@@ -179,6 +179,7 @@ Laufende Logs: `journalctl -u steamos-led-serial -f`
 | `no ESP serial device found` | `--list-ports` prüfen, `SERIAL_PORT` fest eintragen |
 | Streifen bleibt dunkel, Dienst läuft | `--self-test` ausführen. Läuft der, liefert Steam Helligkeit 0 → `MIN_BRIGHTNESS=40` |
 | Rot und Grün vertauscht | Farbreihenfolge der Firmware, siehe [docs/WIRING.md](docs/WIRING.md#farbreihenfolge) |
+| Download-Balken läuft von der falschen Seite | `REVERSE=1` — der Streifen ist andersherum verbaut, als seine Datenleitung beginnt |
 | Flackern, aussetzende LEDs | Baudrate zu hoch für Adapter oder Bit-Banging → auf 230400 zurück (Firmware *und* Config), oder auf GPIO2 umlöten |
 | Nach Firmware-Wechsel bleibt es dunkel | Die GPIO2- und die GPIO14-Variante geben auf **verschiedenen Pins** aus — passt die Firmware zu deiner Verkabelung? |
 | Erste LED spinnt | 3,3-V-Pegel zu niedrig → 74AHCT125 oder 1N4148, siehe Verkabelung |

@@ -156,6 +156,27 @@ class TestRenderer(unittest.TestCase):
         self.assertEqual(forward.render(snapshot, 0.0)[:3], bytes((255, 0, 0)))
         self.assertEqual(backward.render(snapshot, 0.0)[-3:], bytes((255, 0, 0)))
 
+    @staticmethod
+    def _progress_snapshot(filled):
+        """What Steam writes while a download runs: the first LEDs lit."""
+        snapshot = shim.make_snapshot(shim.EFFECT_MANUAL, (0, 0, 0))
+        snapshot.pixels = [(0, 150, 255, 255) if led < filled else (0, 0, 0, 0)
+                           for led in range(shim.LOGICAL_LEDS)]
+        return snapshot
+
+    def test_progress_bar_grows_from_the_first_led(self):
+        renderer = render.Renderer(led_count=30)
+        payload = renderer.render(self._progress_snapshot(6), 0.0)
+        self.assertGreater(payload[2], 40, "bar should start at the first LED")
+        self.assertEqual(payload[-3:], bytes(3), "far end should stay dark")
+
+    def test_reverse_moves_the_progress_bar_to_the_other_end(self):
+        # The strip's data end is not always where the bar should start.
+        snapshot = self._progress_snapshot(6)
+        payload = render.Renderer(led_count=30, reverse=True).render(snapshot, 0.0)
+        self.assertEqual(payload[:3], bytes(3), "near end should now be dark")
+        self.assertGreater(payload[-1], 40, "bar should start at the far LED")
+
     def test_repeat_mapping_tiles(self):
         snapshot = shim.make_snapshot(shim.EFFECT_MANUAL, (0, 0, 0))
         snapshot.pixels[0] = (255, 0, 0, 255)
