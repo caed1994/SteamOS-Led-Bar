@@ -192,8 +192,13 @@ def encode(snapshot, seq=0):
 
 
 def make_snapshot(effect=EFFECT_MANUAL, color=(255, 255, 255), brightness=255,
-                  enabled=1, delay=20, patrol_num=1, color_shift=0):
-    """Convenience constructor for simulation and self tests."""
+                  enabled=1, delay=8, patrol_num=3, color_shift=5):
+    """Convenience constructor for simulation and self tests.
+
+    Defaults mirror what the module initialises itself to (VALVE_DELAY_DEFAULT,
+    VALVE_PATROL_NUM_DEFAULT, VALVE_COLOR_SHIFT_DEFAULT), so simulated output
+    matches an untouched device.
+    """
     pixels = [(color[0], color[1], color[2], 255) for _ in range(LOGICAL_LEDS)]
     return Snapshot(0, 0, enabled, effect, brightness, delay, 0, 0,
                     patrol_num, color_shift, pixels)

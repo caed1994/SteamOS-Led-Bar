@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Removes the SteamOS LED bar USB-serial bridge.
-#   sudo ./uninstall.sh [--purge]
-# --purge also deletes /etc/steamos-led-serial.conf.
+#   sudo ./uninstall.sh [--purge] [--remove-module]
+# --purge          also deletes /etc/steamos-led-serial.conf
+# --remove-module  also unloads and removes the leds-valve-shim kernel module
 
 set -euo pipefail
 
@@ -10,8 +11,21 @@ CONFIG_PATH="/etc/steamos-led-serial.conf"
 UNIT_PATH="/etc/systemd/system/steamos-led-serial.service"
 UDEV_PATH="/etc/udev/rules.d/99-steamos-led-serial.rules"
 
+MODULE_NAME="leds-valve-shim"
+RELEASE="$(uname -r)"
+MODULE_PATH="/usr/lib/modules/$RELEASE/updates/${MODULE_NAME}.ko"
+MODULES_LOAD="/etc/modules-load.d/steamos-led-bar.conf"
+
 PURGE=0
-[[ "${1:-}" == "--purge" ]] && PURGE=1
+REMOVE_MODULE=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --purge) PURGE=1; shift ;;
+        --remove-module) REMOVE_MODULE=1; shift ;;
+        -h|--help) sed -n '2,5p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "unknown option: $1" >&2; exit 1 ;;
+    esac
+done
 
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo ./uninstall.sh" >&2; exit 1; }
 
@@ -31,4 +45,37 @@ if [[ $PURGE -eq 1 ]]; then
 else
     echo "Removed. Kept $CONFIG_PATH (use --purge to delete it)."
 fi
-echo "The leds-valve-shim kernel module was not touched."
+
+if [[ $REMOVE_MODULE -eq 0 ]]; then
+    echo "The $MODULE_NAME kernel module was left in place (--remove-module removes it)."
+    exit 0
+fi
+
+# --- kernel module ---------------------------------------------------------
+
+ROOTFS_WAS_READONLY=0
+restore_readonly() {
+    if [[ $ROOTFS_WAS_READONLY -eq 1 ]] && command -v steamos-readonly >/dev/null 2>&1; then
+        steamos-readonly enable || true
+    fi
+}
+trap restore_readonly EXIT
+
+if command -v steamos-readonly >/dev/null 2>&1; then
+    if steamos-readonly status 2>/dev/null | grep -qi enabled; then
+        echo "Disabling the read-only rootfs to remove the module..."
+        steamos-readonly disable
+        ROOTFS_WAS_READONLY=1
+    fi
+fi
+
+if lsmod | grep -q "^${MODULE_NAME//-/_}"; then
+    rmmod "$MODULE_NAME" 2>/dev/null || modprobe -r "$MODULE_NAME" 2>/dev/null || true
+    echo "Module unloaded."
+fi
+
+rm -f "$MODULE_PATH" "$MODULES_LOAD"
+depmod "$RELEASE" || true
+echo "Module removed from $MODULE_PATH."
+# /usr/lib/depmod.d/10-updates.conf is left alone: it only sets the general
+# search order for updates/ and other modules may rely on it.

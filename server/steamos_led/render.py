@@ -12,16 +12,20 @@ import math
 
 from . import shim
 
-# How long one full animation cycle takes at the hardware's default delay.
-# Valve documents neither the unit nor the scale of `delay`, so rather than
-# guess a step duration and derive wildly different cycle lengths per effect,
-# the cycle times are stated outright and `delay` only scales them relative to
-# its default. SPEED in the config file scales them further.
-DEFAULT_DELAY_MS = 20.0
-RAINBOW_CYCLE = 8.75    # one full trip around the hue circle
-BREATH_CYCLE = 4.0      # one inhale plus exhale
-PATROL_CYCLE = 6.25     # sweep to the far end and back
-DEMO_CYCLE = 8.0        # breathing envelope over the rainbow
+# How long one full animation cycle takes at the module's default delay.
+#
+# `delay` is not a duration: leds-valve-shim exposes it as a slider from
+# VALVE_DELAY_RANGE_MIN(0) to VALVE_DELAY_RANGE_MAX(20), starting at
+# VALVE_DELAY_DEFAULT(8). So the cycle times below are stated outright for that
+# default, and delay scales them linearly - 0 is fastest, 20 is 2.5x slower
+# than default. SPEED in the config scales them further. tests/test_shim_abi.py
+# keeps DELAY_DEFAULT and DELAY_MAX tied to the module source.
+DELAY_DEFAULT = 8
+DELAY_MAX = 20
+RAINBOW_CYCLE = 3.5     # one full trip around the hue circle
+BREATH_CYCLE = 1.6      # one inhale plus exhale
+PATROL_CYCLE = 2.5      # sweep to the far end and back
+DEMO_CYCLE = 3.2        # breathing envelope over the rainbow
 # A small delay must not turn an effect into a strobe light.
 MIN_CYCLE_SECONDS = 0.8
 
@@ -51,9 +55,14 @@ def hsv_to_rgb(hue, saturation, value):
 
 
 def _cycle(snapshot, nominal, speed_scale):
-    """Seconds for one full cycle of an effect, honouring delay and SPEED."""
-    delay = snapshot.delay if snapshot.delay else DEFAULT_DELAY_MS
-    seconds = nominal * (delay / DEFAULT_DELAY_MS)
+    """Seconds for one full cycle of an effect, honouring delay and SPEED.
+
+    delay 0 is a legitimate setting meaning "as fast as possible", not an
+    unset field - the module initialises it to DELAY_DEFAULT, so a zero got
+    there by being written. MIN_CYCLE_SECONDS keeps it watchable.
+    """
+    delay = min(snapshot.delay, DELAY_MAX)
+    seconds = nominal * (delay / float(DELAY_DEFAULT))
     if speed_scale > 0:
         seconds /= speed_scale
     return max(seconds, MIN_CYCLE_SECONDS)

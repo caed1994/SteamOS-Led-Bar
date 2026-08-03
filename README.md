@@ -31,11 +31,13 @@ bleibt klein und robust.
 
 ## Voraussetzungen
 
-* **Kernel-Modul `leds-valve-shim`** — liefert `/dev/valve-leds-shim`. Ohne das
-  Modul gibt es keinen LED-Zustand zu lesen. Installation aus dem
-  [Originalprojekt](https://github.com/rpf16rj/steamos-led-bar-release)
-  (`leds-valve-shim/install.sh`). Wer dieses Projekt schon nutzt, hat es
-  bereits.
+* **Kernel-Modul `leds-valve-shim`** — liefert `/dev/valve-leds-shim` und ist
+  in `leds-valve-shim/` **mit dabei**; `install.sh` baut und lädt es. Zum Bauen
+  braucht es `make`, `gcc` und die Kernel-Header zum laufenden Kernel. Fehlt
+  etwas, sagt der Installer welche Pakete und macht ohne das Modul weiter — der
+  Dienst wartet dann, bis das Gerät auftaucht.
+  Herkunft und Lizenz (GPL-2.0+, Valve Corporation und Anna Oake):
+  [leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
 * **Python 3.9+** — auf SteamOS vorinstalliert. Es werden **keine** zusätzlichen
   Python-Pakete gebraucht (die serielle Schnittstelle wird direkt über
   `termios` angesprochen, kein pyserial).
@@ -79,7 +81,16 @@ Nicht-interaktiv:
 sudo ./install.sh --leds 60 --port /dev/steamos-led-esp --yes
 ```
 
-**Deinstallieren:** `sudo ./uninstall.sh` (mit `--purge` auch die Config).
+Weitere Schalter: `--skip-module` (Modul nicht anfassen), `--rebuild-module`
+(Modul neu bauen, auch wenn es schon läuft).
+
+> **Nach einem SteamOS-Update:** Das Kernel-Modul liegt auf dem Root-Dateisystem
+> und ist danach weg — außerdem passt ein Modul immer nur zu genau einem
+> Kernel. Dann einmal `sudo ./install.sh --rebuild-module`. Der Dienst selbst
+> liegt unter `/var/lib/` und übersteht Updates.
+
+**Deinstallieren:** `sudo ./uninstall.sh` (mit `--purge` auch die Config, mit
+`--remove-module` auch das Kernel-Modul).
 
 ## Konfiguration
 
@@ -122,32 +133,36 @@ PC — genau wie sie auf der echten Steam Machine im Mikrocontroller läuft.
 | 6 | factory | Rot/Grün/Blau/Weiß im Wechsel |
 | 7 | demo | Regenbogen mit überlagertem Atmen |
 
-Ein Hinweis zur Ehrlichkeit: Valve dokumentiert die genaue Bedeutung von
-`delay`, `breath_*` und `patrol_num` nirgends. Statt aus `delay` eine
-Schrittdauer zu raten, sind die Zyklusdauern direkt festgelegt — `delay`
-skaliert sie nur relativ zu seinem Standardwert:
+`delay` ist **keine Zeitangabe**, sondern ein Schieberegler: das Kernel-Modul
+gibt den Bereich `0-20` vor (`delay_range`) und startet bei `8`. Die
+Zyklusdauern unten gelten für diesen Standardwert und werden linear skaliert —
+`delay=0` ist am schnellsten, `delay=20` ist 2,5× langsamer als der Standard:
 
-| Effekt | ein Zyklus |
-| ------ | ---------- |
-| rainbow | 8,75 s (einmal durchs Farbrad) |
-| breath | 4,0 s (einmal ein und aus) |
-| patrol | 6,25 s (hin und zurück) |
-| demo | 8,0 s (Atem-Hüllkurve über dem Regenbogen) |
+| Effekt | ein Zyklus bei `delay=8` | bei `delay=20` |
+| ------ | ------------------------ | -------------- |
+| rainbow | 3,5 s (einmal durchs Farbrad) | 8,75 s |
+| breath | 1,6 s (einmal ein und aus) | 4,0 s |
+| patrol | 2,5 s (hin und zurück) | 6,25 s |
+| demo | 3,2 s (Atem-Hüllkurve über dem Regenbogen) | 8,0 s |
+
+Welchen `delay` dein System meldet, zeigt `--dump`. Die Konstanten in
+`render.py` sind so gewählt, dass sich am sichtbaren Tempo gegenüber vorher
+nichts ändert — nur ihre Bedeutung ist jetzt an den echten Standardwert
+gebunden statt an einen geratenen.
 
 Zu schnell oder zu langsam? `SPEED` in der Config skaliert alles (`SPEED=0.5`
 = halbes Tempo). Die Konstanten stehen oben in `server/steamos_led/render.py`.
 Ein Zyklus wird nie kürzer als 0,8 s, damit ein kleiner `delay`-Wert keinen
 Stroboskop-Effekt erzeugen kann.
 
-`patrol_num` wird **nicht** als Anzahl der Läufer gelesen, obwohl der Name das
-nahelegt: seine Nachbarfelder `breath_offset` und `breath_level` sehen nach
-laufendem Animationszustand aus, also ist `patrol_num` vermutlich die aktuelle
-Position eines einzelnen Punktes. Ein Punkt ist auch das, was „patrol"
-üblicherweise bedeutet. Wer mehr will, setzt `PATROL_DOTS`.
-
-Ob die Vermutung stimmt, lässt sich nachsehen: `--dump` bei laufendem
-patrol-Effekt. Ändert sich `patrol=` fortlaufend, ist es Zustand und keine
-Anzahl.
+`patrol_num` wird **nicht** ausgewertet, `PATROL_DOTS` bestimmt die Anzahl der
+Punkte (Standard 1). Was das Feld bedeutet, ist weiterhin offen: der Modulcode
+zeigt, dass es ein reines sysfs-Attribut mit Standardwert **3** ist, das
+gespeichert und unverändert weitergereicht wird — es ist also eine
+*Einstellung*, kein laufender Animationszustand. „Anzahl der Läufer" ist damit
+durchaus plausibel; nur sah der Standardwert 3 auf der Leiste nicht nach dem
+aus, was man von „patrol" erwartet. Wer das Modul beim Wort nehmen will, setzt
+`PATROL_DOTS=3`.
 
 ## Testen und Diagnose
 
@@ -175,7 +190,8 @@ Laufende Logs: `journalctl -u steamos-led-serial -f`
 
 | Symptom | Ursache / Abhilfe |
 | ------- | ----------------- |
-| `/dev/valve-leds-shim not found` | Kernel-Modul nicht geladen: `sudo modprobe leds-valve-shim`, sonst neu installieren |
+| `/dev/valve-leds-shim not found` | Modul nicht geladen: `sudo modprobe leds-valve-shim`, sonst `sudo ./install.sh --rebuild-module` |
+| Nach SteamOS-Update ist die Leiste tot | Kernel-Modul weg oder passt nicht mehr zum Kernel: `sudo ./install.sh --rebuild-module` |
 | `no ESP serial device found` | `--list-ports` prüfen, `SERIAL_PORT` fest eintragen |
 | Streifen bleibt dunkel, Dienst läuft | `--self-test` ausführen. Läuft der, liefert Steam Helligkeit 0 → `MIN_BRIGHTNESS=40` |
 | Rot und Grün vertauscht | Farbreihenfolge der Firmware, siehe [docs/WIRING.md](docs/WIRING.md#farbreihenfolge) |
@@ -191,6 +207,8 @@ Laufende Logs: `journalctl -u steamos-led-serial -f`
 ## Aufbau des Repos
 
 ```
+leds-valve-shim/          Kernel-Modul (GPL-2.0+, unverändert übernommen),
+                          liefert /dev/valve-leds-shim
 server/steamos_led/       Dienst: config, shim (Snapshot), render (Effekte),
                           link (Protokoll), serialport (termios), service
 server/steamos-led-serial            ausführbarer Einstiegspunkt

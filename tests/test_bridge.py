@@ -225,9 +225,25 @@ class TestRenderer(unittest.TestCase):
 
     def test_longer_delay_slows_the_animation(self):
         quick, slow = shim.make_snapshot(), shim.make_snapshot()
-        quick.delay, slow.delay = 20, 40
+        quick.delay, slow.delay = 8, 16      # the module's range is 0..20
         self.assertLess(render._cycle(quick, render.PATROL_CYCLE, 1.0),
                         render._cycle(slow, render.PATROL_CYCLE, 1.0))
+
+    def test_default_delay_gives_the_nominal_cycle(self):
+        # The constants are stated for the module's default delay.
+        snapshot = shim.make_snapshot()
+        self.assertEqual(snapshot.delay, render.DELAY_DEFAULT)
+        self.assertAlmostEqual(
+            render._cycle(snapshot, render.RAINBOW_CYCLE, 1.0),
+            render.RAINBOW_CYCLE)
+
+    def test_delay_above_the_range_is_clamped(self):
+        snapshot = shim.make_snapshot()
+        snapshot.delay = 255
+        at_max = shim.make_snapshot()
+        at_max.delay = render.DELAY_MAX
+        self.assertEqual(render._cycle(snapshot, render.RAINBOW_CYCLE, 1.0),
+                         render._cycle(at_max, render.RAINBOW_CYCLE, 1.0))
 
     def test_patrol_repeats_exactly_once_per_cycle(self):
         renderer = render.Renderer(led_count=17)
