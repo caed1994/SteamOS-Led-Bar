@@ -1,13 +1,13 @@
-# Herkunft dieses Verzeichnisses
+# Origin of this directory
 
-Die Dateien `leds-valve-shim.c`, `Makefile`, `install.sh` und `LICENSE` sind
-**unverändert übernommen** aus:
+`leds-valve-shim.c`, `Makefile`, `install.sh` and `LICENSE` are **vendored
+unmodified** from:
 
-* Projekt: <https://github.com/rpf16rj/steamos-led-bar-release>
-* Verzeichnis: `leds-valve-shim/`
-* Stand: Commit `e69650a0ff4e8b7e1b375ca16537e6086e04cb33` (2026-07-27)
+* Project: <https://github.com/rpf16rj/steamos-led-bar-release>
+* Directory: `leds-valve-shim/`
+* Revision: commit `e69650a0ff4e8b7e1b375ca16537e6086e04cb33` (2026-07-27)
 
-SHA-256 der übernommenen Dateien:
+SHA-256 of the vendored files:
 
 ```
 92dbecf446ffd86a…  leds-valve-shim.c
@@ -16,11 +16,10 @@ c8f53b19ed3a64bf…  Makefile
 d34ed533226bde77…  install.sh
 ```
 
-## Lizenz und Urheberschaft
+## Licence and authorship
 
-Das Kernel-Modul steht unter **GPL-2.0-or-later** (`SPDX-License-Identifier:
-GPL-2.0+`), die vollständige Lizenz liegt in `LICENSE`. Als Autoren nennt das
-Modul:
+The kernel module is licensed **GPL-2.0-or-later** (`SPDX-License-Identifier:
+GPL-2.0+`); the full text is in `LICENSE`. The module names these authors:
 
 ```c
 MODULE_AUTHOR("Valve Corporation");
@@ -29,25 +28,26 @@ MODULE_DESCRIPTION("Virtual front bar LED shim for your Steam Machine-like compu
 MODULE_LICENSE("GPL");
 ```
 
-Die Lizenz des Moduls gilt unabhängig vom übrigen Repository weiter. Wer den
-Code hier ändert, muss die Änderungen ebenfalls unter GPL-2.0+ stellen.
+That licence continues to apply independently of the rest of this repository.
+Anyone modifying the code here must release those changes under GPL-2.0+ as
+well.
 
-## Was das Modul tut
+## What the module does
 
-Es legt ein Plattformgerät mit LED-Klassen-Einträgen an, damit Steam im Game
-Mode eine LED-Leiste sieht, die es gar nicht gibt, und stellt den geschriebenen
-Zustand unter `/dev/valve-leds-shim` als 100 Byte großen Snapshot bereit
-(`struct valve_leds_snapshot`, Magic `VLED`, Version 1).
+It registers a platform device with LED class entries so that Steam in Game
+Mode sees an LED bar that does not physically exist, and exposes the written
+state at `/dev/valve-leds-shim` as a 100 byte snapshot (`struct
+valve_leds_snapshot`, magic `VLED`, version 1).
 
-Es **animiert nichts selbst**: `delay`, `breath_offset`, `breath_level`,
-`patrol_num`, `color_shift` und `brightness_scale` sind reine sysfs-Attribute
-(0644), die gespeichert und unverändert im Snapshot ausgeliefert werden. Das
-Ausspielen der Effekte ist Sache des Konsumenten — hier des Dienstes in
-`server/`.
+It **animates nothing itself**: `delay`, `breath_offset`, `breath_level`,
+`patrol_num`, `color_shift` and `brightness_scale` are plain sysfs attributes
+(mode 0644) that are stored and handed out unchanged in the snapshot. Playing
+back the effects is up to the consumer — here, the service in `server/`.
 
-## Aktualisieren
+## Updating
 
-Beim Nachziehen einer neuen Upstream-Version die vier Dateien erneut
-unverändert kopieren, die Prüfsummen und den Commit oben aktualisieren und
-`server/steamos_led/shim.py` gegen `struct valve_leds_snapshot` prüfen —
-Layout und Feldbedeutungen dort hängen direkt daran.
+When pulling in a newer upstream version, copy the four files unmodified again,
+update the checksums and the commit above, and check
+`server/steamos_led/shim.py` against `struct valve_leds_snapshot` — the layout
+and field meanings there depend on it directly. `tests/test_shim_abi.py`
+verifies that agreement automatically.

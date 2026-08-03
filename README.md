@@ -1,57 +1,57 @@
-# SteamOS LED Bar — USB-Serial-Bridge
+# SteamOS LED Bar — USB serial bridge
 
-Spiegelt die LED-Leiste der Steam Machine auf einen WS2812-Streifen, der an
-einem **per USB angeschlossenen ESP** hängt. Der Streifen verhält sich damit
-wie die eingebaute Leiste: Farbe, Helligkeit und Effekte kommen direkt aus dem
-Personalisierungs-Menü im SteamOS Game Mode, inklusive Download-Fortschritt.
+Mirrors the Steam Machine's LED bar onto a WS2812 strip driven by an **ESP
+connected over USB**. The strip behaves like the built-in bar: colour,
+brightness and effects come straight from the Personalization menu in SteamOS
+Game Mode, download progress included.
 
-Das ist die USB-Variante zu
+This is the USB variant of
 [rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release),
-das den ESP per WLAN/TCP anbindet. Gleiche Quelle (das Kernel-Modul), anderer
-Transportweg — kein WLAN, keine IP-Konfiguration, kein Access Point.
+which connects the ESP over Wi-Fi/TCP. Same source (the kernel module),
+different transport — no Wi-Fi, no IP configuration, no access point.
 
-## Inhalt
+## Contents
 
-1. [Was du brauchst](#was-du-brauchst)
-2. [Schnellstart](#schnellstart)
-3. [Einstellungen ändern](#einstellungen-ändern)
-4. [Alle Optionen](#alle-optionen)
-5. [Effekte](#effekte)
-6. [Testen und Diagnose](#testen-und-diagnose)
-7. [Wenn etwas nicht geht](#wenn-etwas-nicht-geht)
-8. [Aktualisieren](#aktualisieren)
-9. [Deinstallieren](#deinstallieren)
-10. [Wie es funktioniert](#wie-es-funktioniert)
-11. [Entwicklung](#entwicklung)
+1. [What you need](#what-you-need)
+2. [Quick start](#quick-start)
+3. [Changing settings](#changing-settings)
+4. [All options](#all-options)
+5. [Effects](#effects)
+6. [Testing and diagnostics](#testing-and-diagnostics)
+7. [When something does not work](#when-something-does-not-work)
+8. [Updating](#updating)
+9. [Uninstalling](#uninstalling)
+10. [How it works](#how-it-works)
+11. [Development](#development)
 
-## Was du brauchst
+## What you need
 
 **Hardware**
 
-* Einen **ESP8266** (NodeMCU, D1 mini) oder **ESP32**, per USB-Kabel am PC.
-* Einen **WS2812/WS2812B-Streifen** (NeoPixel), beliebig lang.
-* Verkabelung und Stromversorgung: [docs/WIRING.md](docs/WIRING.md).
-  Kurzfassung: Datenleitung an GPIO2 (D4), gemeinsame Masse, und ab etwa
-  20 LEDs ein eigenes 5-V-Netzteil.
+* An **ESP8266** (NodeMCU, D1 mini) or **ESP32**, connected to the PC by USB.
+* A **WS2812/WS2812B strip** (NeoPixel), any length.
+* Wiring and power: [docs/WIRING.md](docs/WIRING.md). Short version: data line
+  on GPIO2 (D4), shared ground, and a separate 5 V supply from roughly
+  20 LEDs upwards.
 
-**Software** — auf SteamOS ist fast alles schon da:
+**Software** — on SteamOS almost everything is already there:
 
-* **Python 3.9+** — vorinstalliert. Es werden **keine** zusätzlichen Pakete
-  gebraucht, auch kein pyserial.
-* **PlatformIO** — nur einmalig zum Flashen der ESP-Firmware:
+* **Python 3.9+** — preinstalled. **No** extra packages are needed, not even
+  pyserial.
+* **PlatformIO** — only once, to flash the ESP firmware:
   ```bash
   python3 -m pip install --user platformio
   export PATH="$HOME/.local/bin:$PATH"
   ```
-* **make, gcc und Kernel-Header** — zum Bauen des Kernel-Moduls. Fehlt etwas,
-  sagt dir der Installer welche Pakete, und installiert den Rest trotzdem.
+* **make, gcc and kernel headers** — to build the kernel module. If something
+  is missing the installer names the packages and installs the rest anyway.
 
-## Schnellstart
+## Quick start
 
-### 1. Repo klonen
+### 1. Clone the repository
 
-Such dir einen Ort aus, an dem der Ordner bleiben darf — du brauchst ihn später
-nach jedem SteamOS-Update wieder:
+Pick a place where the folder can stay — you will need it again after every
+SteamOS update:
 
 ```bash
 cd ~
@@ -59,214 +59,208 @@ git clone https://github.com/caed1994/SteamOS-Led-Bar.git
 cd SteamOS-Led-Bar
 ```
 
-### 2. Streifen anschließen
+### 2. Connect the strip
 
-Nach [docs/WIRING.md](docs/WIRING.md) verkabeln und den ESP per USB anstecken.
-Ob der PC ihn sieht:
+Wire it up following [docs/WIRING.md](docs/WIRING.md) and plug the ESP into a
+USB port. To check that the PC sees it:
 
 ```bash
 ./server/steamos-led-serial --list-ports
 ```
 
-Kommt hier nichts, hilft ein anderes USB-Kabel — viele Ladekabel haben keine
-Datenadern.
+If nothing shows up, try a different USB cable — many charging cables have no
+data wires.
 
-### 3. Firmware auf den ESP flashen
+### 3. Flash the firmware onto the ESP
 
-**Nur einen** dieser Befehle ausführen, passend zu deiner Hardware. Jeder Flash
-überschreibt den vorherigen:
+Run **only one** of these, matching your hardware. Each flash overwrites the
+previous one:
 
-| Deine Hardware und Verkabelung | Befehl |
-| ------------------------------ | ------ |
-| ESP8266, Datenleitung an **GPIO2 (D4)** — empfohlen | `./flash-esp.sh` |
-| ESP8266, bestehende **D5/GPIO14**-Verkabelung | `./flash-esp.sh esp8266_gpio14` |
-| ESP32, Datenleitung an **GPIO16** | `./flash-esp.sh esp32dev` |
+| Your hardware and wiring | Command |
+| ------------------------ | ------- |
+| ESP8266, data line on **GPIO2 (D4)** — recommended | `./flash-esp.sh` |
+| ESP8266, existing **D5/GPIO14** wiring | `./flash-esp.sh esp8266_gpio14` |
+| ESP32, data line on **GPIO16** | `./flash-esp.sh esp32dev` |
 
-> Die beiden ESP8266-Varianten geben auf **verschiedenen Pins** aus. Wenn dein
-> Streifen an D5 hängt und du die erste Variante flashst, bleibt er dunkel —
-> das ist dann kein Fehler, sondern der falsche Pin.
+> The two ESP8266 builds drive **different pins**. If your strip is on D5 and
+> you flash the first one, it stays dark — that is the wrong pin, not a fault.
 
-### 4. Dienst installieren
+### 4. Install the service
 
 ```bash
 sudo ./install.sh
 ```
 
-Der Installer fragt LED-Anzahl, Port und Baudrate ab, baut und lädt das
-Kernel-Modul, legt den Dienst unter `/var/lib/steamos-led-serial/` ab, schreibt
-`/etc/steamos-led-serial.conf` und startet alles. Wer nicht gefragt werden
-will:
+The installer asks for LED count, port and baud rate, builds and loads the
+kernel module, puts the service in `/var/lib/steamos-led-serial/`, writes
+`/etc/steamos-led-serial.conf` and starts everything. To skip the questions:
 
 ```bash
 sudo ./install.sh --leds 60 --yes
 ```
 
-### 5. Ausprobieren
+### 5. Try it
 
-Im Game Mode unter **Einstellungen → Personalisierung** eine Farbe oder einen
-Effekt wählen — der Streifen sollte sofort mitmachen. Wenn nicht:
+In Game Mode, go to **Settings → Personalization** and pick a colour or an
+effect — the strip should follow immediately. If it does not:
 
 ```bash
 journalctl -u steamos-led-serial -f
 ```
 
-## Einstellungen ändern
+## Changing settings
 
-Alle Einstellungen stehen in **einer Datei**: `/etc/steamos-led-serial.conf`.
-Sie ist eine simple Liste aus `NAME=Wert`. Nach jeder Änderung muss der Dienst
-einmal neu starten, sonst passiert nichts.
+Every setting lives in **one file**: `/etc/steamos-led-serial.conf`. It is a
+plain list of `NAME=value` lines. After each change the service has to be
+restarted, otherwise nothing happens.
 
-**Weg 1 — Datei öffnen und bearbeiten:**
+**Option 1 — open the file and edit it:**
 
 ```bash
-sudo nano /etc/steamos-led-serial.conf     # ändern, dann Strg-O, Enter, Strg-X
+sudo nano /etc/steamos-led-serial.conf     # edit, then Ctrl-O, Enter, Ctrl-X
 sudo systemctl restart steamos-led-serial
 ```
 
-**Weg 2 — eine einzelne Zeile per Befehl setzen.** Das Muster ist immer gleich,
-nur `NAME` und `WERT` tauschen:
+**Option 2 — set a single line from the command line.** The pattern is always
+the same, only `NAME` and `VALUE` change:
 
 ```bash
-sudo sed -i 's/^NAME=.*/NAME=WERT/' /etc/steamos-led-serial.conf
+sudo sed -i 's/^NAME=.*/NAME=VALUE/' /etc/steamos-led-serial.conf
 sudo systemctl restart steamos-led-serial
 ```
 
-### Häufige Wünsche
+### Common wishes
 
-| Was du willst | Einstellung | Befehl zum Kopieren |
-| ------------- | ----------- | ------------------- |
-| Der Balken läuft von der **falschen Seite** los | `REVERSE=1` | `sudo sed -i 's/^REVERSE=.*/REVERSE=1/' /etc/steamos-led-serial.conf` |
-| Dein Streifen hat **nicht 17 LEDs** | `LED_COUNT=60` | `sudo sed -i 's/^LED_COUNT=.*/LED_COUNT=60/' /etc/steamos-led-serial.conf` |
-| **Zu hell**, oder Streifen hängt am USB-Strom | `MAX_BRIGHTNESS=80` | `sudo sed -i 's/^MAX_BRIGHTNESS=.*/MAX_BRIGHTNESS=80/' /etc/steamos-led-serial.conf` |
-| Effekte laufen **zu schnell** | `SPEED=0.5` | `sudo sed -i 's/^SPEED=.*/SPEED=0.5/' /etc/steamos-led-serial.conf` |
-| Lauflicht mit **drei Punkten** statt einem | `PATROL_DOTS=3` | `sudo sed -i 's/^PATROL_DOTS=.*/PATROL_DOTS=3/' /etc/steamos-led-serial.conf` |
-| Streifen bleibt **dunkel**, obwohl ein Effekt an ist | `MIN_BRIGHTNESS=40` | `sudo sed -i 's/^MIN_BRIGHTNESS=.*/MIN_BRIGHTNESS=40/' /etc/steamos-led-serial.conf` |
-| Gedimmte Farben wirken **fleckig** | `GAMMA=2.2` | `sudo sed -i 's/^GAMMA=.*/GAMMA=2.2/' /etc/steamos-led-serial.conf` |
-| **Fester Port** statt automatischer Suche | `SERIAL_PORT=/dev/steamos-led-esp` | `sudo sed -i 's\|^SERIAL_PORT=.*\|SERIAL_PORT=/dev/steamos-led-esp\|' /etc/steamos-led-serial.conf` |
+| What you want | Setting | Command to copy |
+| ------------- | ------- | --------------- |
+| The bar fills from the **wrong end** | `REVERSE=1` | `sudo sed -i 's/^REVERSE=.*/REVERSE=1/' /etc/steamos-led-serial.conf` |
+| Your strip does **not have 17 LEDs** | `LED_COUNT=60` | `sudo sed -i 's/^LED_COUNT=.*/LED_COUNT=60/' /etc/steamos-led-serial.conf` |
+| **Too bright**, or the strip runs off USB power | `MAX_BRIGHTNESS=80` | `sudo sed -i 's/^MAX_BRIGHTNESS=.*/MAX_BRIGHTNESS=80/' /etc/steamos-led-serial.conf` |
+| Effects run **too fast** | `SPEED=0.5` | `sudo sed -i 's/^SPEED=.*/SPEED=0.5/' /etc/steamos-led-serial.conf` |
+| Patrol with **three dots** instead of one | `PATROL_DOTS=3` | `sudo sed -i 's/^PATROL_DOTS=.*/PATROL_DOTS=3/' /etc/steamos-led-serial.conf` |
+| Strip stays **dark** although an effect is on | `MIN_BRIGHTNESS=40` | `sudo sed -i 's/^MIN_BRIGHTNESS=.*/MIN_BRIGHTNESS=40/' /etc/steamos-led-serial.conf` |
+| Dimmed colours look **blotchy** | `GAMMA=2.2` | `sudo sed -i 's/^GAMMA=.*/GAMMA=2.2/' /etc/steamos-led-serial.conf` |
+| A **fixed port** instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` | `sudo sed -i 's#^SERIAL_PORT=.*#SERIAL_PORT=/dev/steamos-led-esp#' /etc/steamos-led-serial.conf` |
 
-Und danach jeweils:
+And afterwards, in each case:
 
 ```bash
 sudo systemctl restart steamos-led-serial
 ```
 
-### Erst ausprobieren, dann festschreiben
+### Try first, write it down later
 
-Jede Option gibt es auch als Kommandozeilenschalter. So kannst du einen Wert
-testen, ohne die Datei anzufassen — den Dienst dafür kurz stoppen, weil er den
-USB-Port exklusiv belegt:
+Every option is also a command line switch, so you can test a value without
+touching the file. Stop the service first — it holds the USB port exclusively:
 
 ```bash
 sudo systemctl stop steamos-led-serial
 sudo /var/lib/steamos-led-serial/steamos-led-serial --leds 60 --reverse -v
 ```
 
-Mit **Strg-C** beenden. Gefällt das Ergebnis, trägst du es wie oben dauerhaft
-ein und startest den Dienst wieder:
+Stop it with **Ctrl-C**. If you like the result, write it into the config as
+above and start the service again:
 
 ```bash
 sudo systemctl start steamos-led-serial
 ```
 
-## Alle Optionen
+## All options
 
-| Option | Standard | Bedeutung |
-| ------ | -------- | --------- |
-| `LED_COUNT` | `17` | LEDs am Streifen |
-| `REVERSE` | `0` | Laufrichtung umdrehen |
-| `MAPPING` | `stretch` | Verteilung der 17 logischen LEDs: `stretch` (weich interpolieren), `repeat` (Muster kacheln), `crop` (1:1, Rest bleibt dunkel) |
-| `MAX_BRIGHTNESS` | `255` | Obergrenze der Helligkeit |
-| `MIN_BRIGHTNESS` | `0` | Untergrenze, falls Steam Helligkeit 0 meldet |
-| `GAMMA` | `1.0` | `2.2` wirkt beim Dimmen gleichmäßiger |
-| `SPEED` | `1.0` | Tempo der Animationen (`0.5` = halb so schnell) |
-| `PATROL_DOTS` | `1` | Anzahl der Punkte beim Lauflicht |
-| `SERIAL_PORT` | `auto` | Serieller Port; `auto` sucht bekannte USB-Serial-Chips |
-| `BAUD` | `230400` | bevorzugte Baudrate; wird beim Verbinden nötigenfalls korrigiert |
-| `BAUD_AUTODETECT` | `1` | bei fehlender Antwort auch die anderen Firmware-Baudraten probieren |
-| `DEVICE` | `/dev/valve-leds-shim` | Zeichengerät des Kernel-Moduls |
-| `FPS` / `IDLE_FPS` | `60` / `4` | Bildrate bei Animation / im Ruhezustand |
-| `LOG_LEVEL` | `info` | `debug` zeigt jede Zustandsänderung im Log |
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `LED_COUNT` | `17` | LEDs on the strip |
+| `REVERSE` | `0` | flip the direction |
+| `MAPPING` | `stretch` | how the 17 logical LEDs spread out: `stretch` (smooth interpolation), `repeat` (tile the pattern), `crop` (1:1, the rest stays dark) |
+| `MAX_BRIGHTNESS` | `255` | brightness ceiling |
+| `MIN_BRIGHTNESS` | `0` | brightness floor, for when Steam reports 0 |
+| `GAMMA` | `1.0` | `2.2` looks smoother when dimmed |
+| `SPEED` | `1.0` | animation speed (`0.5` = half as fast) |
+| `PATROL_DOTS` | `1` | number of dots in the patrol effect |
+| `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
+| `BAUD` | `230400` | preferred baud rate; corrected on connect if needed |
+| `BAUD_AUTODETECT` | `1` | if there is no reply, also try the other firmware baud rates |
+| `DEVICE` | `/dev/valve-leds-shim` | character device of the kernel module |
+| `FPS` / `IDLE_FPS` | `60` / `4` | frame rate while animating / while idle |
+| `LOG_LEVEL` | `info` | `debug` logs every state change |
 
-Alles gibt es auch als Schalter (`--leds`, `--reverse`, `--gamma` …) und als
-Umgebungsvariable (`STEAMOS_LED_LED_COUNT=60`).
+All of them also exist as switches (`--leds`, `--reverse`, `--gamma` …) and as
+environment variables (`STEAMOS_LED_LED_COUNT=60`).
 
-## Effekte
+## Effects
 
-Steam schreibt Effektnummer und Parameter, die Animation läuft auf dem PC —
-genau wie sie auf der echten Steam Machine im Mikrocontroller läuft.
+Steam writes an effect number and its parameters; the animation runs on the PC,
+exactly as it runs on the microcontroller of a real Steam Machine.
 
-| Nr. | Effekt | Umsetzung |
-| --- | ------ | --------- |
-| 0 | off | Streifen aus |
-| 1 | manual | Pixelfarben exakt wie von Steam gesetzt (auch der Download-Balken) |
-| 2 | normal | statische Farbe |
-| 3 | rainbow | Farbverlauf, wandert; Startfarbe aus `color_shift` |
-| 4 | breath | Atmen, Grundfarbe aus dem Snapshot, Phase aus `breath_offset` |
-| 5 | patrol | Lauflicht, ein Punkt hin und her (Anzahl über `PATROL_DOTS`) |
-| 6 | factory | Rot/Grün/Blau/Weiß im Wechsel |
-| 7 | demo | Regenbogen mit überlagertem Atmen |
+| No. | Effect | Implementation |
+| --- | ------ | -------------- |
+| 0 | off | strip off |
+| 1 | manual | pixel colours exactly as Steam set them (this includes the download bar) |
+| 2 | normal | static colour |
+| 3 | rainbow | travelling hue gradient; starting hue from `color_shift` |
+| 4 | breath | breathing, base colour from the snapshot, phase from `breath_offset` |
+| 5 | patrol | one dot sweeping back and forth (count via `PATROL_DOTS`) |
+| 6 | factory | red/green/blue/white in turn |
+| 7 | demo | rainbow with a breathing envelope |
 
-### Tempo der Effekte
+### Effect speed
 
-`delay` ist **keine Zeitangabe**, sondern ein Schieberegler: das Kernel-Modul
-gibt den Bereich `0-20` vor (`delay_range`) und startet bei `8`. Die
-Zyklusdauern gelten für diesen Standardwert und werden linear skaliert —
-`delay=0` ist am schnellsten, `delay=20` ist 2,5× langsamer:
+`delay` is **not a duration**, it is a slider: the kernel module advertises the
+range `0-20` (`delay_range`) and starts at `8`. The cycle times below are
+stated for that default and scale linearly — `delay=0` is fastest, `delay=20`
+is 2.5x slower:
 
-| Effekt | ein Zyklus bei `delay=8` | bei `delay=20` |
-| ------ | ------------------------ | -------------- |
-| rainbow | 3,5 s (einmal durchs Farbrad) | 8,75 s |
-| breath | 1,6 s (einmal ein und aus) | 4,0 s |
-| patrol | 2,5 s (hin und zurück) | 6,25 s |
-| demo | 3,2 s (Atem-Hüllkurve über dem Regenbogen) | 8,0 s |
+| Effect | one cycle at `delay=8` | at `delay=20` |
+| ------ | ---------------------- | ------------- |
+| rainbow | 3.5 s (once around the hue circle) | 8.75 s |
+| breath | 1.6 s (one inhale and exhale) | 4.0 s |
+| patrol | 2.5 s (there and back) | 6.25 s |
+| demo | 3.2 s (breathing envelope over the rainbow) | 8.0 s |
 
-Zu schnell oder zu langsam? `SPEED` skaliert alles gemeinsam. Soll sich nur
-*ein* Effekt ändern, stehen die Konstanten oben in
-`server/steamos_led/render.py`. Ein Zyklus wird nie kürzer als 0,8 s, damit ein
-kleiner `delay`-Wert keinen Stroboskop-Effekt erzeugen kann. Welchen `delay`
-dein System meldet, zeigt `--dump`.
+Too fast or too slow? `SPEED` scales all of them together. To change just
+*one* effect, the constants are at the top of `server/steamos_led/render.py`.
+A cycle never gets shorter than 0.8 s, so a small `delay` cannot turn an effect
+into a strobe light. `--dump` shows which `delay` your system reports.
 
-### Warum das Lauflicht einen Punkt hat
+### Why patrol has one dot
 
-`patrol_num` wird **nicht** ausgewertet, `PATROL_DOTS` bestimmt die Anzahl.
-Was das Feld bedeutet, ist offen: der Modulcode zeigt, dass es ein reines
-sysfs-Attribut mit Standardwert **3** ist, das gespeichert und unverändert
-weitergereicht wird — also eine *Einstellung*, kein laufender
-Animationszustand. „Anzahl der Läufer" ist damit plausibel; nur sah der
-Standardwert 3 auf der Leiste nicht nach dem aus, was man von „patrol"
-erwartet. Wer das Modul beim Wort nehmen will, setzt `PATROL_DOTS=3`.
+`patrol_num` is **not** used; `PATROL_DOTS` sets the count. What the field
+means is still open: the module source shows it is a plain sysfs attribute with
+a default of **3**, stored and passed through untouched — so it is a *setting*,
+not live animation state. "Number of scanners" is therefore plausible; the
+default of 3 simply did not look like what one expects from "patrol". To take
+the module at its word, set `PATROL_DOTS=3`.
 
-## Testen und Diagnose
+## Testing and diagnostics
 
-Der Dienst belegt den seriellen Port exklusiv — für Tests erst stoppen:
+The service holds the serial port exclusively, so stop it before testing:
 
 ```bash
 sudo systemctl stop steamos-led-serial
 ```
 
-Die folgenden Befehle liegen unter `/var/lib/steamos-led-serial/`:
+The commands below live in `/var/lib/steamos-led-serial/`:
 
-| Kommando | Zweck |
-| -------- | ----- |
-| `steamos-led-serial --list-ports` | angeschlossene USB-Serial-Geräte auflisten |
-| `steamos-led-serial --self-test` | Testmuster — funktioniert ohne Steam und ohne Kernel-Modul |
-| `steamos-led-serial --simulate rainbow` | einen Effekt dauerhaft anzeigen |
-| `steamos-led-serial --dump` | zeigt, was Steam schreibt, ohne die LEDs anzusteuern |
-| `steamos-led-serial -v` | im Vordergrund mit Debug-Ausgabe laufen |
+| Command | Purpose |
+| ------- | ------- |
+| `steamos-led-serial --list-ports` | list connected USB serial devices |
+| `steamos-led-serial --self-test` | test patterns — works without Steam and without the kernel module |
+| `steamos-led-serial --simulate rainbow` | show one effect continuously |
+| `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs |
+| `steamos-led-serial -v` | run in the foreground with debug output |
 
-Danach wieder starten:
+Afterwards, start it again:
 
 ```bash
 sudo systemctl start steamos-led-serial
 ```
 
-Laufendes Log ansehen: `journalctl -u steamos-led-serial -f`
+Follow the log: `journalctl -u steamos-led-serial -f`
 
-## Wenn etwas nicht geht
+## When something does not work
 
-**Erste Anlaufstelle** ist immer der Selbsttest — er umgeht Steam und das
-Kernel-Modul und sagt dir damit, ob Verkabelung, Firmware und USB-Strecke
-stimmen:
+**Start with the self test.** It bypasses both Steam and the kernel module, so
+it tells you whether wiring, firmware and the USB path are sound:
 
 ```bash
 sudo systemctl stop steamos-led-serial
@@ -274,25 +268,25 @@ sudo /var/lib/steamos-led-serial/steamos-led-serial --self-test
 sudo systemctl start steamos-led-serial
 ```
 
-Läuft der Selbsttest sauber, liegt das Problem zwischen Steam und dem Dienst.
-Läuft er nicht, liegt es an Hardware oder Firmware.
+If the self test looks right, the problem sits between Steam and the service.
+If it does not, the problem is hardware or firmware.
 
-| Symptom | Ursache und Abhilfe |
-| ------- | ------------------- |
-| `/dev/valve-leds-shim not found` | Modul nicht geladen: `sudo modprobe leds-valve-shim`, sonst `sudo ./install.sh --rebuild-module` |
-| Nach SteamOS-Update ist die Leiste tot | Kernel-Modul weg oder passt nicht mehr zum Kernel: `sudo ./install.sh --rebuild-module` |
-| `no ESP serial device found` | `--list-ports` prüfen; kommt nichts, anderes USB-Kabel probieren (Ladekabel haben oft keine Datenadern) |
-| Streifen bleibt dunkel, Dienst läuft | Selbsttest ausführen. Läuft der, meldet Steam Helligkeit 0 → `MIN_BRIGHTNESS=40` |
-| Rot und Grün vertauscht | Farbreihenfolge der Firmware, siehe [docs/WIRING.md](docs/WIRING.md#farbreihenfolge) |
-| Download-Balken läuft von der falschen Seite | `REVERSE=1` — der Streifen ist andersherum verbaut, als seine Datenleitung beginnt |
-| Nach Firmware-Wechsel bleibt es dunkel | Die GPIO2- und die GPIO14-Variante geben auf **verschiedenen Pins** aus — passt die Firmware zu deiner Verkabelung? |
-| Flackern, aussetzende LEDs | Baudrate zu hoch für Adapter oder Bit-Banging → auf 230400 zurück (Firmware *und* Config), oder auf GPIO2 umlöten |
-| Erste LED spinnt | 3,3-V-Pegel zu niedrig → 74AHCT125 oder 1N4148, siehe [docs/WIRING.md](docs/WIRING.md) |
-| Nur ein Teil des Streifens leuchtet | `LED_COUNT` stimmt nicht, oder liegt über `MAX_LEDS` der Firmware |
-| Streifen bleibt nach dem Abziehen an | sollte nach 5 s ausgehen (Firmware-Watchdog); sonst Firmware zu alt |
-| Beim Flashen: `No module named 'intelhex'` | `flash-esp.sh` installiert das nach; sonst: `~/.platformio/penv/bin/python -m pip install intelhex` |
+| Symptom | Cause and fix |
+| ------- | ------------- |
+| `/dev/valve-leds-shim not found` | module not loaded: `sudo modprobe leds-valve-shim`, otherwise `sudo ./install.sh --rebuild-module` |
+| Bar dead after a SteamOS update | kernel module gone, or no longer matching the kernel: `sudo ./install.sh --rebuild-module` |
+| `no ESP serial device found` | check `--list-ports`; if it stays empty, try another USB cable (charging cables often have no data wires) |
+| Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0 → `MIN_BRIGHTNESS=40` |
+| Red and green swapped | colour order of the firmware, see [docs/WIRING.md](docs/WIRING.md#colour-order) |
+| Download bar fills from the wrong end | `REVERSE=1` — the strip is mounted the other way round from where its data line starts |
+| Dark after switching firmware | the GPIO2 and GPIO14 builds drive **different pins** — does the firmware match your wiring? |
+| Flicker, LEDs dropping out | baud rate too high for the adapter or for bit-banging → back to 230400 (firmware *and* config), or move the data line to GPIO2 |
+| First LED misbehaves | 3.3 V logic level too low → 74AHCT125 or 1N4148, see [docs/WIRING.md](docs/WIRING.md) |
+| Only part of the strip lights up | `LED_COUNT` is wrong, or above the firmware's `MAX_LEDS` |
+| Strip stays lit after unplugging | it should go dark after 5 s (firmware watchdog); if not, the firmware is outdated |
+| While flashing: `No module named 'intelhex'` | `flash-esp.sh` installs it for you; otherwise: `~/.platformio/penv/bin/python -m pip install intelhex` |
 
-## Aktualisieren
+## Updating
 
 ```bash
 cd ~/SteamOS-Led-Bar
@@ -300,93 +294,92 @@ git pull
 sudo ./install.sh --yes
 ```
 
-Eine vorhandene `/etc/steamos-led-serial.conf` bleibt dabei unangetastet —
-deine Einstellungen überleben das Update. Die ESP-Firmware muss nur neu
-geflasht werden, wenn sich in `firmware/` etwas geändert hat.
+An existing `/etc/steamos-led-serial.conf` is left untouched, so your settings
+survive the update. The ESP firmware only needs reflashing when something in
+`firmware/` changed.
 
-> **Nach einem SteamOS-Systemupdate:** Das Kernel-Modul liegt auf dem
-> Root-Dateisystem, das SteamOS bei Updates zurücksetzt — und ein Modul passt
-> immer nur zu genau einem Kernel. Dann einmal:
+> **After a SteamOS system update:** the kernel module lives on the root
+> filesystem, which SteamOS resets on update — and a module only ever matches
+> one kernel. So run this once:
 > ```bash
 > cd ~/SteamOS-Led-Bar && sudo ./install.sh --rebuild-module
 > ```
-> Der Dienst selbst liegt unter `/var/lib/` und übersteht Updates.
+> The service itself lives in `/var/lib/` and survives updates.
 
-## Deinstallieren
+## Uninstalling
 
 ```bash
-sudo ./uninstall.sh                    # Dienst weg, Config und Modul bleiben
-sudo ./uninstall.sh --purge            # zusätzlich die Config löschen
-sudo ./uninstall.sh --remove-module    # zusätzlich das Kernel-Modul entfernen
+sudo ./uninstall.sh                    # service gone, config and module stay
+sudo ./uninstall.sh --purge            # also delete the config
+sudo ./uninstall.sh --remove-module    # also remove the kernel module
 ```
 
-## Wie es funktioniert
+## How it works
 
 ```
   Steam (Game Mode)
-        |  schreibt LED-Zustand
+        |  writes LED state
         v
-  leds-valve-shim  ->  /dev/valve-leds-shim     (Kernel-Modul, 100-Byte-Snapshot)
+  leds-valve-shim  ->  /dev/valve-leds-shim     (kernel module, 100 byte snapshot)
         |
         v
-  steamos-led-serial   systemd-Dienst: liest Snapshot, rendert Effekte,
-        |              mappt 17 logische LEDs auf den echten Streifen
-        |  USB (CDC/UART, gerahmte Pakete mit CRC16)
+  steamos-led-serial   systemd service: reads the snapshot, renders effects,
+        |              maps 17 logical LEDs onto the real strip
+        |  USB (CDC/UART, framed packets with CRC16)
         v
   ESP8266 / ESP32  ->  WS2812B
 ```
 
-Das Kernel-Modul gaukelt Steam eine LED-Leiste vor, die es nicht gibt, und legt
-den geschriebenen Zustand als Snapshot unter `/dev/valve-leds-shim` ab. Der
-Dienst liest ihn, **rendert die Effekte auf dem PC** und schickt fertige Pixel
-an den ESP. Dadurch ist die Streifenlänge frei wählbar (das Bild wird von 17
-auf N LEDs interpoliert), Effekte lassen sich ohne Neu-Flashen anpassen, und
-die Firmware bleibt klein und robust.
+The kernel module presents Steam with an LED bar that does not exist and
+exposes the written state as a snapshot at `/dev/valve-leds-shim`. The service
+reads it, **renders the effects on the PC** and sends finished pixels to the
+ESP. That makes the strip length free (the picture is interpolated from 17 onto
+N LEDs), lets effects be tuned without reflashing, and keeps the firmware small
+and robust.
 
-Eingebaute Sicherheitsnetze:
+Built-in safety nets:
 
-* Der Dienst verbindet sich selbstständig neu, wenn der ESP ab- und wieder
-  angesteckt wird, und wartet geduldig, falls das Kernel-Modul erst später
-  auftaucht.
-* Jedes Paket ist CRC16-gesichert; der Parser synchronisiert sich nach einer
-  Störung selbst wieder.
-* Bleibt die Verbindung 5 s stumm, löscht die Firmware den Streifen — ein
-  gezogenes Kabel hinterlässt keine dauerhaft leuchtenden LEDs.
-* Beim Stoppen des Dienstes wird der Streifen aktiv gelöscht.
-* Die systemd-Unit läuft ohne Netzwerkzugriff und mit `ProtectSystem=strict`.
+* The service reconnects on its own when the ESP is unplugged and plugged back
+  in, and waits patiently if the kernel module only shows up later.
+* Every packet is CRC16 protected; the parser resynchronises after
+  interference.
+* If the link goes quiet for 5 s, the firmware blanks the strip — a pulled
+  cable leaves no LEDs stuck on.
+* Stopping the service clears the strip.
+* The systemd unit runs with no network access and `ProtectSystem=strict`.
 
-## Entwicklung
+## Development
 
 ```
-leds-valve-shim/          Kernel-Modul (GPL-2.0+, unverändert übernommen),
-                          liefert /dev/valve-leds-shim
-server/steamos_led/       Dienst: config, shim (Snapshot), render (Effekte),
-                          link (Protokoll), serialport (termios), service
-server/steamos-led-serial            ausführbarer Einstiegspunkt
-server/steamos-led-serial.service    systemd-Unit-Vorlage
-server/steamos-led-serial.conf       Beispielkonfiguration
-firmware/led-client/      PlatformIO-Projekt für ESP8266/ESP32
-udev/                     Regel für /dev/steamos-led-esp
-docs/PROTOCOL.md          Rahmenformat und Nachrichtentypen
-docs/WIRING.md            Verkabelung, Stromversorgung, Pegelwandlung
-tests/                    Unit- und Integrationstests
-tests/firmware/           Firmware-Tests gegen Arduino-Stubs
+leds-valve-shim/          kernel module (GPL-2.0+, vendored unmodified),
+                          provides /dev/valve-leds-shim
+server/steamos_led/       service: config, shim (snapshot), render (effects),
+                          link (protocol), serialport (termios), service
+server/steamos-led-serial            executable entry point
+server/steamos-led-serial.service    systemd unit template
+server/steamos-led-serial.conf       example configuration
+firmware/led-client/      PlatformIO project for ESP8266/ESP32
+udev/                     rule for /dev/steamos-led-esp
+docs/PROTOCOL.md          frame format and message types
+docs/WIRING.md            wiring, power, level shifting
+tests/                    unit and integration tests
+tests/firmware/           firmware tests against Arduino stubs
 ```
 
-Tests laufen ohne Hardware und ohne Fremdpakete:
+Tests run without hardware and without third-party packages:
 
 ```bash
-python3 -m unittest discover -s tests   # Effekte, Protokoll, Config; dazu ein
-                                        # Integrationstest, der den echten Dienst
-                                        # gegen FIFO + PTY laufen lässt, und ein
-                                        # Abgleich gegen die Kernel-Quelle
-./tests/firmware/run.sh                 # Firmware-Parser auf dem PC (braucht g++)
+python3 -m unittest discover -s tests   # effects, protocol, config; plus an
+                                        # integration test running the real
+                                        # service against a FIFO and a pty, and
+                                        # a check against the kernel source
+./tests/firmware/run.sh                 # firmware parser on the PC (needs g++)
 ```
 
-## Herkunft und Lizenz
+## Origin and licence
 
-Das Kernel-Modul in `leds-valve-shim/` stammt unverändert aus
+The kernel module in `leds-valve-shim/` is taken unmodified from
 [rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release)
-und steht unter **GPL-2.0-or-later**; als Autoren nennt es Valve Corporation
-und Anna Oake. Einzelheiten, Prüfsummen und der übernommene Commit stehen in
+and is licensed **GPL-2.0-or-later**; it names Valve Corporation and Anna Oake
+as its authors. Details, checksums and the vendored commit are in
 [leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
