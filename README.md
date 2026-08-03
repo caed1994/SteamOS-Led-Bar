@@ -129,7 +129,7 @@ skaliert sie nur relativ zu seinem Standardwert:
 
 | Effekt | ein Zyklus |
 | ------ | ---------- |
-| rainbow | 5,0 s (einmal durchs Farbrad) |
+| rainbow | 7,0 s (einmal durchs Farbrad) |
 | breath | 4,0 s (einmal ein und aus) |
 | patrol | 5,0 s (hin und zurück) |
 | demo | 8,0 s (Atem-Hüllkurve über dem Regenbogen) |
