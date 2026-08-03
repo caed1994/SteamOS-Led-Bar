@@ -15,7 +15,8 @@ import logging
 import struct
 import time
 
-from .serialport import SerialError, SerialPort, describe, find_port
+from .serialport import (BAUD_CONSTANTS, SerialError, SerialPort, describe,
+                         find_port)
 
 LOG = logging.getLogger(__name__)
 
@@ -35,6 +36,11 @@ MSG_INFO = 0x02
 MSG_STATS = 0x30
 MSG_LOG = 0x31
 MSG_PONG = 0x41
+
+# Rates the shipped firmware environments use, tried in this order when the
+# configured one gets no answer: GPIO2 build, GPIO14 bit-bang build, ESP32
+# build, and the Arduino default for hand-rolled firmware.
+FALLBACK_BAUD_RATES = (460800, 230400, 921600, 115200)
 
 MSG_NAMES = {
     MSG_HELLO: "HELLO", MSG_FRAME: "FRAME", MSG_FILL: "FILL",
@@ -129,17 +135,21 @@ class EspLink:
     HELLO_TIMEOUT = 0.4
 
     def __init__(self, port="auto", baudrate=460800, led_count=17,
-                 reconnect_delay=2.0):
+                 reconnect_delay=2.0, autodetect_baud=True):
         self.configured_port = port
         self.baudrate = baudrate
         self.led_count = led_count
         self.reconnect_delay = reconnect_delay
+        self.autodetect_baud = autodetect_baud
         self.serial = None
         self.info = None
         self.device = None
+        self.active_baudrate = None
         self._parser = FrameParser()
         self._next_attempt = 0.0
         self._warned_missing = False
+        self._known_good = {}   # device -> baud rate that answered before
+        self._scanned = set()   # devices where a full scan already came up empty
 
     @property
     def connected(self):
@@ -161,56 +171,99 @@ class EspLink:
                             self.configured_port)
                 self._warned_missing = True
             return False
+        self._warned_missing = False
 
-        try:
-            port = SerialPort(device, self.baudrate)
-        except (OSError, SerialError) as exc:
-            LOG.warning("cannot open %s: %s", device, exc)
+        candidates = self._baud_candidates(device)
+        if not candidates:
+            LOG.error("no usable baud rate for %s (configured: %s)",
+                      device, self.baudrate)
             return False
+        preferred = None
 
+        for index, rate in enumerate(candidates):
+            port = self._open(device, rate)
+            if port is None:
+                if index == 0:
+                    return False
+                continue
+
+            info = self._greet(port)
+            if info is not None:
+                if index > 0:
+                    self._scanned.discard(device)
+                self._adopt(port, device, rate, info)
+                return True
+
+            if index == 0:
+                preferred = port    # keep it open for blind mode below
+            else:
+                port.close()
+
+        if len(candidates) > 1:
+            # Remember the miss so later reconnects do not repeat the scan.
+            self._scanned.add(device)
+
+        # Nothing answered. The firmware may predate the handshake, so keep
+        # streaming at the configured rate instead of giving up entirely.
+        if preferred is not None:
+            self._adopt(preferred, device, candidates[0], None)
+            LOG.warning("no HELLO reply from %s; streaming at %d baud anyway",
+                        describe(device), candidates[0])
+            return True
+        return False
+
+    def _baud_candidates(self, device):
+        """Rates to try, most likely first.
+
+        Firmware and host have to agree on the baud rate, and a mismatch looks
+        exactly like a dead strip. Rather than leave that to the config file
+        alone, fall back to the rates the shipped firmware environments use.
+        """
+        first = self._known_good.get(device, self.baudrate)
+        if not self.autodetect_baud or device in self._scanned:
+            candidates = [first]
+        else:
+            candidates = [first]
+            for rate in (self.baudrate,) + FALLBACK_BAUD_RATES:
+                if rate not in candidates:
+                    candidates.append(rate)
+        # Only rates termios has a constant for can actually be set.
+        return [rate for rate in candidates if rate in BAUD_CONSTANTS]
+
+    def _open(self, device, baudrate):
+        try:
+            port = SerialPort(device, baudrate)
+        except (OSError, SerialError) as exc:
+            LOG.warning("cannot open %s at %d baud: %s", device, baudrate, exc)
+            return None
         # Opening the tty pulses DTR/RTS and resets most dev boards; drop both
         # lines and give the firmware time to come up before we greet it.
         port.set_dtr_rts(False)
         time.sleep(self.BOOT_DELAY)
         port.flush_input()
+        return port
 
-        self.serial = port
-        self.device = device
-        self._parser = FrameParser()
-        self._warned_missing = False
-
-        self.info = self._handshake()
-        if not self.connected:
-            # The handshake write failed and tore the port down again.
-            return False
-        if self.info is not None:
-            LOG.info("connected to %s: %s", describe(device), self.info)
-            if self.led_count > self.info.max_leds:
-                LOG.warning(
-                    "configured LED_COUNT=%d exceeds firmware maximum %d; "
-                    "extra LEDs will stay dark",
-                    self.led_count, self.info.max_leds)
-        else:
-            LOG.warning("no HELLO reply from %s; sending frames anyway",
-                        describe(device))
-        return True
-
-    def _handshake(self):
+    def _greet(self, port):
+        """Send HELLO and wait for INFO. Returns None if the ESP stays quiet."""
+        parser = FrameParser()
         for _ in range(self.HELLO_ATTEMPTS):
             try:
-                self.serial.write(build(MSG_HELLO))
+                port.write(build(MSG_HELLO))
             except (OSError, SerialError) as exc:
                 LOG.warning("handshake write failed: %s", exc)
-                self.disconnect()
                 return None
             deadline = time.monotonic() + self.HELLO_TIMEOUT
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
-                if not self.serial.wait_readable(remaining):
+                if not port.wait_readable(remaining):
                     continue
-                for msg_type, payload in self._parser.feed(self.serial.read()):
+                try:
+                    data = port.read()
+                except OSError:
+                    return None
+                for msg_type, payload in parser.feed(data):
                     if msg_type == MSG_INFO:
                         try:
                             return DeviceInfo.parse(payload)
@@ -219,6 +272,27 @@ class EspLink:
                     elif msg_type == MSG_LOG:
                         LOG.info("esp: %s", payload.decode("ascii", "replace").strip())
         return None
+
+    def _adopt(self, port, device, baudrate, info):
+        self.serial = port
+        self.device = device
+        self.active_baudrate = baudrate
+        self.info = info
+        self._parser = FrameParser()
+        if info is None:
+            return
+
+        self._known_good[device] = baudrate
+        LOG.info("connected to %s at %d baud: %s", describe(device), baudrate, info)
+        if baudrate != self.baudrate:
+            LOG.warning(
+                "firmware talks %d baud but BAUD=%d is configured; using %d. "
+                "Set BAUD=%d in the config file to skip this search.",
+                baudrate, self.baudrate, baudrate, baudrate)
+        if self.led_count > info.max_leds:
+            LOG.warning(
+                "configured LED_COUNT=%d exceeds firmware maximum %d; "
+                "extra LEDs will stay dark", self.led_count, info.max_leds)
 
     def poll(self):
         """Drain the incoming direction; keeps STATS/LOG visible in the journal."""
@@ -275,6 +349,7 @@ class EspLink:
             self.serial.close()
             self.serial = None
         self.info = None
+        self.active_baudrate = None
         self._next_attempt = time.monotonic() + self.reconnect_delay
 
     def shutdown(self):

@@ -44,13 +44,18 @@ bleibt klein und robust.
 
 ## Installation
 
-**1. Firmware flashen** (einmalig, [PlatformIO](https://platformio.org/) nötig):
+**1. Firmware flashen** (einmalig, [PlatformIO](https://platformio.org/) nötig).
+**Nur einen** der folgenden Befehle ausführen — passend zu Hardware und
+Verkabelung. Jeder Flash überschreibt den vorherigen:
 
-```bash
-./flash-esp.sh                  # ESP8266, Daten auf GPIO2 (D4) — empfohlen
-./flash-esp.sh esp32dev         # ESP32, Daten auf GPIO16
-./flash-esp.sh esp8266_gpio14   # bestehende D5-Verkabelung beibehalten
-```
+| Hardware / Verkabelung | Befehl |
+| ---------------------- | ------ |
+| ESP8266, Daten an GPIO2 (D4) — empfohlen | `./flash-esp.sh` |
+| ESP8266, bestehende D5/GPIO14-Verkabelung | `./flash-esp.sh esp8266_gpio14` |
+| ESP32, Daten an GPIO16 | `./flash-esp.sh esp32dev` |
+
+Die Baudrate ergibt sich aus der Variante; der Dienst findet sie beim
+Verbinden selbst heraus und schreibt die passende Zeile ins Log.
 
 **2. Dienst installieren:**
 
@@ -81,7 +86,8 @@ sudo ./install.sh --leds 60 --port /dev/steamos-led-esp --yes
 | ------ | -------- | --------- |
 | `DEVICE` | `/dev/valve-leds-shim` | Zeichengerät des Kernel-Shims |
 | `SERIAL_PORT` | `auto` | Serieller Port; `auto` sucht bekannte USB-Serial-Chips |
-| `BAUD` | `460800` | muss zur Firmware passen |
+| `BAUD` | `460800` | bevorzugte Baudrate; wird beim Handshake bei Bedarf korrigiert |
+| `BAUD_AUTODETECT` | `1` | bei fehlender Antwort auch die anderen Firmware-Baudraten probieren |
 | `LED_COUNT` | `17` | LEDs am Streifen |
 | `MAPPING` | `stretch` | `stretch` (interpolieren), `repeat` (kacheln), `crop` (1:1) |
 | `REVERSE` | `0` | Laufrichtung umdrehen |
@@ -147,7 +153,7 @@ Laufende Logs: `journalctl -u steamos-led-serial -f`
 | `no ESP serial device found` | `--list-ports` prüfen, `SERIAL_PORT` fest eintragen |
 | Streifen bleibt dunkel, Dienst läuft | `--self-test` ausführen. Läuft der, liefert Steam Helligkeit 0 → `MIN_BRIGHTNESS=40` |
 | Rot und Grün vertauscht | Farbreihenfolge der Firmware, siehe [docs/WIRING.md](docs/WIRING.md#farbreihenfolge) |
-| Flackern, aussetzende LEDs | Baudrate zu hoch fürs Bit-Banging (GPIO14) → `BAUD=250000`, oder auf GPIO2 umlöten |
+| Flackern, aussetzende LEDs | Baudrate zu hoch fürs Bit-Banging (GPIO14) → `BAUD=230400`, oder auf GPIO2 umlöten |
 | Erste LED spinnt | 3,3-V-Pegel zu niedrig → 74AHCT125 oder 1N4148, siehe Verkabelung |
 | Streifen bleibt nach Abziehen an | sollte nach 5 s ausgehen (Firmware-Watchdog); sonst Firmware zu alt |
 | Nur ein Teil des Streifens leuchtet | `LED_COUNT` stimmt nicht, oder über `MAX_LEDS` der Firmware |

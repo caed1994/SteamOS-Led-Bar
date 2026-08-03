@@ -41,6 +41,7 @@ class Runner:
             baudrate=config["BAUD"],
             led_count=config["LED_COUNT"],
             reconnect_delay=config["RECONNECT_DELAY"],
+            autodetect_baud=config["BAUD_AUTODETECT"],
         )
         self.source = None
 
@@ -203,6 +204,7 @@ def run_self_test(config, duration=None):
         baudrate=config["BAUD"],
         led_count=config["LED_COUNT"],
         reconnect_delay=config["RECONNECT_DELAY"],
+        autodetect_baud=config["BAUD_AUTODETECT"],
     )
 
     stages = [
@@ -269,6 +271,7 @@ def run_simulate(config, effect_name):
         baudrate=config["BAUD"],
         led_count=config["LED_COUNT"],
         reconnect_delay=config["RECONNECT_DELAY"],
+        autodetect_baud=config["BAUD_AUTODETECT"],
     )
     started = time.monotonic()
     print("simulating effect %r, press Ctrl-C to stop" % effect_name)

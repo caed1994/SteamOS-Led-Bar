@@ -130,6 +130,61 @@ class SerialLoopbackTest(unittest.TestCase):
         self.assertIsNotNone(esp.wait_for(link.MSG_BLANK))
         self.assertFalse(bridge.connected)
 
+    def test_baud_candidates_start_with_the_configured_rate(self):
+        bridge = link.EspLink(port=self.device, baudrate=230400)
+        candidates = bridge._baud_candidates(self.device)
+        self.assertEqual(candidates[0], 230400)
+        self.assertEqual(len(candidates), len(set(candidates)), "duplicate rates")
+        for rate in link.FALLBACK_BAUD_RATES:
+            self.assertIn(rate, candidates)
+
+    def test_every_shipped_firmware_rate_is_settable_on_linux(self):
+        # 250000 baud, an obvious choice for WS2812 work, has no termios
+        # constant - a firmware built for it could never be talked to.
+        from steamos_led.serialport import BAUD_CONSTANTS
+        for rate in link.FALLBACK_BAUD_RATES:
+            self.assertIn(rate, BAUD_CONSTANTS,
+                          "firmware rate %d cannot be set on Linux" % rate)
+
+    def test_unsettable_rates_are_filtered_out(self):
+        bridge = link.EspLink(port=self.device, baudrate=250000)
+        self.assertNotIn(250000, bridge._baud_candidates(self.device))
+
+    def test_baud_autodetect_can_be_disabled(self):
+        bridge = link.EspLink(port=self.device, baudrate=230400,
+                              autodetect_baud=False)
+        self.assertEqual(bridge._baud_candidates(self.device), [230400])
+
+    def test_successful_rate_is_reused_on_reconnect(self):
+        self.start_esp()
+        # 460800 is not the configured rate, so it can only come from a scan.
+        bridge = link.EspLink(port=self.device, baudrate=BAUD, led_count=17)
+        bridge.BOOT_DELAY = 0.05
+        self.addCleanup(bridge.disconnect)
+        self.assertTrue(bridge.connect())
+        bridge._known_good[os.path.realpath(self.device)] = 460800
+
+        candidates = bridge._baud_candidates(os.path.realpath(self.device))
+        self.assertEqual(candidates[0], 460800,
+                         "a rate that worked before must be tried first")
+
+    def test_quiet_device_falls_back_to_blind_streaming(self):
+        # No fake ESP: nothing ever answers HELLO.
+        bridge = link.EspLink(port=self.device, baudrate=BAUD, led_count=17)
+        bridge.BOOT_DELAY = 0.0
+        bridge.HELLO_ATTEMPTS = 1
+        bridge.HELLO_TIMEOUT = 0.01
+        self.addCleanup(bridge.disconnect)
+
+        self.assertTrue(bridge.connect(), "should stream blind, not give up")
+        self.assertIsNone(bridge.info)
+        self.assertEqual(bridge.active_baudrate, BAUD,
+                         "blind mode must use the configured rate")
+        # The fruitless scan must not repeat on every reconnect.
+        self.assertIn(os.path.realpath(self.device), bridge._scanned)
+        self.assertEqual(bridge._baud_candidates(os.path.realpath(self.device)),
+                         [BAUD])
+
     def test_reconnect_after_device_disappears(self):
         bridge = link.EspLink(port="/dev/does-not-exist", baudrate=BAUD,
                               led_count=17, reconnect_delay=0.0)

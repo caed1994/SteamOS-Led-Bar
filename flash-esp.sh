@@ -71,7 +71,7 @@ if [[ "${RESTART_SERVICE:-0}" == "1" ]]; then
 fi
 
 case "$ENVIRONMENT" in
-    esp8266_gpio14) EXPECTED_BAUD=250000 ;;
+    esp8266_gpio14) EXPECTED_BAUD=230400 ;;
     esp32dev|esp32s3) EXPECTED_BAUD=921600 ;;
     *) EXPECTED_BAUD=460800 ;;
 esac

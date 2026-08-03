@@ -62,10 +62,10 @@ auf D5 bleiben:
 
 Dabei wird per Bit-Banging getaktet, wofür die Interrupts kurz aus sind. Damit
 der 128 Byte große UART-FIFO nicht überläuft, läuft diese Variante mit
-250000 Baud — entsprechend in `/etc/steamos-led-serial.conf` setzen:
+230400 Baud — entsprechend in `/etc/steamos-led-serial.conf` setzen:
 
 ```
-BAUD=250000
+BAUD=230400
 ```
 
 Praktische Obergrenze dabei: etwa 120 LEDs. Für längere Streifen auf GPIO2

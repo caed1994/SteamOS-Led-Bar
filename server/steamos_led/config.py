@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import os
 
+from .serialport import BAUD_CONSTANTS
+
 DEFAULT_CONFIG_PATH = "/etc/steamos-led-serial.conf"
 
 DEFAULTS = {
     "DEVICE": "/dev/valve-leds-shim",
     "SERIAL_PORT": "auto",
     "BAUD": 460800,
+    "BAUD_AUTODETECT": True,
     "LED_COUNT": 17,
     "MAPPING": "stretch",
     "REVERSE": False,
@@ -106,6 +109,13 @@ def validate(config):
         raise ConfigError("LED_COUNT must be between 1 and 1024")
     if config["MAPPING"] not in MAPPINGS:
         raise ConfigError("MAPPING must be one of: %s" % ", ".join(MAPPINGS))
+    if config["BAUD"] not in BAUD_CONSTANTS:
+        # Linux can only set the rates termios has a constant for; anything
+        # else fails at open() time, which looks like dead hardware.
+        raise ConfigError(
+            "BAUD=%s cannot be set on a Linux serial port. Supported rates: %s"
+            % (config["BAUD"],
+               ", ".join(str(rate) for rate in sorted(BAUD_CONSTANTS))))
     if not 1 <= config["FPS"] <= 240:
         raise ConfigError("FPS must be between 1 and 240")
     if not 1 <= config["IDLE_FPS"] <= config["FPS"]:
