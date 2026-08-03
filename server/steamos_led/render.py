@@ -12,12 +12,19 @@ import math
 
 from . import shim
 
-# The hardware advances one animation step every `delay` milliseconds. The
-# exact unit is not documented anywhere, so it is an assumption tuned to look
-# like the Steam Machine; SPEED in the config file scales it.
+# How long one full animation cycle takes at the hardware's default delay.
+# Valve documents neither the unit nor the scale of `delay`, so rather than
+# guess a step duration and derive wildly different cycle lengths per effect,
+# the cycle times are stated outright and `delay` only scales them relative to
+# its default. SPEED in the config file scales them further.
 DEFAULT_DELAY_MS = 20.0
-RAINBOW_STEPS = 256.0
-BREATH_STEPS = 256.0
+RAINBOW_CYCLE = 5.0     # one full trip around the hue circle
+BREATH_CYCLE = 4.0      # one inhale plus exhale
+PATROL_CYCLE = 2.4      # sweep to the far end and back
+DEMO_CYCLE = 8.0        # breathing envelope over the rainbow
+# A small delay must not turn an effect into a strobe light.
+MIN_CYCLE_SECONDS = 0.8
+
 BREATH_FLOOR = 0.06
 PATROL_WIDTH = 2.2
 FACTORY_INTERVAL = 1.0
@@ -43,12 +50,13 @@ def hsv_to_rgb(hue, saturation, value):
     return red * 255.0, green * 255.0, blue * 255.0
 
 
-def _step_period(snapshot, speed_scale):
+def _cycle(snapshot, nominal, speed_scale):
+    """Seconds for one full cycle of an effect, honouring delay and SPEED."""
     delay = snapshot.delay if snapshot.delay else DEFAULT_DELAY_MS
-    period = delay / 1000.0
+    seconds = nominal * (delay / DEFAULT_DELAY_MS)
     if speed_scale > 0:
-        period /= speed_scale
-    return max(period, 0.001)
+        seconds /= speed_scale
+    return max(seconds, MIN_CYCLE_SECONDS)
 
 
 def _static(snapshot):
@@ -61,7 +69,7 @@ def _static(snapshot):
 
 
 def _rainbow(snapshot, elapsed, speed_scale):
-    phase = elapsed / (_step_period(snapshot, speed_scale) * RAINBOW_STEPS)
+    phase = elapsed / _cycle(snapshot, RAINBOW_CYCLE, speed_scale)
     shift = snapshot.color_shift / 255.0
     frame = []
     for index in range(shim.LOGICAL_LEDS):
@@ -71,7 +79,7 @@ def _rainbow(snapshot, elapsed, speed_scale):
 
 
 def _breath(snapshot, elapsed, speed_scale):
-    period = _step_period(snapshot, speed_scale) * BREATH_STEPS
+    period = _cycle(snapshot, BREATH_CYCLE, speed_scale)
     phase = elapsed / period + snapshot.breath_offset / 255.0
     level = (1.0 - math.cos(2.0 * math.pi * phase)) * 0.5
     level = BREATH_FLOOR + (1.0 - BREATH_FLOOR) * level
@@ -81,20 +89,26 @@ def _breath(snapshot, elapsed, speed_scale):
 
 def _patrol(snapshot, elapsed, speed_scale):
     span = shim.LOGICAL_LEDS - 1
-    period = _step_period(snapshot, speed_scale) * span * 2.0
-    phase = (elapsed / period) % 1.0
-    # Triangle wave: sweep to the far end and back again.
-    head = phase * 2.0 * span if phase < 0.5 else (2.0 - phase * 2.0) * span
+    period = _cycle(snapshot, PATROL_CYCLE, speed_scale)
+    base = (elapsed / period) % 1.0
     scanners = max(1, min(int(snapshot.patrol_num) or 1, 4))
     red, green, blue = snapshot.base_color()
+
+    # Offset each scanner in time rather than in position: shifting the
+    # position and wrapping it would teleport a scanner sitting exactly on the
+    # far end back to LED 0 for one frame.
+    heads = []
+    for scanner in range(scanners):
+        phase = (base + scanner / float(scanners)) % 1.0
+        # Triangle wave: sweep to the far end and back again.
+        heads.append(phase * 2.0 * span if phase < 0.5
+                     else (2.0 - phase * 2.0) * span)
 
     frame = []
     for index in range(shim.LOGICAL_LEDS):
         level = 0.0
-        for scanner in range(scanners):
-            centre = (head + scanner * span / float(scanners)) % span
-            distance = abs(index - centre)
-            level = max(level, math.exp(-(distance ** 2) / PATROL_WIDTH))
+        for head in heads:
+            level = max(level, math.exp(-((index - head) ** 2) / PATROL_WIDTH))
         frame.append((red * level, green * level, blue * level))
     return frame
 
@@ -108,7 +122,7 @@ def _factory(_snapshot, elapsed, _speed_scale):
 
 def _demo(snapshot, elapsed, speed_scale):
     frame = _rainbow(snapshot, elapsed, speed_scale)
-    period = _step_period(snapshot, speed_scale) * BREATH_STEPS * 2.0
+    period = _cycle(snapshot, DEMO_CYCLE, speed_scale)
     level = BREATH_FLOOR + (1.0 - BREATH_FLOOR) * (
         (1.0 - math.cos(2.0 * math.pi * elapsed / period)) * 0.5
     )

@@ -179,6 +179,82 @@ class TestRenderer(unittest.TestCase):
             later = renderer.render(snapshot, 1.7)
             self.assertNotEqual(first, later, "effect %d is static" % effect)
 
+    def test_animation_cycles_are_watchable(self):
+        # A patrol sweep once used 32 steps where rainbow used 256, which made
+        # it eight times faster than everything else and frantic to look at.
+        for nominal in (render.RAINBOW_CYCLE, render.BREATH_CYCLE,
+                        render.PATROL_CYCLE, render.DEMO_CYCLE):
+            seconds = render._cycle(shim.make_snapshot(), nominal, 1.0)
+            self.assertGreaterEqual(seconds, 1.5,
+                                    "a %.1fs cycle is too frantic" % seconds)
+
+    def test_short_delay_cannot_strobe(self):
+        snapshot = shim.make_snapshot(shim.EFFECT_PATROL)
+        snapshot.delay = 1
+        self.assertGreaterEqual(
+            render._cycle(snapshot, render.PATROL_CYCLE, 1.0),
+            render.MIN_CYCLE_SECONDS)
+
+    def test_speed_scales_the_cycle(self):
+        snapshot = shim.make_snapshot(shim.EFFECT_RAINBOW)
+        slow = render._cycle(snapshot, render.RAINBOW_CYCLE, 0.5)
+        fast = render._cycle(snapshot, render.RAINBOW_CYCLE, 2.0)
+        self.assertAlmostEqual(slow, render.RAINBOW_CYCLE * 2)
+        self.assertAlmostEqual(fast, render.RAINBOW_CYCLE / 2)
+
+    def test_longer_delay_slows_the_animation(self):
+        quick, slow = shim.make_snapshot(), shim.make_snapshot()
+        quick.delay, slow.delay = 20, 40
+        self.assertLess(render._cycle(quick, render.PATROL_CYCLE, 1.0),
+                        render._cycle(slow, render.PATROL_CYCLE, 1.0))
+
+    def test_patrol_repeats_exactly_once_per_cycle(self):
+        renderer = render.Renderer(led_count=17)
+        snapshot = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
+        period = render._cycle(snapshot, render.PATROL_CYCLE, 1.0)
+        self.assertEqual(renderer.render(snapshot, 0.0),
+                         renderer.render(snapshot, period))
+        self.assertNotEqual(renderer.render(snapshot, 0.0),
+                            renderer.render(snapshot, period / 4.0))
+
+    def _patrol_positions(self, snapshot, samples=400):
+        renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                                   mapping=render.MAPPING_CROP)
+        period = render._cycle(snapshot, render.PATROL_CYCLE, 1.0)
+        positions = []
+        for step in range(samples):
+            frame = renderer.render(snapshot, period * step / (samples / 2.0))
+            positions.append(max(range(shim.LOGICAL_LEDS),
+                                 key=lambda led: frame[led * 3]))
+        return positions
+
+    def test_patrol_sweep_is_continuous(self):
+        # Offsetting a scanner's position and wrapping it used to teleport it
+        # from the far end back to LED 0 at every turning point.
+        positions = self._patrol_positions(
+            shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0)))
+        for previous, current in zip(positions, positions[1:]):
+            self.assertLessEqual(abs(current - previous), 2,
+                                 "scanner jumped from LED %d to %d"
+                                 % (previous, current))
+
+    def test_patrol_reaches_both_ends(self):
+        positions = self._patrol_positions(
+            shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0)))
+        self.assertEqual(min(positions), 0)
+        self.assertEqual(max(positions), shim.LOGICAL_LEDS - 1)
+
+    def test_patrol_num_adds_scanners(self):
+        renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                                   mapping=render.MAPPING_CROP)
+        one = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
+        two = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
+        two.patrol_num = 2
+        lit = lambda frame: sum(1 for led in range(shim.LOGICAL_LEDS)
+                                if frame[led * 3] > 40)
+        self.assertGreater(lit(renderer.render(two, 0.0)),
+                           lit(renderer.render(one, 0.0)))
+
     def test_gamma_darkens_midtones(self):
         snapshot = shim.make_snapshot(shim.EFFECT_MANUAL, (128, 128, 128))
         linear = render.Renderer(led_count=1, mapping=render.MAPPING_CROP)

@@ -122,10 +122,21 @@ PC — genau wie sie auf der echten Steam Machine im Mikrocontroller läuft.
 | 7 | demo | Regenbogen mit überlagertem Atmen |
 
 Ein Hinweis zur Ehrlichkeit: Valve dokumentiert die genaue Bedeutung von
-`delay`, `breath_*` und `patrol_num` nirgends. Umgesetzt ist die Annahme
-„`delay` = Millisekunden pro Animationsschritt, 256 Schritte pro Zyklus" — das
-sieht dem Original sehr ähnlich. Passt das Tempo nicht, ist `SPEED` der
-Stellhebel; die Konstanten stehen oben in `server/steamos_led/render.py`.
+`delay`, `breath_*` und `patrol_num` nirgends. Statt aus `delay` eine
+Schrittdauer zu raten, sind die Zyklusdauern direkt festgelegt — `delay`
+skaliert sie nur relativ zu seinem Standardwert:
+
+| Effekt | ein Zyklus |
+| ------ | ---------- |
+| rainbow | 5,0 s (einmal durchs Farbrad) |
+| breath | 4,0 s (einmal ein und aus) |
+| patrol | 2,4 s (hin und zurück) |
+| demo | 8,0 s (Atem-Hüllkurve über dem Regenbogen) |
+
+Zu schnell oder zu langsam? `SPEED` in der Config skaliert alles (`SPEED=0.5`
+= halbes Tempo). Die Konstanten stehen oben in `server/steamos_led/render.py`.
+Ein Zyklus wird nie kürzer als 0,8 s, damit ein kleiner `delay`-Wert keinen
+Stroboskop-Effekt erzeugen kann.
 
 ## Testen und Diagnose
 
