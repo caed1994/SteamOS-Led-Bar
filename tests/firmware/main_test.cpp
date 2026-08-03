@@ -54,9 +54,13 @@ int main() {
   Serial.feed(frame.data(), frame.size());
   pump();
   check(g_lastShown.size() == 17, "17 pixels pushed");
-  check(g_lastShown[0].R == 10 && g_lastShown[0].G == 200 && g_lastShown[0].B == 30,
+  // Expectations go through clampBrightness so the test also holds for builds
+  // with a MAX_BRIGHTNESS cap.
+  check(g_lastShown[0].R == clampBrightness(10)
+            && g_lastShown[0].G == clampBrightness(200)
+            && g_lastShown[0].B == clampBrightness(30),
         "first pixel matches the payload");
-  check(g_lastShown[16].R == 26, "last pixel matches the payload");
+  check(g_lastShown[16].R == clampBrightness(26), "last pixel matches the payload");
   check(statFrames == 1, "frame counter incremented");
 
   // --- byte-at-a-time delivery still parses --------------------------------
@@ -122,7 +126,10 @@ int main() {
   // --- link watchdog blanks the strip --------------------------------------
   Serial.feed(longFrame.data(), longFrame.size());
   pump();
-  check(g_lastShown[0].G == 6, "strip lit again before the watchdog test");
+  check(g_lastShown[0].G == clampBrightness(6), "strip lit again before the watchdog test");
+
+  // The MAX_BRIGHTNESS cap must actually bite when the build sets one.
+  check(clampBrightness(255) == MAX_BRIGHTNESS, "MAX_BRIGHTNESS caps full white");
   g_millis += LINK_TIMEOUT_MS + 100;
   pump();
   check(g_lastShown[0].R == 0 && g_lastShown[0].G == 0 && g_lastShown[0].B == 0,

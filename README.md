@@ -151,6 +151,8 @@ Laufende Logs: `journalctl -u steamos-led-serial -f`
 | Erste LED spinnt | 3,3-V-Pegel zu niedrig → 74AHCT125 oder 1N4148, siehe Verkabelung |
 | Streifen bleibt nach Abziehen an | sollte nach 5 s ausgehen (Firmware-Watchdog); sonst Firmware zu alt |
 | Nur ein Teil des Streifens leuchtet | `LED_COUNT` stimmt nicht, oder über `MAX_LEDS` der Firmware |
+| Beim Flashen: `No module named 'intelhex'` | Modul fehlt im PlatformIO-venv; `flash-esp.sh` installiert es automatisch nach, sonst: `~/.platformio/penv/bin/python -m pip install intelhex` |
+| Nach dem Flashen bleibt alles dunkel | Baudrate von Firmware und Config müssen übereinstimmen — `flash-esp.sh` nennt am Ende den richtigen Wert und warnt bei Abweichung |
 
 ## Aufbau des Repos
 
