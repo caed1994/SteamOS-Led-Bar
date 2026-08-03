@@ -20,7 +20,7 @@ from . import shim
 DEFAULT_DELAY_MS = 20.0
 RAINBOW_CYCLE = 5.0     # one full trip around the hue circle
 BREATH_CYCLE = 4.0      # one inhale plus exhale
-PATROL_CYCLE = 2.4      # sweep to the far end and back
+PATROL_CYCLE = 5.0      # sweep to the far end and back
 DEMO_CYCLE = 8.0        # breathing envelope over the rainbow
 # A small delay must not turn an effect into a strobe light.
 MIN_CYCLE_SECONDS = 0.8
@@ -68,8 +68,8 @@ def _static(snapshot):
     return frame
 
 
-def _rainbow(snapshot, elapsed, speed_scale):
-    phase = elapsed / _cycle(snapshot, RAINBOW_CYCLE, speed_scale)
+def _rainbow(snapshot, elapsed, options):
+    phase = elapsed / _cycle(snapshot, RAINBOW_CYCLE, options.speed_scale)
     shift = snapshot.color_shift / 255.0
     frame = []
     for index in range(shim.LOGICAL_LEDS):
@@ -78,8 +78,8 @@ def _rainbow(snapshot, elapsed, speed_scale):
     return frame
 
 
-def _breath(snapshot, elapsed, speed_scale):
-    period = _cycle(snapshot, BREATH_CYCLE, speed_scale)
+def _breath(snapshot, elapsed, options):
+    period = _cycle(snapshot, BREATH_CYCLE, options.speed_scale)
     phase = elapsed / period + snapshot.breath_offset / 255.0
     level = (1.0 - math.cos(2.0 * math.pi * phase)) * 0.5
     level = BREATH_FLOOR + (1.0 - BREATH_FLOOR) * level
@@ -87,11 +87,16 @@ def _breath(snapshot, elapsed, speed_scale):
     return [(red * level, green * level, blue * level)] * shim.LOGICAL_LEDS
 
 
-def _patrol(snapshot, elapsed, speed_scale):
+def _patrol(snapshot, elapsed, options):
     span = shim.LOGICAL_LEDS - 1
-    period = _cycle(snapshot, PATROL_CYCLE, speed_scale)
+    period = _cycle(snapshot, PATROL_CYCLE, options.speed_scale)
     base = (elapsed / period) % 1.0
-    scanners = max(1, min(int(snapshot.patrol_num) or 1, 4))
+    # patrol_num is NOT used as a scanner count. Valve documents none of these
+    # fields, and its neighbours (breath_offset, breath_level) look like live
+    # animation state rather than settings - so patrol_num is most likely the
+    # current position of a single dot, not how many there are. One dot is also
+    # what "patrol" looks like on the real bar. PATROL_DOTS overrides it.
+    scanners = max(1, min(int(options.patrol_dots), 8))
     red, green, blue = snapshot.base_color()
 
     # Offset each scanner in time rather than in position: shifting the
@@ -113,16 +118,16 @@ def _patrol(snapshot, elapsed, speed_scale):
     return frame
 
 
-def _factory(_snapshot, elapsed, _speed_scale):
+def _factory(_snapshot, elapsed, _options):
     colours = ((255.0, 0.0, 0.0), (0.0, 255.0, 0.0), (0.0, 0.0, 255.0),
                (255.0, 255.0, 255.0))
     colour = colours[int(elapsed / FACTORY_INTERVAL) % len(colours)]
     return [colour] * shim.LOGICAL_LEDS
 
 
-def _demo(snapshot, elapsed, speed_scale):
-    frame = _rainbow(snapshot, elapsed, speed_scale)
-    period = _cycle(snapshot, DEMO_CYCLE, speed_scale)
+def _demo(snapshot, elapsed, options):
+    frame = _rainbow(snapshot, elapsed, options)
+    period = _cycle(snapshot, DEMO_CYCLE, options.speed_scale)
     level = BREATH_FLOOR + (1.0 - BREATH_FLOOR) * (
         (1.0 - math.cos(2.0 * math.pi * elapsed / period)) * 0.5
     )
@@ -130,8 +135,8 @@ def _demo(snapshot, elapsed, speed_scale):
 
 
 _EFFECTS = {
-    shim.EFFECT_MANUAL: lambda snap, t, s: _static(snap),
-    shim.EFFECT_NORMAL: lambda snap, t, s: _static(snap),
+    shim.EFFECT_MANUAL: lambda snap, t, options: _static(snap),
+    shim.EFFECT_NORMAL: lambda snap, t, options: _static(snap),
     shim.EFFECT_RAINBOW: _rainbow,
     shim.EFFECT_BREATH: _breath,
     shim.EFFECT_PATROL: _patrol,
@@ -145,7 +150,7 @@ class Renderer:
 
     def __init__(self, led_count, mapping=MAPPING_STRETCH, reverse=False,
                  max_brightness=255, min_brightness=0, gamma=1.0,
-                 speed_scale=1.0):
+                 speed_scale=1.0, patrol_dots=1):
         if led_count < 1:
             raise ValueError("led_count must be >= 1")
         if mapping not in MAPPINGS:
@@ -156,6 +161,7 @@ class Renderer:
         self.max_brightness = max(0, min(int(max_brightness), 255))
         self.min_brightness = max(0, min(int(min_brightness), 255))
         self.speed_scale = speed_scale
+        self.patrol_dots = max(1, min(int(patrol_dots), 8))
         self._gamma_table = self._build_gamma(gamma)
 
     @staticmethod
@@ -172,7 +178,7 @@ class Renderer:
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
         effect = _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL])
-        return effect(snapshot, elapsed, self.speed_scale)
+        return effect(snapshot, elapsed, self)
 
     def _map_to_strip(self, logical):
         count = self.led_count

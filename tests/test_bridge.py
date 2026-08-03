@@ -244,16 +244,38 @@ class TestRenderer(unittest.TestCase):
         self.assertEqual(min(positions), 0)
         self.assertEqual(max(positions), shim.LOGICAL_LEDS - 1)
 
-    def test_patrol_num_adds_scanners(self):
+    @staticmethod
+    def _lit(frame):
+        return sum(1 for led in range(shim.LOGICAL_LEDS) if frame[led * 3] > 40)
+
+    def test_patrol_num_does_not_change_the_dot_count(self):
+        # patrol_num is most likely live position state, not a count. Reading
+        # it as one painted three dots on a bar that should show one.
         renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
                                    mapping=render.MAPPING_CROP)
-        one = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
-        two = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
-        two.patrol_num = 2
-        lit = lambda frame: sum(1 for led in range(shim.LOGICAL_LEDS)
-                                if frame[led * 3] > 40)
-        self.assertGreater(lit(renderer.render(two, 0.0)),
-                           lit(renderer.render(one, 0.0)))
+        plain = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
+        odd = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
+        odd.patrol_num = 3
+        self.assertEqual(renderer.render(plain, 0.0), renderer.render(odd, 0.0))
+
+    def test_patrol_dots_option_adds_scanners(self):
+        snapshot = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
+        one = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                              mapping=render.MAPPING_CROP, patrol_dots=1)
+        three = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                                mapping=render.MAPPING_CROP, patrol_dots=3)
+        self.assertGreater(self._lit(three.render(snapshot, 0.0)),
+                           self._lit(one.render(snapshot, 0.0)))
+
+    def test_patrol_defaults_to_a_single_dot(self):
+        renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                                   mapping=render.MAPPING_CROP)
+        self.assertEqual(renderer.patrol_dots, 1)
+        # One dot with a soft tail must not light up half the bar.
+        snapshot = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
+        peak = max(self._lit(renderer.render(snapshot, offset / 20.0))
+                   for offset in range(20))
+        self.assertLessEqual(peak, 5)
 
     def test_gamma_darkens_midtones(self):
         snapshot = shim.make_snapshot(shim.EFFECT_MANUAL, (128, 128, 128))

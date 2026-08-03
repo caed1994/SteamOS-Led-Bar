@@ -24,6 +24,7 @@ DEFAULTS = {
     "MIN_BRIGHTNESS": 0,
     "GAMMA": 1.0,
     "SPEED": 1.0,
+    "PATROL_DOTS": 1,
     "FPS": 60,
     "IDLE_FPS": 4,
     "RECONNECT_DELAY": 2.0,
@@ -128,4 +129,6 @@ def validate(config):
         raise ConfigError("GAMMA must be greater than 0")
     if config["SPEED"] <= 0:
         raise ConfigError("SPEED must be greater than 0")
+    if not 1 <= config["PATROL_DOTS"] <= 8:
+        raise ConfigError("PATROL_DOTS must be between 1 and 8")
     return config

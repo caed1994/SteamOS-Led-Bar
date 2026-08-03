@@ -98,7 +98,8 @@ sudo ./install.sh --leds 60 --port /dev/steamos-led-esp --yes
 | `MAX_BRIGHTNESS` | `255` | Deckel, z. B. `80` bei USB-Versorgung |
 | `MIN_BRIGHTNESS` | `0` | Untergrenze, falls Steam Helligkeit 0 meldet |
 | `GAMMA` | `1.0` | `2.2` wirkt beim Dimmen gleichmäßiger |
-| `SPEED` | `1.0` | Tempo der Animationen |
+| `SPEED` | `1.0` | Tempo der Animationen (`0.5` = halbes Tempo) |
+| `PATROL_DOTS` | `1` | Anzahl der Punkte beim Lauflicht |
 | `FPS` / `IDLE_FPS` | `60` / `4` | Bildrate bei Animation / Ruhe |
 | `LOG_LEVEL` | `info` | `debug` zeigt jede Zustandsänderung |
 
@@ -117,7 +118,7 @@ PC — genau wie sie auf der echten Steam Machine im Mikrocontroller läuft.
 | 2 | normal | statische Farbe |
 | 3 | rainbow | Farbverlauf, wandert; Startfarbe aus `color_shift` |
 | 4 | breath | Atmen, Grundfarbe aus dem Snapshot, Phase aus `breath_offset` |
-| 5 | patrol | Lauflicht (`patrol_num` Läufer, 1–4) |
+| 5 | patrol | Lauflicht, ein Punkt hin und her (Anzahl über `PATROL_DOTS`) |
 | 6 | factory | Rot/Grün/Blau/Weiß im Wechsel |
 | 7 | demo | Regenbogen mit überlagertem Atmen |
 
@@ -130,13 +131,23 @@ skaliert sie nur relativ zu seinem Standardwert:
 | ------ | ---------- |
 | rainbow | 5,0 s (einmal durchs Farbrad) |
 | breath | 4,0 s (einmal ein und aus) |
-| patrol | 2,4 s (hin und zurück) |
+| patrol | 5,0 s (hin und zurück) |
 | demo | 8,0 s (Atem-Hüllkurve über dem Regenbogen) |
 
 Zu schnell oder zu langsam? `SPEED` in der Config skaliert alles (`SPEED=0.5`
 = halbes Tempo). Die Konstanten stehen oben in `server/steamos_led/render.py`.
 Ein Zyklus wird nie kürzer als 0,8 s, damit ein kleiner `delay`-Wert keinen
 Stroboskop-Effekt erzeugen kann.
+
+`patrol_num` wird **nicht** als Anzahl der Läufer gelesen, obwohl der Name das
+nahelegt: seine Nachbarfelder `breath_offset` und `breath_level` sehen nach
+laufendem Animationszustand aus, also ist `patrol_num` vermutlich die aktuelle
+Position eines einzelnen Punktes. Ein Punkt ist auch das, was „patrol"
+üblicherweise bedeutet. Wer mehr will, setzt `PATROL_DOTS`.
+
+Ob die Vermutung stimmt, lässt sich nachsehen: `--dump` bei laufendem
+patrol-Effekt. Ändert sich `patrol=` fortlaufend, ist es Zustand und keine
+Anzahl.
 
 ## Testen und Diagnose
 

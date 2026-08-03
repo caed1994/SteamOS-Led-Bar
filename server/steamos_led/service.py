@@ -35,6 +35,7 @@ class Runner:
             min_brightness=config["MIN_BRIGHTNESS"],
             gamma=config["GAMMA"],
             speed_scale=config["SPEED"],
+            patrol_dots=config["PATROL_DOTS"],
         )
         self.link = EspLink(
             port=config["SERIAL_PORT"],
@@ -198,6 +199,7 @@ def run_self_test(config, duration=None):
         min_brightness=config["MIN_BRIGHTNESS"],
         gamma=config["GAMMA"],
         speed_scale=config["SPEED"],
+        patrol_dots=config["PATROL_DOTS"],
     )
     link = EspLink(
         port=config["SERIAL_PORT"],
@@ -265,6 +267,7 @@ def run_simulate(config, effect_name):
         min_brightness=config["MIN_BRIGHTNESS"],
         gamma=config["GAMMA"],
         speed_scale=config["SPEED"],
+        patrol_dots=config["PATROL_DOTS"],
     )
     link = EspLink(
         port=config["SERIAL_PORT"],
@@ -315,6 +318,8 @@ def build_parser():
                         help="raise the brightness floor (0-255)")
     parser.add_argument("--gamma", type=float, help="gamma correction, 1.0 = off")
     parser.add_argument("--speed", type=float, help="animation speed multiplier")
+    parser.add_argument("--patrol-dots", dest="patrol_dots", type=int,
+                        help="dots the patrol effect chases (default 1)")
     parser.add_argument("--fps", type=int, help="frame rate for animated effects")
     parser.add_argument("--idle-fps", dest="idle_fps", type=int,
                         help="heartbeat rate for static scenes")
@@ -363,6 +368,7 @@ def main(argv=None):
         "MIN_BRIGHTNESS": args.min_brightness,
         "GAMMA": args.gamma,
         "SPEED": args.speed,
+        "PATROL_DOTS": args.patrol_dots,
         "FPS": args.fps,
         "IDLE_FPS": args.idle_fps,
         "LOG_LEVEL": "debug" if args.verbose else args.log_level,
