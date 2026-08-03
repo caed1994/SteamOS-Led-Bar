@@ -17,10 +17,12 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import link, shim  # noqa: E402
+from steamos_led import link, notify, shim  # noqa: E402
 
 ENTRY_POINT = os.path.join(HERE, "..", "server", "steamos-led-serial")
 RUN_SECONDS = 2.5
+# The notification case needs room for the flash to finish inside the window.
+NOTIFY_RUN_SECONDS = 5.0
 
 
 class ShimWriter(threading.Thread):
@@ -28,9 +30,10 @@ class ShimWriter(threading.Thread):
 
     daemon = True
 
-    def __init__(self, path):
+    def __init__(self, path, switch_at=10):
         super().__init__()
         self.path = path
+        self.switch_at = switch_at      # None keeps the static colour throughout
         self.stop = threading.Event()
 
     def run(self):
@@ -43,7 +46,7 @@ class ShimWriter(threading.Thread):
         try:
             while not self.stop.is_set():
                 seq += 1
-                if seq == 10:
+                if self.switch_at is not None and seq == self.switch_at:
                     snapshot = shim.make_snapshot(shim.EFFECT_RAINBOW)
                 try:
                     os.write(fd, shim.encode(snapshot, seq))
@@ -61,12 +64,17 @@ class EndToEndTest(unittest.TestCase):
         os.mkfifo(self.fifo)
         self.master, self.slave = pty.openpty()
         self.device = os.ttyname(self.slave)
-        self.writer = ShimWriter(self.fifo)
-        self.writer.start()
+        self.writer = None
         self.addCleanup(self._teardown)
 
+    def start_writer(self, switch_at=10):
+        self.writer = ShimWriter(self.fifo, switch_at=switch_at)
+        self.writer.start()
+        return self.writer
+
     def _teardown(self):
-        self.writer.stop.set()
+        if self.writer is not None:
+            self.writer.stop.set()
         for fd in (self.master, self.slave):
             try:
                 os.close(fd)
@@ -78,20 +86,25 @@ class EndToEndTest(unittest.TestCase):
         except OSError:
             pass
 
-    def test_snapshots_reach_the_strip(self):
+    def _start_service(self, *extra, **env_overrides):
+        env = dict(os.environ)
+        env.update(env_overrides)
         proc = subprocess.Popen(
             [sys.executable, ENTRY_POINT,
              "--config", "/dev/null",
              "--device", self.fifo,
              "--serial-port", self.device,
-             "--leds", "17", "--fps", "40", "-v"],
-            stderr=subprocess.PIPE, text=True)
+             "--leds", "17", "--fps", "40", "-v", *extra],
+            stderr=subprocess.PIPE, text=True, env=env)
         self.addCleanup(proc.kill)
+        return proc
 
+    def _collect(self, proc, seconds, on_frame=None):
+        """Answer the handshake and gather FRAME payloads for a while."""
         parser = link.FrameParser()
         frames = []
         os.set_blocking(self.master, False)
-        deadline = time.monotonic() + RUN_SECONDS
+        deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             try:
                 data = os.read(self.master, 16384)
@@ -104,6 +117,16 @@ class EndToEndTest(unittest.TestCase):
                     os.write(self.master, link.build(link.MSG_INFO, info + b"fake"))
                 elif msg_type == link.MSG_FRAME:
                     frames.append(payload)
+                    if on_frame is not None:
+                        on_frame(len(frames))
+        del proc
+        return frames
+
+    def test_snapshots_reach_the_strip(self):
+        self.start_writer()
+        proc = self._start_service()
+
+        frames = self._collect(proc, RUN_SECONDS)
 
         proc.terminate()
         try:
@@ -125,6 +148,47 @@ class EndToEndTest(unittest.TestCase):
 
         # SIGTERM has to blank the strip on the way out.
         self.assertIn("shutting down", stderr)
+
+    def test_notification_takes_over_the_bar_and_gives_it_back(self):
+        # Hold a static colour so "went back to normal" is unambiguous.
+        self.start_writer(switch_at=None)
+        notify_fifo = os.path.join(self.tmpdir, "notify")
+        # Shorter than the test window so the hand-back is observable. Set
+        # through the environment, which also exercises that override path.
+        proc = self._start_service("--notify-fifo", notify_fifo,
+                                   STEAMOS_LED_NOTIFY_DURATION="0.6")
+
+        # Fire as soon as frames flow, and leave a wide margin afterwards: the
+        # link waits out the ESP boot delay first, so frames only start about
+        # two seconds in. Triggering late used to run past the window and made
+        # this test flaky.
+        def maybe_trigger(count):
+            if count == 3:
+                notify.send(notify_fifo, "achievement")
+
+        frames = self._collect(proc, NOTIFY_RUN_SECONDS, on_frame=maybe_trigger)
+        proc.terminate()
+        try:
+            _, stderr = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _, stderr = proc.communicate()
+
+        self.assertTrue(frames, "no frames at all:\n%s" % stderr)
+        self.assertIn("notification: achievement", stderr)
+
+        def is_gold(frame):
+            red, green, blue = frame[2], frame[3], frame[4]
+            return blue == 0 and red > green > 0
+
+        golden = [index for index, frame in enumerate(frames) if is_gold(frame)]
+        self.assertTrue(golden, "the bar never turned gold:\n%s" % stderr)
+
+        # Steam's own colour was green (10, 200, 30) - it has to come back.
+        after = frames[golden[-1] + 1:]
+        self.assertTrue(after, "flash ran to the end of the test, cannot tell")
+        self.assertEqual(tuple(after[-1][2:5]), (10, 200, 30),
+                         "the bar did not go back to what Steam is showing")
 
 
 if __name__ == "__main__":

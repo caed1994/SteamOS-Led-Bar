@@ -5,6 +5,9 @@ After=multi-user.target
 
 [Service]
 Type=simple
+# Holds the notification FIFO; systemd creates and cleans it up.
+RuntimeDirectory=steamos-led-serial
+RuntimeDirectoryMode=0755
 ExecStart=@INSTALL_DIR@/steamos-led-serial
 Restart=always
 RestartSec=3

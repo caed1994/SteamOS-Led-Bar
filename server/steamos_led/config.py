@@ -25,6 +25,9 @@ DEFAULTS = {
     "GAMMA": 1.0,
     "SPEED": 1.0,
     "PATROL_DOTS": 1,
+    "NOTIFY": True,
+    "NOTIFY_DURATION": 3.5,
+    "NOTIFY_FIFO": "/run/steamos-led-serial/notify",
     "FPS": 60,
     "IDLE_FPS": 4,
     "RECONNECT_DELAY": 2.0,
@@ -131,4 +134,6 @@ def validate(config):
         raise ConfigError("SPEED must be greater than 0")
     if not 1 <= config["PATROL_DOTS"] <= 8:
         raise ConfigError("PATROL_DOTS must be between 1 and 8")
+    if not 0.1 <= config["NOTIFY_DURATION"] <= 60:
+        raise ConfigError("NOTIFY_DURATION must be between 0.1 and 60 seconds")
     return config

@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import errno
 import logging
+import os
+import select
 import signal
 import sys
 import time
 
 from . import config as config_module
-from . import render, serialport, shim
+from . import notify, render, serialport, shim
 from .link import EspLink
 
 LOG = logging.getLogger("steamos-led")
@@ -44,6 +46,12 @@ class Runner:
             reconnect_delay=config["RECONNECT_DELAY"],
             autodetect_baud=config["BAUD_AUTODETECT"],
         )
+        self.overlay = notify.NotificationOverlay(
+            enabled=config["NOTIFY"],
+            duration=config["NOTIFY_DURATION"],
+            led_count=config["LED_COUNT"],
+        )
+        self.trigger = None
         self.source = None
 
     def stop(self, *_args):
@@ -91,6 +99,7 @@ class Runner:
     def run(self):
         self.install_signal_handlers()
         try:
+            self._open_trigger()
             self.source = self._open_source()
             self._loop()
         except _Stopped:
@@ -100,7 +109,47 @@ class Runner:
             self.link.shutdown()
             if self.source is not None:
                 self.source.close()
+            if self.trigger is not None:
+                self.trigger.unlink()
         return 0
+
+    def _open_trigger(self):
+        if not self.config["NOTIFY"]:
+            return
+        trigger = notify.FifoTrigger(self.config["NOTIFY_FIFO"])
+        try:
+            trigger.open()
+        except OSError as exc:
+            # Not fatal: without the pipe the bar simply never flashes.
+            LOG.warning("notifications disabled, cannot use %s: %s",
+                        self.config["NOTIFY_FIFO"], exc)
+            return
+        self.trigger = trigger
+
+    def _wait(self, interval):
+        """Block until the LED state changes, a trigger arrives, or timeout.
+
+        Waiting on both at once keeps a notification from sitting in the pipe
+        for up to a quarter second while the bar is idle.
+        """
+        sources = [self.source.fd]
+        if self.trigger is not None and self.trigger.fd >= 0:
+            sources.append(self.trigger.fd)
+        readable, _, _ = select.select(sources, [], [], interval)
+        return self.source.fd in readable
+
+    def _poll_trigger(self, now):
+        if self.trigger is None:
+            return
+        try:
+            words = self.trigger.read()
+        except OSError as exc:
+            LOG.warning("notification trigger failed: %s", exc)
+            self.trigger.close()
+            self.trigger = None
+            return
+        for word in words:
+            self.overlay.trigger(word, now)
 
     def _loop(self):
         started = time.monotonic()
@@ -111,13 +160,16 @@ class Runner:
             connected = self.link.connect()
             self.link.poll()
 
+            self._poll_trigger(time.monotonic())
+
             interval = 1.0 / self.config["FPS"]
-            if snapshot is not None and not snapshot.is_animated:
+            if (snapshot is not None and not snapshot.is_animated
+                    and not self.overlay.active):
                 interval = 1.0 / self.config["IDLE_FPS"]
 
             changed = False
             try:
-                changed = self.source.wait(interval)
+                changed = self._wait(interval)
             except OSError as exc:
                 LOG.warning("poll on %s failed: %s", self.config["DEVICE"], exc)
                 self.source.close()
@@ -143,8 +195,12 @@ class Runner:
             if snapshot is None or not connected:
                 continue
 
-            elapsed = time.monotonic() - started
-            payload = self.renderer.render(snapshot, elapsed)
+            now = time.monotonic()
+            self._poll_trigger(now)
+            payload = self.renderer.render(snapshot, now - started)
+            # A notification takes the whole bar for its duration and then
+            # hands it straight back to whatever Steam is showing.
+            payload = self.overlay.apply(payload, now)
             # Static scenes still need a periodic frame: the firmware blanks the
             # strip when the link goes quiet, so an idle heartbeat is what tells
             # it we are still alive.
@@ -159,6 +215,98 @@ def _interrupt_on_sigterm():
     def handler(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, handler)
+
+
+STEAM_ROOTS = (
+    "~/.local/share/Steam",
+    "~/.steam/steam",
+    "~/.steam/root",
+    "/home/deck/.local/share/Steam",
+)
+# Directories worth watching for an achievement. Game installs are excluded on
+# purpose - only Steam's own bookkeeping is small enough to scan every second.
+STEAM_WATCH_SUBDIRS = ("userdata", "appcache/stats", "logs")
+
+
+def _steam_root():
+    for candidate in STEAM_ROOTS:
+        path = os.path.expanduser(candidate)
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def _scan_steam_files(root):
+    """mtime of every file under the interesting Steam subdirectories."""
+    seen = {}
+    for subdir in STEAM_WATCH_SUBDIRS:
+        base = os.path.join(root, subdir)
+        for dirpath, _dirnames, filenames in os.walk(base):
+            for name in filenames:
+                path = os.path.join(dirpath, name)
+                try:
+                    seen[path] = os.stat(path).st_mtime
+                except OSError:
+                    continue
+    return seen
+
+
+def run_probe(config, seconds=None):
+    """Watch Steam's own files and report what changes when you unlock one.
+
+    Steam publishes no documented local signal for achievements, so rather
+    than guess, this records what actually moves on your machine. Run it, earn
+    an achievement, and read off which file Steam touched.
+    """
+    _interrupt_on_sigterm()
+    del config
+
+    root = _steam_root()
+    if root is None:
+        LOG.error("no Steam directory found, looked in: %s",
+                  ", ".join(STEAM_ROOTS))
+        return 1
+
+    print("Watching %s" % root)
+    print("  subdirectories: %s" % ", ".join(STEAM_WATCH_SUBDIRS))
+    print()
+    print("Now go and unlock an achievement. Every file Steam touches shows up")
+    print("below; the useful ones are those that appear the moment it pops.")
+    print("Press Ctrl-C when done.")
+    print()
+
+    baseline = _scan_steam_files(root)
+    print("baseline: %d files" % len(baseline))
+
+    deadline = time.monotonic() + seconds if seconds else None
+    try:
+        while deadline is None or time.monotonic() < deadline:
+            time.sleep(1.0)
+            current = _scan_steam_files(root)
+            for path, mtime in sorted(current.items()):
+                if baseline.get(path) != mtime:
+                    stamp = time.strftime("%H:%M:%S")
+                    kind = "new  " if path not in baseline else "write"
+                    print("%s  %s  %s" % (stamp, kind, path))
+            baseline = current
+    except KeyboardInterrupt:
+        pass
+
+    print()
+    print("Report the paths that appeared exactly when the achievement popped,")
+    print("and the watcher can be pointed at them.")
+    return 0
+
+
+def run_notify(config, kind):
+    """Fire a notification on a running service."""
+    try:
+        notify.send(config["NOTIFY_FIFO"], kind)
+    except OSError as exc:
+        LOG.error("%s", exc)
+        return 1
+    print("sent %r to %s" % (kind, config["NOTIFY_FIFO"]))
+    return 0
 
 
 def run_list_ports():
@@ -320,6 +468,8 @@ def build_parser():
     parser.add_argument("--speed", type=float, help="animation speed multiplier")
     parser.add_argument("--patrol-dots", dest="patrol_dots", type=int,
                         help="dots the patrol effect chases (default 1)")
+    parser.add_argument("--notify-fifo", dest="notify_fifo", metavar="PATH",
+                        help="named pipe that triggers notifications")
     parser.add_argument("--fps", type=int, help="frame rate for animated effects")
     parser.add_argument("--idle-fps", dest="idle_fps", type=int,
                         help="heartbeat rate for static scenes")
@@ -336,6 +486,13 @@ def build_parser():
     modes.add_argument("--self-test", nargs="?", const=0.0, type=float,
                        metavar="SECONDS", dest="self_test",
                        help="run test patterns without Steam or the kernel module")
+    modes.add_argument("--notify", metavar="KIND",
+                       help="flash the bar on a running service: achievement, "
+                            "message, friend, warning or a colour like '#00ff88'")
+    modes.add_argument("--probe-achievements", nargs="?", const=0.0, type=float,
+                       metavar="SECONDS", dest="probe",
+                       help="watch which Steam files change when an achievement "
+                            "unlocks, to find a signal worth listening to")
     modes.add_argument("--simulate", metavar="EFFECT",
                        help="render one effect continuously (off, manual, normal, "
                             "rainbow, breath, patrol, factory, demo)")
@@ -369,6 +526,7 @@ def main(argv=None):
         "GAMMA": args.gamma,
         "SPEED": args.speed,
         "PATROL_DOTS": args.patrol_dots,
+        "NOTIFY_FIFO": args.notify_fifo,
         "FPS": args.fps,
         "IDLE_FPS": args.idle_fps,
         "LOG_LEVEL": "debug" if args.verbose else args.log_level,
@@ -388,6 +546,10 @@ def main(argv=None):
             return run_dump(config)
         if args.self_test is not None:
             return run_self_test(config, args.self_test or None)
+        if args.notify:
+            return run_notify(config, args.notify)
+        if args.probe is not None:
+            return run_probe(config, args.probe or None)
         if args.simulate:
             return run_simulate(config, args.simulate.lower())
         return Runner(config).run()

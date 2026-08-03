@@ -17,12 +17,13 @@ different transport — no Wi-Fi, no IP configuration, no access point.
 3. [Changing settings](#changing-settings)
 4. [All options](#all-options)
 5. [Effects](#effects)
-6. [Testing and diagnostics](#testing-and-diagnostics)
-7. [When something does not work](#when-something-does-not-work)
-8. [Updating](#updating)
-9. [Uninstalling](#uninstalling)
-10. [How it works](#how-it-works)
-11. [Development](#development)
+6. [Notifications](#notifications)
+7. [Testing and diagnostics](#testing-and-diagnostics)
+8. [When something does not work](#when-something-does-not-work)
+9. [Updating](#updating)
+10. [Uninstalling](#uninstalling)
+11. [How it works](#how-it-works)
+12. [Development](#development)
 
 ## What you need
 
@@ -230,6 +231,67 @@ a default of **3**, stored and passed through untouched — so it is a *setting*
 not live animation state. "Number of scanners" is therefore plausible; the
 default of 3 simply did not look like what one expects from "patrol". To take
 the module at its word, set `PATROL_DOTS=3`.
+
+## Notifications
+
+A notification takes over the whole bar for a few seconds — a gold pulse for an
+achievement, blue for a message — and then hands it straight back to whatever
+Steam was showing. Try it right now, with the service running:
+
+```bash
+steamos-led-serial --notify achievement
+steamos-led-serial --notify message
+steamos-led-serial --notify '#00ff88'      # any colour you like
+```
+
+(the command lives in `/var/lib/steamos-led-serial/`)
+
+Under the hood that writes one word into a named pipe, `/run/steamos-led-serial/notify`.
+**Anything** that can write a line can flash the bar — no library, no API:
+
+```bash
+echo achievement > /run/steamos-led-serial/notify
+```
+
+So a game launch script, a `.desktop` action or your own tool can drive it.
+Known words are `achievement`, `message`, `friend` and `warning`; anything else
+is read as a colour (`#rrggbb` or `r,g,b`).
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `NOTIFY` | `1` | enable the overlay at all |
+| `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
+| `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
+
+### Firing on a real achievement
+
+**This part is not solved yet, and it is worth being upfront about why.** Steam
+publishes no documented local signal when an achievement unlocks. The
+established tool for this,
+[Steam Achievement Notifier](https://github.com/SteamAchievementNotifier/SteamAchievementNotifier),
+polls the Steam Web API — which needs an API key, an internet connection and
+your account to be public. The other project's LED overlay listens on D-Bus for
+`org.freedesktop.Notifications`, but `Notify` is a method call rather than a
+signal, so catching it requires eavesdropping, which the session bus has
+refused by default for years — and Game Mode draws its own notifications
+instead of using the desktop's.
+
+Rather than guess, there is a tool that measures what your machine actually
+does. Run it, unlock an achievement, and see which files Steam touches at that
+exact moment:
+
+```bash
+steamos-led-serial --probe-achievements
+```
+
+It watches Steam's own bookkeeping (`userdata/`, `appcache/stats/`, `logs/`)
+once a second and prints every file that changes, with a timestamp. Run it as
+your normal user, not with `sudo` — it needs your home directory. Whatever
+shows up the instant the achievement pops is the signal worth listening to, and
+a watcher can then be pointed at it.
+
+Until then, the pipe above is the way in: anything that can already tell an
+achievement happened only has to `echo achievement` into it.
 
 ## Testing and diagnostics
 
