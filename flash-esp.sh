@@ -70,11 +70,10 @@ if [[ "${RESTART_SERVICE:-0}" == "1" ]]; then
     sudo systemctl start steamos-led-serial.service
 fi
 
-case "$ENVIRONMENT" in
-    esp8266_gpio14) EXPECTED_BAUD=230400 ;;
-    esp32dev|esp32s3) EXPECTED_BAUD=921600 ;;
-    *) EXPECTED_BAUD=460800 ;;
-esac
+# Read the rate out of the firmware config instead of duplicating it here.
+EXPECTED_BAUD="$(sed -n "/^\[env:$ENVIRONMENT\]/,/^\[/p" "$PROJECT_DIR/platformio.ini" \
+    | sed -n 's/.*-D SERIAL_BAUD=\([0-9]\+\).*/\1/p' | tail -1)"
+[[ -n "$EXPECTED_BAUD" ]] || EXPECTED_BAUD=230400
 
 cat <<EOF
 

@@ -60,16 +60,12 @@ auf D5 bleiben:
 ./flash-esp.sh esp8266_gpio14
 ```
 
-Dabei wird per Bit-Banging getaktet, wofür die Interrupts kurz aus sind. Damit
-der 128 Byte große UART-FIFO nicht überläuft, läuft diese Variante mit
-230400 Baud — entsprechend in `/etc/steamos-led-serial.conf` setzen:
+Dabei wird per Bit-Banging getaktet, wofür die Interrupts kurz aus sind. Der
+128 Byte große UART-FIFO setzt damit eine Obergrenze für die Baudrate — die
+einheitlichen 230400 liegen sicher darunter.
 
-```
-BAUD=230400
-```
-
-Praktische Obergrenze dabei: etwa 120 LEDs. Für längere Streifen auf GPIO2
-umlöten.
+Praktische Obergrenze dieser Variante: etwa 120 LEDs. Für längere Streifen auf
+GPIO2 umlöten.
 
 ## ESP32
 
@@ -80,7 +76,7 @@ per RMT-Peripherie ausgegeben werden. Serielle Verbindung mit 921600 Baud:
 ./flash-esp.sh esp32dev
 ```
 
-Danach `BAUD=921600` in der Config setzen.
+Baudrate wie überall 230400 — an der Config ist nichts zu ändern.
 
 ## Farbreihenfolge
 

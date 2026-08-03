@@ -37,10 +37,10 @@ MSG_STATS = 0x30
 MSG_LOG = 0x31
 MSG_PONG = 0x41
 
-# Rates the shipped firmware environments use, tried in this order when the
-# configured one gets no answer: GPIO2 build, GPIO14 bit-bang build, ESP32
-# build, and the Arduino default for hand-rolled firmware.
-FALLBACK_BAUD_RATES = (460800, 230400, 921600, 115200)
+# Tried in this order when the configured rate gets no answer: the rate all
+# shipped firmware uses, then the rates earlier builds and hand-rolled firmware
+# are likely to run at.
+FALLBACK_BAUD_RATES = (230400, 460800, 921600, 115200)
 
 MSG_NAMES = {
     MSG_HELLO: "HELLO", MSG_FRAME: "FRAME", MSG_FILL: "FILL",
@@ -134,7 +134,7 @@ class EspLink:
     HELLO_ATTEMPTS = 5
     HELLO_TIMEOUT = 0.4
 
-    def __init__(self, port="auto", baudrate=460800, led_count=17,
+    def __init__(self, port="auto", baudrate=230400, led_count=17,
                  reconnect_delay=2.0, autodetect_baud=True):
         self.configured_port = port
         self.baudrate = baudrate

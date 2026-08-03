@@ -235,5 +235,35 @@ class TestConfig(unittest.TestCase):
                 config.load(path=None, overrides=override)
 
 
+class TestFirmwareConsistency(unittest.TestCase):
+    """Guards the two places that have to agree about the serial link."""
+
+    def _firmware_rates(self):
+        import re
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "firmware", "led-client", "platformio.ini")
+        with open(path) as handle:
+            rates = {int(rate) for rate
+                     in re.findall(r"-D SERIAL_BAUD=(\d+)", handle.read())}
+        self.assertTrue(rates, "no SERIAL_BAUD flags found in platformio.ini")
+        return rates
+
+    def test_firmware_rates_can_be_set_on_linux(self):
+        from steamos_led.serialport import BAUD_CONSTANTS
+        for rate in self._firmware_rates():
+            self.assertIn(rate, BAUD_CONSTANTS,
+                          "firmware builds %d baud, which termios cannot set"
+                          % rate)
+
+    def test_default_config_matches_the_firmware(self):
+        self.assertIn(config.DEFAULTS["BAUD"], self._firmware_rates(),
+                      "the default BAUD talks to none of the shipped firmware")
+
+    def test_firmware_rates_are_covered_by_autodetect(self):
+        for rate in self._firmware_rates():
+            self.assertIn(rate, (config.DEFAULTS["BAUD"],) + link.FALLBACK_BAUD_RATES,
+                          "a board flashed at %d baud would never be found" % rate)
+
+
 if __name__ == "__main__":
     unittest.main()

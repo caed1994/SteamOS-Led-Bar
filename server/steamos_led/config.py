@@ -15,7 +15,7 @@ DEFAULT_CONFIG_PATH = "/etc/steamos-led-serial.conf"
 DEFAULTS = {
     "DEVICE": "/dev/valve-leds-shim",
     "SERIAL_PORT": "auto",
-    "BAUD": 460800,
+    "BAUD": 230400,
     "BAUD_AUTODETECT": True,
     "LED_COUNT": 17,
     "MAPPING": "stretch",

@@ -54,8 +54,12 @@ Verkabelung. Jeder Flash überschreibt den vorherigen:
 | ESP8266, bestehende D5/GPIO14-Verkabelung | `./flash-esp.sh esp8266_gpio14` |
 | ESP32, Daten an GPIO16 | `./flash-esp.sh esp32dev` |
 
-Die Baudrate ergibt sich aus der Variante; der Dienst findet sie beim
-Verbinden selbst heraus und schreibt die passende Zeile ins Log.
+Alle Varianten funken mit 230400 Baud — das passt zur Standard-Config, ist
+zuverlässig auch auf billigen USB-Serial-Adaptern und reicht für rund 120 LEDs
+bei 60 fps. Nur für längere Streifen bei voller Bildrate lohnt es, `SERIAL_BAUD`
+in `platformio.ini` **und** `BAUD` in der Config gemeinsam anzuheben. Weicht
+beides doch mal voneinander ab, findet der Dienst die richtige Rate beim
+Verbinden selbst und schreibt sie ins Log.
 
 **2. Dienst installieren:**
 
@@ -86,7 +90,7 @@ sudo ./install.sh --leds 60 --port /dev/steamos-led-esp --yes
 | ------ | -------- | --------- |
 | `DEVICE` | `/dev/valve-leds-shim` | Zeichengerät des Kernel-Shims |
 | `SERIAL_PORT` | `auto` | Serieller Port; `auto` sucht bekannte USB-Serial-Chips |
-| `BAUD` | `460800` | bevorzugte Baudrate; wird beim Handshake bei Bedarf korrigiert |
+| `BAUD` | `230400` | bevorzugte Baudrate; wird beim Handshake bei Bedarf korrigiert |
 | `BAUD_AUTODETECT` | `1` | bei fehlender Antwort auch die anderen Firmware-Baudraten probieren |
 | `LED_COUNT` | `17` | LEDs am Streifen |
 | `MAPPING` | `stretch` | `stretch` (interpolieren), `repeat` (kacheln), `crop` (1:1) |
@@ -153,7 +157,8 @@ Laufende Logs: `journalctl -u steamos-led-serial -f`
 | `no ESP serial device found` | `--list-ports` prüfen, `SERIAL_PORT` fest eintragen |
 | Streifen bleibt dunkel, Dienst läuft | `--self-test` ausführen. Läuft der, liefert Steam Helligkeit 0 → `MIN_BRIGHTNESS=40` |
 | Rot und Grün vertauscht | Farbreihenfolge der Firmware, siehe [docs/WIRING.md](docs/WIRING.md#farbreihenfolge) |
-| Flackern, aussetzende LEDs | Baudrate zu hoch fürs Bit-Banging (GPIO14) → `BAUD=230400`, oder auf GPIO2 umlöten |
+| Flackern, aussetzende LEDs | Baudrate zu hoch für Adapter oder Bit-Banging → auf 230400 zurück (Firmware *und* Config), oder auf GPIO2 umlöten |
+| Nach Firmware-Wechsel bleibt es dunkel | Die GPIO2- und die GPIO14-Variante geben auf **verschiedenen Pins** aus — passt die Firmware zu deiner Verkabelung? |
 | Erste LED spinnt | 3,3-V-Pegel zu niedrig → 74AHCT125 oder 1N4148, siehe Verkabelung |
 | Streifen bleibt nach Abziehen an | sollte nach 5 s ausgehen (Firmware-Watchdog); sonst Firmware zu alt |
 | Nur ein Teil des Streifens leuchtet | `LED_COUNT` stimmt nicht, oder über `MAX_LEDS` der Firmware |

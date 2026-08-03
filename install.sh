@@ -81,7 +81,7 @@ if [[ -z "$SERIAL_PORT" ]]; then
     SERIAL_PORT="$(ask 'Serial port ("auto" picks the first ESP adapter)' auto)"
 fi
 
-[[ -n "$BAUD" ]] || BAUD="$(ask 'Baud rate (must match the firmware)' 460800)"
+[[ -n "$BAUD" ]] || BAUD="$(ask 'Baud rate (all shipped firmware uses 230400)' 230400)"
 [[ "$BAUD" =~ ^[0-9]+$ ]] || die "baud rate must be a number"
 
 # --- install ---------------------------------------------------------------
