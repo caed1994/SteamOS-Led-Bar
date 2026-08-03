@@ -18,9 +18,9 @@ from . import shim
 # the cycle times are stated outright and `delay` only scales them relative to
 # its default. SPEED in the config file scales them further.
 DEFAULT_DELAY_MS = 20.0
-RAINBOW_CYCLE = 7.0     # one full trip around the hue circle
+RAINBOW_CYCLE = 8.75    # one full trip around the hue circle
 BREATH_CYCLE = 4.0      # one inhale plus exhale
-PATROL_CYCLE = 5.0      # sweep to the far end and back
+PATROL_CYCLE = 6.25     # sweep to the far end and back
 DEMO_CYCLE = 8.0        # breathing envelope over the rainbow
 # A small delay must not turn an effect into a strobe light.
 MIN_CYCLE_SECONDS = 0.8
