@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+firmware/led-client/.vscode/

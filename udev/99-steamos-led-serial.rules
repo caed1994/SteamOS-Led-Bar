@@ -1,0 +1,22 @@
+# Stable name for the ESP that drives the LED bar, plus group access so the
+# service does not have to guess which ttyUSB it ended up on.
+#
+# Install: sudo cp 99-steamos-led-serial.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload && sudo udevadm trigger
+#
+# Afterwards set SERIAL_PORT=/dev/steamos-led-esp in /etc/steamos-led-serial.conf.
+#
+# If you own more than one board with the same USB-serial chip, add
+# ATTRS{serial}=="<your board's serial>" to the matching rule so the symlink
+# lands on the right one (see: udevadm info -a -n /dev/ttyUSB0).
+
+# Silicon Labs CP210x (most NodeMCU / D1 mini boards)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="steamos-led-esp", GROUP="uucp", MODE="0660"
+# QinHeng CH340 / CH9102
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="steamos-led-esp", GROUP="uucp", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", SYMLINK+="steamos-led-esp", GROUP="uucp", MODE="0660"
+# FTDI FT232R / FT231X
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="steamos-led-esp", GROUP="uucp", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6015", SYMLINK+="steamos-led-esp", GROUP="uucp", MODE="0660"
+# Espressif native USB CDC (ESP32-S2 / S3 / C3)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", SYMLINK+="steamos-led-esp", GROUP="uucp", MODE="0660"
