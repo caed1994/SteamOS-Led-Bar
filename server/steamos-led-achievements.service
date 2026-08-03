@@ -1,0 +1,24 @@
+[Unit]
+# A *user* unit, not a system one: Steamworks talks to the Steam client of the
+# logged-in user, so this has to live in that session. The LED service itself
+# stays sandboxed as root and only receives trigger words through its FIFO.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp steamos-led-achievements.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now steamos-led-achievements
+#
+# Log:  journalctl --user -u steamos-led-achievements -f
+Description=Flash the LED bar when a Steam achievement unlocks
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/var/lib/steamos-led-serial/steamos-led-serial --watch-achievements
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -263,35 +263,70 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 
-### Firing on a real achievement
+### Flashing on a real achievement
 
-**This part is not solved yet, and it is worth being upfront about why.** Steam
-publishes no documented local signal when an achievement unlocks. The
-established tool for this,
-[Steam Achievement Notifier](https://github.com/SteamAchievementNotifier/SteamAchievementNotifier),
-polls the Steam Web API — which needs an API key, an internet connection and
-your account to be public. The other project's LED overlay listens on D-Bus for
-`org.freedesktop.Notifications`, but `Notify` is a method call rather than a
-signal, so catching it requires eavesdropping, which the session bus has
-refused by default for years — and Game Mode draws its own notifications
-instead of using the desktop's.
+The bar can flash the moment an achievement unlocks, with **no API key, no
+internet and no public profile** — by asking the Steam client running on your
+own machine, through Valve's local Steamworks API. This is the same route
+[Steam Achievement Notifier](https://github.com/SteamAchievementNotifier/SteamAchievementNotifier)
+takes since V1.9.
 
-Rather than guess, there is a tool that measures what your machine actually
-does. Run it, unlock an achievement, and see which files Steam touches at that
-exact moment:
+First check whether your machine can do it. **Start a game**, then run this as
+your normal user (not with `sudo`):
+
+```bash
+/var/lib/steamos-led-serial/steamos-led-serial --steam-check
+```
+
+It reports where Steam is, which `libsteam_api.so` it found, which game it
+believes is running, and whether it can talk to Steam as that game. If the last
+line says realtime detection works, start the watcher:
+
+```bash
+/var/lib/steamos-led-serial/steamos-led-serial --watch-achievements
+```
+
+Unlock something, and the bar flashes gold. To have it run with your session:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ~/SteamOS-Led-Bar/server/steamos-led-achievements.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now steamos-led-achievements
+```
+
+**Why a separate user service?** Steamworks is a game-side API: it talks to the
+Steam client of the logged-in user, and it has to be initialised *as* a
+specific game. The LED service runs as root, walled off from your home
+directory — exactly where Steam lives. So the watcher runs beside Steam in your
+session and only writes a word into the pipe. The service never has to know
+Steam exists.
+
+Two consequences of how Steamworks works, worth knowing:
+
+* It offers no way to ask *which* game is running, so the watcher works that
+  out itself, from `RunningAppID` in Steam's registry file and from the
+  `SteamAppId` in the environment of running processes. Switching games is
+  picked up automatically.
+* `libsteam_api.so` belongs to the Steamworks SDK and ships inside games rather
+  than being redistributable, so it is not vendored here. The watcher borrows
+  the copy from one of your installed games; `--steam-check` shows which one.
+
+### If that does not work on your machine
+
+There is a fallback that measures instead of guessing. Run it, unlock an
+achievement, and see which files Steam touches at that exact moment:
 
 ```bash
 steamos-led-serial --probe-achievements
 ```
 
 It watches Steam's own bookkeeping (`userdata/`, `appcache/stats/`, `logs/`)
-once a second and prints every file that changes, with a timestamp. Run it as
-your normal user, not with `sudo` — it needs your home directory. Whatever
-shows up the instant the achievement pops is the signal worth listening to, and
-a watcher can then be pointed at it.
+once a second and prints every file that changes, with a timestamp. Whatever
+shows up the instant the achievement pops can be watched directly.
 
-Until then, the pipe above is the way in: anything that can already tell an
-achievement happened only has to `echo achievement` into it.
+And the pipe is always there: anything that can already tell an achievement
+happened only has to `echo achievement` into it.
 
 ## Testing and diagnostics
 

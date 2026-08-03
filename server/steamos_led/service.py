@@ -12,7 +12,7 @@ import sys
 import time
 
 from . import config as config_module
-from . import notify, render, serialport, shim
+from . import notify, render, serialport, shim, steamworks
 from .link import EspLink
 
 LOG = logging.getLogger("steamos-led")
@@ -298,6 +298,124 @@ def run_probe(config, seconds=None):
     return 0
 
 
+def run_steam_check(config):
+    """Report what the Steamworks path can and cannot find on this machine."""
+    del config
+    print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"))
+
+    try:
+        library = steamworks.find_library()
+        print("libsteam_api.so:   %s" % library)
+    except steamworks.SteamworksError as exc:
+        print("libsteam_api.so:   NOT FOUND (%s)" % exc)
+        library = None
+
+    from_registry = steamworks._app_id_from_registry()
+    from_processes = steamworks._app_id_from_processes()
+    print("running app (registry.vdf): %s" % (from_registry or "none"))
+    print("running app (process env):  %s" % (from_processes or "none"))
+
+    app_id = from_registry or from_processes
+    if library is None:
+        print()
+        print("Without the library nothing else can be tried.")
+        return 1
+    if not app_id:
+        print()
+        print("No game is running, so the API cannot be initialised as one.")
+        print("Start a game and run this again.")
+        return 1
+
+    print()
+    print("Initialising Steamworks as app %d ..." % app_id)
+    stats = steamworks.UserStats(app_id, library)
+    try:
+        stats.open()
+    except steamworks.SteamworksError as exc:
+        print("  FAILED: %s" % exc)
+        return 1
+
+    try:
+        achievements = stats.achievements()
+        unlocked = sum(1 for value in achievements.values() if value)
+        print("  OK - %d achievements, %d unlocked" % (len(achievements), unlocked))
+        for name, is_unlocked in sorted(achievements.items())[:5]:
+            print("    [%s] %s" % ("x" if is_unlocked else " ",
+                                   stats.display_name(name)))
+        if len(achievements) > 5:
+            print("    ... and %d more" % (len(achievements) - 5))
+    finally:
+        stats.close()
+
+    print()
+    print("This machine can do realtime detection: steamos-led-serial "
+          "--watch-achievements")
+    return 0
+
+
+def run_watch_achievements(config, interval=1.0):
+    """Flash the bar whenever an achievement unlocks in the running game.
+
+    Runs as your normal user, next to Steam - not as the service, which is
+    sandboxed away from your home directory. It only writes trigger words into
+    the notification pipe, so the service stays untouched.
+    """
+    _interrupt_on_sigterm()
+
+    fifo = config["NOTIFY_FIFO"]
+    watcher = None
+    current_app = None
+    stats = None
+
+    print("Watching for achievements; flashes go to %s" % fifo)
+    print("Press Ctrl-C to stop.")
+
+    try:
+        while True:
+            app_id = steamworks.running_app_id()
+
+            if app_id != current_app:
+                if stats is not None:
+                    stats.close()
+                    stats, watcher = None, None
+                current_app = app_id
+                if app_id:
+                    try:
+                        stats = steamworks.UserStats(app_id)
+                        stats.open()
+                        watcher = steamworks.AchievementWatcher(stats)
+                        LOG.info("attached to app %d", app_id)
+                    except steamworks.SteamworksError as exc:
+                        LOG.warning("cannot attach to app %s: %s", app_id, exc)
+                        stats, watcher = None, None
+                        # Do not hammer a game that refuses us.
+                        current_app = app_id
+                else:
+                    LOG.info("no game running")
+
+            if watcher is not None:
+                try:
+                    for name in watcher.poll():
+                        display = stats.display_name(name)
+                        LOG.info("achievement unlocked: %s", display)
+                        try:
+                            notify.send(fifo, "achievement")
+                        except OSError as exc:
+                            LOG.warning("could not flash the bar: %s", exc)
+                except OSError as exc:
+                    LOG.warning("lost the Steamworks connection: %s", exc)
+                    stats.close()
+                    stats, watcher, current_app = None, None, None
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if stats is not None:
+            stats.close()
+    return 0
+
+
 def run_notify(config, kind):
     """Fire a notification on a running service."""
     try:
@@ -489,6 +607,13 @@ def build_parser():
     modes.add_argument("--notify", metavar="KIND",
                        help="flash the bar on a running service: achievement, "
                             "message, friend, warning or a colour like '#00ff88'")
+    modes.add_argument("--watch-achievements", action="store_true",
+                       dest="watch_achievements",
+                       help="flash on every achievement unlocked in the running "
+                            "game (run as your normal user, not with sudo)")
+    modes.add_argument("--steam-check", action="store_true", dest="steam_check",
+                       help="report whether realtime achievement detection can "
+                            "work on this machine")
     modes.add_argument("--probe-achievements", nargs="?", const=0.0, type=float,
                        metavar="SECONDS", dest="probe",
                        help="watch which Steam files change when an achievement "
@@ -548,6 +673,10 @@ def main(argv=None):
             return run_self_test(config, args.self_test or None)
         if args.notify:
             return run_notify(config, args.notify)
+        if args.steam_check:
+            return run_steam_check(config)
+        if args.watch_achievements:
+            return run_watch_achievements(config)
         if args.probe is not None:
             return run_probe(config, args.probe or None)
         if args.simulate:
