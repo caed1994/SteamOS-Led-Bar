@@ -15,6 +15,8 @@ import math
 import os
 import stat
 
+from .render import breath_envelope
+
 LOG = logging.getLogger(__name__)
 
 DEFAULT_FIFO = "/run/steamos-led-serial/notify"
@@ -33,7 +35,6 @@ FADE_TAIL = 0.25    # fraction of the duration spent fading back out
 
 STYLE_BLOOM = "bloom"
 STYLE_PULSE = "pulse"
-STYLES = (STYLE_BLOOM, STYLE_PULSE)
 
 # The bloom, as fractions of the notification's duration: grow out of the
 # middle, breathe once while fully out, then shrink back into the middle.
@@ -51,10 +52,10 @@ def _breath(progress):
     """One smooth inhale and exhale across the middle phase, 0..1."""
     span = BLOOM_RETRACT - BLOOM_EXPANDED
     position = (progress - BLOOM_EXPANDED) / span
-    # cos goes 1 -> -1 -> 1, so this dips to the floor and comes back without
-    # ever switching off.
-    swell = (1.0 + math.cos(2.0 * math.pi * position)) * 0.5
-    return BLOOM_BREATH_FLOOR + (1.0 - BLOOM_BREATH_FLOOR) * swell
+    # The shared envelope starts dark; this one starts lit, dips to the floor
+    # and comes back, so it runs half a cycle ahead. It never switches off - a
+    # hard off would read as a blink rather than a breath.
+    return breath_envelope(position + 0.5, BLOOM_BREATH_FLOOR)
 
 
 def bloom_levels(progress, led_count):
@@ -87,6 +88,26 @@ def bloom_levels(progress, led_count):
         level = (radius - distance) / BLOOM_FEATHER
         levels.append(max(0.0, min(level, 1.0)) * brightness)
     return levels
+
+
+def pulse_levels(progress, led_count):
+    """Per-LED brightness for the pulse: swell a few times, then fade out.
+
+    The tail keeps it from ending on a hard edge.
+    """
+    pulse = (1.0 - math.cos(2.0 * math.pi * PULSES * progress)) * 0.5
+    if progress > 1.0 - FADE_TAIL:
+        pulse *= (1.0 - progress) / FADE_TAIL
+    return [pulse] * led_count
+
+
+# The shapes a notification can take. config validates NOTIFY_STYLE against
+# STYLES, so this table is the only place a new one has to be registered.
+_STYLES = {
+    STYLE_BLOOM: bloom_levels,
+    STYLE_PULSE: pulse_levels,
+}
+STYLES = tuple(_STYLES)
 
 
 def parse_color(text):
@@ -138,15 +159,7 @@ class Notification:
         progress = self.progress(now)
         if progress is None:
             return None
-        if self.style == STYLE_BLOOM:
-            return bloom_levels(progress, led_count)
-
-        # Pulse a few times, then fade out over the tail so it does not end
-        # with a hard edge.
-        pulse = (1.0 - math.cos(2.0 * math.pi * PULSES * progress)) * 0.5
-        if progress > 1.0 - FADE_TAIL:
-            pulse *= (1.0 - progress) / FADE_TAIL
-        return [pulse] * led_count
+        return _STYLES[self.style](progress, led_count)
 
 
 class NotificationOverlay:

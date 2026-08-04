@@ -15,7 +15,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/var/lib/steamos-led-serial/steamos-led-serial --watch-achievements
+ExecStart=@INSTALL_DIR@/steamos-led-serial --watch-achievements
 Restart=always
 RestartSec=10
 

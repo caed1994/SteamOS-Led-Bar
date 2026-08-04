@@ -87,11 +87,20 @@ def _rainbow(snapshot, elapsed, options):
     return frame
 
 
+def breath_envelope(phase, floor):
+    """A raised cosine over one cycle, lifted so it never reaches zero.
+
+    Phase 0 is the dark end. Shared by the breath effect, the demo fade and the
+    notification bloom, so "breathing" looks the same wherever it appears.
+    """
+    swell = (1.0 - math.cos(2.0 * math.pi * phase)) * 0.5
+    return floor + (1.0 - floor) * swell
+
+
 def _breath(snapshot, elapsed, options):
     period = _cycle(snapshot, BREATH_CYCLE, options.speed_scale)
     phase = elapsed / period + snapshot.breath_offset / 255.0
-    level = (1.0 - math.cos(2.0 * math.pi * phase)) * 0.5
-    level = BREATH_FLOOR + (1.0 - BREATH_FLOOR) * level
+    level = breath_envelope(phase, BREATH_FLOOR)
     red, green, blue = snapshot.base_color()
     return [(red * level, green * level, blue * level)] * shim.LOGICAL_LEDS
 
@@ -137,9 +146,7 @@ def _factory(_snapshot, elapsed, _options):
 def _demo(snapshot, elapsed, options):
     frame = _rainbow(snapshot, elapsed, options)
     period = _cycle(snapshot, DEMO_CYCLE, options.speed_scale)
-    level = BREATH_FLOOR + (1.0 - BREATH_FLOOR) * (
-        (1.0 - math.cos(2.0 * math.pi * elapsed / period)) * 0.5
-    )
+    level = breath_envelope(elapsed / period, BREATH_FLOOR)
     return [(r * level, g * level, b * level) for r, g, b in frame]
 
 

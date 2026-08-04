@@ -17,6 +17,11 @@ SHIM_DEVICE="/dev/valve-leds-shim"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Where the achievement watcher's user unit lives, and how to reach the user's
+# systemd. Shared with uninstall.sh so the two cannot disagree.
+# shellcheck source=scripts/user-unit.sh
+source "$SOURCE_DIR/scripts/user-unit.sh"
+
 LED_COUNT=""
 SERIAL_PORT=""
 BAUD=""
@@ -202,55 +207,47 @@ fi
 # --- achievement watcher (a user service) ----------------------------------
 
 install_achievement_watcher() {
-    local unit="steamos-led-achievements.service"
-    local source="$SOURCE_DIR/server/$unit"
+    local source="$SOURCE_DIR/server/$WATCHER_UNIT"
 
     if [[ $SKIP_WATCHER -eq 1 ]]; then
         say "Skipping the achievement watcher (--skip-watcher)"
         return 0
     fi
-    [[ -f "$source" ]] || { warn "$unit not found in the repository"; return 1; }
+    [[ -f "$source" ]] \
+        || { warn "$WATCHER_UNIT not found in the repository"; return 1; }
 
     # It has to run in the desktop session: Steamworks talks to the Steam
     # client of the logged-in user, and this script runs as root.
-    local user="${SUDO_USER:-}"
-    if [[ -z "$user" || "$user" == "root" ]]; then
+    if ! watcher_user_dirs; then
         warn "cannot tell which desktop user to install the watcher for."
         warn "Run the installer with sudo from your normal account, or see the"
         warn "README for the three manual commands."
         return 1
     fi
 
-    local home
-    home="$(getent passwd "$user" | cut -d: -f6)"
-    [[ -n "$home" && -d "$home" ]] || { warn "no home directory for $user"; return 1; }
-
-    local dir="$home/.config/systemd/user"
-    local wants="$dir/default.target.wants"
-
-    say "Installing the achievement watcher for $user"
+    local wants="$WATCHER_DIR/$WATCHER_WANTS"
+    say "Installing the achievement watcher for $WATCHER_USER"
     # Create the directories as the user: "install -d" would leave any missing
     # parent (~/.config on a fresh account) owned by root, which quietly breaks
     # everything else that writes there.
-    runuser -u "$user" -- mkdir -p "$wants" \
+    runuser -u "$WATCHER_USER" -- mkdir -p "$wants" \
         || { warn "cannot create $wants"; return 1; }
-    install -o "$user" -g "$user" -m 0644 "$source" "$dir/$unit"
+    # Same @INSTALL_DIR@ substitution as the system unit, so moving the
+    # install directory keeps both of them pointing at the real binary.
+    sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" "$source" > "$WATCHER_DIR/$WATCHER_UNIT"
+    chown "$WATCHER_USER:$WATCHER_USER" "$WATCHER_DIR/$WATCHER_UNIT"
+    chmod 0644 "$WATCHER_DIR/$WATCHER_UNIT"
 
     # Enable by writing the symlink systemctl would create. Doing it directly
     # avoids needing the user's session bus, which root cannot reach reliably.
-    ln -sfn "../$unit" "$wants/$unit"
-    chown -h "$user:$user" "$wants/$unit"
+    ln -sfn "../$WATCHER_UNIT" "$wants/$WATCHER_UNIT"
+    chown -h "$WATCHER_USER:$WATCHER_USER" "$wants/$WATCHER_UNIT"
 
     # If the user has a live session, pick it up now instead of at next login.
-    local runtime="/run/user/$(id -u "$user")"
-    if [[ -d "$runtime" ]]; then
-        runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
-            systemctl --user daemon-reload >/dev/null 2>&1 || true
-        if runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
-                systemctl --user restart "$unit" >/dev/null 2>&1; then
-            say "Watcher running now"
-            return 0
-        fi
+    user_systemctl daemon-reload || true
+    if user_systemctl restart "$WATCHER_UNIT"; then
+        say "Watcher running now"
+        return 0
     fi
     say "Watcher enabled; it starts with your next login"
     return 0

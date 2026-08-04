@@ -25,27 +25,35 @@ class _Stopped(Exception):
     """Raised internally when a signal asks us to shut down."""
 
 
+def build_renderer(config):
+    return render.Renderer(
+        led_count=config["LED_COUNT"],
+        mapping=config["MAPPING"],
+        reverse=config["REVERSE"],
+        max_brightness=config["MAX_BRIGHTNESS"],
+        min_brightness=config["MIN_BRIGHTNESS"],
+        gamma=config["GAMMA"],
+        speed_scale=config["SPEED"],
+        patrol_dots=config["PATROL_DOTS"],
+    )
+
+
+def build_link(config):
+    return EspLink(
+        port=config["SERIAL_PORT"],
+        baudrate=config["BAUD"],
+        led_count=config["LED_COUNT"],
+        reconnect_delay=config["RECONNECT_DELAY"],
+        autodetect_baud=config["BAUD_AUTODETECT"],
+    )
+
+
 class Runner:
     def __init__(self, config):
         self.config = config
         self.running = True
-        self.renderer = render.Renderer(
-            led_count=config["LED_COUNT"],
-            mapping=config["MAPPING"],
-            reverse=config["REVERSE"],
-            max_brightness=config["MAX_BRIGHTNESS"],
-            min_brightness=config["MIN_BRIGHTNESS"],
-            gamma=config["GAMMA"],
-            speed_scale=config["SPEED"],
-            patrol_dots=config["PATROL_DOTS"],
-        )
-        self.link = EspLink(
-            port=config["SERIAL_PORT"],
-            baudrate=config["BAUD"],
-            led_count=config["LED_COUNT"],
-            reconnect_delay=config["RECONNECT_DELAY"],
-            autodetect_baud=config["BAUD_AUTODETECT"],
-        )
+        self.renderer = build_renderer(config)
+        self.link = build_link(config)
         self.overlay = notify.NotificationOverlay(
             enabled=config["NOTIFY"],
             duration=config["NOTIFY_DURATION"],
@@ -130,14 +138,17 @@ class Runner:
     def _wait(self, interval):
         """Block until the LED state changes, a trigger arrives, or timeout.
 
-        Waiting on both at once keeps a notification from sitting in the pipe
-        for up to a quarter second while the bar is idle.
+        Returns (state changed, trigger ready). Waiting on both at once keeps a
+        notification from sitting in the pipe for up to a quarter second while
+        the bar is idle - and reporting which one woke us means the pipe is
+        read exactly when it has something in it.
         """
         sources = [self.source.fd]
         if self.trigger is not None and self.trigger.fd >= 0:
             sources.append(self.trigger.fd)
         readable, _, _ = select.select(sources, [], [], interval)
-        return self.source.fd in readable
+        return (self.source.fd in readable,
+                self.trigger is not None and self.trigger.fd in readable)
 
     def _poll_trigger(self, now):
         if self.trigger is None:
@@ -161,21 +172,21 @@ class Runner:
             connected = self.link.connect()
             self.link.poll()
 
-            self._poll_trigger(time.monotonic())
-
             interval = 1.0 / self.config["FPS"]
             if (snapshot is not None and not snapshot.is_animated
                     and not self.overlay.active):
                 interval = 1.0 / self.config["IDLE_FPS"]
 
-            changed = False
             try:
-                changed = self._wait(interval)
+                changed, triggered = self._wait(interval)
             except OSError as exc:
                 LOG.warning("poll on %s failed: %s", self.config["DEVICE"], exc)
                 self.source.close()
                 self.source = self._open_source()
                 continue
+
+            if triggered:
+                self._poll_trigger(time.monotonic())
 
             if changed or snapshot is None:
                 try:
@@ -197,7 +208,6 @@ class Runner:
                 continue
 
             now = time.monotonic()
-            self._poll_trigger(now)
             payload = self.renderer.render(snapshot, now - started)
             # A notification takes the whole bar for its duration and then
             # hands it straight back to whatever Steam is showing.
@@ -218,23 +228,9 @@ def _interrupt_on_sigterm():
     signal.signal(signal.SIGTERM, handler)
 
 
-STEAM_ROOTS = (
-    "~/.local/share/Steam",
-    "~/.steam/steam",
-    "~/.steam/root",
-    "/home/deck/.local/share/Steam",
-)
 # Directories worth watching for an achievement. Game installs are excluded on
 # purpose - only Steam's own bookkeeping is small enough to scan every second.
 STEAM_WATCH_SUBDIRS = ("userdata", "appcache/stats", "logs")
-
-
-def _steam_root():
-    for candidate in STEAM_ROOTS:
-        path = os.path.expanduser(candidate)
-        if os.path.isdir(path):
-            return path
-    return None
 
 
 def _scan_steam_files(root):
@@ -262,10 +258,10 @@ def run_probe(config, seconds=None):
     _interrupt_on_sigterm()
     del config
 
-    root = _steam_root()
+    root = steamworks.steam_root()
     if root is None:
         LOG.error("no Steam directory found, looked in: %s",
-                  ", ".join(STEAM_ROOTS))
+                  ", ".join(steamworks.STEAM_ROOTS))
         return 1
 
     print("Watching %s" % root)
@@ -312,8 +308,7 @@ def run_steam_check(config):
         print("libsteam_api.so candidates:")
         for path in candidates:
             found = steamworks.elf_class(path)
-            label = {steamworks.ELFCLASS32: "32-bit",
-                     steamworks.ELFCLASS64: "64-bit"}.get(found, "not an ELF file")
+            label = steamworks.class_name(found)
             mark = "use " if found == steamworks.WANTED_ELF_CLASS else "skip"
             print("  [%s] %-7s %s" % (mark, label, path))
 
@@ -338,12 +333,11 @@ def run_steam_check(config):
             for symbol in relevant:
                 print("  %s" % symbol)
 
-    from_registry = steamworks._app_id_from_registry()
-    from_processes = steamworks._app_id_from_processes()
-    print("running app (registry.vdf): %s" % (from_registry or "none"))
-    print("running app (process env):  %s" % (from_processes or "none"))
+    sources = steamworks.app_id_sources()
+    for label, value in sources:
+        print("running app (%-12s): %s" % (label, value or "none"))
 
-    app_id = from_registry or from_processes
+    app_id = next((value for _label, value in sources if value), None)
     if library is None:
         print()
         print("Without the library nothing else can be tried.")
@@ -517,23 +511,8 @@ def run_dump(config):
 def run_self_test(config, duration=None):
     """Drive test patterns without Steam or the kernel module."""
     _interrupt_on_sigterm()
-    renderer = render.Renderer(
-        led_count=config["LED_COUNT"],
-        mapping=config["MAPPING"],
-        reverse=config["REVERSE"],
-        max_brightness=config["MAX_BRIGHTNESS"],
-        min_brightness=config["MIN_BRIGHTNESS"],
-        gamma=config["GAMMA"],
-        speed_scale=config["SPEED"],
-        patrol_dots=config["PATROL_DOTS"],
-    )
-    link = EspLink(
-        port=config["SERIAL_PORT"],
-        baudrate=config["BAUD"],
-        led_count=config["LED_COUNT"],
-        reconnect_delay=config["RECONNECT_DELAY"],
-        autodetect_baud=config["BAUD_AUTODETECT"],
-    )
+    renderer = build_renderer(config)
+    link = build_link(config)
 
     stages = [
         ("red", shim.make_snapshot(shim.EFFECT_MANUAL, (255, 0, 0)), 2.0),
@@ -585,23 +564,8 @@ def run_simulate(config, effect_name):
 
     _interrupt_on_sigterm()
     snapshot = shim.make_snapshot(effects[effect_name], (255, 60, 0))
-    renderer = render.Renderer(
-        led_count=config["LED_COUNT"],
-        mapping=config["MAPPING"],
-        reverse=config["REVERSE"],
-        max_brightness=config["MAX_BRIGHTNESS"],
-        min_brightness=config["MIN_BRIGHTNESS"],
-        gamma=config["GAMMA"],
-        speed_scale=config["SPEED"],
-        patrol_dots=config["PATROL_DOTS"],
-    )
-    link = EspLink(
-        port=config["SERIAL_PORT"],
-        baudrate=config["BAUD"],
-        led_count=config["LED_COUNT"],
-        reconnect_delay=config["RECONNECT_DELAY"],
-        autodetect_baud=config["BAUD_AUTODETECT"],
-    )
+    renderer = build_renderer(config)
+    link = build_link(config)
     started = time.monotonic()
     print("simulating effect %r, press Ctrl-C to stop" % effect_name)
     try:

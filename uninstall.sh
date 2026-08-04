@@ -16,6 +16,10 @@ RELEASE="$(uname -r)"
 MODULE_PATH="/usr/lib/modules/$RELEASE/updates/${MODULE_NAME}.ko"
 MODULES_LOAD="/etc/modules-load.d/steamos-led-bar.conf"
 
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/user-unit.sh
+source "$SOURCE_DIR/scripts/user-unit.sh"
+
 PURGE=0
 REMOVE_MODULE=0
 while [[ $# -gt 0 ]]; do
@@ -32,28 +36,14 @@ done
 # --- achievement watcher (a user service) ----------------------------------
 
 remove_achievement_watcher() {
-    local unit="steamos-led-achievements.service"
-    local user="${SUDO_USER:-}"
-    [[ -n "$user" && "$user" != "root" ]] || return 0
+    watcher_user_dirs || return 0
+    [[ -f "$WATCHER_DIR/$WATCHER_UNIT" ]] || return 0
 
-    local home
-    home="$(getent passwd "$user" | cut -d: -f6)"
-    [[ -n "$home" ]] || return 0
-
-    local dir="$home/.config/systemd/user"
-    [[ -f "$dir/$unit" ]] || return 0
-
-    local runtime="/run/user/$(id -u "$user")"
-    if [[ -d "$runtime" ]]; then
-        runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
-            systemctl --user stop "$unit" >/dev/null 2>&1 || true
-    fi
-    rm -f "$dir/$unit" "$dir/default.target.wants/$unit"
-    if [[ -d "$runtime" ]]; then
-        runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
-            systemctl --user daemon-reload >/dev/null 2>&1 || true
-    fi
-    echo "Removed the achievement watcher for $user."
+    user_systemctl stop "$WATCHER_UNIT" || true
+    rm -f "$WATCHER_DIR/$WATCHER_UNIT" \
+          "$WATCHER_DIR/$WATCHER_WANTS/$WATCHER_UNIT"
+    user_systemctl daemon-reload || true
+    echo "Removed the achievement watcher for $WATCHER_USER."
 }
 
 remove_achievement_watcher

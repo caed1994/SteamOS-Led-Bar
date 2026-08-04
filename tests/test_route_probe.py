@@ -3,12 +3,13 @@
 Picking the wrong Steamworks interface version does not raise - it segfaults,
 because the flat wrappers call through a vtable that does not match. So the
 probe runs each candidate in a forked child, and this checks that a crashing
-child is reported rather than taking the process with it.
+child is reported rather than taking the process with it. It drives
+steamworks._run_in_child directly - the supervisor probe_route itself uses, so
+a regression in that branch cannot pass unnoticed.
 """
 
 import ctypes
 import os
-import signal
 import sys
 import unittest
 
@@ -18,25 +19,6 @@ sys.path.insert(0, os.path.join(HERE, "..", "server"))
 from steamos_led import steamworks  # noqa: E402
 
 
-def _fork_and(action):
-    """Run `action` in a child and report how it ended, like probe_route does."""
-    read_fd, write_fd = os.pipe()
-    pid = os.fork()
-    if pid == 0:
-        os.close(read_fd)
-        try:
-            action(write_fd)
-        finally:
-            os._exit(0)
-    os.close(write_fd)
-    message = os.read(read_fd, 4096)
-    os.close(read_fd)
-    _pid, status = os.waitpid(pid, 0)
-    if os.WIFSIGNALED(status):
-        return "crashed", signal.Signals(os.WTERMSIG(status)).name
-    return "ok", message.decode()
-
-
 class ChildIsolationTest(unittest.TestCase):
     def test_a_segfaulting_child_is_reported_not_fatal(self):
         def crash(_write_fd):
@@ -44,14 +26,14 @@ class ChildIsolationTest(unittest.TestCase):
             # mismatched interface pointer produces.
             ctypes.string_at(0)
 
-        status, detail = _fork_and(crash)
+        status, detail = steamworks._run_in_child(crash)
         self.assertEqual(status, "crashed")
         self.assertEqual(detail, "SIGSEGV")
         # Reaching this line at all is the point: the parent lived.
         self.assertTrue(True)
 
     def test_a_healthy_child_reports_back(self):
-        status, detail = _fork_and(lambda fd: os.write(fd, b"OK 42"))
+        status, detail = steamworks._run_in_child(lambda fd: os.write(fd, b"OK 42"))
         self.assertEqual(status, "ok")
         self.assertEqual(detail, "OK 42")
 

@@ -22,6 +22,26 @@ class ElfError(ValueError):
     pass
 
 
+def elf_class(path):
+    """1 for a 32-bit object, 2 for 64-bit, None if it is not an ELF file."""
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(5)
+    except OSError:
+        return None
+    if len(header) < 5 or header[:4] != b"\x7fELF":
+        return None
+    return header[4]
+
+
+def class_name(value):
+    """How to name an ELF class in a message, including "no ELF here"."""
+    if value is None:
+        return "not an ELF file"
+    return {ELFCLASS32: "32-bit", ELFCLASS64: "64-bit"}.get(
+        value, "an unknown ELF class (%s)" % value)
+
+
 def _unpack(fmt, data, offset):
     return struct.unpack_from(fmt, data, offset)
 
@@ -34,23 +54,23 @@ def exported_symbols(path):
     if len(data) < 64 or data[:4] != b"\x7fELF":
         raise ElfError("%s is not an ELF file" % path)
 
-    elf_class = data[4]
+    class_id = data[4]
     little = data[5] == 1
     endian = "<" if little else ">"
 
-    if elf_class == ELFCLASS64:
+    if class_id == ELFCLASS64:
         # e_shoff at 0x28, e_shentsize 0x3a, e_shnum 0x3c
         (section_offset,) = _unpack(endian + "Q", data, 0x28)
         (entry_size,) = _unpack(endian + "H", data, 0x3A)
         (count,) = _unpack(endian + "H", data, 0x3C)
         sym_size, name_fmt, shndx_offset = 24, endian + "I", 6
-    elif elf_class == ELFCLASS32:
+    elif class_id == ELFCLASS32:
         (section_offset,) = _unpack(endian + "I", data, 0x20)
         (entry_size,) = _unpack(endian + "H", data, 0x2E)
         (count,) = _unpack(endian + "H", data, 0x30)
         sym_size, name_fmt, shndx_offset = 16, endian + "I", 14
     else:
-        raise ElfError("%s has an unknown ELF class %s" % (path, elf_class))
+        raise ElfError("%s has an unknown ELF class %s" % (path, class_id))
 
     if not section_offset or not count:
         raise ElfError("%s has no section headers" % path)
@@ -60,7 +80,7 @@ def exported_symbols(path):
         base = section_offset + index * entry_size
         if base + entry_size > len(data):
             raise ElfError("%s has a truncated section table" % path)
-        if elf_class == ELFCLASS64:
+        if class_id == ELFCLASS64:
             sh_type, = _unpack(endian + "I", data, base + 4)
             sh_link, = _unpack(endian + "I", data, base + 40)
             sh_offset, = _unpack(endian + "Q", data, base + 24)

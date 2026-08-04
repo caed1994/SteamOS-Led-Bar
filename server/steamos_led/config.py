@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 
+from . import notify
 from .serialport import BAUD_CONSTANTS
 
 DEFAULT_CONFIG_PATH = "/etc/steamos-led-serial.conf"
@@ -109,7 +110,9 @@ def load(path=DEFAULT_CONFIG_PATH, overrides=None):
 
 
 MAPPINGS = ("stretch", "repeat", "crop")
-NOTIFY_STYLES = ("bloom", "pulse")
+# Taken from the module that implements them, so the validator cannot drift
+# away from the styles a notification can actually take.
+NOTIFY_STYLES = notify.STYLES
 
 
 def validate(config):

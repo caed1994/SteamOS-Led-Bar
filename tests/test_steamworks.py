@@ -153,16 +153,31 @@ class SteamDiscoveryTest(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
+    def _fake_steam_root(self):
+        """Point steam_root() at the temp directory for one test."""
+        original = steamworks.STEAM_ROOTS
+        steamworks.STEAM_ROOTS = (self.tmpdir,)
+        self.addCleanup(setattr, steamworks, "STEAM_ROOTS", original)
+        # Also move HOME, or the last candidate path (~/.steam/registry.vdf)
+        # would read the real Steam of whoever runs the suite.
+        home = os.environ.get("HOME")
+        os.environ["HOME"] = self.tmpdir
+        self.addCleanup(os.environ.__setitem__, "HOME", home or "")
+        return self.tmpdir
+
     def test_registry_parsing(self):
-        path = os.path.join(self.tmpdir, "registry.vdf")
-        with open(path, "w") as handle:
+        root = self._fake_steam_root()
+        with open(os.path.join(root, "registry.vdf"), "w") as handle:
             handle.write('"Registry"\n{\n\t"HKCU"\n\t{\n'
                          '\t\t"RunningAppID"\t\t"570"\n\t}\n}\n')
-        with open(path) as handle:
-            import re
-            match = re.search(r'"RunningAppID"\s+"(\d+)"', handle.read())
-        self.assertIsNotNone(match)
-        self.assertEqual(int(match.group(1)), 570)
+        self.assertEqual(steamworks._app_id_from_registry(), 570)
+
+    def test_registry_with_no_running_app_reports_nothing(self):
+        root = self._fake_steam_root()
+        with open(os.path.join(root, "registry.vdf"), "w") as handle:
+            handle.write('"Registry"\n{\n\t"HKCU"\n\t{\n'
+                         '\t\t"RunningAppID"\t\t"0"\n\t}\n}\n')
+        self.assertIsNone(steamworks._app_id_from_registry())
 
     @staticmethod
     def _fake_library(path, elf_class):
