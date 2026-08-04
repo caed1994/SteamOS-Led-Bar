@@ -391,11 +391,37 @@ def run_steam_check(config):
     finally:
         stats.close()
 
+    supported, reason = steamworks.supports_messages(library)
+    print()
+    print("Friend messages: %s (%s)" % ("yes" if supported else "no", reason))
+
     print()
     print("Realtime detection works here: steamos-led-serial --watch-achievements")
     print("To skip the search next time, put this in the config:")
     print("  STEAM_ROUTE=%s" % route)
     return 0
+
+
+def _open_message_watcher(config, stats):
+    """Attach friend-message watching, or return None and carry on without it.
+
+    Achievements work on every library we have seen; messages need the manual
+    dispatch API from SDK 1.47, which an older copy simply lacks. That must
+    cost the notification, not the whole watcher.
+    """
+    if not config["NOTIFY_MESSAGES"]:
+        return None
+    supported, reason = steamworks.supports_messages(stats.library_path)
+    if not supported:
+        LOG.info("friend messages not available: %s", reason)
+        return None
+    watcher = steamworks.MessageWatcher(stats)
+    try:
+        watcher.open()
+    except Exception as exc:                          # noqa: BLE001
+        LOG.warning("friend messages unavailable: %s", exc)
+        return None
+    return watcher
 
 
 def run_watch_achievements(config, interval=1.0):
@@ -409,6 +435,7 @@ def run_watch_achievements(config, interval=1.0):
 
     fifo = config["NOTIFY_FIFO"]
     watcher = None
+    messages = None
     current_app = None
     stats = None
 
@@ -421,8 +448,10 @@ def run_watch_achievements(config, interval=1.0):
 
             if app_id != current_app:
                 if stats is not None:
+                    if messages is not None:
+                        messages.close()
                     stats.close()
-                    stats, watcher = None, None
+                    stats, watcher, messages = None, None, None
                 current_app = app_id
                 if app_id:
                     try:
@@ -444,9 +473,10 @@ def run_watch_achievements(config, interval=1.0):
                         stats.open()
                         watcher = steamworks.AchievementWatcher(stats)
                         LOG.info("attached to app %d", app_id)
+                        messages = _open_message_watcher(config, stats)
                     except steamworks.SteamworksError as exc:
                         LOG.warning("cannot attach to app %s: %s", app_id, exc)
-                        stats, watcher = None, None
+                        stats, watcher, messages = None, None, None
                         # Do not hammer a game that refuses us.
                         current_app = app_id
                 else:
@@ -464,7 +494,24 @@ def run_watch_achievements(config, interval=1.0):
                 except OSError as exc:
                     LOG.warning("lost the Steamworks connection: %s", exc)
                     stats.close()
-                    stats, watcher, current_app = None, None, None
+                    stats, watcher, messages = None, None, None
+                    current_app = None
+
+            if messages is not None:
+                # Kept apart from the achievement poll on purpose: messages are
+                # the newer, less proven half, and must not be able to take the
+                # working half down with them.
+                try:
+                    for _ in range(messages.poll()):
+                        LOG.info("friend message received")
+                        try:
+                            notify.send(fifo, "message")
+                        except OSError as exc:
+                            LOG.warning("could not flash the bar: %s", exc)
+                except Exception as exc:              # noqa: BLE001
+                    LOG.warning("message watching failed, disabling it: %s", exc)
+                    messages.close()
+                    messages = None
 
             time.sleep(interval)
     except KeyboardInterrupt:
@@ -670,8 +717,8 @@ def build_parser():
                             "message, friend, warning or a colour like '#00ff88'")
     modes.add_argument("--watch-achievements", action="store_true",
                        dest="watch_achievements",
-                       help="flash on every achievement unlocked in the running "
-                            "game (run as your normal user, not with sudo)")
+                       help="flash on achievements and friend messages in the "
+                            "running game (run as your normal user, not sudo)")
     modes.add_argument("--steam-check", action="store_true", dest="steam_check",
                        help="report whether realtime achievement detection can "
                             "work on this machine")

@@ -651,3 +651,217 @@ def select_route(app_id, library, reporter=None):
         if status == "ok":
             return route, int(detail or 0)
     return None, 0
+
+
+# -- friend chat messages ---------------------------------------------------
+#
+# An achievement is state: poll it and diff. A message is an event, so this
+# needs Steam's callback queue. The manual dispatch API is the one way to read
+# that queue without the C++ headers - it was added in SDK 1.47, so an older
+# libsteam_api.so simply cannot do this, and says so instead of guessing.
+
+# Interface version strings. Note friends spells them differently from stats:
+# "SteamFriends017", not "STEAMFRIENDS_INTERFACE_VERSION017".
+FRIENDS_INTERFACES = tuple("SteamFriends%03d" % version
+                           for version in range(18, 13, -1))
+
+_FRIENDS_ACCESSOR_RE = re.compile(r"^SteamAPI_SteamFriends_v(\d+)$")
+
+# k_iSteamFriendsCallbacks(300) + 43
+CALLBACK_FRIEND_CHAT_MSG = 343
+# Only a real message should flash; the same callback also carries typing
+# indicators and emotes.
+CHAT_ENTRY_TYPE_CHAT_MSG = 1
+
+MANUAL_DISPATCH_SYMBOLS = (
+    "SteamAPI_ManualDispatch_Init",
+    "SteamAPI_ManualDispatch_RunFrame",
+    "SteamAPI_ManualDispatch_GetNextCallback",
+    "SteamAPI_ManualDispatch_FreeLastCallback",
+)
+
+
+class CallbackMsg(ctypes.Structure):
+    """The header Steam hands back for every queued callback."""
+
+    _fields_ = [
+        ("m_hSteamUser", ctypes.c_int32),
+        ("m_iCallback", ctypes.c_int),
+        ("m_pubParam", ctypes.POINTER(ctypes.c_uint8)),
+        ("m_cubParam", ctypes.c_int),
+    ]
+
+
+def supports_messages(library):
+    """Whether a library is new enough to read the callback queue."""
+    try:
+        symbols = elf.exported_symbols(library)
+    except (OSError, elf.ElfError):
+        return False, "symbol table unreadable"
+
+    missing = [name for name in MANUAL_DISPATCH_SYMBOLS if name not in symbols]
+    if missing:
+        return False, "no manual dispatch (missing %s)" % ", ".join(missing)
+    if not any(name in symbols for name in
+               ("SteamAPI_ISteamClient_GetISteamFriends",
+                "SteamInternal_FindOrCreateUserInterface")) \
+            and not any(_FRIENDS_ACCESSOR_RE.match(name) for name in symbols):
+        return False, "no way to reach ISteamFriends"
+    return True, "manual dispatch available"
+
+
+class MessageWatcher:
+    """Turns Steam's callback queue into 'a friend just wrote' events.
+
+    Attaches to the same library and app as the achievement side, and is
+    deliberately optional: every failure disables messages and leaves the
+    achievement path untouched.
+    """
+
+    def __init__(self, stats):
+        # Reuses the open UserStats connection: same process, same SteamAPI_Init.
+        self.stats = stats
+        self.friends = None
+        self.pipe = None
+        self._lib = None
+        self._get_next = None
+        self._free_last = None
+        self._run_frame = None
+        self._get_message = None
+
+    def open(self):
+        lib = self.stats._lib
+        if lib is None:
+            raise SteamworksError("Steamworks is not open")
+
+        for name in MANUAL_DISPATCH_SYMBOLS:
+            if not hasattr(lib, name):
+                raise SteamworksError(
+                    "%s has no %s - this libsteam_api.so predates manual "
+                    "dispatch (SDK 1.47), so messages cannot be read"
+                    % (self.stats.library_path, name))
+
+        self.friends = self._resolve_friends(lib)
+        if not self.friends:
+            raise SteamworksError("could not reach ISteamFriends")
+
+        listen = lib.SteamAPI_ISteamFriends_SetListenForFriendsMessages
+        listen.restype = ctypes.c_bool
+        listen.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+        if not listen(self.friends, True):
+            raise SteamworksError("SetListenForFriendsMessages was refused")
+
+        self._get_message = lib.SteamAPI_ISteamFriends_GetFriendMessage
+        self._get_message.restype = ctypes.c_int
+        self._get_message.argtypes = [ctypes.c_void_p, ctypes.c_uint64,
+                                      ctypes.c_int, ctypes.c_void_p,
+                                      ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+
+        get_pipe = lib.SteamAPI_GetHSteamPipe
+        get_pipe.restype = ctypes.c_int32
+        get_pipe.argtypes = []
+        self.pipe = get_pipe()
+
+        lib.SteamAPI_ManualDispatch_Init()
+        self._run_frame = lib.SteamAPI_ManualDispatch_RunFrame
+        self._run_frame.restype = None
+        self._run_frame.argtypes = [ctypes.c_int32]
+        self._get_next = lib.SteamAPI_ManualDispatch_GetNextCallback
+        self._get_next.restype = ctypes.c_bool
+        self._get_next.argtypes = [ctypes.c_int32, ctypes.POINTER(CallbackMsg)]
+        self._free_last = lib.SteamAPI_ManualDispatch_FreeLastCallback
+        self._free_last.restype = None
+        self._free_last.argtypes = [ctypes.c_int32]
+        self._lib = lib
+        LOG.info("listening for friend messages")
+
+    def _resolve_friends(self, lib):
+        symbols = self.stats._symbols()
+
+        accessors = sorted(
+            (int(match.group(1)), match.group(0))
+            for match in (_FRIENDS_ACCESSOR_RE.match(name) for name in symbols)
+            if match)
+        for _version, name in sorted(accessors, reverse=True):
+            accessor = getattr(lib, name, None)
+            if accessor is None:
+                continue
+            accessor.restype = ctypes.c_void_p
+            accessor.argtypes = []
+            iface = accessor()
+            if iface:
+                return _as_pointer(iface)
+
+        if hasattr(lib, "SteamAPI_ISteamClient_GetISteamFriends") \
+                and hasattr(lib, "SteamAPI_GetHSteamUser"):
+            client = self._steam_client(lib, symbols)
+            if client:
+                for name, restype in (("SteamAPI_GetHSteamUser", ctypes.c_int32),
+                                      ("SteamAPI_GetHSteamPipe", ctypes.c_int32)):
+                    function = getattr(lib, name)
+                    function.restype = restype
+                    function.argtypes = []
+                getter = lib.SteamAPI_ISteamClient_GetISteamFriends
+                getter.restype = ctypes.c_void_p
+                getter.argtypes = [ctypes.c_void_p, ctypes.c_int32,
+                                   ctypes.c_int32, ctypes.c_char_p]
+                user = lib.SteamAPI_GetHSteamUser()
+                pipe = lib.SteamAPI_GetHSteamPipe()
+                for version in FRIENDS_INTERFACES:
+                    iface = getter(client, user, pipe, version.encode("ascii"))
+                    if iface:
+                        LOG.debug("ISteamFriends via %s", version)
+                        return _as_pointer(iface)
+        return None
+
+    @staticmethod
+    def _steam_client(lib, symbols):
+        names = sorted((name for name in symbols
+                        if re.match(r"^SteamAPI_SteamClient_v\d+$", name)),
+                       reverse=True)
+        for candidate in names + ["SteamClient"]:
+            accessor = getattr(lib, candidate, None)
+            if accessor is None:
+                continue
+            accessor.restype = ctypes.c_void_p
+            accessor.argtypes = []
+            client = accessor()
+            if client:
+                return ctypes.c_void_p(client)
+        return None
+
+    def poll(self):
+        """Drain the callback queue; returns how many friend messages arrived."""
+        if self._lib is None:
+            return 0
+
+        messages = 0
+        self._run_frame(self.pipe)
+        callback = CallbackMsg()
+        while self._get_next(self.pipe, ctypes.byref(callback)):
+            try:
+                if callback.m_iCallback == CALLBACK_FRIEND_CHAT_MSG:
+                    if self._is_real_message(callback):
+                        messages += 1
+            finally:
+                # Must always free, or the queue never advances.
+                self._free_last(self.pipe)
+        return messages
+
+    def _is_real_message(self, callback):
+        """Filter out typing indicators, which share this callback."""
+        if callback.m_cubParam < 12 or not callback.m_pubParam:
+            return True         # cannot tell; better to flash than to miss one
+        payload = ctypes.string_at(callback.m_pubParam, 12)
+        steam_id = int.from_bytes(payload[0:8], "little")
+        message_id = int.from_bytes(payload[8:12], "little", signed=True)
+
+        buffer = ctypes.create_string_buffer(4096)
+        entry_type = ctypes.c_int(0)
+        self._get_message(self.friends, steam_id, message_id, buffer,
+                          len(buffer), ctypes.byref(entry_type))
+        return entry_type.value == CHAT_ENTRY_TYPE_CHAT_MSG
+
+    def close(self):
+        self._lib = None
+        self.friends = None

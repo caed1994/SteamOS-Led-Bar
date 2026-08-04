@@ -261,6 +261,7 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | ------ | ------- | ------- |
 | `NOTIFY` | `1` | enable the overlay at all |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
+| `NOTIFY_MESSAGES` | `1` | also flash on friend messages (needs a newer library) |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 
 ### Flashing on a real achievement
@@ -319,6 +320,26 @@ Two consequences of how Steamworks works, worth knowing:
   found and which it picked. Architecture matters: Proton keeps a 32-bit copy in
   `files/lib` next to the 64-bit one in `files/lib64`, and only the one matching
   your Python will load. Set `STEAM_LIBRARY` to a path to override the choice.
+
+### Friend messages
+
+While a game is running, a message from a friend flashes the bar blue. It comes
+from the same watcher; nothing extra to install.
+
+Two honest limits:
+
+* **Only while a game is running.** Steamworks has to be attached to an app,
+  and attaching to one you are not playing would show you as playing it. Sitting
+  in the library with no game open, nothing flashes.
+* **Needs a libsteam_api.so from SDK 1.47 or newer.** An achievement is a
+  *state* that can be polled and compared; a message is an *event*, so it has to
+  be read out of Steam's callback queue, and the API for doing that without the
+  C++ headers only exists in newer libraries. Older copies - Proton ships one -
+  do achievements fine and simply skip messages, with the reason in the log.
+
+`--steam-check` ends with a line saying whether your library can do it. Typing
+indicators travel on the same callback and are filtered out, so the bar only
+flashes for an actual message. `NOTIFY_MESSAGES=0` turns the whole thing off.
 
 ### If that does not work on your machine
 
