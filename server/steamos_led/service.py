@@ -50,6 +50,7 @@ class Runner:
             enabled=config["NOTIFY"],
             duration=config["NOTIFY_DURATION"],
             led_count=config["LED_COUNT"],
+            style=config["NOTIFY_STYLE"],
         )
         self.trigger = None
         self.source = None

@@ -234,9 +234,23 @@ the module at its word, set `PATROL_DOTS=3`.
 
 ## Notifications
 
-A notification takes over the whole bar for a few seconds — a gold pulse for an
-achievement, blue for a message — and then hands it straight back to whatever
-Steam was showing. Try it right now, with the service running:
+A notification takes over the whole bar for a few seconds and then hands it
+straight back to whatever Steam was showing. The flash grows out of the middle,
+blinks once when it reaches both ends, and retracts back into the middle:
+
+```
+ 0.00s |·················|
+ 0.25s |······+###+······|
+ 0.50s |····+#######+····|
+ 1.00s |#################|
+ 1.50s |·················|   <- the blink
+ 1.75s |#################|
+ 2.50s |··+###########+··|
+ 3.25s |·······+#+·······|
+```
+
+Gold for an achievement, blue for a message. Try it right now, with the
+service running:
 
 ```bash
 steamos-led-serial --notify achievement
@@ -262,6 +276,7 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `NOTIFY` | `1` | enable the overlay at all |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
+| `NOTIFY_STYLE` | `bloom` | shape of the flash: `bloom` (out of the middle) or `pulse` (whole bar swells three times) |
 
 ### Flashing on a real achievement
 

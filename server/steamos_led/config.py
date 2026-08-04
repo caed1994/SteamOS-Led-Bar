@@ -28,6 +28,7 @@ DEFAULTS = {
     "NOTIFY": True,
     "NOTIFY_DURATION": 3.5,
     "NOTIFY_FIFO": "/run/steamos-led-serial/notify",
+    "NOTIFY_STYLE": "bloom",
     "STEAM_LIBRARY": "auto",
     "STEAM_ROUTE": "auto",
     "FPS": 60,
@@ -108,6 +109,7 @@ def load(path=DEFAULT_CONFIG_PATH, overrides=None):
 
 
 MAPPINGS = ("stretch", "repeat", "crop")
+NOTIFY_STYLES = ("bloom", "pulse")
 
 
 def validate(config):
@@ -138,4 +140,7 @@ def validate(config):
         raise ConfigError("PATROL_DOTS must be between 1 and 8")
     if not 0.1 <= config["NOTIFY_DURATION"] <= 60:
         raise ConfigError("NOTIFY_DURATION must be between 0.1 and 60 seconds")
+    if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
+        raise ConfigError("NOTIFY_STYLE must be one of: %s"
+                          % ", ".join(NOTIFY_STYLES))
     return config

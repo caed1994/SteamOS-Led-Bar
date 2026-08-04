@@ -44,13 +44,18 @@ class OverlayTest(unittest.TestCase):
         frame = self.overlay.apply(self.base, 100.5)
         self.assertNotEqual(frame, self.base)
         self.assertEqual(len(frame), 4 * 3)
-        # Every LED shows the same colour...
-        self.assertEqual(len({frame[i:i + 3] for i in range(0, 12, 3)}), 1)
-        # ...and it is gold: red high, some green, no blue.
-        red, green, blue = frame[0], frame[1], frame[2]
+        # Gold: red high, some green, no blue - on whichever LED is lit.
+        lit = max(range(4), key=lambda led: frame[led * 3])
+        red, green, blue = frame[lit * 3:lit * 3 + 3]
         self.assertGreater(red, green)
         self.assertGreater(green, blue)
         self.assertEqual(blue, 0)
+
+    def test_brightness_varies_over_the_flash(self):
+        self.overlay.trigger("achievement", 0.0)
+        levels = {self.overlay.apply(self.base, step / 40.0)[0]
+                  for step in range(80)}
+        self.assertGreater(len(levels), 3, "the flash should move, not sit still")
 
     def test_hands_the_bar_back_when_it_expires(self):
         self.overlay.trigger("achievement", 100.0)
@@ -58,22 +63,19 @@ class OverlayTest(unittest.TestCase):
         self.assertEqual(self.overlay.apply(self.base, 102.1), self.base)
         self.assertFalse(self.overlay.active)
 
-    def test_brightness_varies_over_the_flash(self):
-        self.overlay.trigger("achievement", 0.0)
-        levels = {self.overlay.apply(self.base, step / 40.0)[0]
-                  for step in range(80)}
-        self.assertGreater(len(levels), 5, "flash should pulse, not sit still")
-
     def test_ends_dark_so_there_is_no_hard_edge(self):
         self.overlay.trigger("achievement", 0.0)
         tail = self.overlay.apply(self.base, 1.98)
-        self.assertLess(max(tail[:3]), 60)
+        self.assertLess(max(tail), 60)
 
     def test_retrigger_restarts_the_flash(self):
         self.overlay.trigger("achievement", 0.0)
         self.overlay.trigger("message", 1.0)
         frame = self.overlay.apply(self.base, 1.5)
-        self.assertGreater(frame[2], frame[0], "should be the blue one now")
+        # Look at the middle: the bloom starts there, so the ends are still
+        # dark this early into the flash.
+        centre = frame[3:6]
+        self.assertGreater(centre[2], centre[0], "should be the blue one now")
 
     def test_disabled_overlay_never_fires(self):
         overlay = notify.NotificationOverlay(enabled=False, led_count=4)
@@ -87,9 +89,10 @@ class OverlayTest(unittest.TestCase):
     def test_arbitrary_colour_can_be_triggered(self):
         self.overlay.trigger("#0000ff", 0.0)
         frame = self.overlay.apply(self.base, 0.5)
-        self.assertEqual(frame[0], 0)
-        self.assertEqual(frame[1], 0)
-        self.assertGreater(frame[2], 0)
+        red, green, blue = frame[3:6]           # the middle, where it starts
+        self.assertEqual(red, 0)
+        self.assertEqual(green, 0)
+        self.assertGreater(blue, 0)
 
 
 class FifoTriggerTest(unittest.TestCase):
@@ -155,6 +158,84 @@ class FifoTriggerTest(unittest.TestCase):
             handle.write("x")
         with self.assertRaises(OSError):
             notify.FifoTrigger(plain).open()
+
+
+class BloomShapeTest(unittest.TestCase):
+    """The achievement flash: out of the middle, one blink, back to the middle."""
+
+    LEDS = 17
+    DURATION = 2.0
+
+    def setUp(self):
+        self.overlay = notify.NotificationOverlay(
+            duration=self.DURATION, led_count=self.LEDS)
+        self.overlay.trigger("achievement", 0.0)
+        self.base = bytes(self.LEDS * 3)
+
+    def _levels(self, fraction):
+        frame = self.overlay.apply(self.base, self.DURATION * fraction)
+        return [frame[led * 3] for led in range(self.LEDS)]
+
+    def test_starts_in_the_middle(self):
+        levels = self._levels(0.10)
+        middle = self.LEDS // 2
+        self.assertGreater(levels[middle], 0)
+        self.assertEqual(levels[0], 0, "the ends must not be lit yet")
+        self.assertEqual(levels[-1], 0)
+
+    def test_grows_outwards(self):
+        early = self._levels(0.10)
+        later = self._levels(0.25)
+        lit = lambda levels: sum(1 for level in levels if level > 0)
+        self.assertGreater(lit(later), lit(early))
+
+    def test_reaches_the_ends_at_full_brightness(self):
+        # The travelling edge has to overshoot, or the outermost pair sits
+        # exactly on the boundary and never lights.
+        levels = self._levels(0.35)
+        self.assertEqual(levels[0], levels[self.LEDS // 2])
+        self.assertEqual(levels[-1], levels[self.LEDS // 2])
+        self.assertGreater(levels[0], 200)
+
+    def test_blinks_once_while_fully_out(self):
+        self.assertEqual(self._levels(0.45), [0] * self.LEDS)
+
+    def test_lights_up_again_after_the_blink(self):
+        self.assertGreater(min(self._levels(0.55)), 200)
+
+    def test_retracts_towards_the_middle(self):
+        late = self._levels(0.85)
+        middle = self.LEDS // 2
+        self.assertGreater(late[middle], 0)
+        self.assertEqual(late[0], 0, "the ends should be dark again")
+        self.assertEqual(late[-1], 0)
+
+    def test_symmetric_about_the_centre(self):
+        for fraction in (0.1, 0.2, 0.35, 0.55, 0.8, 0.95):
+            levels = self._levels(fraction)
+            self.assertEqual(levels, levels[::-1], "asymmetric at %.2f" % fraction)
+
+    def test_fades_out_rather_than_cutting_off(self):
+        # The retract runs to zero exactly at the end, so the last frame is a
+        # faint glow in the middle - not a hard switch-off.
+        self.assertLess(max(self._levels(0.99)), 60)
+        self.assertGreater(max(self._levels(0.90)), 0)
+
+    def test_works_on_other_strip_lengths(self):
+        for count in (1, 2, 5, 30, 144):
+            overlay = notify.NotificationOverlay(duration=1.0, led_count=count)
+            overlay.trigger("achievement", 0.0)
+            frame = overlay.apply(bytes(count * 3), 0.35)
+            self.assertEqual(len(frame), count * 3)
+            self.assertGreater(max(frame), 0, "%d LEDs stayed dark" % count)
+
+    def test_pulse_style_is_still_available(self):
+        overlay = notify.NotificationOverlay(
+            duration=2.0, led_count=self.LEDS, style=notify.STYLE_PULSE)
+        overlay.trigger("achievement", 0.0)
+        frame = overlay.apply(self.base, 0.3)
+        levels = {frame[led * 3] for led in range(self.LEDS)}
+        self.assertEqual(len(levels), 1, "the pulse lights the bar evenly")
 
 
 if __name__ == "__main__":

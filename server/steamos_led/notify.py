@@ -31,6 +31,56 @@ KINDS = {
 PULSES = 3          # how often the bar swells during one notification
 FADE_TAIL = 0.25    # fraction of the duration spent fading back out
 
+STYLE_BLOOM = "bloom"
+STYLE_PULSE = "pulse"
+STYLES = (STYLE_BLOOM, STYLE_PULSE)
+
+# The bloom, as fractions of the notification's duration: grow out of the
+# middle, hold, blink once, then shrink back into the middle.
+BLOOM_EXPANDED = 0.30
+BLOOM_DARK = 0.40
+BLOOM_RELIT = 0.50
+BLOOM_RETRACT = 0.60
+# How soft the travelling edge is, in units of the half-strip. Without it the
+# front is a hard step, which looks blocky on a short bar.
+BLOOM_FEATHER = 0.18
+
+
+def bloom_levels(progress, led_count):
+    """Per-LED brightness for the bloom, 0..1, at a point in the flash."""
+    if led_count < 1:
+        return []
+    if led_count == 1:
+        # Nothing to travel across; fall back to on/off with the same timing.
+        lit = 0.0 if BLOOM_DARK <= progress < BLOOM_RELIT else 1.0
+        if progress >= BLOOM_RETRACT:
+            lit = 1.0 - (progress - BLOOM_RETRACT) / (1.0 - BLOOM_RETRACT)
+        return [max(0.0, min(lit, 1.0))]
+
+    # The front has to travel one feather past the last LED, otherwise the
+    # outermost pair sits exactly on the edge and never lights at all.
+    full = 1.0 + BLOOM_FEATHER
+
+    if progress < BLOOM_EXPANDED:
+        radius = full * progress / BLOOM_EXPANDED    # growing out of the middle
+    elif progress < BLOOM_DARK:
+        radius = full                                # fully out, held
+    elif progress < BLOOM_RELIT:
+        return [0.0] * led_count                     # the single blink
+    elif progress < BLOOM_RETRACT:
+        radius = full                                # lit again
+    else:
+        radius = full * (1.0 - (progress - BLOOM_RETRACT) / (1.0 - BLOOM_RETRACT))
+
+    centre = (led_count - 1) / 2.0
+    levels = []
+    for index in range(led_count):
+        # 0 at the middle, 1 at either end.
+        distance = abs(index - centre) / centre
+        level = (radius - distance) / BLOOM_FEATHER
+        levels.append(max(0.0, min(level, 1.0)))
+    return levels
+
 
 def parse_color(text):
     """Accept a kind name, '#rrggbb', 'rrggbb' or 'r,g,b'."""
@@ -63,33 +113,44 @@ def parse_color(text):
 class Notification:
     """One flash in progress."""
 
-    def __init__(self, color, duration, started):
+    def __init__(self, color, duration, started, style=STYLE_BLOOM):
         self.color = color
         self.duration = max(float(duration), 0.1)
         self.started = started
+        self.style = style if style in STYLES else STYLE_BLOOM
 
-    def level(self, now):
-        """Brightness envelope in 0..1, or None once the flash is over."""
+    def progress(self, now):
+        """Position within the flash in 0..1, or None once it is over."""
         elapsed = now - self.started
         if elapsed < 0 or elapsed >= self.duration:
             return None
-        progress = elapsed / self.duration
+        return elapsed / self.duration
+
+    def levels(self, now, led_count):
+        """Per-LED brightness, or None once the flash is over."""
+        progress = self.progress(now)
+        if progress is None:
+            return None
+        if self.style == STYLE_BLOOM:
+            return bloom_levels(progress, led_count)
 
         # Pulse a few times, then fade out over the tail so it does not end
         # with a hard edge.
         pulse = (1.0 - math.cos(2.0 * math.pi * PULSES * progress)) * 0.5
         if progress > 1.0 - FADE_TAIL:
             pulse *= (1.0 - progress) / FADE_TAIL
-        return pulse
+        return [pulse] * led_count
 
 
 class NotificationOverlay:
     """Holds the active flash and paints it over a rendered frame."""
 
-    def __init__(self, enabled=True, duration=3.5, led_count=17):
+    def __init__(self, enabled=True, duration=3.5, led_count=17,
+                 style=STYLE_BLOOM):
         self.enabled = enabled
         self.duration = duration
         self.led_count = led_count
+        self.style = style if style in STYLES else STYLE_BLOOM
         self.current = None
 
     @property
@@ -106,23 +167,25 @@ class NotificationOverlay:
             LOG.warning("ignoring notification %r: %s", kind, exc)
             return False
         LOG.info("notification: %s", kind)
-        self.current = Notification(color, self.duration, now)
+        self.current = Notification(color, self.duration, now, self.style)
         return True
 
     def apply(self, payload, now):
         """Return the frame to send: the flash while one runs, else `payload`."""
         if self.current is None:
             return payload
-        level = self.current.level(now)
-        if level is None:
+        levels = self.current.levels(now, self.led_count)
+        if levels is None:
             self.current = None
             return payload
 
         red, green, blue = self.current.color
-        pixel = bytes((int(red * level + 0.5),
-                       int(green * level + 0.5),
-                       int(blue * level + 0.5)))
-        return pixel * self.led_count
+        frame = bytearray()
+        for level in levels:
+            frame.append(int(red * level + 0.5))
+            frame.append(int(green * level + 0.5))
+            frame.append(int(blue * level + 0.5))
+        return bytes(frame)
 
     def clear(self):
         self.current = None
