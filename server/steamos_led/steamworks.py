@@ -18,6 +18,7 @@ import glob
 import logging
 import os
 import re
+import sys
 
 LOG = logging.getLogger(__name__)
 
@@ -38,8 +39,45 @@ LIBRARY_GLOBS = (
     "steamapps/common/*/libsteam_api.so",
     "steamapps/common/*/*/libsteam_api.so",
     "steamapps/common/*/*/*/libsteam_api.so",
+    "steamapps/common/*/*/*/*/libsteam_api.so",
     "linux64/libsteam_api.so",
 )
+
+# ELFCLASS64 is byte 4 of the ELF header, ELFCLASS32 is 1. Games ship both, and
+# Proton keeps them in sibling files/lib and files/lib64 directories, so the
+# first match alphabetically is routinely the wrong architecture.
+ELFCLASS32, ELFCLASS64 = 1, 2
+WANTED_ELF_CLASS = ELFCLASS64 if sys.maxsize > 2 ** 32 else ELFCLASS32
+
+
+def _class_name(value):
+    return {ELFCLASS32: "32-bit", ELFCLASS64: "64-bit"}.get(
+        value, "an unknown ELF class (%s)" % value)
+
+
+def elf_class(path):
+    """1 for a 32-bit object, 2 for 64-bit, None if it is not an ELF file."""
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(5)
+    except OSError:
+        return None
+    if len(header) < 5 or header[:4] != b"\x7fELF":
+        return None
+    return header[4]
+
+
+def find_libraries():
+    """Every libsteam_api.so under the Steam directory, newest paths first."""
+    root = steam_root()
+    if root is None:
+        return []
+    found = []
+    for pattern in LIBRARY_GLOBS:
+        for match in glob.glob(os.path.join(root, pattern)):
+            if match not in found:
+                found.append(match)
+    return sorted(found)
 
 
 class SteamworksError(RuntimeError):
@@ -60,22 +98,34 @@ def find_library(explicit=None):
     The library is part of the Steamworks SDK and ships inside games, so it is
     never redistributed here - one of the installed games lends us its copy.
     """
-    if explicit:
-        if os.path.isfile(explicit):
-            return explicit
-        raise SteamworksError("no library at %s" % explicit)
+    if explicit and explicit != "auto":
+        if not os.path.isfile(explicit):
+            raise SteamworksError("no library at %s" % explicit)
+        found = elf_class(explicit)
+        if found is not None and found != WANTED_ELF_CLASS:
+            raise SteamworksError(
+                "%s is %s, this Python needs %s"
+                % (explicit, _class_name(found), _class_name(WANTED_ELF_CLASS)))
+        return explicit
 
     root = steam_root()
     if root is None:
         raise SteamworksError("no Steam directory found")
 
-    for pattern in LIBRARY_GLOBS:
-        matches = sorted(glob.glob(os.path.join(root, pattern)))
-        if matches:
-            return matches[0]
-    raise SteamworksError(
-        "no libsteam_api.so under %s - install a game that ships it, or pass "
-        "the path explicitly" % root)
+    candidates = find_libraries()
+    if not candidates:
+        raise SteamworksError(
+            "no libsteam_api.so under %s - install a game that ships it, or "
+            "set STEAM_LIBRARY to one" % root)
+
+    usable = [path for path in candidates
+              if elf_class(path) == WANTED_ELF_CLASS]
+    if not usable:
+        raise SteamworksError(
+            "found %d libsteam_api.so, none of them %s like this Python "
+            "(e.g. %s)" % (len(candidates), _class_name(WANTED_ELF_CLASS),
+                           candidates[0]))
+    return usable[0]
 
 
 # -- which game is running -------------------------------------------------

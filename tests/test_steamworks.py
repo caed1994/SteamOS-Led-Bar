@@ -109,14 +109,72 @@ class SteamDiscoveryTest(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(int(match.group(1)), 570)
 
+    @staticmethod
+    def _fake_library(path, elf_class):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(b"\x7fELF" + bytes([elf_class]) + b"\x00" * 32)
+        return path
+
+    def test_elf_class_is_read_from_the_header(self):
+        thirty_two = self._fake_library(
+            os.path.join(self.tmpdir, "a", "libsteam_api.so"),
+            steamworks.ELFCLASS32)
+        sixty_four = self._fake_library(
+            os.path.join(self.tmpdir, "b", "libsteam_api.so"),
+            steamworks.ELFCLASS64)
+        self.assertEqual(steamworks.elf_class(thirty_two), steamworks.ELFCLASS32)
+        self.assertEqual(steamworks.elf_class(sixty_four), steamworks.ELFCLASS64)
+
+    def test_elf_class_of_a_non_elf_file_is_none(self):
+        plain = os.path.join(self.tmpdir, "notes.txt")
+        with open(plain, "w") as handle:
+            handle.write("not a library")
+        self.assertIsNone(steamworks.elf_class(plain))
+        self.assertIsNone(steamworks.elf_class(os.path.join(self.tmpdir, "gone")))
+
+    def test_explicit_library_of_the_wrong_arch_is_refused(self):
+        # Proton ships files/lib (32-bit) beside files/lib64, and the 32-bit
+        # one sorts first - loading it fails with a bare "wrong ELF class".
+        wrong = steamworks.ELFCLASS32 \
+            if steamworks.WANTED_ELF_CLASS == steamworks.ELFCLASS64 \
+            else steamworks.ELFCLASS64
+        path = self._fake_library(
+            os.path.join(self.tmpdir, "lib", "libsteam_api.so"), wrong)
+        with self.assertRaises(steamworks.SteamworksError) as caught:
+            steamworks.find_library(path)
+        self.assertIn("bit", str(caught.exception))
+
+    def test_explicit_library_of_the_right_arch_is_accepted(self):
+        path = self._fake_library(
+            os.path.join(self.tmpdir, "lib64", "libsteam_api.so"),
+            steamworks.WANTED_ELF_CLASS)
+        self.assertEqual(steamworks.find_library(path), path)
+
+    def test_auto_means_search(self):
+        # "auto" is the config default and must not be taken for a path.
+        with self.assertRaises(steamworks.SteamworksError) as caught:
+            steamworks.find_library("auto")
+        self.assertNotIn("no library at auto", str(caught.exception))
+
+    def test_globs_reach_protons_lib64(self):
+        relative = "steamapps/common/Proton 9.0 (Beta)/files/lib64/libsteam_api.so"
+        import fnmatch
+        self.assertTrue(
+            any(fnmatch.fnmatch(relative, pattern)
+                for pattern in steamworks.LIBRARY_GLOBS),
+            "the search must reach the path layout Proton actually uses")
+
     def test_library_lookup_reports_a_missing_file(self):
         with self.assertRaises(steamworks.SteamworksError):
             steamworks.find_library("/nonexistent/libsteam_api.so")
 
-    def test_explicit_library_is_used_as_given(self):
+    def test_file_that_is_not_an_elf_object_is_taken_at_face_value(self):
+        # An unreadable header is not proof of the wrong architecture, so the
+        # explicit path is still honoured and the loader gets to complain.
         path = os.path.join(self.tmpdir, "libsteam_api.so")
         with open(path, "wb") as handle:
-            handle.write(b"\x7fELF not really")
+            handle.write(b"not an ELF file at all")
         self.assertEqual(steamworks.find_library(path), path)
 
     def test_library_globs_cover_the_usual_install_layouts(self):

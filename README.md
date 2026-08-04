@@ -310,7 +310,10 @@ Two consequences of how Steamworks works, worth knowing:
   picked up automatically.
 * `libsteam_api.so` belongs to the Steamworks SDK and ships inside games rather
   than being redistributable, so it is not vendored here. The watcher borrows
-  the copy from one of your installed games; `--steam-check` shows which one.
+  the copy from one of your installed games; `--steam-check` lists every copy it
+  found and which it picked. Architecture matters: Proton keeps a 32-bit copy in
+  `files/lib` next to the 64-bit one in `files/lib64`, and only the one matching
+  your Python will load. Set `STEAM_LIBRARY` to a path to override the choice.
 
 ### If that does not work on your machine
 

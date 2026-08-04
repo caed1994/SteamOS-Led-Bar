@@ -300,14 +300,26 @@ def run_probe(config, seconds=None):
 
 def run_steam_check(config):
     """Report what the Steamworks path can and cannot find on this machine."""
-    del config
     print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"))
 
+    bits = 64 if steamworks.WANTED_ELF_CLASS == steamworks.ELFCLASS64 else 32
+    print("This Python:       %d-bit, so it needs a %d-bit library" % (bits, bits))
+
+    candidates = steamworks.find_libraries()
+    if candidates:
+        print("libsteam_api.so candidates:")
+        for path in candidates:
+            found = steamworks.elf_class(path)
+            label = {steamworks.ELFCLASS32: "32-bit",
+                     steamworks.ELFCLASS64: "64-bit"}.get(found, "not an ELF file")
+            mark = "use " if found == steamworks.WANTED_ELF_CLASS else "skip"
+            print("  [%s] %-7s %s" % (mark, label, path))
+
     try:
-        library = steamworks.find_library()
-        print("libsteam_api.so:   %s" % library)
+        library = steamworks.find_library(config["STEAM_LIBRARY"])
+        print("chosen library:    %s" % library)
     except steamworks.SteamworksError as exc:
-        print("libsteam_api.so:   NOT FOUND (%s)" % exc)
+        print("chosen library:    NONE (%s)" % exc)
         library = None
 
     from_registry = steamworks._app_id_from_registry()
@@ -328,7 +340,7 @@ def run_steam_check(config):
 
     print()
     print("Initialising Steamworks as app %d ..." % app_id)
-    stats = steamworks.UserStats(app_id, library)
+    stats = steamworks.UserStats(app_id, library)  # already arch-checked
     try:
         stats.open()
     except steamworks.SteamworksError as exc:
@@ -381,7 +393,8 @@ def run_watch_achievements(config, interval=1.0):
                 current_app = app_id
                 if app_id:
                     try:
-                        stats = steamworks.UserStats(app_id)
+                        stats = steamworks.UserStats(
+                            app_id, config["STEAM_LIBRARY"])
                         stats.open()
                         watcher = steamworks.AchievementWatcher(stats)
                         LOG.info("attached to app %d", app_id)
@@ -588,6 +601,8 @@ def build_parser():
                         help="dots the patrol effect chases (default 1)")
     parser.add_argument("--notify-fifo", dest="notify_fifo", metavar="PATH",
                         help="named pipe that triggers notifications")
+    parser.add_argument("--steam-library", dest="steam_library", metavar="PATH",
+                        help="path to libsteam_api.so, or 'auto' to search")
     parser.add_argument("--fps", type=int, help="frame rate for animated effects")
     parser.add_argument("--idle-fps", dest="idle_fps", type=int,
                         help="heartbeat rate for static scenes")
@@ -652,6 +667,7 @@ def main(argv=None):
         "SPEED": args.speed,
         "PATROL_DOTS": args.patrol_dots,
         "NOTIFY_FIFO": args.notify_fifo,
+        "STEAM_LIBRARY": args.steam_library,
         "FPS": args.fps,
         "IDLE_FPS": args.idle_fps,
         "LOG_LEVEL": "debug" if args.verbose else args.log_level,

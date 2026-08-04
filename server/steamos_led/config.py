@@ -28,6 +28,7 @@ DEFAULTS = {
     "NOTIFY": True,
     "NOTIFY_DURATION": 3.5,
     "NOTIFY_FIFO": "/run/steamos-led-serial/notify",
+    "STEAM_LIBRARY": "auto",
     "FPS": 60,
     "IDLE_FPS": 4,
     "RECONNECT_DELAY": 2.0,
