@@ -243,8 +243,8 @@ takes one breath once it reaches both ends, and retracts back into the middle:
  0.29s |······+###+······|   growing outwards
  0.73s |··+###########+··|
  1.02s |#################|   fully out
- 1.46s |-----------------|   breathing down...
- 1.90s |#################|   ...and back up
+ 1.60s |-----------------|   breathing down to 8%...
+ 2.04s |#################|   ...and back up
  2.48s |··+###########+··|   retracting
  3.21s |·······+#+·······|
 ```

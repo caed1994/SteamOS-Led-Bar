@@ -189,10 +189,16 @@ class BloomShapeTest(unittest.TestCase):
         lit = lambda levels: sum(1 for level in levels if level > 0)
         self.assertGreater(lit(later), lit(early))
 
+    # Sampled relative to the phase boundaries, so tuning the timing does not
+    # break the tests that describe the shape.
+    JUST_OUT = notify.BLOOM_EXPANDED + 0.01
+    BREATH_LOW = (notify.BLOOM_EXPANDED + notify.BLOOM_RETRACT) / 2
+    BREATH_END = notify.BLOOM_RETRACT - 0.02
+
     def test_reaches_the_ends_at_full_brightness(self):
         # The travelling edge has to overshoot, or the outermost pair sits
         # exactly on the boundary and never lights.
-        levels = self._levels(0.31)
+        levels = self._levels(self.JUST_OUT)
         self.assertEqual(levels[0], levels[self.LEDS // 2])
         self.assertEqual(levels[-1], levels[self.LEDS // 2])
         self.assertGreater(levels[0], 240)
@@ -200,16 +206,16 @@ class BloomShapeTest(unittest.TestCase):
     def test_breathes_rather_than_blinking(self):
         # A hard off reads as a blink; the bar should look like it takes a
         # breath, so the dip stays visibly lit.
-        low = self._levels(0.45)
+        low = self._levels(self.BREATH_LOW)
         self.assertGreater(min(low), 0, "the breath must not switch off")
         self.assertLess(max(low), 80, "and it has to dip noticeably")
 
     def test_the_breath_dims_the_whole_bar_together(self):
-        low = self._levels(0.45)
+        low = self._levels(self.BREATH_LOW)
         self.assertEqual(len(set(low)), 1, "the dip should be even")
 
     def test_comes_back_up_after_the_breath(self):
-        self.assertGreater(max(self._levels(0.59)), 240)
+        self.assertGreater(max(self._levels(self.BREATH_END)), 240)
 
     def test_never_goes_fully_dark_in_the_middle_of_the_flash(self):
         for step in range(5, 95):

@@ -37,11 +37,11 @@ STYLES = (STYLE_BLOOM, STYLE_PULSE)
 
 # The bloom, as fractions of the notification's duration: grow out of the
 # middle, breathe once while fully out, then shrink back into the middle.
-BLOOM_EXPANDED = 0.30
-BLOOM_RETRACT = 0.60
+BLOOM_EXPANDED = 0.28
+BLOOM_RETRACT = 0.64
 # How far down the breath dips. Not to zero: a hard off reads as a blink, and
 # the point is that it should look like the bar is taking a breath.
-BLOOM_BREATH_FLOOR = 0.15
+BLOOM_BREATH_FLOOR = 0.08
 # How soft the travelling edge is, in units of the half-strip. Without it the
 # front is a hard step, which looks blocky on a short bar.
 BLOOM_FEATHER = 0.18
