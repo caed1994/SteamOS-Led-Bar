@@ -261,9 +261,6 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | ------ | ------- | ------- |
 | `NOTIFY` | `1` | enable the overlay at all |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
-| `NOTIFY_MESSAGES` | `1` | also flash on friend messages (needs a newer library) |
-| `NOTIFY_DBUS` | `1` | also flash on desktop notifications from the session bus |
-| `NOTIFY_DBUS_FILTER` | `steam` | only notifications from this application; empty means all |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 
 ### Flashing on a real achievement
@@ -322,50 +319,6 @@ Two consequences of how Steamworks works, worth knowing:
   found and which it picked. Architecture matters: Proton keeps a 32-bit copy in
   `files/lib` next to the 64-bit one in `files/lib64`, and only the one matching
   your Python will load. Set `STEAM_LIBRARY` to a path to override the choice.
-
-### Friend messages
-
-While a game is running, a message from a friend flashes the bar blue. It comes
-from the same watcher; nothing extra to install.
-
-Two honest limits:
-
-* **Only while a game is running.** Steamworks has to be attached to an app,
-  and attaching to one you are not playing would show you as playing it. Sitting
-  in the library with no game open, nothing flashes.
-* **Needs a libsteam_api.so from SDK 1.47 or newer.** An achievement is a
-  *state* that can be polled and compared; a message is an *event*, so it has to
-  be read out of Steam's callback queue, and the API for doing that without the
-  C++ headers only exists in newer libraries. Older copies - Proton ships one -
-  do achievements fine and simply skip messages, with the reason in the log.
-
-`--steam-check` ends with a line saying whether your library can do it. Typing
-indicators travel on the same callback and are filtered out, so the bar only
-flashes for an actual message. `NOTIFY_MESSAGES=0` turns the whole thing off.
-
-### Desktop notifications as a second source
-
-The bar also watches the session bus for desktop notifications, which is what
-the other LED project does. Its advantage is that it needs no game running;
-its catch is that it only sees anything if Steam posts to the desktop
-notification service at all, which is worth verifying on your machine:
-
-```bash
-dbus-monitor "interface='org.freedesktop.Notifications'"
-```
-
-Trigger a Steam notification and see whether anything scrolls past. Note that
-the other project subscribes to a *signal* named `Notify` — but `Notify` is a
-method call, and method calls are unicast, so a signal match never receives
-one. Measured on a private bus, that rule caught a hand-sent signal and zero
-method calls, while a monitor caught the call. This implementation therefore
-runs `dbus-monitor` (as a subprocess, so no dbus-python or PyGObject is
-needed) and reads its output.
-
-`NOTIFY_DBUS_FILTER` decides whose notifications count — `steam` by default,
-so a finished download in your browser does not light up the bar. Summaries
-containing "achievement" (in several languages) flash gold, everything else
-blue.
 
 ### If that does not work on your machine
 
