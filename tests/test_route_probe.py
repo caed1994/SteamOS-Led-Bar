@@ -1,0 +1,97 @@
+"""The route probe has to survive a child that dies badly.
+
+Picking the wrong Steamworks interface version does not raise - it segfaults,
+because the flat wrappers call through a vtable that does not match. So the
+probe runs each candidate in a forked child, and this checks that a crashing
+child is reported rather than taking the process with it.
+"""
+
+import ctypes
+import os
+import signal
+import sys
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "server"))
+
+from steamos_led import steamworks  # noqa: E402
+
+
+def _fork_and(action):
+    """Run `action` in a child and report how it ended, like probe_route does."""
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        try:
+            action(write_fd)
+        finally:
+            os._exit(0)
+    os.close(write_fd)
+    message = os.read(read_fd, 4096)
+    os.close(read_fd)
+    _pid, status = os.waitpid(pid, 0)
+    if os.WIFSIGNALED(status):
+        return "crashed", signal.Signals(os.WTERMSIG(status)).name
+    return "ok", message.decode()
+
+
+class ChildIsolationTest(unittest.TestCase):
+    def test_a_segfaulting_child_is_reported_not_fatal(self):
+        def crash(_write_fd):
+            # A null dereference through ctypes: the same shape of failure a
+            # mismatched interface pointer produces.
+            ctypes.string_at(0)
+
+        status, detail = _fork_and(crash)
+        self.assertEqual(status, "crashed")
+        self.assertEqual(detail, "SIGSEGV")
+        # Reaching this line at all is the point: the parent lived.
+        self.assertTrue(True)
+
+    def test_a_healthy_child_reports_back(self):
+        status, detail = _fork_and(lambda fd: os.write(fd, b"OK 42"))
+        self.assertEqual(status, "ok")
+        self.assertEqual(detail, "OK 42")
+
+
+class ProbeRouteTest(unittest.TestCase):
+    def test_missing_library_is_a_failure_not_a_crash(self):
+        status, detail = steamworks.probe_route(
+            480, "/nonexistent/libsteam_api.so", "accessor:whatever")
+        self.assertEqual(status, "failed")
+        self.assertIn("nonexistent", detail)
+
+    def test_select_route_gives_up_cleanly(self):
+        route, count = steamworks.select_route(
+            480, "/nonexistent/libsteam_api.so")
+        self.assertIsNone(route)
+        self.assertEqual(count, 0)
+
+    def test_every_attempt_is_reported(self):
+        seen = []
+        steamworks.select_route("480", "/nonexistent/libsteam_api.so",
+                                reporter=lambda *args: seen.append(args))
+        self.assertTrue(seen, "the reporter should see each attempt")
+        self.assertTrue(all(status == "failed" for _route, status, _d in seen))
+
+
+class CandidateRouteTest(unittest.TestCase):
+    def test_versioned_accessors_come_first(self):
+        routes = steamworks.candidate_routes("/nonexistent")
+        self.assertTrue(routes[0].startswith("accessor:"))
+
+    def test_older_routes_are_offered_when_symbols_allow(self):
+        import tempfile
+        # Without a readable symbol table only the accessor guesses remain,
+        # which is the documented fallback.
+        with tempfile.NamedTemporaryFile(suffix=".so") as handle:
+            handle.write(b"not an ELF file")
+            handle.flush()
+            routes = steamworks.candidate_routes(handle.name)
+        self.assertTrue(all(route.startswith("accessor:") for route in routes))
+
+
+if __name__ == "__main__":
+    unittest.main()

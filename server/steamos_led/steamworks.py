@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import sys
+import time
 
 from . import elf
 
@@ -224,10 +225,13 @@ def running_app_id():
 class UserStats:
     """A thin ctypes wrapper around ISteamUserStats for one app."""
 
-    def __init__(self, app_id, library=None):
+    def __init__(self, app_id, library=None, route=None):
         self.app_id = int(app_id)
         self.library_path = find_library(library)
-        self.route = None       # which of the SDK routes actually worked
+        # A route pins one way in: "accessor:NAME", "userinterface:VERSION" or
+        # "client:VERSION". None means try them all.
+        self.wanted_route = route if route and route != "auto" else None
+        self.route = None
         self._lib = None
         self._iface = None
 
@@ -299,6 +303,13 @@ class UserStats:
         symbols = self._symbols()
         self.route = None
 
+        if self.wanted_route:
+            iface = self._try_route(lib, self.wanted_route)
+            if iface:
+                return iface
+            raise SteamworksError("route %s did not resolve ISteamUserStats"
+                                  % self.wanted_route)
+
         names = user_stats_accessors(symbols) or [
             name for name in USER_STATS_ACCESSORS if hasattr(lib, name)]
         for name in names:
@@ -326,7 +337,29 @@ class UserStats:
             % (self.library_path,
                ", ".join(interesting_symbols(symbols)) or "none"))
 
-    def _via_user_interface(self, lib, symbols):
+    def _try_route(self, lib, route):
+        """Take exactly one documented way in, no fallbacks."""
+        kind, _, detail = route.partition(":")
+        if kind == "accessor":
+            if not hasattr(lib, detail):
+                return None
+            accessor = getattr(lib, detail)
+            accessor.restype = ctypes.c_void_p
+            accessor.argtypes = []
+            iface = accessor()
+            if iface:
+                self.route = route
+                return _as_pointer(iface)
+            return None
+        if kind == "userinterface":
+            return self._via_user_interface(lib, self._symbols(),
+                                            versions=(detail,), route=route)
+        if kind == "client":
+            return self._via_steam_client(lib, self._symbols(),
+                                          versions=(detail,), route=route)
+        raise SteamworksError("unknown route %r" % route)
+
+    def _via_user_interface(self, lib, symbols, versions=None, route=None):
         name = "SteamInternal_FindOrCreateUserInterface"
         if name not in symbols and not hasattr(lib, name):
             return None
@@ -342,14 +375,14 @@ class UserStats:
         create.argtypes = [ctypes.c_int32, ctypes.c_char_p]
 
         user = get_user()
-        for version in USER_STATS_INTERFACES:
+        for version in (versions or USER_STATS_INTERFACES):
             iface = create(user, version.encode("ascii"))
             if iface:
-                self.route = "%s(%s)" % (name, version)
+                self.route = route or ("userinterface:%s" % version)
                 return _as_pointer(iface)
         return None
 
-    def _via_steam_client(self, lib, symbols):
+    def _via_steam_client(self, lib, symbols, versions=None, route=None):
         getter = "SteamAPI_ISteamClient_GetISteamUserStats"
         if getter not in symbols and not hasattr(lib, getter):
             return None
@@ -386,11 +419,11 @@ class UserStats:
         get_stats.restype = ctypes.c_void_p
         get_stats.argtypes = [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32,
                               ctypes.c_char_p]
-        for version in USER_STATS_INTERFACES:
+        for version in (versions or USER_STATS_INTERFACES):
             iface = get_stats(ctypes.c_void_p(client), user, pipe,
                               version.encode("ascii"))
             if iface:
-                self.route = "%s(%s)" % (getter, version)
+                self.route = route or ("client:%s" % version)
                 return _as_pointer(iface)
         return None
 
@@ -489,3 +522,103 @@ class AchievementWatcher:
                  if unlocked and not self.previous.get(name, False)]
         self.previous = current
         return fresh
+
+
+# -- picking a route safely -------------------------------------------------
+#
+# The flat SteamAPI_ISteamUserStats_* wrappers in a library are compiled
+# against one specific interface version. Fetching a different version through
+# the older routes hands back a pointer whose vtable does not match, and
+# calling through it does not fail - it segfaults. Which version a given
+# libsteam_api.so expects is not discoverable from the outside, so each
+# candidate is tried in a child process: a crash costs one fork instead of the
+# whole program, and the survivor is the answer.
+
+
+def candidate_routes(library):
+    """Every way into ISteamUserStats worth trying, most likely first."""
+    try:
+        symbols = elf.exported_symbols(library)
+    except (OSError, elf.ElfError):
+        symbols = set()
+
+    routes = ["accessor:%s" % name for name in user_stats_accessors(symbols)]
+    if "SteamInternal_FindOrCreateUserInterface" in symbols:
+        routes += ["userinterface:%s" % version
+                   for version in USER_STATS_INTERFACES]
+    if "SteamAPI_ISteamClient_GetISteamUserStats" in symbols:
+        routes += ["client:%s" % version for version in USER_STATS_INTERFACES]
+    if not routes:
+        routes = ["accessor:%s" % name for name in USER_STATS_ACCESSORS]
+    return routes
+
+
+def _probe_in_child(app_id, library, route, write_fd):
+    """Runs in the forked child; must never return."""
+    try:
+        stats = UserStats(app_id, library, route=route)
+        stats.open()
+        count = len(stats.achievements())
+        os.write(write_fd, b"OK %d" % count)
+    except BaseException as exc:                    # noqa: BLE001 - report all
+        os.write(write_fd, ("ERR %s" % exc).encode("utf-8", "replace")[:400])
+    finally:
+        # _exit, not exit: no atexit handlers, no flushing the parent's buffers.
+        os._exit(0)
+
+
+def probe_route(app_id, library, route, timeout=15.0):
+    """Try one route in a child process.
+
+    Returns (status, detail) where status is "ok", "failed" or "crashed".
+    """
+    import select as _select
+    import signal as _signal
+
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        _probe_in_child(app_id, library, route, write_fd)
+
+    os.close(write_fd)
+    message = b""
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                os.kill(pid, _signal.SIGKILL)
+                break
+            readable, _, _ = _select.select([read_fd], [], [], remaining)
+            if not readable:
+                continue
+            chunk = os.read(read_fd, 4096)
+            if not chunk:
+                break
+            message += chunk
+    finally:
+        os.close(read_fd)
+
+    _pid, status = os.waitpid(pid, 0)
+
+    if os.WIFSIGNALED(status):
+        number = os.WTERMSIG(status)
+        name = _signal.Signals(number).name if number in iter(_signal.Signals) \
+            else str(number)
+        return "crashed", name
+    text = message.decode("utf-8", "replace")
+    if text.startswith("OK "):
+        return "ok", text[3:].strip()
+    return "failed", text[4:].strip() if text.startswith("ERR ") else "no answer"
+
+
+def select_route(app_id, library, reporter=None):
+    """Find a route that survives being used. Returns (route, achievements)."""
+    for route in candidate_routes(library):
+        status, detail = probe_route(app_id, library, route)
+        if reporter is not None:
+            reporter(route, status, detail)
+        if status == "ok":
+            return route, int(detail or 0)
+    return None, 0

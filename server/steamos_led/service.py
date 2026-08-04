@@ -300,7 +300,8 @@ def run_probe(config, seconds=None):
 
 def run_steam_check(config):
     """Report what the Steamworks path can and cannot find on this machine."""
-    print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"))
+    print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"),
+          flush=True)
 
     bits = 64 if steamworks.WANTED_ELF_CLASS == steamworks.ELFCLASS64 else 32
     print("This Python:       %d-bit, so it needs a %d-bit library" % (bits, bits))
@@ -317,7 +318,7 @@ def run_steam_check(config):
 
     try:
         library = steamworks.find_library(config["STEAM_LIBRARY"])
-        print("chosen library:    %s" % library)
+        print("chosen library:    %s" % library, flush=True)
     except steamworks.SteamworksError as exc:
         print("chosen library:    NONE (%s)" % exc)
         library = None
@@ -352,34 +353,48 @@ def run_steam_check(config):
         print("Start a game and run this again.")
         return 1
 
-    print()
-    print("Initialising Steamworks as app %d ..." % app_id)
-    # Steam's library writes to the terminal from C, unbuffered; flush first so
-    # the two streams do not interleave confusingly.
-    sys.stdout.flush()
-    stats = steamworks.UserStats(app_id, library)  # already arch-checked
-    try:
-        stats.open()
-    except steamworks.SteamworksError as exc:
-        print("  FAILED: %s" % exc)
+    print(flush=True)
+    print("Trying each way into ISteamUserStats as app %d." % app_id)
+    print("Each one runs in a child process, so a crash costs a fork and not")
+    print("the diagnosis - the flat wrappers are built against one interface")
+    print("version, and the wrong one segfaults rather than failing politely.")
+    print(flush=True)
+
+    def report(route, status, detail):
+        mark = {"ok": "WORKS ", "crashed": "CRASH ", "failed": "no    "}[status]
+        print("  [%s] %-52s %s" % (mark, route, detail), flush=True)
+
+    route, count = steamworks.select_route(app_id, library, reporter=report)
+    print(flush=True)
+
+    if route is None:
+        print("No route worked. Please report the list above.")
         return 1
 
+    print("Working route: %s (%d achievements)" % (route, count))
+
+    stats = steamworks.UserStats(app_id, library, route=route)
+    sys.stdout.flush()
     try:
-        print("  reached ISteamUserStats via %s" % stats.route)
+        stats.open()
         achievements = stats.achievements()
         unlocked = sum(1 for value in achievements.values() if value)
-        print("  OK - %d achievements, %d unlocked" % (len(achievements), unlocked))
+        print("%d achievements, %d unlocked" % (len(achievements), unlocked))
         for name, is_unlocked in sorted(achievements.items())[:5]:
-            print("    [%s] %s" % ("x" if is_unlocked else " ",
-                                   stats.display_name(name)))
+            print("  [%s] %s" % ("x" if is_unlocked else " ",
+                                 stats.display_name(name)))
         if len(achievements) > 5:
-            print("    ... and %d more" % (len(achievements) - 5))
+            print("  ... and %d more" % (len(achievements) - 5))
+    except steamworks.SteamworksError as exc:
+        print("Re-opening the working route failed: %s" % exc)
+        return 1
     finally:
         stats.close()
 
     print()
-    print("This machine can do realtime detection: steamos-led-serial "
-          "--watch-achievements")
+    print("Realtime detection works here: steamos-led-serial --watch-achievements")
+    print("To skip the search next time, put this in the config:")
+    print("  STEAM_ROUTE=%s" % route)
     return 0
 
 
@@ -411,8 +426,21 @@ def run_watch_achievements(config, interval=1.0):
                 current_app = app_id
                 if app_id:
                     try:
-                        stats = steamworks.UserStats(
-                            app_id, config["STEAM_LIBRARY"])
+                        route = config["STEAM_ROUTE"]
+                        library = steamworks.find_library(
+                            config["STEAM_LIBRARY"])
+                        if not route or route == "auto":
+                            # Probe in child processes first: picking the wrong
+                            # interface version would take the watcher down
+                            # with a segfault rather than an exception.
+                            route, _count = steamworks.select_route(
+                                app_id, library)
+                            if route is None:
+                                raise steamworks.SteamworksError(
+                                    "no working route for app %d - run "
+                                    "--steam-check for details" % app_id)
+                            LOG.info("using route %s", route)
+                        stats = steamworks.UserStats(app_id, library, route=route)
                         stats.open()
                         watcher = steamworks.AchievementWatcher(stats)
                         LOG.info("attached to app %d", app_id)
