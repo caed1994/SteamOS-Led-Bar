@@ -3,16 +3,15 @@
 # logged-in user, so this has to live in that session. The LED service itself
 # stays sandboxed as root and only receives trigger words through its FIFO.
 #
-# Install:
-#   mkdir -p ~/.config/systemd/user
-#   cp steamos-led-achievements.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now steamos-led-achievements
-#
-# Log:  journalctl --user -u steamos-led-achievements -f
+# install.sh puts this in place for you. Log:
+#   journalctl --user -u steamos-led-achievements -f
 Description=Flash the LED bar when a Steam achievement unlocks
+# Ordering only. Deliberately NOT PartOf=graphical-session.target: that would
+# stop the watcher whenever the desktop session goes away, which is exactly
+# what switching to Game Mode does - and Game Mode does not bring that target
+# back, so nothing would restart it. This should live as long as the login
+# does, across both modes.
 After=graphical-session.target
-PartOf=graphical-session.target
 
 [Service]
 Type=simple
