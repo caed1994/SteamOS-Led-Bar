@@ -36,41 +36,48 @@ STYLE_PULSE = "pulse"
 STYLES = (STYLE_BLOOM, STYLE_PULSE)
 
 # The bloom, as fractions of the notification's duration: grow out of the
-# middle, hold, blink once, then shrink back into the middle.
+# middle, breathe once while fully out, then shrink back into the middle.
 BLOOM_EXPANDED = 0.30
-BLOOM_DARK = 0.40
-BLOOM_RELIT = 0.50
 BLOOM_RETRACT = 0.60
+# How far down the breath dips. Not to zero: a hard off reads as a blink, and
+# the point is that it should look like the bar is taking a breath.
+BLOOM_BREATH_FLOOR = 0.15
 # How soft the travelling edge is, in units of the half-strip. Without it the
 # front is a hard step, which looks blocky on a short bar.
 BLOOM_FEATHER = 0.18
+
+
+def _breath(progress):
+    """One smooth inhale and exhale across the middle phase, 0..1."""
+    span = BLOOM_RETRACT - BLOOM_EXPANDED
+    position = (progress - BLOOM_EXPANDED) / span
+    # cos goes 1 -> -1 -> 1, so this dips to the floor and comes back without
+    # ever switching off.
+    swell = (1.0 + math.cos(2.0 * math.pi * position)) * 0.5
+    return BLOOM_BREATH_FLOOR + (1.0 - BLOOM_BREATH_FLOOR) * swell
 
 
 def bloom_levels(progress, led_count):
     """Per-LED brightness for the bloom, 0..1, at a point in the flash."""
     if led_count < 1:
         return []
-    if led_count == 1:
-        # Nothing to travel across; fall back to on/off with the same timing.
-        lit = 0.0 if BLOOM_DARK <= progress < BLOOM_RELIT else 1.0
-        if progress >= BLOOM_RETRACT:
-            lit = 1.0 - (progress - BLOOM_RETRACT) / (1.0 - BLOOM_RETRACT)
-        return [max(0.0, min(lit, 1.0))]
 
     # The front has to travel one feather past the last LED, otherwise the
     # outermost pair sits exactly on the edge and never lights at all.
     full = 1.0 + BLOOM_FEATHER
+    brightness = 1.0
 
     if progress < BLOOM_EXPANDED:
         radius = full * progress / BLOOM_EXPANDED    # growing out of the middle
-    elif progress < BLOOM_DARK:
-        radius = full                                # fully out, held
-    elif progress < BLOOM_RELIT:
-        return [0.0] * led_count                     # the single blink
     elif progress < BLOOM_RETRACT:
-        radius = full                                # lit again
+        radius = full                                # fully out, breathing
+        brightness = _breath(progress)
     else:
         radius = full * (1.0 - (progress - BLOOM_RETRACT) / (1.0 - BLOOM_RETRACT))
+
+    if led_count == 1:
+        # Nothing to travel across, but the timing should still match.
+        return [max(0.0, min(radius / full * brightness, 1.0))]
 
     centre = (led_count - 1) / 2.0
     levels = []
@@ -78,7 +85,7 @@ def bloom_levels(progress, led_count):
         # 0 at the middle, 1 at either end.
         distance = abs(index - centre) / centre
         level = (radius - distance) / BLOOM_FEATHER
-        levels.append(max(0.0, min(level, 1.0)))
+        levels.append(max(0.0, min(level, 1.0)) * brightness)
     return levels
 
 

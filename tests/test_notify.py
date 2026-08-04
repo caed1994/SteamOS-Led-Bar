@@ -192,16 +192,29 @@ class BloomShapeTest(unittest.TestCase):
     def test_reaches_the_ends_at_full_brightness(self):
         # The travelling edge has to overshoot, or the outermost pair sits
         # exactly on the boundary and never lights.
-        levels = self._levels(0.35)
+        levels = self._levels(0.31)
         self.assertEqual(levels[0], levels[self.LEDS // 2])
         self.assertEqual(levels[-1], levels[self.LEDS // 2])
-        self.assertGreater(levels[0], 200)
+        self.assertGreater(levels[0], 240)
 
-    def test_blinks_once_while_fully_out(self):
-        self.assertEqual(self._levels(0.45), [0] * self.LEDS)
+    def test_breathes_rather_than_blinking(self):
+        # A hard off reads as a blink; the bar should look like it takes a
+        # breath, so the dip stays visibly lit.
+        low = self._levels(0.45)
+        self.assertGreater(min(low), 0, "the breath must not switch off")
+        self.assertLess(max(low), 80, "and it has to dip noticeably")
 
-    def test_lights_up_again_after_the_blink(self):
-        self.assertGreater(min(self._levels(0.55)), 200)
+    def test_the_breath_dims_the_whole_bar_together(self):
+        low = self._levels(0.45)
+        self.assertEqual(len(set(low)), 1, "the dip should be even")
+
+    def test_comes_back_up_after_the_breath(self):
+        self.assertGreater(max(self._levels(0.59)), 240)
+
+    def test_never_goes_fully_dark_in_the_middle_of_the_flash(self):
+        for step in range(5, 95):
+            levels = self._levels(step / 100.0)
+            self.assertGreater(max(levels), 0, "dark at %.2f" % (step / 100.0))
 
     def test_retracts_towards_the_middle(self):
         late = self._levels(0.85)

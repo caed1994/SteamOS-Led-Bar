@@ -236,18 +236,20 @@ the module at its word, set `PATROL_DOTS=3`.
 
 A notification takes over the whole bar for a few seconds and then hands it
 straight back to whatever Steam was showing. The flash grows out of the middle,
-blinks once when it reaches both ends, and retracts back into the middle:
+takes one breath once it reaches both ends, and retracts back into the middle:
 
 ```
  0.00s |·················|
- 0.25s |······+###+······|
- 0.50s |····+#######+····|
- 1.00s |#################|
- 1.50s |·················|   <- the blink
- 1.75s |#################|
- 2.50s |··+###########+··|
- 3.25s |·······+#+·······|
+ 0.29s |······+###+······|   growing outwards
+ 0.73s |··+###########+··|
+ 1.02s |#################|   fully out
+ 1.46s |-----------------|   breathing down...
+ 1.90s |#################|   ...and back up
+ 2.48s |··+###########+··|   retracting
+ 3.21s |·······+#+·······|
 ```
+
+The dip is a fade, not a blink — it never switches off.
 
 Gold for an achievement, blue for a message. Try it right now, with the
 service running:
