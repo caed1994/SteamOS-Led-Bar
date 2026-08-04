@@ -12,7 +12,7 @@ import sys
 import time
 
 from . import config as config_module
-from . import elf, notify, render, serialport, shim, steamworks
+from . import dbusnotify, elf, notify, render, serialport, shim, steamworks
 from .link import EspLink
 
 LOG = logging.getLogger("steamos-led")
@@ -402,6 +402,24 @@ def run_steam_check(config):
     return 0
 
 
+def _open_dbus_watcher(config):
+    """Watch desktop notifications, independent of any game being open.
+
+    This is the route the other LED project takes, and it covers the gap the
+    Steamworks one cannot: it keeps working when no game is running, because
+    it never attaches to an app.
+    """
+    if not config["NOTIFY_DBUS"]:
+        return None
+    watcher = dbusnotify.DbusNotificationWatcher(config["NOTIFY_DBUS_FILTER"])
+    try:
+        watcher.open()
+    except Exception as exc:                          # noqa: BLE001
+        LOG.warning("desktop notifications unavailable: %s", exc)
+        return None
+    return watcher
+
+
 def _open_message_watcher(config, stats):
     """Attach friend-message watching, or return None and carry on without it.
 
@@ -438,6 +456,7 @@ def run_watch_achievements(config, interval=1.0):
     messages = None
     current_app = None
     stats = None
+    desktop = _open_dbus_watcher(config)
 
     print("Watching for achievements; flashes go to %s" % fifo)
     print("Press Ctrl-C to stop.")
@@ -513,12 +532,26 @@ def run_watch_achievements(config, interval=1.0):
                     messages.close()
                     messages = None
 
+            if desktop is not None:
+                try:
+                    for kind in desktop.poll():
+                        try:
+                            notify.send(fifo, kind)
+                        except OSError as exc:
+                            LOG.warning("could not flash the bar: %s", exc)
+                except Exception as exc:              # noqa: BLE001
+                    LOG.warning("desktop notifications failed, disabling: %s", exc)
+                    desktop.close()
+                    desktop = None
+
             time.sleep(interval)
     except KeyboardInterrupt:
         pass
     finally:
         if stats is not None:
             stats.close()
+        if desktop is not None:
+            desktop.close()
     return 0
 
 

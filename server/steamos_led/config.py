@@ -31,6 +31,8 @@ DEFAULTS = {
     "STEAM_LIBRARY": "auto",
     "STEAM_ROUTE": "auto",
     "NOTIFY_MESSAGES": True,
+    "NOTIFY_DBUS": True,
+    "NOTIFY_DBUS_FILTER": "steam",
     "FPS": 60,
     "IDLE_FPS": 4,
     "RECONNECT_DELAY": 2.0,
