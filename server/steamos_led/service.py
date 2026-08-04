@@ -12,7 +12,7 @@ import sys
 import time
 
 from . import config as config_module
-from . import notify, render, serialport, shim, steamworks
+from . import elf, notify, render, serialport, shim, steamworks
 from .link import EspLink
 
 LOG = logging.getLogger("steamos-led")
@@ -322,6 +322,20 @@ def run_steam_check(config):
         print("chosen library:    NONE (%s)" % exc)
         library = None
 
+    if library:
+        # Which route into ISteamUserStats this library offers is the thing
+        # most likely to differ between SDK generations, so show it up front.
+        try:
+            symbols = elf.exported_symbols(library)
+        except (OSError, elf.ElfError) as exc:
+            print("symbols:           unreadable (%s)" % exc)
+        else:
+            relevant = steamworks.interesting_symbols(symbols)
+            print("symbols:           %d exported, %d relevant"
+                  % (len(symbols), len(relevant)))
+            for symbol in relevant:
+                print("  %s" % symbol)
+
     from_registry = steamworks._app_id_from_registry()
     from_processes = steamworks._app_id_from_processes()
     print("running app (registry.vdf): %s" % (from_registry or "none"))
@@ -348,6 +362,7 @@ def run_steam_check(config):
         return 1
 
     try:
+        print("  reached ISteamUserStats via %s" % stats.route)
         achievements = stats.achievements()
         unlocked = sum(1 for value in achievements.values() if value)
         print("  OK - %d achievements, %d unlocked" % (len(achievements), unlocked))

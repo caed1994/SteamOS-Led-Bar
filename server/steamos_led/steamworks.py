@@ -20,6 +20,8 @@ import os
 import re
 import sys
 
+from . import elf
+
 LOG = logging.getLogger(__name__)
 
 STEAM_ROOTS = (
@@ -29,11 +31,40 @@ STEAM_ROOTS = (
     "/home/deck/.local/share/Steam",
 )
 
-# The versioned accessor changes with the SDK the library was built from, so
-# try the known ones newest first.
+# The versioned accessor changes with the SDK a library was built from, so the
+# exported symbols are read rather than guessed. These are only the fallback
+# order for libraries whose symbol table cannot be parsed.
 USER_STATS_ACCESSORS = tuple(
     "SteamAPI_SteamUserStats_v%03d" % version for version in (13, 12, 11, 10)
 )
+
+# Interface version strings for the older routes, which take them as text.
+USER_STATS_INTERFACES = tuple(
+    "STEAMUSERSTATS_INTERFACE_VERSION%03d" % version
+    for version in (13, 12, 11, 10, 9, 8, 7)
+)
+
+_ACCESSOR_RE = re.compile(r"^SteamAPI_SteamUserStats_v(\d+)$")
+
+
+def user_stats_accessors(symbols):
+    """Versioned ISteamUserStats accessors a library exports, newest first."""
+    found = []
+    for symbol in symbols:
+        match = _ACCESSOR_RE.match(symbol)
+        if match:
+            found.append((int(match.group(1)), symbol))
+    return [name for _version, name in sorted(found, reverse=True)]
+
+
+def interesting_symbols(symbols):
+    """The subset worth showing when a library will not cooperate."""
+    return sorted(
+        symbol for symbol in symbols
+        if ("UserStats" in symbol or "SteamClient" in symbol
+            or "FindOrCreate" in symbol or "GetHSteam" in symbol
+            or symbol.startswith("SteamAPI_Init"))
+    )
 
 LIBRARY_GLOBS = (
     "steamapps/common/*/libsteam_api.so",
@@ -184,6 +215,7 @@ class UserStats:
     def __init__(self, app_id, library=None):
         self.app_id = int(app_id)
         self.library_path = find_library(library)
+        self.route = None       # which of the SDK routes actually worked
         self._lib = None
         self._iface = None
 
@@ -223,22 +255,11 @@ class UserStats:
                 "SteamAPI_Init failed for app %d%s - is Steam running, and do "
                 "you own this app?" % (self.app_id, ": " + detail if detail else ""))
 
-        accessor = None
-        for name in USER_STATS_ACCESSORS:
-            if hasattr(lib, name):
-                accessor = getattr(lib, name)
-                break
-        if accessor is None:
+        try:
+            iface = self._resolve_user_stats(lib)
+        except SteamworksError:
             self._shutdown(lib)
-            raise SteamworksError("%s exports no ISteamUserStats accessor"
-                                  % self.library_path)
-
-        accessor.restype = ctypes.c_void_p
-        accessor.argtypes = []
-        iface = accessor()
-        if not iface:
-            self._shutdown(lib)
-            raise SteamworksError("Steam returned no ISteamUserStats interface")
+            raise
 
         self._bind(lib)
         self._lib = lib
@@ -247,6 +268,119 @@ class UserStats:
         if not self._request_stats(self._iface):
             LOG.warning("RequestCurrentStats returned false; stats may be stale")
         self.run_callbacks()
+
+    def _symbols(self):
+        try:
+            return elf.exported_symbols(self.library_path)
+        except (OSError, elf.ElfError) as exc:
+            LOG.debug("cannot read symbols from %s: %s", self.library_path, exc)
+            return set()
+
+    def _resolve_user_stats(self, lib):
+        """Get an ISteamUserStats pointer, whichever route this library offers.
+
+        Three of them exist across SDK generations: the versioned flat
+        accessor, SteamInternal_FindOrCreateUserInterface, and going through
+        ISteamClient. Proton ships an older library than a current SDK, so the
+        first one is not always there.
+        """
+        symbols = self._symbols()
+        self.route = None
+
+        names = user_stats_accessors(symbols) or [
+            name for name in USER_STATS_ACCESSORS if hasattr(lib, name)]
+        for name in names:
+            if not hasattr(lib, name):
+                continue
+            accessor = getattr(lib, name)
+            accessor.restype = ctypes.c_void_p
+            accessor.argtypes = []
+            iface = accessor()
+            if iface:
+                self.route = name
+                return ctypes.c_void_p(iface)
+
+        iface = self._via_user_interface(lib, symbols)
+        if iface:
+            return iface
+
+        iface = self._via_steam_client(lib, symbols)
+        if iface:
+            return iface
+
+        raise SteamworksError(
+            "%s offers no way to reach ISteamUserStats. Exported symbols that "
+            "looked relevant: %s"
+            % (self.library_path,
+               ", ".join(interesting_symbols(symbols)) or "none"))
+
+    def _via_user_interface(self, lib, symbols):
+        name = "SteamInternal_FindOrCreateUserInterface"
+        if name not in symbols and not hasattr(lib, name):
+            return None
+        if not hasattr(lib, "SteamAPI_GetHSteamUser"):
+            return None
+
+        get_user = lib.SteamAPI_GetHSteamUser
+        get_user.restype = ctypes.c_int32
+        get_user.argtypes = []
+
+        create = getattr(lib, name)
+        create.restype = ctypes.c_void_p
+        create.argtypes = [ctypes.c_int32, ctypes.c_char_p]
+
+        user = get_user()
+        for version in USER_STATS_INTERFACES:
+            iface = create(user, version.encode("ascii"))
+            if iface:
+                self.route = "%s(%s)" % (name, version)
+                return ctypes.c_void_p(iface)
+        return None
+
+    def _via_steam_client(self, lib, symbols):
+        getter = "SteamAPI_ISteamClient_GetISteamUserStats"
+        if getter not in symbols and not hasattr(lib, getter):
+            return None
+
+        client = None
+        client_names = sorted(
+            (symbol for symbol in symbols
+             if re.match(r"^SteamAPI_SteamClient_v\d+$", symbol)),
+            reverse=True)
+        for candidate in client_names + ["SteamClient"]:
+            if not hasattr(lib, candidate):
+                continue
+            accessor = getattr(lib, candidate)
+            accessor.restype = ctypes.c_void_p
+            accessor.argtypes = []
+            client = accessor()
+            if client:
+                break
+        if not client:
+            return None
+
+        for name, restype in (("SteamAPI_GetHSteamUser", ctypes.c_int32),
+                              ("SteamAPI_GetHSteamPipe", ctypes.c_int32)):
+            if not hasattr(lib, name):
+                return None
+            function = getattr(lib, name)
+            function.restype = restype
+            function.argtypes = []
+
+        user = lib.SteamAPI_GetHSteamUser()
+        pipe = lib.SteamAPI_GetHSteamPipe()
+
+        get_stats = getattr(lib, getter)
+        get_stats.restype = ctypes.c_void_p
+        get_stats.argtypes = [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32,
+                              ctypes.c_char_p]
+        for version in USER_STATS_INTERFACES:
+            iface = get_stats(ctypes.c_void_p(client), user, pipe,
+                              version.encode("ascii"))
+            if iface:
+                self.route = "%s(%s)" % (getter, version)
+                return ctypes.c_void_p(iface)
+        return None
 
     @staticmethod
     def _shutdown(lib):
