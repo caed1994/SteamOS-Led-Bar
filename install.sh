@@ -23,6 +23,7 @@ BAUD=""
 ASSUME_YES=0
 SKIP_MODULE=0
 REBUILD_MODULE=0
+SKIP_WATCHER=0
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warning:\033[0m %s\n' "$*" >&2; }
@@ -38,6 +39,7 @@ Options:
   --baud RATE     serial baud rate (default: 230400)
   --skip-module   do not touch the leds-valve-shim kernel module
   --rebuild-module  rebuild and reinstall the module even if it is loaded
+  --skip-watcher  do not install the achievement watcher user service
   -y, --yes       accept defaults, no prompts
   -h, --help      this text
 EOF
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
         --baud) BAUD="${2:-}"; shift 2 ;;
         --skip-module) SKIP_MODULE=1; shift ;;
         --rebuild-module) REBUILD_MODULE=1; shift ;;
+        --skip-watcher) SKIP_WATCHER=1; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
@@ -196,6 +199,66 @@ fi
 
 # --- enable ----------------------------------------------------------------
 
+# --- achievement watcher (a user service) ----------------------------------
+
+install_achievement_watcher() {
+    local unit="steamos-led-achievements.service"
+    local source="$SOURCE_DIR/server/$unit"
+
+    if [[ $SKIP_WATCHER -eq 1 ]]; then
+        say "Skipping the achievement watcher (--skip-watcher)"
+        return 0
+    fi
+    [[ -f "$source" ]] || { warn "$unit not found in the repository"; return 1; }
+
+    # It has to run in the desktop session: Steamworks talks to the Steam
+    # client of the logged-in user, and this script runs as root.
+    local user="${SUDO_USER:-}"
+    if [[ -z "$user" || "$user" == "root" ]]; then
+        warn "cannot tell which desktop user to install the watcher for."
+        warn "Run the installer with sudo from your normal account, or see the"
+        warn "README for the three manual commands."
+        return 1
+    fi
+
+    local home
+    home="$(getent passwd "$user" | cut -d: -f6)"
+    [[ -n "$home" && -d "$home" ]] || { warn "no home directory for $user"; return 1; }
+
+    local dir="$home/.config/systemd/user"
+    local wants="$dir/default.target.wants"
+
+    say "Installing the achievement watcher for $user"
+    # Create the directories as the user: "install -d" would leave any missing
+    # parent (~/.config on a fresh account) owned by root, which quietly breaks
+    # everything else that writes there.
+    runuser -u "$user" -- mkdir -p "$wants" \
+        || { warn "cannot create $wants"; return 1; }
+    install -o "$user" -g "$user" -m 0644 "$source" "$dir/$unit"
+
+    # Enable by writing the symlink systemctl would create. Doing it directly
+    # avoids needing the user's session bus, which root cannot reach reliably.
+    ln -sfn "../$unit" "$wants/$unit"
+    chown -h "$user:$user" "$wants/$unit"
+
+    # If the user has a live session, pick it up now instead of at next login.
+    local runtime="/run/user/$(id -u "$user")"
+    if [[ -d "$runtime" ]]; then
+        runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
+            systemctl --user daemon-reload >/dev/null 2>&1 || true
+        if runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
+                systemctl --user restart "$unit" >/dev/null 2>&1; then
+            say "Watcher running now"
+            return 0
+        fi
+    fi
+    say "Watcher enabled; it starts with your next login"
+    return 0
+}
+
+WATCHER_OK=1
+install_achievement_watcher || WATCHER_OK=0
+
 say "Enabling steamos-led-serial.service"
 systemctl daemon-reload
 systemctl enable --now steamos-led-serial.service
@@ -214,6 +277,10 @@ Done.
   Config:   $CONFIG_PATH
   Logs:     journalctl -u steamos-led-serial -f
   Restart:  sudo systemctl restart steamos-led-serial
+
+Achievement flashes: $(if [[ $SKIP_WATCHER -eq 1 ]]; then echo "skipped (--skip-watcher)"; elif [[ $WATCHER_OK -eq 1 ]]; then echo "watcher installed for ${SUDO_USER:-?}"; else echo "NOT installed, see README"; fi)
+  Check:    $INSTALL_DIR/steamos-led-serial --steam-check   (with a game running)
+  Log:      journalctl --user -u steamos-led-achievements -f
 
 Test the strip without Steam (stop the service first so the port is free):
 

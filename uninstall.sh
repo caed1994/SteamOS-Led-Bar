@@ -29,6 +29,35 @@ done
 
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo ./uninstall.sh" >&2; exit 1; }
 
+# --- achievement watcher (a user service) ----------------------------------
+
+remove_achievement_watcher() {
+    local unit="steamos-led-achievements.service"
+    local user="${SUDO_USER:-}"
+    [[ -n "$user" && "$user" != "root" ]] || return 0
+
+    local home
+    home="$(getent passwd "$user" | cut -d: -f6)"
+    [[ -n "$home" ]] || return 0
+
+    local dir="$home/.config/systemd/user"
+    [[ -f "$dir/$unit" ]] || return 0
+
+    local runtime="/run/user/$(id -u "$user")"
+    if [[ -d "$runtime" ]]; then
+        runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
+            systemctl --user stop "$unit" >/dev/null 2>&1 || true
+    fi
+    rm -f "$dir/$unit" "$dir/default.target.wants/$unit"
+    if [[ -d "$runtime" ]]; then
+        runuser -u "$user" -- env "XDG_RUNTIME_DIR=$runtime" \
+            systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+    echo "Removed the achievement watcher for $user."
+}
+
+remove_achievement_watcher
+
 # Stopping the service blanks the strip before the process exits.
 systemctl disable --now steamos-led-serial.service 2>/dev/null || true
 rm -f "$UNIT_PATH"

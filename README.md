@@ -286,14 +286,19 @@ line says realtime detection works, start the watcher:
 /var/lib/steamos-led-serial/steamos-led-serial --watch-achievements
 ```
 
-Unlock something, and the bar flashes gold. To have it run with your session:
+Unlock something, and the bar flashes gold.
+
+**`install.sh` sets this up for you** — it installs the watcher as a user
+service for whoever ran `sudo ./install.sh`, so it starts with your session.
+Nothing else to do. To check on it:
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp ~/SteamOS-Led-Bar/server/steamos-led-achievements.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now steamos-led-achievements
+systemctl --user status steamos-led-achievements
+journalctl --user -u steamos-led-achievements -f
 ```
+
+Pass `--skip-watcher` to the installer to leave it out, or turn it off later
+with `systemctl --user disable --now steamos-led-achievements`.
 
 **Why a separate user service?** Steamworks is a game-side API: it talks to the
 Steam client of the logged-in user, and it has to be initialised *as* a
