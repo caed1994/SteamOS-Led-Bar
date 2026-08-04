@@ -81,6 +81,40 @@ class AchievementWatcherTest(unittest.TestCase):
         stats.state = {"A": True, "B": True}
         self.assertEqual(watcher.poll(), ["B"])
 
+    def test_a_late_stats_load_does_not_flash_the_back_catalogue(self):
+        # RequestCurrentStats is asynchronous: every achievement reads as
+        # locked until Steam answers. Without this guard, a player with 40
+        # earned achievements would get 40 flashes when the answer landed.
+        stats = FakeStats({name: False for name in "ABCDEFGHIJ"})
+        watcher = steamworks.AchievementWatcher(stats)
+        watcher.poll()
+        stats.state.update({name: True for name in "ABCDEFGH"})
+        self.assertEqual(watcher.poll(), [])
+
+    def test_a_real_unlock_after_a_flood_still_reports(self):
+        stats = FakeStats({name: False for name in "ABCDEFGHIJ"})
+        watcher = steamworks.AchievementWatcher(stats)
+        watcher.poll()
+        stats.state.update({name: True for name in "ABCDEFGH"})
+        watcher.poll()
+        stats.state["I"] = True
+        self.assertEqual(watcher.poll(), ["I"])
+
+    def test_a_believable_burst_is_still_reported(self):
+        # Games do hand out two or three at once; only a flood is suspicious.
+        stats = FakeStats({name: False for name in "ABCDEFGHIJ"})
+        watcher = steamworks.AchievementWatcher(stats)
+        watcher.poll()
+        stats.state.update({"A": True, "B": True})
+        self.assertEqual(sorted(watcher.poll()), ["A", "B"])
+
+    def test_flood_threshold_is_configurable(self):
+        stats = FakeStats({name: False for name in "ABCDEFGHIJ"})
+        watcher = steamworks.AchievementWatcher(stats, flood_threshold=100)
+        watcher.poll()
+        stats.state.update({name: True for name in "ABCDEFGH"})
+        self.assertEqual(len(watcher.poll()), 8)
+
     def test_pumps_callbacks(self):
         stats = FakeStats({"A": False})
         watcher = steamworks.AchievementWatcher(stats)

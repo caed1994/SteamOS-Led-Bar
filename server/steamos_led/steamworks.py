@@ -283,7 +283,7 @@ class UserStats:
 
         if not self._request_stats(self._iface):
             LOG.warning("RequestCurrentStats returned false; stats may be stale")
-        self.run_callbacks()
+        self.wait_for_stats()
 
     def _symbols(self):
         try:
@@ -459,6 +459,25 @@ class UserStats:
         self._display.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                   ctypes.c_char_p]
 
+    def wait_for_stats(self, timeout=3.0):
+        """Give RequestCurrentStats time to answer.
+
+        It is asynchronous: the schema (how many achievements exist) is there
+        at once, but every unlock state reads as false until Steam replies.
+        Taking the baseline too early makes the whole back catalogue look like
+        it unlocked a moment later.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.run_callbacks()
+            if any(self.achievements().values()):
+                return True
+            time.sleep(0.1)
+        # A game with genuinely nothing unlocked ends up here too, which is why
+        # the watcher keeps its own guard against a late flood.
+        LOG.debug("no unlocked achievement seen within %.1fs", timeout)
+        return False
+
     def run_callbacks(self):
         if self._lib is not None:
             self._run_callbacks()
@@ -500,8 +519,13 @@ class UserStats:
 class AchievementWatcher:
     """Reports achievements that flip from locked to unlocked."""
 
-    def __init__(self, stats):
+    # More than this appearing between two polls is Steam delivering state,
+    # not the player earning them a tenth of a second apart.
+    FLOOD_THRESHOLD = 3
+
+    def __init__(self, stats, flood_threshold=FLOOD_THRESHOLD):
         self.stats = stats
+        self.flood_threshold = flood_threshold
         self.previous = None
 
     def poll(self):
@@ -521,6 +545,11 @@ class AchievementWatcher:
         fresh = [name for name, unlocked in current.items()
                  if unlocked and not self.previous.get(name, False)]
         self.previous = current
+
+        if len(fresh) > self.flood_threshold:
+            LOG.info("%d achievements appeared at once - taking that as a late "
+                     "stats load rather than a burst of unlocks", len(fresh))
+            return []
         return fresh
 
 
