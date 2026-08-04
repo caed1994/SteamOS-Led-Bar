@@ -220,8 +220,8 @@ install_achievement_watcher() {
     # client of the logged-in user, and this script runs as root.
     if ! watcher_user_dirs; then
         warn "cannot tell which desktop user to install the watcher for."
-        warn "Run the installer with sudo from your normal account, or see the"
-        warn "README for the three manual commands."
+        warn "Run the installer with sudo from your normal account, or start"
+        warn "it yourself - see \"Flashing on a real achievement\" in the README."
         return 1
     fi
 

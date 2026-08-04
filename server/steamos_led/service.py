@@ -335,7 +335,7 @@ def run_steam_check(config):
 
     sources = steamworks.app_id_sources()
     for label, value in sources:
-        print("running app (%-12s): %s" % (label, value or "none"))
+        print("%-28s%s" % ("running app (%s):" % label, value or "none"))
 
     app_id = next((value for _label, value in sources if value), None)
     if library is None:

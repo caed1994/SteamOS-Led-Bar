@@ -160,9 +160,16 @@ class SteamDiscoveryTest(unittest.TestCase):
         self.addCleanup(setattr, steamworks, "STEAM_ROOTS", original)
         # Also move HOME, or the last candidate path (~/.steam/registry.vdf)
         # would read the real Steam of whoever runs the suite.
-        home = os.environ.get("HOME")
+        original_home = os.environ.get("HOME")
+
+        def restore_home():
+            if original_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original_home
+
         os.environ["HOME"] = self.tmpdir
-        self.addCleanup(os.environ.__setitem__, "HOME", home or "")
+        self.addCleanup(restore_home)
         return self.tmpdir
 
     def test_registry_parsing(self):
