@@ -81,6 +81,18 @@ ELFCLASS32, ELFCLASS64 = 1, 2
 WANTED_ELF_CLASS = ELFCLASS64 if sys.maxsize > 2 ** 32 else ELFCLASS32
 
 
+def _as_pointer(value):
+    """Accept a raw address or an already-wrapped pointer.
+
+    The resolver routes return c_void_p, and wrapping one of those in
+    c_void_p() again raises "cannot be converted to pointer" rather than doing
+    nothing - so normalise instead of assuming which form arrived.
+    """
+    if isinstance(value, ctypes.c_void_p):
+        return value
+    return ctypes.c_void_p(value)
+
+
 def _class_name(value):
     return {ELFCLASS32: "32-bit", ELFCLASS64: "64-bit"}.get(
         value, "an unknown ELF class (%s)" % value)
@@ -263,7 +275,7 @@ class UserStats:
 
         self._bind(lib)
         self._lib = lib
-        self._iface = ctypes.c_void_p(iface)
+        self._iface = _as_pointer(iface)
 
         if not self._request_stats(self._iface):
             LOG.warning("RequestCurrentStats returned false; stats may be stale")
@@ -298,7 +310,7 @@ class UserStats:
             iface = accessor()
             if iface:
                 self.route = name
-                return ctypes.c_void_p(iface)
+                return _as_pointer(iface)
 
         iface = self._via_user_interface(lib, symbols)
         if iface:
@@ -334,7 +346,7 @@ class UserStats:
             iface = create(user, version.encode("ascii"))
             if iface:
                 self.route = "%s(%s)" % (name, version)
-                return ctypes.c_void_p(iface)
+                return _as_pointer(iface)
         return None
 
     def _via_steam_client(self, lib, symbols):
@@ -379,7 +391,7 @@ class UserStats:
                               version.encode("ascii"))
             if iface:
                 self.route = "%s(%s)" % (getter, version)
-                return ctypes.c_void_p(iface)
+                return _as_pointer(iface)
         return None
 
     @staticmethod

@@ -89,6 +89,27 @@ class AchievementWatcherTest(unittest.TestCase):
         self.assertEqual(stats.callbacks_run, 2)
 
 
+class PointerNormalisationTest(unittest.TestCase):
+    """The interface pointer arrives in two shapes depending on the route."""
+
+    def test_raw_address_is_wrapped(self):
+        import ctypes
+        pointer = steamworks._as_pointer(0x7FFF1234)
+        self.assertIsInstance(pointer, ctypes.c_void_p)
+        self.assertEqual(pointer.value, 0x7FFF1234)
+
+    def test_existing_pointer_is_passed_through(self):
+        # Wrapping a c_void_p in c_void_p() raises "cannot be converted to
+        # pointer" instead of being a no-op, which crashed the check right
+        # after a route had successfully resolved.
+        import ctypes
+        original = ctypes.c_void_p(0x7FFF1234)
+        self.assertIs(steamworks._as_pointer(original), original)
+
+    def test_null_stays_null(self):
+        self.assertFalse(steamworks._as_pointer(0).value)
+
+
 class SteamDiscoveryTest(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

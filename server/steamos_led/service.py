@@ -354,6 +354,9 @@ def run_steam_check(config):
 
     print()
     print("Initialising Steamworks as app %d ..." % app_id)
+    # Steam's library writes to the terminal from C, unbuffered; flush first so
+    # the two streams do not interleave confusingly.
+    sys.stdout.flush()
     stats = steamworks.UserStats(app_id, library)  # already arch-checked
     try:
         stats.open()
