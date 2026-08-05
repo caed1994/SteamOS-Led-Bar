@@ -735,10 +735,20 @@ class FriendMessageDecodingTest(unittest.TestCase):
     SENDER = 76561198008351377
     PAYLOAD = bytes.fromhex("91badd020100100102000000")
 
-    def _listener(self, callbacks):
+    def _listener(self, callbacks, entry_types=None):
+        """A listener over these callbacks.
+
+        entry_types maps a message id to what GetFriendMessage would report;
+        None for the whole map stands for a library that cannot tell us.
+        """
         listener = steamworks.FriendMessageListener.__new__(
             steamworks.FriendMessageListener)
         listener.stats = self
+        if entry_types is None:
+            listener.entry_type = lambda _sender, _message: None
+        else:
+            listener.entry_type = lambda _sender, message: entry_types.get(
+                message, steamworks.CHAT_ENTRY_CHAT_MSG)
         self._callbacks = list(callbacks)
         return listener
 
@@ -818,6 +828,71 @@ class MessageFlashTest(WatcherSessionLifetimeTest):
     def test_no_messages_means_no_flash(self):
         self._run([1942280, 1942280, None])
         self.assertNotIn("message", self.flashes)
+
+
+
+
+class TypingNoticeTest(unittest.TestCase):
+    """A friend typing arrives as the same callback as the message itself.
+
+    Found on hardware after the feature already worked: the bar flashed twice
+    per message, once when the friend started typing and once when it landed.
+    Steam distinguishes them only in the chat entry type, which has to be
+    fetched with GetFriendMessage.
+    """
+
+    SENDER = 76561198008351377
+
+    def _payload(self, message_id):
+        return bytes.fromhex("91badd0201001001") + bytes([message_id, 0, 0, 0])
+
+    def _listener(self, entry_types):
+        test = self
+
+        class Session:
+            def run_callbacks(self):
+                pass
+
+            def take_callbacks(self):
+                pending, test._pending = test._pending, []
+                return pending
+
+        listener = steamworks.FriendMessageListener.__new__(
+            steamworks.FriendMessageListener)
+        listener.stats = Session()
+        listener.entry_type = lambda _sender, message: entry_types.get(message)
+        return listener
+
+    def test_typing_does_not_count_as_a_message(self):
+        self._pending = [(343, self._payload(2))]
+        listener = self._listener({2: steamworks.CHAT_ENTRY_TYPING})
+        self.assertEqual(listener.messages(), [])
+
+    def test_the_message_itself_still_counts(self):
+        self._pending = [(343, self._payload(3))]
+        listener = self._listener({3: steamworks.CHAT_ENTRY_CHAT_MSG})
+        self.assertEqual(listener.messages(), [(self.SENDER, 3)])
+
+    def test_typing_then_sending_flashes_once(self):
+        # The sequence a real message produces: a typing notice, then the
+        # message. Only the second one may reach the bar.
+        self._pending = [(343, self._payload(4)), (343, self._payload(5))]
+        listener = self._listener({4: steamworks.CHAT_ENTRY_TYPING,
+                                   5: steamworks.CHAT_ENTRY_CHAT_MSG})
+        self.assertEqual(listener.messages(), [(self.SENDER, 5)])
+
+    def test_other_entry_kinds_are_ignored_too(self):
+        # Left the conversation, was kicked, historical chat replayed on
+        # connect - none of those is someone writing to you now.
+        self._pending = [(343, self._payload(6))]
+        listener = self._listener({6: 11})       # k_EChatEntryTypeHistoricalChat
+        self.assertEqual(listener.messages(), [])
+
+    def test_a_library_that_cannot_tell_us_still_flashes(self):
+        # Degrading to a flash too many beats degrading to no flashes at all.
+        self._pending = [(343, self._payload(7))]
+        listener = self._listener({})            # entry_type returns None
+        self.assertEqual(listener.messages(), [(self.SENDER, 7)])
 
 
 if __name__ == "__main__":

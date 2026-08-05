@@ -342,6 +342,12 @@ inside older games and older Proton versions cannot deliver them. Steam's own
 copy under `steamrt64/` can, and it is there on every machine, which is why it
 is preferred.
 
+Steam announces "your friend is typing" through the same callback as the
+message itself, so the entry type is read back to tell them apart - otherwise
+the bar would flash twice per message. Reading it means reading the message
+text, which is then discarded: what a friend wrote does not belong in a
+system log.
+
 Set `NOTIFY_MESSAGES=0` in the config to turn it off. Achievements are
 unaffected either way: if no suitable library is found, the watcher says so in
 the log once and carries on flashing gold.

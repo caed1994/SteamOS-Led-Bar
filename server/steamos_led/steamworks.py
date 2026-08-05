@@ -67,6 +67,12 @@ FRIENDS_INTERFACES = tuple(
 FRIEND_CHAT_MESSAGE = 343
 FRIEND_CHAT_MESSAGE_BYTES = 12
 
+# EChatEntryType. Steam announces "they are typing" through the same callback
+# as the message itself, so without reading the entry type the bar flashes
+# twice per message - once when they start typing, once when it arrives.
+CHAT_ENTRY_CHAT_MSG = 1
+CHAT_ENTRY_TYPING = 2
+
 MANUAL_DISPATCH_INIT = "SteamAPI_ManualDispatch_Init"
 LISTEN_FOR_MESSAGES = "SteamAPI_ISteamFriends_SetListenForFriendsMessages"
 GET_FRIEND_MESSAGE = "SteamAPI_ISteamFriends_GetFriendMessage"
@@ -708,6 +714,7 @@ class FriendMessageListener:
         self.lib = stats.library
         self.route = None
         self._friends = None
+        self._get_message = None
 
     def open(self):
         if self.stats._pipe is None:
@@ -742,7 +749,44 @@ class FriendMessageListener:
                 "SetListenForFriendsMessages was refused - the Steam client "
                 "declined to forward chat to this app")
 
+        self._bind_reader(symbols)
         LOG.info("listening for friend messages via %s", self.route)
+
+    def _bind_reader(self, symbols):
+        """Bind GetFriendMessage, which is how a typing notice is told apart."""
+        if GET_FRIEND_MESSAGE not in symbols:
+            LOG.warning("%s cannot read chat entries, so the bar will also "
+                        "flash while a friend is still typing",
+                        self.stats.library_path)
+            return
+        reader = getattr(self.lib, GET_FRIEND_MESSAGE)
+        reader.restype = ctypes.c_int32
+        reader.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_int32,
+                           ctypes.c_void_p, ctypes.c_int32,
+                           ctypes.POINTER(ctypes.c_int32)]
+        self._get_message = reader
+
+    # Big enough for any chat message; the text itself is read and dropped.
+    MESSAGE_BUFFER = 4096
+
+    def entry_type(self, steam_id, message_id):
+        """Whether this entry is a message, someone typing, or something else.
+
+        Returns None when the library cannot tell us, in which case the caller
+        has to take every entry at face value.
+
+        The message text has to be read to get at the type, and is then thrown
+        away on purpose: what a friend wrote has no business in a system log.
+        """
+        if self._get_message is None:
+            return None
+        buffer = ctypes.create_string_buffer(self.MESSAGE_BUFFER)
+        entry = ctypes.c_int32(0)
+        self._get_message(self._friends, ctypes.c_uint64(steam_id),
+                          ctypes.c_int32(message_id), buffer,
+                          ctypes.c_int32(self.MESSAGE_BUFFER),
+                          ctypes.byref(entry))
+        return entry.value
 
     def _resolve_friends(self, symbols):
         """An ISteamFriends pointer, by whichever door this library has."""
@@ -774,7 +818,8 @@ class FriendMessageListener:
 
         Returns (steam id, message id) pairs. Only messages *received* produce
         this callback - sending one from this machine was measured not to, so
-        the bar does not flash while you type.
+        the bar does not flash while you type. A friend typing does produce
+        one, though, which is why the entry type is checked.
         """
         found = []
         for number, payload in self.callbacks():
@@ -785,6 +830,11 @@ class FriendMessageListener:
                 continue
             steam_id, message_id = struct.unpack(
                 "<QI", payload[:FRIEND_CHAT_MESSAGE_BYTES])
+
+            entry = self.entry_type(steam_id, message_id)
+            if entry is not None and entry != CHAT_ENTRY_CHAT_MSG:
+                LOG.debug("chat entry type %d is not a message", entry)
+                continue
             found.append((steam_id, message_id))
         return found
 
