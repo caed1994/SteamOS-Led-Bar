@@ -499,5 +499,81 @@ class CallbackMsgLayoutTest(unittest.TestCase):
                          ctypes.sizeof(ctypes.c_void_p) * 2)
 
 
+
+
+class LibrarySearchTest(unittest.TestCase):
+    """Where a libsteam_api.so is looked for.
+
+    Found on a real machine: the only copies our globs saw belonged to one
+    Proton version, while the Steam client's own copies under steamrt64/ sat
+    right there unnoticed. Those matter most - they come with Steam itself, so
+    they are present whatever games or Proton versions are installed, and
+    newer Proton no longer ships one at all.
+    """
+
+    def setUp(self):
+        import shutil, tempfile
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        original = steamworks.STEAM_ROOTS
+        steamworks.STEAM_ROOTS = (self.root,)
+        self.addCleanup(setattr, steamworks, "STEAM_ROOTS", original)
+
+    def _place(self, relative, root=None):
+        path = os.path.join(root or self.root, relative)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(b"\x7fELF" + bytes([elf.ELFCLASS64]) + b"\x00" * 32)
+        return path
+
+    def test_the_steam_clients_own_copies_are_found(self):
+        wanted = {self._place("steamrt64/libsteam_api.so"),
+                  self._place("steamrt32/libsteam_api.so")}
+        self.assertTrue(wanted.issubset(set(steamworks.find_libraries())))
+
+    def test_games_are_still_found(self):
+        path = self._place(
+            "steamapps/common/Proton 9.0 (Beta)/files/lib64/libsteam_api.so")
+        self.assertIn(path, steamworks.find_libraries())
+
+    def test_a_deeply_nested_copy_is_found(self):
+        # Newer layouts bury it further down than the old globs reached.
+        path = self._place(
+            "steamapps/common/Runtime/files/lib/steamrt/x86_64/libsteam_api.so")
+        self.assertIn(path, steamworks.find_libraries())
+
+    def test_a_second_library_folder_is_searched(self):
+        import shutil, tempfile
+        card = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, card, ignore_errors=True)
+        os.makedirs(os.path.join(self.root, "steamapps"), exist_ok=True)
+        with open(os.path.join(self.root, "steamapps",
+                               "libraryfolders.vdf"), "w") as handle:
+            handle.write('"libraryfolders"\n{\n\t"0"\n\t{\n'
+                         '\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n'
+                         '\t\t"path"\t\t"%s"\n\t}\n}\n' % (self.root, card))
+        path = self._place("steamapps/common/Game/libsteam_api.so", root=card)
+        self.assertIn(card, steamworks.library_roots())
+        self.assertIn(path, steamworks.find_libraries())
+
+    def test_a_library_folder_that_is_gone_is_skipped(self):
+        os.makedirs(os.path.join(self.root, "steamapps"), exist_ok=True)
+        with open(os.path.join(self.root, "steamapps",
+                               "libraryfolders.vdf"), "w") as handle:
+            handle.write('"libraryfolders"\n{\n\t"0"\n\t{\n'
+                         '\t\t"path"\t\t"/run/media/removed-sd-card"\n\t}\n}\n')
+        self.assertEqual(steamworks.library_roots(), [self.root])
+
+    def test_no_libraryfolders_file_is_not_an_error(self):
+        self.assertEqual(steamworks.library_roots(), [self.root])
+
+    def test_the_order_is_stable(self):
+        self._place("steamrt64/libsteam_api.so")
+        self._place("steamapps/common/A Game/libsteam_api.so")
+        found = steamworks.find_libraries()
+        self.assertEqual(found, sorted(found))
+        self.assertEqual(len(found), len(set(found)), "no duplicates")
+
+
 if __name__ == "__main__":
     unittest.main()

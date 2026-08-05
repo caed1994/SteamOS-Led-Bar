@@ -126,12 +126,20 @@ def interesting_symbols(symbols):
             or symbol.startswith("SteamAPI_Init"))
     )
 
+# Where a libsteam_api.so can turn up, relative to a Steam library folder.
+# steamrt32/ and steamrt64/ are the important ones: they belong to the Steam
+# client itself rather than to a game, so they are there on every machine that
+# has Steam at all. Without them this depends on which games or Proton
+# versions happen to be installed - and newer Proton no longer ships one.
 LIBRARY_GLOBS = (
+    "steamrt64/libsteam_api.so",
+    "steamrt32/libsteam_api.so",
+    "linux64/libsteam_api.so",
     "steamapps/common/*/libsteam_api.so",
     "steamapps/common/*/*/libsteam_api.so",
     "steamapps/common/*/*/*/libsteam_api.so",
     "steamapps/common/*/*/*/*/libsteam_api.so",
-    "linux64/libsteam_api.so",
+    "steamapps/common/*/*/*/*/*/libsteam_api.so",
 )
 
 # Games ship a 32-bit and a 64-bit libsteam_api.so, and Proton keeps them in
@@ -163,16 +171,45 @@ def _call_accessor(lib, name):
     return accessor() or None
 
 
-def find_libraries():
-    """Every libsteam_api.so under the Steam directory, newest paths first."""
+def library_roots():
+    """Every Steam library folder: the install itself, plus extra drives.
+
+    A Steam Deck with an SD card keeps its games in a second library folder,
+    and Steam records them in libraryfolders.vdf. Searching only the install
+    directory finds nothing for anyone who put their games elsewhere.
+    """
     root = steam_root()
     if root is None:
         return []
+
+    roots = [root]
+    try:
+        with open(os.path.join(root, "steamapps", "libraryfolders.vdf"),
+                  "r", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return roots
+
+    for match in re.finditer(r'"path"\s+"([^"]+)"', text):
+        path = match.group(1).replace("\\\\", "/")
+        if os.path.isdir(path) and path not in roots:
+            roots.append(path)
+    return roots
+
+
+def find_libraries():
+    """Every libsteam_api.so across all Steam library folders, sorted.
+
+    The order is plain alphabetical and deliberately not clever: which copy
+    gets used has to stay stable, because the interface version a library
+    answers on is pinned in the config next to it.
+    """
     found = []
-    for pattern in LIBRARY_GLOBS:
-        for match in glob.glob(os.path.join(root, pattern)):
-            if match not in found:
-                found.append(match)
+    for root in library_roots():
+        for pattern in LIBRARY_GLOBS:
+            for match in glob.glob(os.path.join(root, pattern)):
+                if match not in found:
+                    found.append(match)
     return sorted(found)
 
 

@@ -340,9 +340,16 @@ def run_probe_messages(config, seconds=None):
     """
     _interrupt_on_sigterm()
 
+    # An explicitly configured library may sit outside the search - that is
+    # the whole point of setting one - so survey it alongside what we find.
+    candidates = list(steamworks.find_libraries())
+    explicit = config["STEAM_LIBRARY"]
+    if explicit and explicit != "auto" and explicit not in candidates:
+        candidates.insert(0, explicit)
+
     print("Libraries, and what each one offers for friend messages:")
     usable = []
-    for path in steamworks.find_libraries():
+    for path in candidates:
         support = steamworks.message_support(path)
         if support.get("error"):
             print("  [ ?  ] %s (%s)" % (path, support["error"]))
