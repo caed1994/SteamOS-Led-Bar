@@ -14,7 +14,7 @@ from steamos_led import notify  # noqa: E402
 class ColourParsingTest(unittest.TestCase):
     def test_named_kinds(self):
         self.assertEqual(notify.parse_color("achievement"), (255, 215, 0))
-        self.assertEqual(notify.parse_color("MESSAGE"), (160, 0, 255))
+        self.assertEqual(notify.parse_color("MESSAGE"), (128, 0, 255))
 
     def test_hex(self):
         self.assertEqual(notify.parse_color("#00ff88"), (0, 255, 136))
