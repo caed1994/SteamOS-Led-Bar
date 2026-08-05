@@ -328,11 +328,25 @@ def run_steam_check(config):
     return 0
 
 
-# How often the loop below falls back to scanning every process for the
-# running app. The registry answers most of the time and costs one small file
-# read; the scan reads the environment block of every process the user owns,
-# which is not something to do every second for the whole login.
+# How often the loop below scans every process for the running app while it is
+# still *searching* for one. The scan reads the environment block of every
+# process the user owns, so doing it every second for a whole login is a lot of
+# work for "still nothing"; noticing a game a few seconds late costs nothing.
 PROCESS_SCAN_EVERY = 5          # ticks
+
+
+def _should_scan_processes(tick, attached):
+    """Whether this tick should pay for the full process scan.
+
+    While a game is attached the answer is always yes. Not every machine's
+    registry.vdf names the running app - on some it stays empty the whole time
+    and the process scan is the *only* source that reports it - so a tick that
+    skips the scan would read as "no game" and detach a game that is still
+    running. That is not just a missed flash: every reattach opens a fresh
+    Steamworks session as that app, and Steam waits for those to end before it
+    finishes stopping the game.
+    """
+    return attached or tick % PROCESS_SCAN_EVERY == 0
 
 
 def run_watch_achievements(config, interval=1.0):
@@ -355,7 +369,8 @@ def run_watch_achievements(config, interval=1.0):
     try:
         for tick in itertools.count():
             app_id = steamworks.running_app_id(
-                scan_processes=tick % PROCESS_SCAN_EVERY == 0)
+                scan_processes=_should_scan_processes(
+                    tick, attached=current_app is not None))
 
             if app_id != current_app:
                 if stats is not None:

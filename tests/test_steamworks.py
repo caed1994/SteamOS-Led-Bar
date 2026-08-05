@@ -13,7 +13,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import elf, steamworks  # noqa: E402
+from steamos_led import elf, service, steamworks  # noqa: E402
 
 
 class FakeStats:
@@ -297,6 +297,35 @@ class SteamDiscoveryTest(unittest.TestCase):
     def test_process_scan_survives_unreadable_entries(self):
         # /proc is full of processes we may not read; that must not raise.
         self.assertIsNone(steamworks._app_id_from_processes() or None)
+
+
+
+
+class ProcessScanRhythmTest(unittest.TestCase):
+    """When the watcher pays for the full process scan.
+
+    Regression guard. Skipping the scan while a game was attached made the
+    watcher read "no game" on a machine whose registry.vdf never names the
+    running app: it detached and reattached every five seconds, and because
+    every attach opens a Steamworks session as that app, Steam then sat on
+    "Stopping" forever when the game was quit.
+    """
+
+    def test_an_attached_game_is_confirmed_on_every_tick(self):
+        for tick in range(25):
+            self.assertTrue(
+                service._should_scan_processes(tick, attached=True),
+                "tick %d skipped the only source that finds the game" % tick)
+
+    def test_searching_for_a_game_is_throttled(self):
+        scans = [tick for tick in range(25)
+                 if service._should_scan_processes(tick, attached=False)]
+        self.assertEqual(scans, [0, 5, 10, 15, 20])
+
+    def test_the_first_tick_looks_straight_away(self):
+        # Otherwise starting the watcher with a game already running would
+        # wait out the throttle before noticing it.
+        self.assertTrue(service._should_scan_processes(0, attached=False))
 
 
 if __name__ == "__main__":

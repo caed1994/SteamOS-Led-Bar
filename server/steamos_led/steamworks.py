@@ -240,10 +240,13 @@ def running_app_id(scan_processes=True):
     """The app ID of the game currently running, or None.
 
     The registry is one small file read; the process scan reads the whole
-    environment block of every process the user owns. A caller polling once a
-    second should therefore ask for the scan only every few ticks - it stays
-    the authority for the case the registry does not report, it just does not
-    have to answer every single time.
+    environment block of every process the user owns, so a caller polling once
+    a second may want to skip it sometimes.
+
+    Be careful with that: on some machines the registry never names the running
+    app at all, and the scan is the only source that finds it. So None from
+    scan_processes=False means "did not look", not "no game" - a caller that
+    already believes a game is running must not conclude it ended from this.
     """
     app_id = _app_id_from_registry()
     if app_id or not scan_processes:
