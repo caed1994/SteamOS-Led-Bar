@@ -82,11 +82,9 @@ LIBRARY_GLOBS = (
 
 # Games ship a 32-bit and a 64-bit libsteam_api.so, and Proton keeps them in
 # sibling files/lib and files/lib64 directories, so the first match
-# alphabetically is routinely the wrong architecture. Re-exported from elf so
-# callers of this module do not need both imports.
-ELFCLASS32, ELFCLASS64 = elf.ELFCLASS32, elf.ELFCLASS64
-elf_class, class_name = elf.elf_class, elf.class_name
-WANTED_ELF_CLASS = ELFCLASS64 if sys.maxsize > 2 ** 32 else ELFCLASS32
+# alphabetically is routinely the wrong architecture.
+WANTED_ELF_CLASS = (elf.ELFCLASS64 if sys.maxsize > 2 ** 32
+                    else elf.ELFCLASS32)
 
 
 def _as_pointer(value):
@@ -145,11 +143,12 @@ def find_library(explicit=None):
     if explicit and explicit != "auto":
         if not os.path.isfile(explicit):
             raise SteamworksError("no library at %s" % explicit)
-        found = elf_class(explicit)
+        found = elf.elf_class(explicit)
         if found is not None and found != WANTED_ELF_CLASS:
             raise SteamworksError(
                 "%s is %s, this Python needs %s"
-                % (explicit, class_name(found), class_name(WANTED_ELF_CLASS)))
+                % (explicit, elf.class_name(found),
+                   elf.class_name(WANTED_ELF_CLASS)))
         return explicit
 
     root = steam_root()
@@ -163,11 +162,11 @@ def find_library(explicit=None):
             "set STEAM_LIBRARY to one" % root)
 
     usable = [path for path in candidates
-              if elf_class(path) == WANTED_ELF_CLASS]
+              if elf.elf_class(path) == WANTED_ELF_CLASS]
     if not usable:
         raise SteamworksError(
             "found %d libsteam_api.so, none of them %s like this Python "
-            "(e.g. %s)" % (len(candidates), class_name(WANTED_ELF_CLASS),
+            "(e.g. %s)" % (len(candidates), elf.class_name(WANTED_ELF_CLASS),
                            candidates[0]))
     return usable[0]
 
@@ -199,13 +198,21 @@ def _app_id_from_registry():
 
 
 def _app_id_from_processes():
-    """Steam launches games with SteamAppId in their environment."""
+    """Steam launches games with SteamAppId in their environment.
+
+    This reads the environment block of every process the user owns, so it is
+    far more expensive than the registry - see running_app_id().
+    """
     for entry in glob.glob("/proc/[0-9]*/environ"):
         try:
             with open(entry, "rb") as handle:
                 environ = handle.read()
         except OSError:
             continue        # not ours, or gone again
+        # Nearly every process fails this test, and it is much cheaper than
+        # splitting a Proton-sized environment block into a list first.
+        if b"SteamAppId=" not in environ:
+            continue
         for variable in environ.split(b"\0"):
             if variable.startswith(b"SteamAppId="):
                 value = variable.split(b"=", 1)[1].decode("ascii", "replace")
@@ -221,17 +228,27 @@ APP_ID_SOURCES = (
 
 
 def app_id_sources():
-    """[(label, app id or None)] - what every source says, for diagnostics."""
+    """[(label, app id or None)] - what every source says, for diagnostics.
+
+    Unlike running_app_id() this always asks everyone, because the point of
+    --steam-check is to show where the answer did and did not come from.
+    """
     return [(label, lookup()) for label, lookup in APP_ID_SOURCES]
 
 
-def running_app_id():
-    """The app ID of the game currently running, or None."""
-    for _label, lookup in APP_ID_SOURCES:
-        app_id = lookup()
-        if app_id:
-            return app_id
-    return None
+def running_app_id(scan_processes=True):
+    """The app ID of the game currently running, or None.
+
+    The registry is one small file read; the process scan reads the whole
+    environment block of every process the user owns. A caller polling once a
+    second should therefore ask for the scan only every few ticks - it stays
+    the authority for the case the registry does not report, it just does not
+    have to answer every single time.
+    """
+    app_id = _app_id_from_registry()
+    if app_id or not scan_processes:
+        return app_id
+    return _app_id_from_processes()
 
 
 # -- the API itself ---------------------------------------------------------
@@ -240,13 +257,15 @@ def running_app_id():
 class UserStats:
     """A thin ctypes wrapper around ISteamUserStats for one app."""
 
-    def __init__(self, app_id, library=None, route=None):
+    def __init__(self, app_id, library, route):
         self.app_id = int(app_id)
         self.library_path = find_library(library)
-        # A route pins one way in: "accessor:NAME", "userinterface:VERSION" or
-        # "client:VERSION". None means try them all.
-        self.wanted_route = route if route and route != "auto" else None
-        self.route = None
+        # One way in: "accessor:NAME", "userinterface:VERSION" or
+        # "client:VERSION". Required, and deliberately so - the flat wrappers
+        # are built against a single interface version and the wrong one
+        # segfaults instead of failing, so the choice belongs to
+        # select_route(), which probes the candidates in child processes.
+        self.route = route
         self._lib = None
         self._iface = None
         self._symbol_cache = None
@@ -296,6 +315,9 @@ class UserStats:
         self._bind(lib)
         self._lib = lib
         self._iface = _as_pointer(iface)
+        # Nothing past this point needs the symbol table, and a large library
+        # keeps a few hundred KiB alive for as long as the game runs.
+        self._symbol_cache = None
 
         if not self._request_stats(self._iface):
             LOG.warning("RequestCurrentStats returned false; stats may be stale")
@@ -312,35 +334,12 @@ class UserStats:
         return self._symbol_cache
 
     def _resolve_user_stats(self, lib):
-        """Get an ISteamUserStats pointer, whichever route this library offers.
+        """Take this instance's route, and only that one - no fallbacks.
 
-        Which routes a library offers, and in which order to try them, is
-        decided in exactly one place - candidate_routes() - and this walks that
-        list. Walking it in-process is only safe once a route has been probed
-        in a child: the wrong interface version segfaults rather than failing,
-        which is why callers should pin a route from select_route().
+        Trying the others in-process is what select_route() exists to avoid:
+        the wrong interface version does not raise, it segfaults.
         """
-        self.route = None
-        routes = ([self.wanted_route] if self.wanted_route
-                  else candidate_routes(self.library_path))
-
-        for route in routes:
-            iface = self._try_route(lib, route)
-            if iface:
-                return iface
-
-        if self.wanted_route:
-            raise SteamworksError("route %s did not resolve ISteamUserStats"
-                                  % self.wanted_route)
-        raise SteamworksError(
-            "%s offers no way to reach ISteamUserStats. Exported symbols that "
-            "looked relevant: %s"
-            % (self.library_path,
-               ", ".join(interesting_symbols(self._symbols())) or "none"))
-
-    def _try_route(self, lib, route):
-        """Take exactly one documented way in, no fallbacks."""
-        kind, _, detail = route.partition(":")
+        kind, _, detail = self.route.partition(":")
         if kind == "accessor":
             iface = _call_accessor(lib, detail)
         elif kind == "userinterface":
@@ -348,11 +347,14 @@ class UserStats:
         elif kind == "client":
             iface = self._via_steam_client(lib, detail)
         else:
-            raise SteamworksError("unknown route %r" % route)
+            raise SteamworksError("unknown route %r" % self.route)
 
         if not iface:
-            return None
-        self.route = route
+            raise SteamworksError(
+                "route %s did not resolve ISteamUserStats in %s. Exported "
+                "symbols that looked relevant: %s"
+                % (self.route, self.library_path,
+                   ", ".join(interesting_symbols(self._symbols())) or "none"))
         return _as_pointer(iface)
 
     def _via_user_interface(self, lib, version):

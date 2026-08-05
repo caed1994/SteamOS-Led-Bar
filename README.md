@@ -339,19 +339,10 @@ Two consequences of how Steamworks works, worth knowing:
 
 ### If that does not work on your machine
 
-There is a fallback that measures instead of guessing. Run it, unlock an
-achievement, and see which files Steam touches at that exact moment:
-
-```bash
-steamos-led-serial --probe-achievements
-```
-
-It watches Steam's own bookkeeping (`userdata/`, `appcache/stats/`, `logs/`)
-once a second and prints every file that changes, with a timestamp. Whatever
-shows up the instant the achievement pops can be watched directly.
-
-And the pipe is always there: anything that can already tell an achievement
-happened only has to `echo achievement` into it.
+The pipe is always there, and it does not care who writes to it: anything that
+can already tell an achievement happened only has to `echo achievement` into
+it. A game launcher hook, a script watching a log, an overlay - all of them
+work without this service knowing they exist.
 
 ## Testing and diagnostics
 

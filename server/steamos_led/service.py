@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import errno
+import itertools
 import logging
-import os
 import select
 import signal
 import sys
@@ -208,10 +208,12 @@ class Runner:
                 continue
 
             now = time.monotonic()
-            payload = self.renderer.render(snapshot, now - started)
             # A notification takes the whole bar for its duration and then
-            # hands it straight back to whatever Steam is showing.
-            payload = self.overlay.apply(payload, now)
+            # hands it straight back to whatever Steam is showing - so while
+            # one runs there is nothing underneath worth rendering.
+            payload = self.overlay.frame(now)
+            if payload is None:
+                payload = self.renderer.render(snapshot, now - started)
             # Static scenes still need a periodic frame: the firmware blanks the
             # strip when the link goes quiet, so an idle heartbeat is what tells
             # it we are still alive.
@@ -228,87 +230,20 @@ def _interrupt_on_sigterm():
     signal.signal(signal.SIGTERM, handler)
 
 
-# Directories worth watching for an achievement. Game installs are excluded on
-# purpose - only Steam's own bookkeeping is small enough to scan every second.
-STEAM_WATCH_SUBDIRS = ("userdata", "appcache/stats", "logs")
-
-
-def _scan_steam_files(root):
-    """mtime of every file under the interesting Steam subdirectories."""
-    seen = {}
-    for subdir in STEAM_WATCH_SUBDIRS:
-        base = os.path.join(root, subdir)
-        for dirpath, _dirnames, filenames in os.walk(base):
-            for name in filenames:
-                path = os.path.join(dirpath, name)
-                try:
-                    seen[path] = os.stat(path).st_mtime
-                except OSError:
-                    continue
-    return seen
-
-
-def run_probe(config, seconds=None):
-    """Watch Steam's own files and report what changes when you unlock one.
-
-    Steam publishes no documented local signal for achievements, so rather
-    than guess, this records what actually moves on your machine. Run it, earn
-    an achievement, and read off which file Steam touched.
-    """
-    _interrupt_on_sigterm()
-    del config
-
-    root = steamworks.steam_root()
-    if root is None:
-        LOG.error("no Steam directory found, looked in: %s",
-                  ", ".join(steamworks.STEAM_ROOTS))
-        return 1
-
-    print("Watching %s" % root)
-    print("  subdirectories: %s" % ", ".join(STEAM_WATCH_SUBDIRS))
-    print()
-    print("Now go and unlock an achievement. Every file Steam touches shows up")
-    print("below; the useful ones are those that appear the moment it pops.")
-    print("Press Ctrl-C when done.")
-    print()
-
-    baseline = _scan_steam_files(root)
-    print("baseline: %d files" % len(baseline))
-
-    deadline = time.monotonic() + seconds if seconds else None
-    try:
-        while deadline is None or time.monotonic() < deadline:
-            time.sleep(1.0)
-            current = _scan_steam_files(root)
-            for path, mtime in sorted(current.items()):
-                if baseline.get(path) != mtime:
-                    stamp = time.strftime("%H:%M:%S")
-                    kind = "new  " if path not in baseline else "write"
-                    print("%s  %s  %s" % (stamp, kind, path))
-            baseline = current
-    except KeyboardInterrupt:
-        pass
-
-    print()
-    print("Report the paths that appeared exactly when the achievement popped,")
-    print("and the watcher can be pointed at them.")
-    return 0
-
-
 def run_steam_check(config):
     """Report what the Steamworks path can and cannot find on this machine."""
     print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"),
           flush=True)
 
-    bits = 64 if steamworks.WANTED_ELF_CLASS == steamworks.ELFCLASS64 else 32
-    print("This Python:       %d-bit, so it needs a %d-bit library" % (bits, bits))
+    bits = elf.class_name(steamworks.WANTED_ELF_CLASS)
+    print("This Python:       %s, so it needs a %s library" % (bits, bits))
 
     candidates = steamworks.find_libraries()
     if candidates:
         print("libsteam_api.so candidates:")
         for path in candidates:
-            found = steamworks.elf_class(path)
-            label = steamworks.class_name(found)
+            found = elf.elf_class(path)
+            label = elf.class_name(found)
             mark = "use " if found == steamworks.WANTED_ELF_CLASS else "skip"
             print("  [%s] %-7s %s" % (mark, label, path))
 
@@ -393,6 +328,13 @@ def run_steam_check(config):
     return 0
 
 
+# How often the loop below falls back to scanning every process for the
+# running app. The registry answers most of the time and costs one small file
+# read; the scan reads the environment block of every process the user owns,
+# which is not something to do every second for the whole login.
+PROCESS_SCAN_EVERY = 5          # ticks
+
+
 def run_watch_achievements(config, interval=1.0):
     """Flash the bar whenever an achievement unlocks in the running game.
 
@@ -411,8 +353,9 @@ def run_watch_achievements(config, interval=1.0):
     print("Press Ctrl-C to stop.")
 
     try:
-        while True:
-            app_id = steamworks.running_app_id()
+        for tick in itertools.count():
+            app_id = steamworks.running_app_id(
+                scan_processes=tick % PROCESS_SCAN_EVERY == 0)
 
             if app_id != current_app:
                 if stats is not None:
@@ -440,10 +383,10 @@ def run_watch_achievements(config, interval=1.0):
                         watcher = steamworks.AchievementWatcher(stats)
                         LOG.info("attached to app %d", app_id)
                     except steamworks.SteamworksError as exc:
+                        # current_app is already this app, so the loop will
+                        # not try again until a different game starts.
                         LOG.warning("cannot attach to app %s: %s", app_id, exc)
                         stats, watcher = None, None
-                        # Do not hammer a game that refuses us.
-                        current_app = app_id
                 else:
                     LOG.info("no game running")
 
@@ -640,10 +583,6 @@ def build_parser():
     modes.add_argument("--steam-check", action="store_true", dest="steam_check",
                        help="report whether realtime achievement detection can "
                             "work on this machine")
-    modes.add_argument("--probe-achievements", nargs="?", const=0.0, type=float,
-                       metavar="SECONDS", dest="probe",
-                       help="watch which Steam files change when an achievement "
-                            "unlocks, to find a signal worth listening to")
     modes.add_argument("--simulate", metavar="EFFECT",
                        help="render one effect continuously (off, manual, normal, "
                             "rainbow, breath, patrol, factory, demo)")
@@ -704,8 +643,6 @@ def main(argv=None):
             return run_steam_check(config)
         if args.watch_achievements:
             return run_watch_achievements(config)
-        if args.probe is not None:
-            return run_probe(config, args.probe or None)
         if args.simulate:
             return run_simulate(config, args.simulate.lower())
         return Runner(config).run()

@@ -190,14 +190,19 @@ class NotificationOverlay:
         self.current = Notification(color, self.duration, now, self.style)
         return True
 
-    def apply(self, payload, now):
-        """Return the frame to send: the flash while one runs, else `payload`."""
+    def frame(self, now):
+        """The flash's own frame, or None when no flash is running.
+
+        Kept separate from apply() so the caller can skip rendering the frame
+        underneath: a flash covers the whole bar, so for its whole duration
+        anything rendered below it would only be thrown away.
+        """
         if self.current is None:
-            return payload
+            return None
         levels = self.current.levels(now, self.led_count)
         if levels is None:
             self.current = None
-            return payload
+            return None
 
         red, green, blue = self.current.color
         frame = bytearray()
@@ -207,8 +212,10 @@ class NotificationOverlay:
             frame.append(int(blue * level + 0.5))
         return bytes(frame)
 
-    def clear(self):
-        self.current = None
+    def apply(self, payload, now):
+        """Return the frame to send: the flash while one runs, else `payload`."""
+        frame = self.frame(now)
+        return payload if frame is None else frame
 
 
 class FifoTrigger:

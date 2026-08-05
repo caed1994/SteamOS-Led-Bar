@@ -57,6 +57,25 @@ class OverlayTest(unittest.TestCase):
                   for step in range(80)}
         self.assertGreater(len(levels), 3, "the flash should move, not sit still")
 
+    def test_frame_is_none_while_nothing_is_running(self):
+        # The service renders the frame underneath only when this says None,
+        # so an idle overlay must not claim the bar.
+        self.assertIsNone(self.overlay.frame(0.0))
+
+    def test_frame_gives_the_flash_while_one_runs(self):
+        self.overlay.trigger("achievement", 100.0)
+        frame = self.overlay.frame(100.5)
+        self.assertIsNotNone(frame)
+        self.assertEqual(len(frame), 4 * 3)
+        self.assertEqual(frame, self.overlay.apply(self.base, 100.5))
+
+    def test_frame_lets_go_the_moment_the_flash_expires(self):
+        self.overlay.trigger("achievement", 100.0)
+        self.assertIsNotNone(self.overlay.frame(100.5))
+        self.assertIsNone(self.overlay.frame(102.1),
+                          "the bar has to go back to Steam, not stay gold")
+        self.assertFalse(self.overlay.active)
+
     def test_hands_the_bar_back_when_it_expires(self):
         self.overlay.trigger("achievement", 100.0)
         self.assertNotEqual(self.overlay.apply(self.base, 100.5), self.base)

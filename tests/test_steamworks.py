@@ -13,7 +13,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import steamworks  # noqa: E402
+from steamos_led import elf, steamworks  # noqa: E402
 
 
 class FakeStats:
@@ -186,6 +186,33 @@ class SteamDiscoveryTest(unittest.TestCase):
                          '\t\t"RunningAppID"\t\t"0"\n\t}\n}\n')
         self.assertIsNone(steamworks._app_id_from_registry())
 
+    def test_the_registry_alone_can_answer(self):
+        # The process scan reads every process's environment, so the watcher
+        # asks for it only every few ticks. When the registry knows the
+        # answer, skipping the scan must not change it.
+        root = self._fake_steam_root()
+        with open(os.path.join(root, "registry.vdf"), "w") as handle:
+            handle.write('"Registry"\n{\n\t"HKCU"\n\t{\n'
+                         '\t\t"RunningAppID"\t\t"570"\n\t}\n}\n')
+        self.assertEqual(steamworks.running_app_id(scan_processes=False), 570)
+        self.assertEqual(steamworks.running_app_id(), 570)
+
+    def test_skipping_the_scan_does_not_invent_an_app(self):
+        self._fake_steam_root()          # no registry.vdf in it
+        self.assertIsNone(steamworks.running_app_id(scan_processes=False))
+
+    def test_the_scan_is_still_the_fallback(self):
+        # Losing the process scan entirely would break detection on machines
+        # whose registry does not report the running app.
+        self._fake_steam_root()
+        calls = []
+        original = steamworks._app_id_from_processes
+        steamworks._app_id_from_processes = lambda: calls.append(1) or 42
+        self.addCleanup(setattr, steamworks,
+                        "_app_id_from_processes", original)
+        self.assertEqual(steamworks.running_app_id(), 42)
+        self.assertEqual(len(calls), 1)
+
     @staticmethod
     def _fake_library(path, elf_class):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -196,26 +223,26 @@ class SteamDiscoveryTest(unittest.TestCase):
     def test_elf_class_is_read_from_the_header(self):
         thirty_two = self._fake_library(
             os.path.join(self.tmpdir, "a", "libsteam_api.so"),
-            steamworks.ELFCLASS32)
+            elf.ELFCLASS32)
         sixty_four = self._fake_library(
             os.path.join(self.tmpdir, "b", "libsteam_api.so"),
-            steamworks.ELFCLASS64)
-        self.assertEqual(steamworks.elf_class(thirty_two), steamworks.ELFCLASS32)
-        self.assertEqual(steamworks.elf_class(sixty_four), steamworks.ELFCLASS64)
+            elf.ELFCLASS64)
+        self.assertEqual(elf.elf_class(thirty_two), elf.ELFCLASS32)
+        self.assertEqual(elf.elf_class(sixty_four), elf.ELFCLASS64)
 
     def test_elf_class_of_a_non_elf_file_is_none(self):
         plain = os.path.join(self.tmpdir, "notes.txt")
         with open(plain, "w") as handle:
             handle.write("not a library")
-        self.assertIsNone(steamworks.elf_class(plain))
-        self.assertIsNone(steamworks.elf_class(os.path.join(self.tmpdir, "gone")))
+        self.assertIsNone(elf.elf_class(plain))
+        self.assertIsNone(elf.elf_class(os.path.join(self.tmpdir, "gone")))
 
     def test_explicit_library_of_the_wrong_arch_is_refused(self):
         # Proton ships files/lib (32-bit) beside files/lib64, and the 32-bit
         # one sorts first - loading it fails with a bare "wrong ELF class".
-        wrong = steamworks.ELFCLASS32 \
-            if steamworks.WANTED_ELF_CLASS == steamworks.ELFCLASS64 \
-            else steamworks.ELFCLASS64
+        wrong = elf.ELFCLASS32 \
+            if steamworks.WANTED_ELF_CLASS == elf.ELFCLASS64 \
+            else elf.ELFCLASS64
         path = self._fake_library(
             os.path.join(self.tmpdir, "lib", "libsteam_api.so"), wrong)
         with self.assertRaises(steamworks.SteamworksError) as caught:

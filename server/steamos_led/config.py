@@ -28,7 +28,7 @@ DEFAULTS = {
     "PATROL_DOTS": 1,
     "NOTIFY": True,
     "NOTIFY_DURATION": 3.5,
-    "NOTIFY_FIFO": "/run/steamos-led-serial/notify",
+    "NOTIFY_FIFO": notify.DEFAULT_FIFO,
     "NOTIFY_STYLE": "bloom",
     "STEAM_LIBRARY": "auto",
     "STEAM_ROUTE": "auto",
