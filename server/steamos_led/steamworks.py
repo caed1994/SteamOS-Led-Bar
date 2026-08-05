@@ -161,6 +161,11 @@ def _as_pointer(value):
     return ctypes.c_void_p(value)
 
 
+def _optional(lib, name):
+    """A bound symbol, or None if the library does not have it."""
+    return getattr(lib, name, None)
+
+
 def _call_accessor(lib, name):
     """Call a zero-argument accessor that hands back an interface pointer."""
     if not hasattr(lib, name):
@@ -413,7 +418,10 @@ class UserStats:
         # keeps a few hundred KiB alive for as long as the game runs.
         self._symbol_cache = None
 
-        if not self._request_stats(self._iface):
+        if self._request_stats is None:
+            LOG.debug("%s does not export RequestCurrentStats - this SDK has "
+                      "the stats ready after init", self.library_path)
+        elif not self._request_stats(self._iface):
             LOG.warning("RequestCurrentStats returned false; stats may be stale")
         self.wait_for_stats()
 
@@ -507,13 +515,23 @@ class UserStats:
             lib.SteamAPI_Shutdown()
 
     def _bind(self, lib):
-        self._run_callbacks = lib.SteamAPI_RunCallbacks
-        self._run_callbacks.restype = None
-        self._run_callbacks.argtypes = []
+        # These two came and went with the SDK. RequestCurrentStats was
+        # removed once stats started arriving with SteamAPI_Init, and a
+        # library built for manual callback dispatch need not export
+        # RunCallbacks either. Absent is normal, so bind them if they are
+        # there and carry on if they are not - refusing a library over a call
+        # it no longer needs would rule out the Steam client's own copy, which
+        # is the one present on every machine.
+        self._run_callbacks = _optional(lib, "SteamAPI_RunCallbacks")
+        if self._run_callbacks is not None:
+            self._run_callbacks.restype = None
+            self._run_callbacks.argtypes = []
 
-        self._request_stats = lib.SteamAPI_ISteamUserStats_RequestCurrentStats
-        self._request_stats.restype = ctypes.c_bool
-        self._request_stats.argtypes = [ctypes.c_void_p]
+        self._request_stats = _optional(
+            lib, "SteamAPI_ISteamUserStats_RequestCurrentStats")
+        if self._request_stats is not None:
+            self._request_stats.restype = ctypes.c_bool
+            self._request_stats.argtypes = [ctypes.c_void_p]
 
         self._num = lib.SteamAPI_ISteamUserStats_GetNumAchievements
         self._num.restype = ctypes.c_uint32
@@ -553,7 +571,7 @@ class UserStats:
         return False
 
     def run_callbacks(self):
-        if self._lib is not None:
+        if self._lib is not None and self._run_callbacks is not None:
             self._run_callbacks()
 
     def achievements(self):

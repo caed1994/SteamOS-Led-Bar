@@ -575,5 +575,77 @@ class LibrarySearchTest(unittest.TestCase):
         self.assertEqual(len(found), len(set(found)), "no duplicates")
 
 
+
+
+class _FakeCFunction:
+    """Stands in for a ctypes function pointer."""
+
+    def __init__(self):
+        self.restype = None
+        self.argtypes = None
+
+    def __call__(self, *_args):
+        return True
+
+
+class _FakeLibrary:
+    """A CDLL that has every symbol except the ones named as missing.
+
+    Real CDLL raises AttributeError when dlsym fails, which is what getattr's
+    default relies on.
+    """
+
+    def __init__(self, missing=()):
+        self.missing = set(missing)
+
+    def __getattr__(self, name):
+        if name.startswith("_") or name in self.missing:
+            raise AttributeError(name)
+        function = _FakeCFunction()
+        setattr(self, name, function)
+        return function
+
+
+class BindingAcrossSdkVersionsTest(unittest.TestCase):
+    """Binding must survive calls that the SDK has since dropped.
+
+    Found on hardware: the Steam client's own libsteam_api.so exports the
+    whole ISteamUserStats family except RequestCurrentStats, which newer SDKs
+    removed because the stats arrive with SteamAPI_Init. Insisting on it
+    rejected the one library that is present on every machine.
+    """
+
+    def _bind(self, missing=()):
+        stats = steamworks.UserStats.__new__(steamworks.UserStats)
+        stats._bind(_FakeLibrary(missing))
+        return stats
+
+    def test_a_library_without_request_current_stats_still_binds(self):
+        stats = self._bind(["SteamAPI_ISteamUserStats_RequestCurrentStats"])
+        self.assertIsNone(stats._request_stats)
+        self.assertIsNotNone(stats._num, "reading achievements must still work")
+
+    def test_a_library_without_run_callbacks_still_binds(self):
+        # A library built for manual dispatch need not export it.
+        stats = self._bind(["SteamAPI_RunCallbacks"])
+        self.assertIsNone(stats._run_callbacks)
+
+    def test_pumping_a_library_without_run_callbacks_does_nothing(self):
+        stats = self._bind(["SteamAPI_RunCallbacks"])
+        stats._lib = object()
+        stats.run_callbacks()          # must not raise
+
+    def test_everything_present_is_bound(self):
+        stats = self._bind()
+        self.assertIsNotNone(stats._request_stats)
+        self.assertIsNotNone(stats._run_callbacks)
+
+    def test_a_library_that_cannot_read_achievements_is_still_refused(self):
+        # Tolerating the retired calls must not turn into tolerating a
+        # library that has no way to report an achievement at all.
+        with self.assertRaises(AttributeError):
+            self._bind(["SteamAPI_ISteamUserStats_GetNumAchievements"])
+
+
 if __name__ == "__main__":
     unittest.main()
