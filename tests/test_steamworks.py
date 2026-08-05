@@ -567,12 +567,25 @@ class LibrarySearchTest(unittest.TestCase):
     def test_no_libraryfolders_file_is_not_an_error(self):
         self.assertEqual(steamworks.library_roots(), [self.root])
 
-    def test_the_order_is_stable(self):
-        self._place("steamrt64/libsteam_api.so")
-        self._place("steamapps/common/A Game/libsteam_api.so")
+    def test_steams_own_copy_is_preferred_over_a_games(self):
+        # "A Game" sorts first alphabetically, so this only passes if the
+        # client's copy is ranked ahead rather than merely sorted.
+        game = self._place("steamapps/common/A Game/libsteam_api.so")
+        client = self._place("steamrt64/libsteam_api.so")
         found = steamworks.find_libraries()
-        self.assertEqual(found, sorted(found))
+        self.assertLess(found.index(client), found.index(game))
+
+    def test_the_order_is_deterministic_and_free_of_duplicates(self):
+        self._place("steamrt64/libsteam_api.so")
+        self._place("steamrt32/libsteam_api.so")
+        self._place("steamapps/common/A Game/libsteam_api.so")
+        self._place("steamapps/common/B Game/libsteam_api.so")
+        found = steamworks.find_libraries()
+        self.assertEqual(found, steamworks.find_libraries())
         self.assertEqual(len(found), len(set(found)), "no duplicates")
+        # Alphabetical within each group.
+        games = [path for path in found if "steamapps" in path]
+        self.assertEqual(games, sorted(games))
 
 
 
@@ -585,7 +598,9 @@ class _FakeCFunction:
         self.argtypes = None
 
     def __call__(self, *_args):
-        return True
+        # False keeps GetNextCallback loops from spinning forever; the tests
+        # that need a truthy answer say so themselves.
+        return False
 
 
 class _FakeLibrary:
@@ -617,6 +632,8 @@ class BindingAcrossSdkVersionsTest(unittest.TestCase):
 
     def _bind(self, missing=()):
         stats = steamworks.UserStats.__new__(steamworks.UserStats)
+        stats._pipe = None          # standard dispatch, as __init__ would set
+        stats._pending = []
         stats._bind(_FakeLibrary(missing))
         return stats
 
@@ -645,6 +662,59 @@ class BindingAcrossSdkVersionsTest(unittest.TestCase):
         # library that has no way to report an achievement at all.
         with self.assertRaises(AttributeError):
             self._bind(["SteamAPI_ISteamUserStats_GetNumAchievements"])
+
+
+
+
+class DispatchModeTest(unittest.TestCase):
+    """Steam allows one callback dispatch mode per session.
+
+    Measured on hardware: SteamAPI_ManualDispatch_Init() answered "Cannot be
+    used, standard dispatch has already been selected" because opening the
+    session had already pumped it with SteamAPI_RunCallbacks. Whichever mode
+    is used first is the one Steam keeps, so the choice belongs to the session
+    and has to be made before anything pumps.
+    """
+
+    def _session(self, manual):
+        stats = steamworks.UserStats.__new__(steamworks.UserStats)
+        stats.manual_dispatch = manual
+        stats._pipe = 7 if manual else None
+        stats._pending = []
+        stats._lib = _FakeLibrary()
+        stats._bind(stats._lib)
+        return stats
+
+    def test_a_standard_session_pumps_the_standard_way(self):
+        stats = self._session(manual=False)
+        calls = []
+        stats._run_callbacks = lambda *args: calls.append("standard")
+        stats.run_callbacks()
+        self.assertEqual(calls, ["standard"])
+
+    def test_a_manual_session_does_not_touch_run_callbacks(self):
+        # This is the whole bug: one call to SteamAPI_RunCallbacks locks the
+        # session into standard dispatch and the listener never sees anything.
+        stats = self._session(manual=True)
+        stats._run_callbacks = lambda *args: self.fail(
+            "manual dispatch must never call SteamAPI_RunCallbacks")
+        stats._pump_manual = lambda: None
+        stats.run_callbacks()
+
+    def test_callbacks_are_handed_over_once(self):
+        stats = self._session(manual=True)
+        stats._pending = [(343, b"abc"), (344, b"")]
+        self.assertEqual(stats.take_callbacks(), [(343, b"abc"), (344, b"")])
+        self.assertEqual(stats.take_callbacks(), [],
+                         "the same callback must not be reported twice")
+
+    def test_an_unread_queue_cannot_grow_without_bound(self):
+        # Manual dispatch delivers every callback, not only the wanted ones,
+        # so a listener that stops reading must not leak.
+        stats = self._session(manual=True)
+        stats._pending = [(1, b"")] * (stats.MAX_PENDING_CALLBACKS + 50)
+        stats._pump_manual()        # the fake reports nothing waiting
+        self.assertLessEqual(len(stats._pending), stats.MAX_PENDING_CALLBACKS)
 
 
 if __name__ == "__main__":

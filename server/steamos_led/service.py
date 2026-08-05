@@ -407,7 +407,8 @@ def run_probe_messages(config, seconds=None):
             print("fine for messages, which is worth knowing before giving up.")
             return 1
 
-    stats = steamworks.UserStats(app_id, library, route=route)
+    stats = steamworks.UserStats(app_id, library, route=route,
+                                 manual_dispatch=True)
     listener = None
     try:
         stats.open()

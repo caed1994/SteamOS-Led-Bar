@@ -131,16 +131,19 @@ def interesting_symbols(symbols):
 # client itself rather than to a game, so they are there on every machine that
 # has Steam at all. Without them this depends on which games or Proton
 # versions happen to be installed - and newer Proton no longer ships one.
-LIBRARY_GLOBS = (
+CLIENT_GLOBS = (
     "steamrt64/libsteam_api.so",
     "steamrt32/libsteam_api.so",
     "linux64/libsteam_api.so",
+)
+GAME_GLOBS = (
     "steamapps/common/*/libsteam_api.so",
     "steamapps/common/*/*/libsteam_api.so",
     "steamapps/common/*/*/*/libsteam_api.so",
     "steamapps/common/*/*/*/*/libsteam_api.so",
     "steamapps/common/*/*/*/*/*/libsteam_api.so",
 )
+LIBRARY_GLOBS = CLIENT_GLOBS + GAME_GLOBS
 
 # Games ship a 32-bit and a 64-bit libsteam_api.so, and Proton keeps them in
 # sibling files/lib and files/lib64 directories, so the first match
@@ -203,19 +206,23 @@ def library_roots():
 
 
 def find_libraries():
-    """Every libsteam_api.so across all Steam library folders, sorted.
+    """Every libsteam_api.so across all Steam library folders.
 
-    The order is plain alphabetical and deliberately not clever: which copy
-    gets used has to stay stable, because the interface version a library
-    answers on is pinned in the config next to it.
+    The Steam client's own copies come first, then games, alphabetically
+    within each group. That order is a choice, not an accident: the client's
+    copy is on every machine whether or not a particular game is installed,
+    it is kept current by Steam itself, and the ones shipped inside games can
+    be years old - the copy that came with Proton 9 here predates the callback
+    dispatch added in SDK 1.51 and cannot receive friend messages at all.
     """
-    found = []
+    found = {}
     for root in library_roots():
         for pattern in LIBRARY_GLOBS:
+            rank = 0 if pattern in CLIENT_GLOBS else 1
             for match in glob.glob(os.path.join(root, pattern)):
-                if match not in found:
-                    found.append(match)
-    return sorted(found)
+                found.setdefault(match, rank)
+    return [path for _rank, path in
+            sorted((rank, path) for path, rank in found.items())]
 
 
 class SteamworksError(RuntimeError):
@@ -356,7 +363,7 @@ def running_app_id(scan_processes=True):
 class UserStats:
     """A thin ctypes wrapper around ISteamUserStats for one app."""
 
-    def __init__(self, app_id, library, route):
+    def __init__(self, app_id, library, route, manual_dispatch=False):
         self.app_id = int(app_id)
         self.library_path = find_library(library)
         # One way in: "accessor:NAME", "userinterface:VERSION" or
@@ -365,8 +372,16 @@ class UserStats:
         # segfaults instead of failing, so the choice belongs to
         # select_route(), which probes the candidates in child processes.
         self.route = route
+        # Steam allows one callback dispatch mode per session and fixes it the
+        # first time either mode is used - so it has to be decided here,
+        # before open() pumps anything. Manual dispatch is what lets a ctypes
+        # binding see callbacks at all; standard dispatch is cheaper and is
+        # all the achievement polling needs.
+        self.manual_dispatch = manual_dispatch
         self._lib = None
         self._iface = None
+        self._pipe = None
+        self._pending = []
         self._symbol_cache = None
 
     def open(self):
@@ -412,6 +427,8 @@ class UserStats:
             raise
 
         self._bind(lib)
+        if self.manual_dispatch:
+            self._start_manual_dispatch(lib)
         self._lib = lib
         self._iface = _as_pointer(iface)
         # Nothing past this point needs the symbol table, and a large library
@@ -570,9 +587,62 @@ class UserStats:
         LOG.debug("no unlocked achievement seen within %.1fs", timeout)
         return False
 
+    MAX_PENDING_CALLBACKS = 256
+
+    def _start_manual_dispatch(self, lib):
+        """Switch this session to manual callback dispatch.
+
+        Must happen before anything calls SteamAPI_RunCallbacks: whichever
+        mode is used first is the one Steam keeps, and it refuses to change
+        afterwards with "standard dispatch has already been selected".
+        """
+        init = _optional(lib, MANUAL_DISPATCH_INIT)
+        if init is None:
+            raise SteamworksError(
+                "%s predates manual callback dispatch (SDK 1.51), so callbacks "
+                "cannot be delivered to a ctypes binding at all"
+                % self.library_path)
+
+        get_pipe = lib.SteamAPI_GetHSteamPipe
+        get_pipe.restype = ctypes.c_int32
+        get_pipe.argtypes = []
+        self._pipe = get_pipe()
+        init()
+
     def run_callbacks(self):
-        if self._lib is not None and self._run_callbacks is not None:
+        """Pump the connection, whichever way this session dispatches."""
+        if self._lib is None:
+            return
+        if self._pipe is not None:
+            self._pump_manual()
+        elif self._run_callbacks is not None:
             self._run_callbacks()
+
+    def _pump_manual(self):
+        lib = self._lib
+        lib.SteamAPI_ManualDispatch_RunFrame(ctypes.c_int32(self._pipe))
+
+        get_next = lib.SteamAPI_ManualDispatch_GetNextCallback
+        get_next.restype = ctypes.c_bool
+        get_next.argtypes = [ctypes.c_int32, ctypes.POINTER(CallbackMsg)]
+
+        message = CallbackMsg()
+        while get_next(ctypes.c_int32(self._pipe), ctypes.byref(message)):
+            size = max(0, message.param_size)
+            payload = bytes(bytearray(message.param[:size])) if size else b""
+            self._pending.append((message.callback, payload))
+            lib.SteamAPI_ManualDispatch_FreeLastCallback(
+                ctypes.c_int32(self._pipe))
+
+        # With manual dispatch every callback lands here, not only the ones
+        # anyone asked for, so an unread queue must not grow without bound.
+        if len(self._pending) > self.MAX_PENDING_CALLBACKS:
+            self._pending = self._pending[-self.MAX_PENDING_CALLBACKS:]
+
+    def take_callbacks(self):
+        """Everything dispatched since the last call, as (id, payload)."""
+        pending, self._pending = self._pending, []
+        return pending
 
     def achievements(self):
         """{api name: unlocked} for every achievement the app defines."""
@@ -617,10 +687,10 @@ class FriendMessageListener:
     stops.
 
     Callbacks are collected through manual dispatch, which is the only route
-    the flat C API offers a non-C++ binding. Note that manual dispatch and
-    SteamAPI_RunCallbacks are alternatives, not companions: once dispatch is
-    initialised, run_frame() below is what pumps the connection, so an owner
-    of both this and an AchievementWatcher must stop calling run_callbacks().
+    the flat C API offers a non-C++ binding - so the session has to have been
+    opened with manual_dispatch=True. Steam fixes the dispatch mode the first
+    time either kind is used and will not change it afterwards, which is why
+    that choice belongs to the session and not to this.
     """
 
     def __init__(self, stats):
@@ -628,10 +698,13 @@ class FriendMessageListener:
         self.lib = stats.library
         self.route = None
         self._friends = None
-        self._pipe = None
-        self._seen = set()
 
     def open(self):
+        if self.stats._pipe is None:
+            raise SteamworksError(
+                "this session dispatches callbacks the standard way, which "
+                "hands them to nobody - open it with manual_dispatch=True")
+
         # Read the symbols here rather than borrowing the session's cache,
         # which open() drops on purpose so a game-long session does not sit on
         # a few hundred KiB of symbol table.
@@ -641,11 +714,6 @@ class FriendMessageListener:
             raise SteamworksError("cannot read symbols from %s: %s"
                                   % (self.stats.library_path, exc))
 
-        if MANUAL_DISPATCH_INIT not in symbols:
-            raise SteamworksError(
-                "%s predates manual callback dispatch (SDK 1.51), so callbacks "
-                "cannot be delivered to a ctypes binding at all"
-                % self.stats.library_path)
         if LISTEN_FOR_MESSAGES not in symbols:
             raise SteamworksError("%s exports no %s"
                                   % (self.stats.library_path,
@@ -664,12 +732,6 @@ class FriendMessageListener:
                 "SetListenForFriendsMessages was refused - the Steam client "
                 "declined to forward chat to this app")
 
-        get_pipe = self.lib.SteamAPI_GetHSteamPipe
-        get_pipe.restype = ctypes.c_int32
-        get_pipe.argtypes = []
-        self._pipe = get_pipe()
-
-        self.lib.SteamAPI_ManualDispatch_Init()
         LOG.info("listening for friend messages via %s", self.route)
 
     def _resolve_friends(self, symbols):
@@ -698,29 +760,15 @@ class FriendMessageListener:
         return None
 
     def callbacks(self):
-        """Every callback waiting right now, as (id, payload bytes) pairs.
+        """Every callback dispatched since the last call, as (id, payload).
 
         Deliberately returns all of them rather than filtering: which callback
         number carries a chat message differs between SDK generations, and
-        reading it off a live machine beats guessing from a header.
+        reading it off a live machine beats guessing from a header. Pumping
+        belongs to the session, which owns the one dispatcher Steam allows.
         """
-        if self._pipe is None:
-            return []
-
-        self.lib.SteamAPI_ManualDispatch_RunFrame(ctypes.c_int32(self._pipe))
-        get_next = self.lib.SteamAPI_ManualDispatch_GetNextCallback
-        get_next.restype = ctypes.c_bool
-        get_next.argtypes = [ctypes.c_int32, ctypes.POINTER(CallbackMsg)]
-
-        seen = []
-        message = CallbackMsg()
-        while get_next(ctypes.c_int32(self._pipe), ctypes.byref(message)):
-            size = max(0, message.param_size)
-            payload = bytes(bytearray(message.param[:size])) if size else b""
-            seen.append((message.callback, payload))
-            self.lib.SteamAPI_ManualDispatch_FreeLastCallback(
-                ctypes.c_int32(self._pipe))
-        return seen
+        self.stats.run_callbacks()
+        return self.stats.take_callbacks()
 
     def close(self):
         if self._friends is not None and hasattr(self.lib,
@@ -730,7 +778,6 @@ class FriendMessageListener:
             except Exception as exc:                # noqa: BLE001
                 LOG.debug("could not stop listening: %s", exc)
         self._friends = None
-        self._pipe = None
 
 
 class AchievementWatcher:
