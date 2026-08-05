@@ -390,9 +390,21 @@ def run_probe_messages(config, seconds=None):
 
     route = config["STEAM_ROUTE"]
     if not route or route == "auto":
-        route, _count = steamworks.select_route(app_id, library)
+        print("Finding a way into Steamworks with this library:")
+
+        def report(candidate, status, detail):
+            mark = {"ok": "WORKS ", "crashed": "CRASH ", "failed": "no    "}
+            print("  [%s] %-52s %s" % (mark[status], candidate, detail),
+                  flush=True)
+
+        route, _count = steamworks.select_route(app_id, library,
+                                                reporter=report)
+        print(flush=True)
         if route is None:
-            print("No working route into Steamworks - run --steam-check.")
+            print("None of them worked, so there is no session to listen on.")
+            print("The lines above say why each one was turned down - a")
+            print("library that cannot reach ISteamUserStats may still be")
+            print("fine for messages, which is worth knowing before giving up.")
             return 1
 
     stats = steamworks.UserStats(app_id, library, route=route)
