@@ -62,6 +62,12 @@ pixels over UART1 instead of bit-banging with interrupts disabled.
 
 ## Connection lifecycle
 
+0. From power-up until the host says anything, the firmware breathes the strip
+   in dim amber. It is driven from the main loop rather than blocking in
+   `setup()`, so it can wait indefinitely and still answer the greeting the
+   moment it arrives - the host gives up on the handshake after about four
+   seconds, which a blocking animation would eat. The first valid message ends
+   it and blanks the strip.
 1. The host opens the port, drops DTR/RTS and waits ~1.8 s for the board to
    boot (opening a tty resets most ESP dev boards).
 2. It sends `HELLO` up to five times and waits for `INFO`. Without a reply it

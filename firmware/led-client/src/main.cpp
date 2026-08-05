@@ -6,6 +6,7 @@
 
 #include <Arduino.h>
 #include <NeoPixelBus.h>
+#include <math.h>
 #include <string.h>
 
 #ifndef LED_PIN
@@ -28,6 +29,20 @@
 #endif
 #ifndef DEVICE_NAME
 #define DEVICE_NAME "esp-led-client"
+#endif
+
+// The waiting animation: one amber breath while no host has spoken yet.
+// WAIT_BREATH_MS is the length of a full breath, so a larger value is calmer.
+#ifndef WAIT_BREATH_MS
+#define WAIT_BREATH_MS 3000
+#endif
+// Amber, kept dim on purpose: this shows right after power-up, when the
+// supply is least settled, and it may run unattended for hours.
+#ifndef WAIT_RED
+#define WAIT_RED 40
+#endif
+#ifndef WAIT_GREEN
+#define WAIT_GREEN 16
 #endif
 
 // ---------------------------------------------------------------- strip ---
@@ -214,7 +229,18 @@ static uint16_t statResyncs = 0;
 static uint32_t lastFrameMs = 0;
 static bool linkIdle = true;
 
+// Nothing has been heard from the host yet, so the strip is ours to play with.
+static bool waitingForHost = true;
+static uint32_t waitStartMs = 0;
+static uint32_t lastWaitFrameMs = 0;
+
 static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length) {
+  if (waitingForHost) {
+    // Any valid message means the service is there. Hand the strip over dark
+    // so a greeting that is not followed by frames does not leave it mid-breath.
+    waitingForHost = false;
+    blankStrip();
+  }
   switch (type) {
     case MSG_HELLO:
       sendInfo();
@@ -333,18 +359,40 @@ static void feed(uint8_t byte) {
 
 // ----------------------------------------------------------------- setup ---
 
-static void bootAnimation() {
+// Breathes amber until the host says something, then hands the strip over.
+//
+// This runs from loop(), not setup(): the firmware cannot parse the greeting
+// while an animation blocks, and the host gives up on the handshake after
+// about four seconds. Driving it from the loop means it can wait as long as
+// it likes - all night on a charger - and still step aside the moment the
+// service turns up.
+// How dark the breath gets, and how often it is redrawn. 20 ms is 50 fps,
+// which is smooth and still leaves the loop free for the serial port.
+static const float WAIT_BREATH_FLOOR = 0.05f;
+static const uint32_t WAIT_FRAME_MS = 20;
+
+static void waitingAnimation(uint32_t now) {
+  if ((uint32_t)(now - lastWaitFrameMs) < WAIT_FRAME_MS) {
+    return;
+  }
+  lastWaitFrameMs = now;
+
   ensureStrip(LED_COUNT);
   if (strip == nullptr) {
     return;
   }
-  for (uint16_t i = 0; i < stripLength; i++) {
-    strip->ClearTo(RgbColor(0, 0, 0));
-    strip->SetPixelColor(i, RgbColor(clampBrightness(40), clampBrightness(16), 0));
-    strip->Show();
-    delay(1000 / (stripLength > 0 ? stripLength : 1) / 2 + 8);
-  }
-  blankStrip();
+
+  // Raised cosine over one breath, lifted off zero so it never quite goes
+  // out - the same shape the host uses for its own breath effect.
+  const float phase =
+      (float)((now - waitStartMs) % WAIT_BREATH_MS) / (float)WAIT_BREATH_MS;
+  const float swell = (1.0f - cosf(6.2831853f * phase)) * 0.5f;
+  const float level = WAIT_BREATH_FLOOR + (1.0f - WAIT_BREATH_FLOOR) * swell;
+
+  strip->ClearTo(RgbColor(clampBrightness((uint8_t)(WAIT_RED * level + 0.5f)),
+                          clampBrightness((uint8_t)(WAIT_GREEN * level + 0.5f)),
+                          0));
+  strip->Show();
 }
 
 void setup() {
@@ -354,8 +402,8 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   Serial.setTimeout(0);
 
-  bootAnimation();
-  lastFrameMs = millis();
+  waitStartMs = millis();
+  lastFrameMs = waitStartMs;
   sendInfo();
   sendLog("ready");
 }
@@ -372,6 +420,10 @@ void loop() {
   if (!linkIdle && (uint32_t)(now - lastFrameMs) > LINK_TIMEOUT_MS) {
     blankStrip();
     linkIdle = true;
+  }
+
+  if (waitingForHost) {
+    waitingAnimation(now);
   }
 
   static uint32_t lastStatsMs = 0;

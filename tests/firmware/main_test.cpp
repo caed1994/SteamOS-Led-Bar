@@ -43,6 +43,45 @@ int main() {
   setup();
   Serial.tx.clear();
 
+  // --- the waiting animation breathes until the host turns up --------------
+  // It has to run from loop(), not block setup(): the host gives up on the
+  // handshake after about four seconds, and a blocking animation would eat it.
+  {
+    g_millis += WAIT_FRAME_MS + 1;
+    pump();
+    check(g_lastShown.size() == LED_COUNT, "waiting animation lights the strip");
+    check(g_lastShown[0].R > 0 && g_lastShown[0].B == 0,
+          "waiting animation is amber");
+    check(g_lastShown[0].R == g_lastShown[LED_COUNT - 1].R,
+          "the whole strip breathes together");
+
+    // Sample a full breath: it must move, dip low, and never quite go out.
+    uint8_t low = 255, high = 0;
+    for (uint32_t step = 0; step < WAIT_BREATH_MS; step += WAIT_FRAME_MS + 1) {
+      g_millis += WAIT_FRAME_MS + 1;
+      pump();
+      const uint8_t level = g_lastShown[0].R;
+      if (level < low) low = level;
+      if (level > high) high = level;
+    }
+    check(high > low, "the breath actually moves");
+    check(high == clampBrightness(WAIT_RED), "it reaches full amber");
+    check(low < high / 2, "and dips noticeably");
+
+    // A greeting ends it, and hands the strip over dark rather than mid-breath.
+    auto greeting = hostFrame(0x01, {});
+    Serial.feed(greeting.data(), greeting.size());
+    pump();
+    check(g_lastShown[0].R == 0 && g_lastShown[0].G == 0,
+          "the host taking over blanks the strip");
+    const int showsAfterHandover = g_showCount;
+    g_millis += WAIT_BREATH_MS;
+    pump();
+    check(g_showCount == showsAfterHandover,
+          "and the animation does not come back once the host is there");
+  }
+  Serial.tx.clear();
+
   // --- FRAME renders pixels ------------------------------------------------
   std::vector<uint8_t> payload{17, 0};
   for (int i = 0; i < 17; i++) {
