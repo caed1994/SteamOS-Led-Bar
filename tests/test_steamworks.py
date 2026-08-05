@@ -328,5 +328,103 @@ class ProcessScanRhythmTest(unittest.TestCase):
         self.assertTrue(service._should_scan_processes(0, attached=False))
 
 
+class WatcherSessionLifetimeTest(unittest.TestCase):
+    """The watcher handles one game session and then ends its process.
+
+    SteamAPI_Init registers the process with Steam as an instance of that
+    game. Measured on hardware: Steam keeps a game on "Stopping" while such a
+    registration exists, and SteamAPI_Shutdown does not clear it - only the
+    process ending does. So the loop must not just detach and carry on.
+    """
+
+    def setUp(self):
+        self.opened, self.closed, self.flashes = [], [], []
+        self._patch(steamworks, "find_library", lambda _explicit: "libsteam.so")
+        self._patch(steamworks, "select_route",
+                    lambda app, lib, reporter=None: ("accessor:x", 1))
+        self._patch(steamworks, "UserStats", self._fake_stats)
+        self._patch(steamworks, "AchievementWatcher", _FakeWatcher)
+        self._patch(service.notify, "send",
+                    lambda fifo, kind: self.flashes.append(kind))
+
+    def _patch(self, module, name, value):
+        original = getattr(module, name)
+        setattr(module, name, value)
+        self.addCleanup(setattr, module, name, original)
+
+    def _fake_stats(self, app_id, library, route):
+        return _FakeStats(app_id, self.opened, self.closed)
+
+    def _run(self, app_ids):
+        """Play back these running_app_id() answers, then stop the loop."""
+        answers = iter(app_ids)
+
+        def next_answer(scan_processes=True):
+            try:
+                return next(answers)
+            except StopIteration:
+                raise KeyboardInterrupt      # same exit the user's Ctrl-C takes
+
+        self._patch(steamworks, "running_app_id", next_answer)
+        return service.run_watch_achievements(
+            {"NOTIFY_FIFO": "/dev/null", "STEAM_ROUTE": "auto",
+             "STEAM_LIBRARY": "auto"}, interval=0)
+
+    def test_it_exits_once_the_game_is_gone(self):
+        # The None is the game ending; anything after it must not be reached.
+        self.assertEqual(self._run([1942280, 1942280, None, 1942280]), 0)
+        self.assertEqual(self.opened, [1942280])
+        self.assertEqual(self.closed, [1942280],
+                         "the session has to be closed before the process goes")
+
+    def test_it_stays_for_as_long_as_the_game_does(self):
+        # One session for one game. Reattaching mid-game is what made Steam
+        # hang in the first place, so opening exactly once is the property.
+        self._run([1942280] * 6)
+        self.assertEqual(self.opened, [1942280])
+
+    def test_waiting_for_a_game_does_not_end_the_process(self):
+        # Exiting with nothing attached would put systemd in a restart loop.
+        self._run([None, None, None])
+        self.assertEqual(self.opened, [])
+        self.assertEqual(self.closed, [])
+
+    def test_the_flash_still_fires_before_it_exits(self):
+        self._run([1942280, 1942280, None])
+        self.assertEqual(self.flashes, ["achievement"])
+
+
+class _FakeStats:
+    def __init__(self, app_id, opened, closed):
+        self.app_id, self._opened, self._closed = app_id, opened, closed
+        self._open = False
+
+    def open(self):
+        self._open = True
+        self._opened.append(self.app_id)
+
+    def close(self):
+        # Idempotent, like the real one - the loop closes on the way out and
+        # the shutdown handler closes again.
+        if self._open:
+            self._open = False
+            self._closed.append(self.app_id)
+
+    def display_name(self, name):
+        return name
+
+
+class _FakeWatcher:
+    """Reports one unlock on its second poll, then nothing."""
+
+    def __init__(self, stats):
+        self.stats = stats
+        self.polls = 0
+
+    def poll(self):
+        self.polls += 1
+        return ["FIRST_BLOOD"] if self.polls == 2 else []
+
+
 if __name__ == "__main__":
     unittest.main()

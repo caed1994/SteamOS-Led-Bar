@@ -560,6 +560,21 @@ def candidate_routes(library):
     return routes
 
 
+def _suppress_core_dumps():
+    """Crashing is the expected outcome here, so do not save the wreck.
+
+    A probe that picks the wrong interface version segfaults - that is the
+    whole reason for the child. Left alone, each one hands systemd-coredump a
+    full dump of a Python process with steamclient.so mapped, which lands in
+    the journal and on disk every single time a game starts.
+    """
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (ImportError, ValueError, OSError) as exc:
+        LOG.debug("cannot disable core dumps in the probe child: %s", exc)
+
+
 def _run_in_child(target, timeout=15.0):
     """Run target(write_fd) in a forked child and report how it ended.
 
@@ -574,6 +589,7 @@ def _run_in_child(target, timeout=15.0):
     pid = os.fork()
     if pid == 0:
         os.close(read_fd)
+        _suppress_core_dumps()
         try:
             target(write_fd)
         finally:

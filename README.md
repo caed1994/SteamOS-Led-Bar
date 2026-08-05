@@ -317,6 +317,14 @@ journalctl --user -u steamos-led-achievements -f
 Pass `--skip-watcher` to the installer to leave it out, or turn it off later
 with `systemctl --user disable --now steamos-led-achievements`.
 
+**The log will show it restarting after every game — that is on purpose.** A
+process that has initialised Steamworks as a game stays registered with the
+Steam client as an instance of it, and Steam will not report that game as
+stopped while the registration exists. `SteamAPI_Shutdown` does not clear it;
+only the process ending does. So the watcher handles one game session and then
+exits, and systemd starts it again about twenty seconds later, in time for the
+next game.
+
 **Why a separate user service?** Steamworks is a game-side API: it talks to the
 Steam client of the logged-in user, and it has to be initialised *as* a
 specific game. The LED service runs as root, walled off from your home

@@ -16,8 +16,17 @@ After=graphical-session.target
 [Service]
 Type=simple
 ExecStart=@INSTALL_DIR@/steamos-led-serial --watch-achievements
+# Restart is not just crash recovery here, it is how the watcher works. A
+# process that has initialised Steamworks as a game stays registered with the
+# Steam client as an instance of it, and Steam will not report the game as
+# stopped while that registration exists - SteamAPI_Shutdown does not clear
+# it, only the process ending does. So the watcher handles one game session
+# and exits, and this brings it back for the next one.
 Restart=always
-RestartSec=10
+# Long enough that Steam has finished stopping the game before the next
+# watcher looks: coming back while Steam is still winding down would find the
+# app still present, attach to it, and block the shutdown all over again.
+RestartSec=20
 
 [Install]
 WantedBy=default.target

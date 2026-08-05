@@ -375,7 +375,17 @@ def run_watch_achievements(config, interval=1.0):
             if app_id != current_app:
                 if stats is not None:
                     stats.close()
-                    stats, watcher = None, None
+                    # And then go away entirely. SteamAPI_Init registers this
+                    # process with the Steam client as an instance of that
+                    # game, and Steam will not report a game as stopped while
+                    # such a registration exists. Measured on hardware:
+                    # SteamAPI_Shutdown does not release it - Steam sat on
+                    # "Stopping" until this process ended. Ending it does, so
+                    # one process handles one game session and systemd starts
+                    # the next one (Restart=always in the unit).
+                    LOG.info("game ended - exiting so Steam can finish "
+                             "stopping it; systemd restarts the watcher")
+                    return 0
                 current_app = app_id
                 if app_id:
                     try:
