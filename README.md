@@ -251,7 +251,7 @@ takes one breath once it reaches both ends, and retracts back into the middle:
 
 The dip is a fade, not a blink — it never switches off.
 
-Gold for an achievement, blue for a message. Try it right now, with the
+Gold for an achievement, purple for a message. Try it right now, with the
 service running:
 
 ```bash
@@ -327,7 +327,7 @@ next game.
 
 ### Friend messages
 
-The bar also flashes **blue** when someone messages you on Steam, as long as a
+The bar also flashes **purple** when someone messages you on Steam, as long as a
 game is running. Two things are needed and the installer cannot guarantee
 either, so check with:
 

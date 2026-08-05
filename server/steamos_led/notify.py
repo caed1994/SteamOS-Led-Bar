@@ -25,7 +25,7 @@ DEFAULT_FIFO = "/run/steamos-led-serial/notify"
 # arbitrary one with e.g. `--notify '#00ff88'`.
 KINDS = {
     "achievement": (255, 215, 0),    # gold
-    "message": (0, 120, 255),        # blue
+    "message": (160, 0, 255),        # purple
     "friend": (0, 200, 80),          # green
     "warning": (255, 60, 0),         # orange-red
 }

@@ -14,7 +14,7 @@ from steamos_led import notify  # noqa: E402
 class ColourParsingTest(unittest.TestCase):
     def test_named_kinds(self):
         self.assertEqual(notify.parse_color("achievement"), (255, 215, 0))
-        self.assertEqual(notify.parse_color("MESSAGE"), (0, 120, 255))
+        self.assertEqual(notify.parse_color("MESSAGE"), (160, 0, 255))
 
     def test_hex(self):
         self.assertEqual(notify.parse_color("#00ff88"), (0, 255, 136))
@@ -93,8 +93,9 @@ class OverlayTest(unittest.TestCase):
         frame = self.overlay.apply(self.base, 1.5)
         # Look at the middle: the bloom starts there, so the ends are still
         # dark this early into the flash.
-        centre = frame[3:6]
-        self.assertGreater(centre[2], centre[0], "should be the blue one now")
+        red, green, blue = frame[3:6]
+        self.assertGreater(blue, red, "should be the purple one now")
+        self.assertEqual(green, 0, "gold has green in it, purple does not")
 
     def test_disabled_overlay_never_fires(self):
         overlay = notify.NotificationOverlay(enabled=False, led_count=4)
