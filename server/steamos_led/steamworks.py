@@ -45,6 +45,60 @@ USER_STATS_INTERFACES = tuple(
     for version in (13, 12, 11, 10, 9, 8, 7)
 )
 
+# -- friend messages --------------------------------------------------------
+#
+# ISteamFriends can report incoming chat messages, but only as callbacks, and
+# the flat C API has exactly one way to hand callbacks to a non-C++ binding:
+# manual dispatch. That arrived in SDK 1.51, and Proton ships an older library
+# on some machines - so whether this is possible at all is a property of the
+# borrowed libsteam_api.so, which message_support() reports without loading it.
+
+FRIENDS_INTERFACES = tuple(
+    "SteamFriends%03d" % version for version in (17, 16, 15, 14, 13, 12)
+)
+
+MANUAL_DISPATCH_INIT = "SteamAPI_ManualDispatch_Init"
+LISTEN_FOR_MESSAGES = "SteamAPI_ISteamFriends_SetListenForFriendsMessages"
+GET_FRIEND_MESSAGE = "SteamAPI_ISteamFriends_GetFriendMessage"
+
+
+class CallbackMsg(ctypes.Structure):
+    """CallbackMsg_t, as manual dispatch fills it in."""
+
+    _fields_ = [("user", ctypes.c_int32),
+                ("callback", ctypes.c_int32),
+                ("param", ctypes.POINTER(ctypes.c_uint8)),
+                ("param_size", ctypes.c_int32)]
+
+
+def message_support(library):
+    """What a library offers for friend messages. Reads symbols, loads nothing.
+
+    Returns a dict of findings, or {"error": ...} if the symbols are unreadable.
+    """
+    try:
+        symbols = elf.exported_symbols(library)
+    except (OSError, elf.ElfError) as exc:
+        return {"error": str(exc)}
+    return {
+        "manual_dispatch": MANUAL_DISPATCH_INIT in symbols,
+        "listen": LISTEN_FOR_MESSAGES in symbols,
+        "read_message": GET_FRIEND_MESSAGE in symbols,
+        "accessors": versioned_accessors(symbols, "Friends"),
+        "find_or_create": "SteamInternal_FindOrCreateUserInterface" in symbols,
+        "via_client": "SteamAPI_ISteamClient_GetISteamFriends" in symbols,
+    }
+
+
+def usable_for_messages(support):
+    """Whether these findings add up to a library we could listen with."""
+    if support.get("error"):
+        return False
+    reachable = bool(support["accessors"] or support["find_or_create"]
+                     or support["via_client"])
+    return bool(support["manual_dispatch"] and support["listen"] and reachable)
+
+
 _ACCESSOR_RE = re.compile(r"^SteamAPI_Steam(\w+)_v(\d+)$")
 
 
@@ -326,6 +380,11 @@ class UserStats:
             LOG.warning("RequestCurrentStats returned false; stats may be stale")
         self.wait_for_stats()
 
+    @property
+    def library(self):
+        """The loaded CDLL, for anything else that wants this same session."""
+        return self._lib
+
     def _symbols(self):
         if self._symbol_cache is None:
             try:
@@ -492,6 +551,131 @@ class UserStats:
 
     def __exit__(self, *_exc):
         self.close()
+
+
+class FriendMessageListener:
+    """Receives Steam friend chat messages while a game is running.
+
+    Borrows an already-open UserStats session: it is the same Steam client
+    connection, initialised as the same app, so there is nothing extra to
+    register with Steam and nothing extra for Steam to wait for when the game
+    stops.
+
+    Callbacks are collected through manual dispatch, which is the only route
+    the flat C API offers a non-C++ binding. Note that manual dispatch and
+    SteamAPI_RunCallbacks are alternatives, not companions: once dispatch is
+    initialised, run_frame() below is what pumps the connection, so an owner
+    of both this and an AchievementWatcher must stop calling run_callbacks().
+    """
+
+    def __init__(self, stats):
+        self.stats = stats
+        self.lib = stats.library
+        self.route = None
+        self._friends = None
+        self._pipe = None
+        self._seen = set()
+
+    def open(self):
+        # Read the symbols here rather than borrowing the session's cache,
+        # which open() drops on purpose so a game-long session does not sit on
+        # a few hundred KiB of symbol table.
+        try:
+            symbols = elf.exported_symbols(self.stats.library_path)
+        except (OSError, elf.ElfError) as exc:
+            raise SteamworksError("cannot read symbols from %s: %s"
+                                  % (self.stats.library_path, exc))
+
+        if MANUAL_DISPATCH_INIT not in symbols:
+            raise SteamworksError(
+                "%s predates manual callback dispatch (SDK 1.51), so callbacks "
+                "cannot be delivered to a ctypes binding at all"
+                % self.stats.library_path)
+        if LISTEN_FOR_MESSAGES not in symbols:
+            raise SteamworksError("%s exports no %s"
+                                  % (self.stats.library_path,
+                                     LISTEN_FOR_MESSAGES))
+
+        self._friends = self._resolve_friends(symbols)
+        if self._friends is None:
+            raise SteamworksError("%s offers no way to reach ISteamFriends"
+                                  % self.stats.library_path)
+
+        listen = getattr(self.lib, LISTEN_FOR_MESSAGES)
+        listen.restype = ctypes.c_bool
+        listen.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+        if not listen(self._friends, True):
+            raise SteamworksError(
+                "SetListenForFriendsMessages was refused - the Steam client "
+                "declined to forward chat to this app")
+
+        get_pipe = self.lib.SteamAPI_GetHSteamPipe
+        get_pipe.restype = ctypes.c_int32
+        get_pipe.argtypes = []
+        self._pipe = get_pipe()
+
+        self.lib.SteamAPI_ManualDispatch_Init()
+        LOG.info("listening for friend messages via %s", self.route)
+
+    def _resolve_friends(self, symbols):
+        """An ISteamFriends pointer, by whichever door this library has."""
+        for name in versioned_accessors(symbols, "Friends"):
+            iface = _call_accessor(self.lib, name)
+            if iface:
+                self.route = "accessor:%s" % name
+                return _as_pointer(iface)
+
+        name = "SteamInternal_FindOrCreateUserInterface"
+        if hasattr(self.lib, name) and hasattr(self.lib,
+                                               "SteamAPI_GetHSteamUser"):
+            get_user = self.lib.SteamAPI_GetHSteamUser
+            get_user.restype = ctypes.c_int32
+            get_user.argtypes = []
+            create = getattr(self.lib, name)
+            create.restype = ctypes.c_void_p
+            create.argtypes = [ctypes.c_int32, ctypes.c_char_p]
+            user = get_user()
+            for version in FRIENDS_INTERFACES:
+                iface = create(user, version.encode("ascii"))
+                if iface:
+                    self.route = "userinterface:%s" % version
+                    return _as_pointer(iface)
+        return None
+
+    def callbacks(self):
+        """Every callback waiting right now, as (id, payload bytes) pairs.
+
+        Deliberately returns all of them rather than filtering: which callback
+        number carries a chat message differs between SDK generations, and
+        reading it off a live machine beats guessing from a header.
+        """
+        if self._pipe is None:
+            return []
+
+        self.lib.SteamAPI_ManualDispatch_RunFrame(ctypes.c_int32(self._pipe))
+        get_next = self.lib.SteamAPI_ManualDispatch_GetNextCallback
+        get_next.restype = ctypes.c_bool
+        get_next.argtypes = [ctypes.c_int32, ctypes.POINTER(CallbackMsg)]
+
+        seen = []
+        message = CallbackMsg()
+        while get_next(ctypes.c_int32(self._pipe), ctypes.byref(message)):
+            size = max(0, message.param_size)
+            payload = bytes(bytearray(message.param[:size])) if size else b""
+            seen.append((message.callback, payload))
+            self.lib.SteamAPI_ManualDispatch_FreeLastCallback(
+                ctypes.c_int32(self._pipe))
+        return seen
+
+    def close(self):
+        if self._friends is not None and hasattr(self.lib,
+                                                 LISTEN_FOR_MESSAGES):
+            try:
+                getattr(self.lib, LISTEN_FOR_MESSAGES)(self._friends, False)
+            except Exception as exc:                # noqa: BLE001
+                LOG.debug("could not stop listening: %s", exc)
+        self._friends = None
+        self._pipe = None
 
 
 class AchievementWatcher:

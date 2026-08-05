@@ -426,5 +426,78 @@ class _FakeWatcher:
         return ["FIRST_BLOOD"] if self.polls == 2 else []
 
 
+
+
+class MessageSupportTest(unittest.TestCase):
+    """Reading off what a library can do for friend messages, before loading it.
+
+    Whether this is possible at all is a property of the borrowed
+    libsteam_api.so: manual callback dispatch arrived in SDK 1.51, and Proton
+    ships older copies. Answering that from the symbol table costs nothing and
+    saves loading a library that cannot work.
+    """
+
+    FULL = {"manual_dispatch": True, "listen": True, "read_message": True,
+            "accessors": ["SteamAPI_SteamFriends_v017"],
+            "find_or_create": True, "via_client": True}
+
+    def _without(self, **changes):
+        support = dict(self.FULL)
+        support.update(changes)
+        return support
+
+    def test_a_complete_library_is_usable(self):
+        self.assertTrue(steamworks.usable_for_messages(self.FULL))
+
+    def test_no_manual_dispatch_means_no_callbacks_at_all(self):
+        self.assertFalse(steamworks.usable_for_messages(
+            self._without(manual_dispatch=False)))
+
+    def test_no_listen_call_means_nothing_to_switch_on(self):
+        self.assertFalse(steamworks.usable_for_messages(
+            self._without(listen=False)))
+
+    def test_isteamfriends_has_to_be_reachable_somehow(self):
+        self.assertFalse(steamworks.usable_for_messages(
+            self._without(accessors=[], find_or_create=False,
+                          via_client=False)))
+        # Any one of the three doors is enough on its own.
+        closed = {"accessors": [], "find_or_create": False, "via_client": False}
+        for door, value in (("accessors", ["SteamAPI_SteamFriends_v017"]),
+                            ("find_or_create", True), ("via_client", True)):
+            opened = dict(closed)
+            opened[door] = value
+            self.assertTrue(
+                steamworks.usable_for_messages(self._without(**opened)), door)
+
+    def test_an_unreadable_library_is_not_usable(self):
+        self.assertFalse(steamworks.usable_for_messages({"error": "truncated"}))
+
+    def test_support_of_a_non_library_reports_an_error(self):
+        import shutil, tempfile
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        path = os.path.join(tmpdir, "notelf.so")
+        with open(path, "w") as handle:
+            handle.write("not a library")
+        self.assertIn("error", steamworks.message_support(path))
+
+
+class CallbackMsgLayoutTest(unittest.TestCase):
+    """CallbackMsg_t has to match what the C side writes into it."""
+
+    def test_fields_are_where_the_sdk_puts_them(self):
+        import ctypes
+        self.assertEqual(steamworks.CallbackMsg.user.offset, 0)
+        self.assertEqual(steamworks.CallbackMsg.callback.offset, 4)
+        # The payload pointer is pointer-aligned, so on 64-bit there are four
+        # bytes of padding after the two ints. Getting this wrong would read
+        # the payload size out of the middle of the pointer.
+        self.assertEqual(steamworks.CallbackMsg.param.offset,
+                         ctypes.sizeof(ctypes.c_void_p))
+        self.assertEqual(steamworks.CallbackMsg.param_size.offset,
+                         ctypes.sizeof(ctypes.c_void_p) * 2)
+
+
 if __name__ == "__main__":
     unittest.main()

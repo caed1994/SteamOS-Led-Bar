@@ -328,6 +328,110 @@ def run_steam_check(config):
     return 0
 
 
+def run_probe_messages(config, seconds=None):
+    """Find out whether Steam will forward friend messages to us, and how.
+
+    Two unknowns, and neither is worth guessing at after the last two
+    attempts. First: whether the borrowed libsteam_api.so can deliver
+    callbacks to a ctypes binding at all - manual dispatch arrived in SDK
+    1.51 and Proton ships older copies. Second: which callback number carries
+    a chat message, which differs between SDK generations. So this prints
+    every callback that arrives rather than looking for one it expects.
+    """
+    _interrupt_on_sigterm()
+
+    print("Libraries, and what each one offers for friend messages:")
+    usable = []
+    for path in steamworks.find_libraries():
+        support = steamworks.message_support(path)
+        if support.get("error"):
+            print("  [ ?  ] %s (%s)" % (path, support["error"]))
+            continue
+        ok = steamworks.usable_for_messages(support)
+        if ok:
+            usable.append(path)
+        print("  [%s] %s" % ("use " if ok else "skip", path))
+        print("         manual dispatch: %-5s  listen: %-5s  read: %s"
+              % (support["manual_dispatch"], support["listen"],
+                 support["read_message"]))
+        print("         ISteamFriends via: %s"
+              % (", ".join(support["accessors"]
+                           + (["FindOrCreateUserInterface"]
+                              if support["find_or_create"] else [])
+                           + (["ISteamClient"] if support["via_client"]
+                              else [])) or "nothing found"))
+    print()
+    if not usable:
+        print("No library here can deliver callbacks to us. Friend messages")
+        print("cannot be read this way on this machine - which is worth")
+        print("knowing before anything is built on top of it.")
+        return 1
+
+    app_id = steamworks.running_app_id()
+    if not app_id:
+        print("Now start a game and run this again: Steamworks has to be")
+        print("initialised as a specific app, so there is nothing to attach")
+        print("to while none is running.")
+        return 1
+
+    library = steamworks.find_library(config["STEAM_LIBRARY"])
+    if not steamworks.usable_for_messages(steamworks.message_support(library)):
+        print("The library that would be chosen (%s)" % library)
+        print("cannot do this. Set STEAM_LIBRARY to one of the usable ones")
+        print("above and run this again.")
+        return 1
+
+    route = config["STEAM_ROUTE"]
+    if not route or route == "auto":
+        route, _count = steamworks.select_route(app_id, library)
+        if route is None:
+            print("No working route into Steamworks - run --steam-check.")
+            return 1
+
+    stats = steamworks.UserStats(app_id, library, route=route)
+    listener = None
+    try:
+        stats.open()
+        listener = steamworks.FriendMessageListener(stats)
+        listener.open()
+    except steamworks.SteamworksError as exc:
+        print("Cannot listen: %s" % exc)
+        stats.close()
+        return 1
+
+    print("Attached to app %d. Now have someone send you a Steam message." % app_id)
+    print("Every callback that arrives is listed below, with its number and")
+    print("payload size - the one that appears exactly when the message does")
+    print("is the one worth acting on. Press Ctrl-C when done.")
+    print(flush=True)
+
+    counts = {}
+    deadline = time.monotonic() + seconds if seconds else None
+    try:
+        while deadline is None or time.monotonic() < deadline:
+            for number, payload in listener.callbacks():
+                counts[number] = counts.get(number, 0) + 1
+                print("%s  callback %-6d %3d bytes  %s"
+                      % (time.strftime("%H:%M:%S"), number, len(payload),
+                         payload[:24].hex() or "-"), flush=True)
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        listener.close()
+        stats.close()
+
+    print()
+    if not counts:
+        print("Nothing arrived at all. Either Steam does not forward chat to")
+        print("this app, or no message came in while it was listening.")
+        return 1
+    print("Totals: %s" % ", ".join("callback %d x%d" % (number, count)
+                                   for number, count in sorted(counts.items())))
+    print("Report the number that lined up with the message.")
+    return 0
+
+
 # How often the loop below scans every process for the running app while it is
 # still *searching* for one. The scan reads the environment block of every
 # process the user owns, so doing it every second for a whole login is a lot of
@@ -608,6 +712,11 @@ def build_parser():
     modes.add_argument("--steam-check", action="store_true", dest="steam_check",
                        help="report whether realtime achievement detection can "
                             "work on this machine")
+    modes.add_argument("--probe-messages", nargs="?", const=0.0, type=float,
+                       metavar="SECONDS", dest="probe_messages",
+                       help="with a game running, report every Steamworks "
+                            "callback so the one carrying a friend message "
+                            "can be identified")
     modes.add_argument("--simulate", metavar="EFFECT",
                        help="render one effect continuously (off, manual, normal, "
                             "rainbow, breath, patrol, factory, demo)")
@@ -666,6 +775,8 @@ def main(argv=None):
             return run_notify(config, args.notify)
         if args.steam_check:
             return run_steam_check(config)
+        if args.probe_messages is not None:
+            return run_probe_messages(config, args.probe_messages or None)
         if args.watch_achievements:
             return run_watch_achievements(config)
         if args.simulate:
