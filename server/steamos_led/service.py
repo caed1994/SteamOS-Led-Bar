@@ -473,6 +473,26 @@ def _should_scan_processes(tick, attached):
     return attached or tick % PROCESS_SCAN_EVERY == 0
 
 
+def _flash(fifo, kind):
+    """Trigger the bar, and keep going if the service is not listening."""
+    try:
+        notify.send(fifo, kind)
+    except OSError as exc:
+        LOG.warning("could not flash the bar: %s", exc)
+
+
+def _open_message_listener(stats):
+    """Start listening for friend chat, or None if Steam will not have it."""
+    try:
+        listener = steamworks.FriendMessageListener(stats)
+        listener.open()
+        return listener
+    except steamworks.SteamworksError as exc:
+        # Not fatal: achievements are the main event and still work.
+        LOG.warning("friend messages unavailable: %s", exc)
+        return None
+
+
 def run_watch_achievements(config, interval=1.0):
     """Flash the bar whenever an achievement unlocks in the running game.
 
@@ -484,6 +504,7 @@ def run_watch_achievements(config, interval=1.0):
 
     fifo = config["NOTIFY_FIFO"]
     watcher = None
+    listener = None
     current_app = None
     stats = None
 
@@ -498,6 +519,9 @@ def run_watch_achievements(config, interval=1.0):
 
             if app_id != current_app:
                 if stats is not None:
+                    if listener is not None:
+                        listener.close()
+                        listener = None
                     stats.close()
                     # And then go away entirely. SteamAPI_Init registers this
                     # process with the Steam client as an instance of that
@@ -527,9 +551,26 @@ def run_watch_achievements(config, interval=1.0):
                                     "no working route for app %d - run "
                                     "--steam-check for details" % app_id)
                             LOG.info("using route %s", route)
-                        stats = steamworks.UserStats(app_id, library, route=route)
+                        # Friend messages arrive as callbacks, and a
+                        # ctypes binding can only receive those through
+                        # manual dispatch - which the session has to be
+                        # opened with, because Steam fixes the dispatch mode
+                        # the first time either kind is used. Ask for it only
+                        # when the library can actually do it: an older copy
+                        # would refuse, and achievements matter more.
+                        manual = (config["NOTIFY_MESSAGES"]
+                                  and steamworks.usable_for_messages(
+                                      steamworks.message_support(library)))
+                        if config["NOTIFY_MESSAGES"] and not manual:
+                            LOG.info("%s is too old to deliver friend "
+                                     "messages; achievements only", library)
+                        stats = steamworks.UserStats(app_id, library,
+                                                     route=route,
+                                                     manual_dispatch=manual)
                         stats.open()
                         watcher = steamworks.AchievementWatcher(stats)
+                        listener = _open_message_listener(stats) if manual \
+                            else None
                         LOG.info("attached to app %d", app_id)
                     except steamworks.SteamworksError as exc:
                         # current_app is already this app, so the loop will
@@ -542,21 +583,31 @@ def run_watch_achievements(config, interval=1.0):
             if watcher is not None:
                 try:
                     for name in watcher.poll():
-                        display = stats.display_name(name)
-                        LOG.info("achievement unlocked: %s", display)
-                        try:
-                            notify.send(fifo, "achievement")
-                        except OSError as exc:
-                            LOG.warning("could not flash the bar: %s", exc)
+                        LOG.info("achievement unlocked: %s",
+                                 stats.display_name(name))
+                        _flash(fifo, "achievement")
+                    if listener is not None:
+                        # One flash however many arrived at once: a retrigger
+                        # restarts the animation, so a burst would hold the
+                        # strip lit far longer than a single notification.
+                        messages = listener.messages()
+                        if messages:
+                            LOG.info("%d friend message(s)", len(messages))
+                            _flash(fifo, "message")
                 except OSError as exc:
                     LOG.warning("lost the Steamworks connection: %s", exc)
+                    if listener is not None:
+                        listener.close()
                     stats.close()
-                    stats, watcher, current_app = None, None, None
+                    stats, watcher, listener = None, None, None
+                    current_app = None
 
             time.sleep(interval)
     except KeyboardInterrupt:
         pass
     finally:
+        if listener is not None:
+            listener.close()
         if stats is not None:
             stats.close()
     return 0

@@ -30,6 +30,7 @@ DEFAULTS = {
     "NOTIFY_DURATION": 3.5,
     "NOTIFY_FIFO": notify.DEFAULT_FIFO,
     "NOTIFY_STYLE": "bloom",
+    "NOTIFY_MESSAGES": True,
     "STEAM_LIBRARY": "auto",
     "STEAM_ROUTE": "auto",
     "FPS": 60,

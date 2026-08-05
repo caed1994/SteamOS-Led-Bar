@@ -325,6 +325,32 @@ only the process ending does. So the watcher handles one game session and then
 exits, and systemd starts it again about twenty seconds later, in time for the
 next game.
 
+### Friend messages
+
+The bar also flashes **blue** when someone messages you on Steam, as long as a
+game is running. Two things are needed and the installer cannot guarantee
+either, so check with:
+
+```bash
+steamos-led-serial --probe-messages
+```
+
+It lists every `libsteam_api.so` on the machine and says which can do it.
+Chat arrives as a Steamworks *callback*, and callbacks only reach a Python
+binding through manual dispatch, which was added in SDK 1.51 - copies shipped
+inside older games and older Proton versions cannot deliver them. Steam's own
+copy under `steamrt64/` can, and it is there on every machine, which is why it
+is preferred.
+
+Set `NOTIFY_MESSAGES=0` in the config to turn it off. Achievements are
+unaffected either way: if no suitable library is found, the watcher says so in
+the log once and carries on flashing gold.
+
+**Why only while a game runs?** Steamworks has to be initialised *as* an app,
+so there is nothing to attach to otherwise - and a process registered with
+Steam as a game keeps Steam from ever finishing "Stopping" that game. Desktop
+Mode and Game Mode both work; what matters is a running game, not the session.
+
 **Why a separate user service?** Steamworks is a game-side API: it talks to the
 Steam client of the logged-in user, and it has to be initialised *as* a
 specific game. The LED service runs as root, walled off from your home

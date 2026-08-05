@@ -18,6 +18,7 @@ import glob
 import logging
 import os
 import re
+import struct
 import sys
 import time
 
@@ -56,6 +57,15 @@ USER_STATS_INTERFACES = tuple(
 FRIENDS_INTERFACES = tuple(
     "SteamFriends%03d" % version for version in (17, 16, 15, 14, 13, 12)
 )
+
+# GameConnectedFriendChatMsg_t: k_iSteamFriendsCallbacks (300) + 43. Read off
+# a live machine rather than a header, and the payload confirms the struct -
+# eight bytes of CSteamID followed by a message counter that steps by one per
+# message. Identify it by this number and never by its size: PersonaStateChange
+# (304) is also twelve bytes and also starts with the same friend's SteamID,
+# and it arrives when they come online or start typing.
+FRIEND_CHAT_MESSAGE = 343
+FRIEND_CHAT_MESSAGE_BYTES = 12
 
 MANUAL_DISPATCH_INIT = "SteamAPI_ManualDispatch_Init"
 LISTEN_FOR_MESSAGES = "SteamAPI_ISteamFriends_SetListenForFriendsMessages"
@@ -758,6 +768,25 @@ class FriendMessageListener:
                     self.route = "userinterface:%s" % version
                     return _as_pointer(iface)
         return None
+
+    def messages(self):
+        """Friend chat messages received since the last call.
+
+        Returns (steam id, message id) pairs. Only messages *received* produce
+        this callback - sending one from this machine was measured not to, so
+        the bar does not flash while you type.
+        """
+        found = []
+        for number, payload in self.callbacks():
+            if number != FRIEND_CHAT_MESSAGE:
+                continue
+            if len(payload) < FRIEND_CHAT_MESSAGE_BYTES:
+                LOG.debug("short chat callback: %d bytes", len(payload))
+                continue
+            steam_id, message_id = struct.unpack(
+                "<QI", payload[:FRIEND_CHAT_MESSAGE_BYTES])
+            found.append((steam_id, message_id))
+        return found
 
     def callbacks(self):
         """Every callback dispatched since the last call, as (id, payload).

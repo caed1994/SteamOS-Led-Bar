@@ -337,6 +337,8 @@ class WatcherSessionLifetimeTest(unittest.TestCase):
     process ending does. So the loop must not just detach and carry on.
     """
 
+    messages_enabled = False
+
     def setUp(self):
         self.opened, self.closed, self.flashes = [], [], []
         self._patch(steamworks, "find_library", lambda _explicit: "libsteam.so")
@@ -352,8 +354,10 @@ class WatcherSessionLifetimeTest(unittest.TestCase):
         setattr(module, name, value)
         self.addCleanup(setattr, module, name, original)
 
-    def _fake_stats(self, app_id, library, route):
-        return _FakeStats(app_id, self.opened, self.closed)
+    def _fake_stats(self, app_id, library, route, manual_dispatch=False):
+        stats = _FakeStats(app_id, self.opened, self.closed)
+        stats.manual_dispatch = manual_dispatch
+        return stats
 
     def _run(self, app_ids):
         """Play back these running_app_id() answers, then stop the loop."""
@@ -368,7 +372,8 @@ class WatcherSessionLifetimeTest(unittest.TestCase):
         self._patch(steamworks, "running_app_id", next_answer)
         return service.run_watch_achievements(
             {"NOTIFY_FIFO": "/dev/null", "STEAM_ROUTE": "auto",
-             "STEAM_LIBRARY": "auto"}, interval=0)
+             "STEAM_LIBRARY": "auto",
+             "NOTIFY_MESSAGES": self.messages_enabled}, interval=0)
 
     def test_it_exits_once_the_game_is_gone(self):
         # The None is the game ending; anything after it must not be reached.
@@ -715,6 +720,104 @@ class DispatchModeTest(unittest.TestCase):
         stats._pending = [(1, b"")] * (stats.MAX_PENDING_CALLBACKS + 50)
         stats._pump_manual()        # the fake reports nothing waiting
         self.assertLessEqual(len(stats._pending), stats.MAX_PENDING_CALLBACKS)
+
+
+
+
+class FriendMessageDecodingTest(unittest.TestCase):
+    """Turning raw callbacks into "someone wrote to you".
+
+    The callback number and payload layout were read off a live machine:
+    343, twelve bytes, an eight byte SteamID followed by a message counter
+    that steps by one per message.
+    """
+
+    SENDER = 76561198008351377
+    PAYLOAD = bytes.fromhex("91badd020100100102000000")
+
+    def _listener(self, callbacks):
+        listener = steamworks.FriendMessageListener.__new__(
+            steamworks.FriendMessageListener)
+        listener.stats = self
+        self._callbacks = list(callbacks)
+        return listener
+
+    # stands in for the session the listener reads from
+    def run_callbacks(self):
+        pass
+
+    def take_callbacks(self):
+        pending, self._callbacks = self._callbacks, []
+        return pending
+
+    def test_a_chat_callback_is_decoded(self):
+        listener = self._listener([(343, self.PAYLOAD)])
+        self.assertEqual(listener.messages(), [(self.SENDER, 2)])
+
+    def test_the_message_id_steps_with_each_message(self):
+        payloads = [(343, self.PAYLOAD[:8] + bytes([n, 0, 0, 0]))
+                    for n in (2, 3, 4)]
+        listener = self._listener(payloads)
+        self.assertEqual([msg for _sender, msg in listener.messages()],
+                         [2, 3, 4])
+
+    def test_persona_state_changes_are_not_messages(self):
+        # 304 is the same twelve bytes and starts with the same SteamID - it
+        # arrives when a friend comes online or starts typing. Filtering by
+        # size instead of by number would flash the bar for both.
+        listener = self._listener([(304, self.PAYLOAD)])
+        self.assertEqual(listener.messages(), [])
+
+    def test_other_callbacks_are_ignored(self):
+        listener = self._listener([(1040044, b"x" * 784), (348, b"\xd7"),
+                                   (343, self.PAYLOAD)])
+        self.assertEqual(listener.messages(), [(self.SENDER, 2)])
+
+    def test_a_truncated_payload_is_skipped_not_unpacked(self):
+        listener = self._listener([(343, b"\x01\x02\x03")])
+        self.assertEqual(listener.messages(), [])
+
+    def test_nothing_waiting_is_no_messages(self):
+        self.assertEqual(self._listener([]).messages(), [])
+
+
+class MessageFlashTest(WatcherSessionLifetimeTest):
+    """The watcher's side: one flash per poll, however many arrived."""
+
+    messages_enabled = True
+
+    def setUp(self):
+        super().setUp()
+        self.pending_messages = []
+        self._patch(steamworks, "message_support", lambda _path: {})
+        self._patch(steamworks, "usable_for_messages", lambda _support: True)
+        self._patch(service, "_open_message_listener",
+                    lambda _stats: self)
+
+    # stands in for the listener
+    def messages(self):
+        pending, self.pending_messages = self.pending_messages, []
+        return pending
+
+    def close(self):
+        pass
+
+    def test_a_message_flashes_the_bar(self):
+        self.pending_messages = [(1, 2)]
+        self._run([1942280, 1942280, None])
+        self.assertIn("message", self.flashes)
+
+    def test_a_burst_is_one_flash_not_five(self):
+        # Retriggering restarts the animation, so five triggers would hold the
+        # strip lit far longer than one notification - and that is what browns
+        # out a strip running off the ESP's USB rail.
+        self.pending_messages = [(1, n) for n in range(5)]
+        self._run([1942280, 1942280, None])
+        self.assertEqual(self.flashes.count("message"), 1)
+
+    def test_no_messages_means_no_flash(self):
+        self._run([1942280, 1942280, None])
+        self.assertNotIn("message", self.flashes)
 
 
 if __name__ == "__main__":
