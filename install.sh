@@ -202,19 +202,25 @@ if [[ $MODULE_OK -eq 0 ]]; then
     warn "The service will still be installed and waits for the device to appear."
 fi
 
-# --- enable ----------------------------------------------------------------
-
 # --- achievement watcher (a user service) ----------------------------------
+
+# Set by install_achievement_watcher for the summary at the end, so the
+# outcome is decided once where it is known rather than reconstructed later.
+WATCHER_STATUS="not attempted"
 
 install_achievement_watcher() {
     local source="$SOURCE_DIR/server/$WATCHER_UNIT"
 
     if [[ $SKIP_WATCHER -eq 1 ]]; then
         say "Skipping the achievement watcher (--skip-watcher)"
+        WATCHER_STATUS="skipped (--skip-watcher)"
         return 0
     fi
-    [[ -f "$source" ]] \
-        || { warn "$WATCHER_UNIT not found in the repository"; return 1; }
+    if [[ ! -f "$source" ]]; then
+        warn "$WATCHER_UNIT not found in the repository"
+        WATCHER_STATUS="NOT installed - unit missing from the repository"
+        return 1
+    fi
 
     # It has to run in the desktop session: Steamworks talks to the Steam
     # client of the logged-in user, and this script runs as root.
@@ -222,6 +228,7 @@ install_achievement_watcher() {
         warn "cannot tell which desktop user to install the watcher for."
         warn "Run the installer with sudo from your normal account, or start"
         warn "it yourself - see \"Flashing on a real achievement\" in the README."
+        WATCHER_STATUS="NOT installed - run the installer with sudo from your account"
         return 1
     fi
 
@@ -230,8 +237,11 @@ install_achievement_watcher() {
     # Create the directories as the user: "install -d" would leave any missing
     # parent (~/.config on a fresh account) owned by root, which quietly breaks
     # everything else that writes there.
-    runuser -u "$WATCHER_USER" -- mkdir -p "$wants" \
-        || { warn "cannot create $wants"; return 1; }
+    if ! runuser -u "$WATCHER_USER" -- mkdir -p "$wants"; then
+        warn "cannot create $wants"
+        WATCHER_STATUS="NOT installed - could not write to $WATCHER_DIR"
+        return 1
+    fi
     # Same @INSTALL_DIR@ substitution as the system unit, so moving the
     # install directory keeps both of them pointing at the real binary.
     sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" "$source" > "$WATCHER_DIR/$WATCHER_UNIT"
@@ -247,25 +257,59 @@ install_achievement_watcher() {
     user_systemctl daemon-reload || true
     if user_systemctl restart "$WATCHER_UNIT"; then
         say "Watcher running now"
-        return 0
+        WATCHER_STATUS="running for $WATCHER_USER"
+    else
+        say "Watcher enabled; it starts with your next login"
+        WATCHER_STATUS="enabled for $WATCHER_USER, starts at next login"
     fi
-    say "Watcher enabled; it starts with your next login"
     return 0
 }
 
-WATCHER_OK=1
-install_achievement_watcher || WATCHER_OK=0
+# --- start it --------------------------------------------------------------
 
 say "Enabling steamos-led-serial.service"
 systemctl daemon-reload
-systemctl enable --now steamos-led-serial.service
+systemctl enable steamos-led-serial.service
+# Deliberately not "enable --now": that starts a stopped service but leaves a
+# running one alone, so installing over a running copy would keep serving the
+# old code from the old unit - files updated, behaviour not. Restarting always
+# lands on what was just installed.
+systemctl restart steamos-led-serial.service
 
-sleep 1
 if systemctl is-active --quiet steamos-led-serial.service; then
     say "Service is running."
 else
     warn "Service is not active. Check: journalctl -u steamos-led-serial -n 40"
 fi
+
+# The service creates the notification pipe at startup and carries on without
+# it if that fails, logging one warning - which means a broken setup still
+# reports "active" and simply never flashes. Check for it here instead.
+notify_setting() {  # notify_setting <KEY> <default>
+    local value=""
+    if [[ -f "$CONFIG_PATH" ]]; then
+        value="$(sed -n "s/^$1=\(.*\)\$/\1/p" "$CONFIG_PATH" \
+                 | tail -1 | tr -d '[:space:]')"
+    fi
+    printf '%s' "${value:-$2}"
+}
+
+if [[ "$(notify_setting NOTIFY 1)" =~ ^(1|true|yes|on)$ ]]; then
+    NOTIFY_FIFO="$(notify_setting NOTIFY_FIFO /run/steamos-led-serial/notify)"
+    for _ in 1 2 3 4 5 6; do
+        [[ -p "$NOTIFY_FIFO" ]] && break
+        sleep 0.5
+    done
+    if [[ -p "$NOTIFY_FIFO" ]]; then
+        say "Notification pipe ready ($NOTIFY_FIFO)"
+    else
+        warn "the service is running, but $NOTIFY_FIFO was not created -"
+        warn "achievement and message flashes will not work."
+        warn "The reason is in: journalctl -u steamos-led-serial -n 40"
+    fi
+fi
+
+install_achievement_watcher || true
 
 cat <<EOF
 
@@ -275,7 +319,7 @@ Done.
   Logs:     journalctl -u steamos-led-serial -f
   Restart:  sudo systemctl restart steamos-led-serial
 
-Achievement flashes: $(if [[ $SKIP_WATCHER -eq 1 ]]; then echo "skipped (--skip-watcher)"; elif [[ $WATCHER_OK -eq 1 ]]; then echo "watcher installed for ${SUDO_USER:-?}"; else echo "NOT installed, see README"; fi)
+Achievement and message flashes: $WATCHER_STATUS
   Check:    $INSTALL_DIR/steamos-led-serial --steam-check   (with a game running)
   Log:      journalctl --user -u steamos-led-achievements -f
 
