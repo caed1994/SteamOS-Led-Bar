@@ -12,8 +12,9 @@ WATCHER_UNIT="steamos-led-achievements.service"
 # Must match WantedBy= in that unit: it is where the enable symlink goes.
 WATCHER_WANTS="default.target.wants"
 
-# Sets WATCHER_USER, WATCHER_DIR and WATCHER_RUNTIME for the desktop user who
-# invoked sudo. Returns non-zero, quietly, when there is no such user.
+# Sets WATCHER_USER, WATCHER_HOME, WATCHER_DIR and WATCHER_RUNTIME for the
+# desktop user who invoked sudo. Returns non-zero, quietly, when there is no
+# such user. The installer also uses this to run PlatformIO as that user.
 watcher_user_dirs() {
     WATCHER_USER="${SUDO_USER:-}"
     [[ -n "$WATCHER_USER" && "$WATCHER_USER" != "root" ]] || return 1
@@ -22,6 +23,7 @@ watcher_user_dirs() {
     home="$(getent passwd "$WATCHER_USER" | cut -d: -f6)"
     [[ -n "$home" && -d "$home" ]] || return 1
 
+    WATCHER_HOME="$home"
     WATCHER_DIR="$home/.config/systemd/user"
     WATCHER_RUNTIME="/run/user/$(id -u "$WATCHER_USER")"
     return 0

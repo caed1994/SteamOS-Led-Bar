@@ -29,6 +29,18 @@ ASSUME_YES=0
 SKIP_MODULE=0
 REBUILD_MODULE=0
 SKIP_WATCHER=0
+FLASH_ENV=""
+
+# The firmware builds, in the order the menu offers them. Descriptions say
+# which pin the strip goes on, because that is the part that has to match the
+# wiring - see docs/WIRING.md.
+FIRMWARE_ENVS=(
+    "nodemcuv2:ESP8266 (NodeMCU, D1 mini), strip on GPIO2 - recommended"
+    "esp8266_gpio14:ESP8266, strip on GPIO14 / D5 - keeps older wiring"
+    "esp32dev:ESP32, strip on GPIO16"
+    "esp32s3:ESP32-S3, strip on GPIO16"
+    "d1_mini:ESP8266 with the D1 mini board profile, strip on GPIO2"
+)
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warning:\033[0m %s\n' "$*" >&2; }
@@ -45,6 +57,8 @@ Options:
   --skip-module   do not touch the leds-valve-shim kernel module
   --rebuild-module  rebuild and reinstall the module even if it is loaded
   --skip-watcher  do not install the achievement watcher user service
+  --flash ENV     also flash the ESP firmware (e.g. nodemcuv2, esp32dev),
+                  or a number from the menu; omit to be asked, 0 to skip
   -y, --yes       accept defaults, no prompts
   -h, --help      this text
 EOF
@@ -58,6 +72,7 @@ while [[ $# -gt 0 ]]; do
         --skip-module) SKIP_MODULE=1; shift ;;
         --rebuild-module) REBUILD_MODULE=1; shift ;;
         --skip-watcher) SKIP_WATCHER=1; shift ;;
+        --flash) FLASH_ENV="${2:-}"; shift 2 ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
@@ -97,6 +112,37 @@ fi
 
 [[ -n "$BAUD" ]] || BAUD="$(ask 'Baud rate (all shipped firmware uses 230400)' 230400)"
 [[ "$BAUD" =~ ^[0-9]+$ ]] || die "baud rate must be a number"
+
+# --- firmware ---------------------------------------------------------------
+
+# Turns "2", "esp32dev" or "" into an environment name, or nothing for "no".
+resolve_firmware_choice() {
+    local choice="$1" entry
+    [[ -z "$choice" || "$choice" == "0" || "$choice" == "n" ]] && return 0
+
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+        (( choice >= 1 && choice <= ${#FIRMWARE_ENVS[@]} )) \
+            || die "pick a number between 0 and ${#FIRMWARE_ENVS[@]}"
+        printf '%s' "${FIRMWARE_ENVS[choice - 1]%%:*}"
+        return 0
+    fi
+    for entry in "${FIRMWARE_ENVS[@]}"; do
+        [[ "$choice" == "${entry%%:*}" ]] && { printf '%s' "$choice"; return 0; }
+    done
+    die "unknown firmware environment: $choice"
+}
+
+if [[ -z "$FLASH_ENV" && $ASSUME_YES -eq 0 ]]; then
+    # Default is 0: flashing is the one step that touches the hardware, and
+    # nobody re-running the installer for a config change expects it.
+    say "Flash the ESP firmware as well?"
+    echo "   0  no - it is already flashed (default)"
+    for index in "${!FIRMWARE_ENVS[@]}"; do
+        printf '   %d  %s\n' "$((index + 1))" "${FIRMWARE_ENVS[index]#*:}"
+    done
+    FLASH_ENV="$(ask 'Firmware' 0)"
+fi
+FLASH_ENV="$(resolve_firmware_choice "$FLASH_ENV")"
 
 # --- install ---------------------------------------------------------------
 
@@ -265,6 +311,50 @@ install_achievement_watcher() {
     return 0
 }
 
+# --- firmware ---------------------------------------------------------------
+
+flash_firmware() {
+    [[ -n "$FLASH_ENV" ]] || return 0
+
+    # PlatformIO lives in the user's home - the toolchains land in
+    # ~/.platformio and "pio" itself in ~/.local/bin - so this has to run as
+    # them. As root it would either not find pio at all, or download a few
+    # hundred megabytes of toolchain into a root-owned ~/.platformio that
+    # breaks every later run.
+    if ! watcher_user_dirs; then
+        warn "cannot tell which user to flash as - run the installer with"
+        warn "sudo from your normal account, or run ./flash-esp.sh yourself."
+        return 1
+    fi
+
+    # The service holds the serial port exclusively. It is started further
+    # down, so stopping any older copy here leaves the port free.
+    systemctl stop steamos-led-serial.service >/dev/null 2>&1 || true
+
+    local ini="$SOURCE_DIR/firmware/led-client/platformio.ini"
+    if ! grep -q "^\[env:$FLASH_ENV\]" "$ini"; then
+        warn "the menu offers '$FLASH_ENV' but $ini has no such environment."
+        warn "The two have drifted apart - please report this."
+        return 1
+    fi
+
+    say "Flashing firmware '$FLASH_ENV' as $WATCHER_USER"
+    runuser -u "$WATCHER_USER" -- env \
+        "HOME=$WATCHER_HOME" \
+        "PATH=$WATCHER_HOME/.local/bin:$PATH" \
+        bash "$SOURCE_DIR/flash-esp.sh" "$FLASH_ENV"
+}
+
+FIRMWARE_STATUS="not flashed (say so at the prompt, or --flash, to change that)"
+if [[ -n "$FLASH_ENV" ]]; then
+    if flash_firmware; then
+        FIRMWARE_STATUS="flashed: $FLASH_ENV"
+    else
+        FIRMWARE_STATUS="FAILED to flash $FLASH_ENV - see above"
+        warn "firmware flashing failed; the service is installed either way."
+    fi
+fi
+
 # --- start it --------------------------------------------------------------
 
 say "Enabling steamos-led-serial.service"
@@ -315,6 +405,7 @@ cat <<EOF
 
 Done.
 
+  Firmware: $FIRMWARE_STATUS
   Config:   $CONFIG_PATH
   Logs:     journalctl -u steamos-led-serial -f
   Restart:  sudo systemctl restart steamos-led-serial

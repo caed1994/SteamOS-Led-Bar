@@ -74,8 +74,11 @@ data wires.
 
 ### 3. Flash the firmware onto the ESP
 
-Run **only one** of these, matching your hardware. Each flash overwrites the
-previous one:
+**The installer in step 4 can do this for you** — it offers a numbered list and
+defaults to *not* flashing, so if you would rather do it there, skip ahead.
+
+To do it separately, run **only one** of these, matching your hardware. Each
+flash overwrites the previous one:
 
 | Your hardware and wiring | Command |
 | ------------------------ | ------- |
@@ -92,13 +95,25 @@ previous one:
 sudo ./install.sh
 ```
 
-The installer asks for LED count, port and baud rate, builds and loads the
-kernel module, puts the service in `/var/lib/steamos-led-serial/`, writes
-`/etc/steamos-led-serial.conf` and starts everything. To skip the questions:
+The installer asks for LED count, port, baud rate and whether to flash the
+firmware, builds and loads the kernel module, puts the service in
+`/var/lib/steamos-led-serial/`, writes `/etc/steamos-led-serial.conf` and
+starts everything.
+
+The firmware question defaults to **0, meaning no** — flashing is the one step
+that touches the hardware, and re-running the installer to change a setting
+should not reflash the board. Pick the number matching your wiring to have it
+done here instead of in step 3.
+
+To skip the questions entirely:
 
 ```bash
-sudo ./install.sh --leds 60 --yes
+sudo ./install.sh --leds 60 --yes            # never flashes
+sudo ./install.sh --leds 60 --yes --flash 1  # ...unless you ask
 ```
+
+PlatformIO runs as *your* user, not as root: its toolchains live in
+`~/.platformio`, and a root-owned copy of that would break every later run.
 
 ### 5. Try it
 
