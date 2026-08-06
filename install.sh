@@ -313,6 +313,30 @@ install_achievement_watcher() {
 
 # --- firmware ---------------------------------------------------------------
 
+# Where PlatformIO lives depends on how it was installed: the standalone
+# installer puts it in ~/.platformio/penv/bin, "pip install --user" in
+# ~/.local/bin, a distribution package somewhere on the system PATH. So ask
+# the user's login shell first - that is the setup that already works when
+# they run ./flash-esp.sh by hand, whatever their profile does - and only fall
+# back to the known locations if their profile does not put it on PATH.
+find_pio() {
+    local candidate
+    candidate="$(runuser -l "$WATCHER_USER" -c 'command -v pio' 2>/dev/null \
+                 | tail -1)"
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+        printf '%s' "$candidate"
+        return 0
+    fi
+    for candidate in "$WATCHER_HOME/.platformio/penv/bin/pio" \
+                     "$WATCHER_HOME/.local/bin/pio"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 flash_firmware() {
     [[ -n "$FLASH_ENV" ]] || return 0
 
@@ -338,10 +362,19 @@ flash_firmware() {
         return 1
     fi
 
-    say "Flashing firmware '$FLASH_ENV' as $WATCHER_USER"
+    local pio_path
+    if ! pio_path="$(find_pio)"; then
+        warn "PlatformIO (pio) not found for $WATCHER_USER. Install it with:"
+        warn "    python3 -m pip install --user platformio"
+        warn "The service is installed either way; flash later with"
+        warn "    ./flash-esp.sh $FLASH_ENV"
+        return 1
+    fi
+
+    say "Flashing firmware '$FLASH_ENV' as $WATCHER_USER (${pio_path})"
     runuser -u "$WATCHER_USER" -- env \
         "HOME=$WATCHER_HOME" \
-        "PATH=$WATCHER_HOME/.local/bin:$PATH" \
+        "PATH=$(dirname "$pio_path"):$PATH" \
         bash "$SOURCE_DIR/flash-esp.sh" "$FLASH_ENV"
 }
 
