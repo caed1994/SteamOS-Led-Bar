@@ -37,6 +37,7 @@ except ImportError:                                         # pragma: no cover
         "see the README. To install it: sudo pacman -S tk\n"
         "(and remember a SteamOS update will remove it again).")
 
+import kdetheme                                             # noqa: E402
 import ledpanel                                             # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
 
@@ -67,6 +68,111 @@ SETTINGS = [
 ]
 
 
+def apply_theme(root):
+    """Dress the window in whatever colours Plasma is using.
+
+    ttk ships no theme that resembles a modern desktop, and it cannot ask one
+    either - so the scheme is read from KDE's own config and painted on. clam
+    is the base because it is the only built-in theme that honours colour
+    options at all; the others draw fixed bitmaps.
+
+    Returns the palette, so the parts tkinter styles cannot reach - the text
+    pane, the status marks - can use the same colours.
+    """
+    palette = kdetheme.read()
+    shade = kdetheme.derived(palette)
+    dark = kdetheme.is_dark(palette)
+
+    style = ttk.Style()
+    try:
+        style.theme_use("clam")
+    except tk.TclError:                                     # pragma: no cover
+        pass
+
+    if palette["font"]:
+        family, size = palette["font"]
+        root.option_add("*Font", (family, size))
+        style.configure(".", font=(family, size))
+        heading = (family, size + 3, "bold")
+    else:
+        heading = ("TkDefaultFont", 13, "bold")
+
+    root.configure(background=palette["window"])
+    style.configure(".", background=palette["window"],
+                    foreground=palette["window_text"],
+                    fieldbackground=palette["view"],
+                    bordercolor=shade["border"],
+                    focuscolor=palette["selection"],
+                    troughcolor=shade["raised"], relief="flat")
+    style.configure("TFrame", background=palette["window"])
+    style.configure("TLabel", background=palette["window"],
+                    foreground=palette["window_text"])
+    style.configure("Heading.TLabel", font=heading)
+    style.configure("Muted.TLabel", foreground=shade["muted"])
+    style.configure("Good.TLabel", foreground=palette["positive"])
+    style.configure("Bad.TLabel", foreground=palette["negative"])
+
+    style.configure("TLabelframe", background=palette["window"],
+                    bordercolor=shade["border"])
+    style.configure("TLabelframe.Label", background=palette["window"],
+                    foreground=shade["muted"])
+
+    style.configure("TButton", background=palette["button"],
+                    foreground=palette["button_text"],
+                    bordercolor=shade["border"], padding=(12, 6))
+    style.map("TButton",
+              background=[("pressed", palette["selection"]),
+                          ("active", shade["hover"])],
+              foreground=[("pressed", palette["selection_text"])])
+
+    style.configure("Accent.TButton", background=palette["selection"],
+                    foreground=palette["selection_text"])
+    style.map("Accent.TButton",
+              background=[("active", kdetheme.mix(palette["selection"],
+                                                  "#ffffff", 0.15))])
+
+    style.configure("TNotebook", background=palette["window"],
+                    bordercolor=shade["border"], tabmargins=(2, 6, 2, 0))
+    style.configure("TNotebook.Tab", background=shade["raised"],
+                    foreground=shade["muted"], padding=(16, 8),
+                    bordercolor=shade["border"])
+    style.map("TNotebook.Tab",
+              background=[("selected", palette["window"])],
+              foreground=[("selected", palette["window_text"])],
+              expand=[("selected", (0, 0, 0, 2))])
+
+    style.configure("TCheckbutton", background=palette["window"],
+                    foreground=palette["window_text"],
+                    indicatorcolor=palette["view"])
+    style.map("TCheckbutton",
+              indicatorcolor=[("selected", palette["selection"])],
+              background=[("active", palette["window"])])
+
+    style.configure("TCombobox", fieldbackground=palette["view"],
+                    background=palette["button"],
+                    foreground=palette["view_text"],
+                    arrowcolor=palette["window_text"],
+                    bordercolor=shade["border"], padding=(6, 4))
+    root.option_add("*TCombobox*Listbox.background", palette["view"])
+    root.option_add("*TCombobox*Listbox.foreground", palette["view_text"])
+    root.option_add("*TCombobox*Listbox.selectBackground",
+                    palette["selection"])
+    root.option_add("*TCombobox*Listbox.selectForeground",
+                    palette["selection_text"])
+
+    style.configure("Horizontal.TScale", background=palette["window"],
+                    troughcolor=shade["raised"],
+                    bordercolor=shade["border"])
+    style.configure("TScrollbar", background=shade["raised"],
+                    troughcolor=palette["window"],
+                    bordercolor=shade["border"],
+                    arrowcolor=palette["window_text"])
+
+    palette["_shade"] = shade
+    palette["_dark"] = dark
+    return palette
+
+
 class Runner:
     """Runs a command without freezing the window.
 
@@ -75,6 +181,7 @@ class Runner:
     """
 
     def __init__(self, widget, sink):
+        # sink(text, tag=None) - the tag is optional so a plain writer works.
         self.widget = widget
         self.sink = sink
         self.queue = queue.Queue()
@@ -86,7 +193,7 @@ class Runner:
             self.sink("Still busy with the last command.\n")
             return False
         self.busy = True
-        self.sink("$ %s\n" % " ".join(command))
+        self.sink("$ %s\n" % " ".join(command), "command")
         threading.Thread(target=self._work, args=(command, done),
                          daemon=True).start()
         return True
@@ -97,7 +204,7 @@ class Runner:
                 command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1)
         except OSError as exc:
-            self.queue.put(("line", "cannot run: %s\n" % exc))
+            self.queue.put(("line", "cannot run: %s\n" % exc))   # noqa
             self.queue.put(("done", (1, done)))
             return
         for line in process.stdout:
@@ -114,7 +221,7 @@ class Runner:
                 else:
                     code, done = payload
                     self.busy = False
-                    self.sink("[exit %d]\n\n" % code)
+                    self.sink("[exit %d]\n\n" % code, "command")
                     if done is not None:
                         done(code)
         except queue.Empty:
@@ -126,20 +233,29 @@ class Panel:
     def __init__(self, root):
         self.root = root
         root.title("SteamOS LED bar")
-        root.minsize(640, 560)
+        root.minsize(720, 640)
 
+        self.palette = apply_theme(root)
+        self.shade = self.palette["_shade"]
         self.config = self._load_config()
         self.vars = {}
 
+        header = ttk.Frame(root)
+        header.pack(fill="x", padx=16, pady=(14, 0))
+        ttk.Label(header, text="SteamOS LED bar",
+                  style="Heading.TLabel").pack(anchor="w")
+        self.headline = ttk.Label(header, text="", style="Muted.TLabel")
+        self.headline.pack(anchor="w", pady=(2, 0))
+
         notebook = ttk.Notebook(root)
-        notebook.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+        notebook.pack(fill="both", expand=True, padx=16, pady=(12, 0))
 
         self.output = self._build_output(root)
         self.runner = Runner(root, self._write)
 
-        notebook.add(self._build_settings(notebook), text="Settings")
-        notebook.add(self._build_tests(notebook), text="Test")
-        notebook.add(self._build_status(notebook), text="Status && repair")
+        notebook.add(self._build_settings(notebook), text="  Settings  ")
+        notebook.add(self._build_tests(notebook), text="  Test  ")
+        notebook.add(self._build_status(notebook), text="  Status && repair  ")
 
         self.refresh_status()
 
@@ -155,20 +271,31 @@ class Panel:
                 % (config_module.DEFAULT_CONFIG_PATH, exc))
             return dict(config_module.DEFAULTS)
 
-    def _write(self, text):
+    def _write(self, text, tag=None):
         self.output.configure(state="normal")
-        self.output.insert("end", text)
+        self.output.insert("end", text, tag or ())
         self.output.see("end")
         self.output.configure(state="disabled")
 
     def _build_output(self, parent):
-        frame = ttk.LabelFrame(parent, text="Output")
-        frame.pack(fill="both", expand=True, padx=8, pady=8)
-        text = tk.Text(frame, height=10, wrap="word", state="disabled")
+        frame = ttk.LabelFrame(parent, text="Output", padding=1)
+        frame.pack(fill="both", expand=True, padx=16, pady=14)
+        # tk.Text is not a themed widget, so its colours have to be set by
+        # hand - and it is the one place a fixed-width font is right, because
+        # everything landing here is command output.
+        text = tk.Text(frame, height=9, wrap="word", state="disabled",
+                       relief="flat", borderwidth=0, padx=10, pady=8,
+                       background=self.palette["view"],
+                       foreground=self.palette["view_text"],
+                       insertbackground=self.palette["view_text"],
+                       selectbackground=self.palette["selection"],
+                       selectforeground=self.palette["selection_text"],
+                       font=("TkFixedFont",))
         scroll = ttk.Scrollbar(frame, command=text.yview)
         text.configure(yscrollcommand=scroll.set)
         text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        text.tag_configure("command", foreground=self.shade["muted"])
         return text
 
     # -- settings ---------------------------------------------------------
@@ -176,12 +303,12 @@ class Panel:
     def _build_settings(self, parent):
         outer = ttk.Frame(parent)
         grid = ttk.Frame(outer)
-        grid.pack(fill="both", expand=True, padx=10, pady=10)
+        grid.pack(fill="both", expand=True, padx=16, pady=16)
         grid.columnconfigure(1, weight=1)
 
         for row, (key, label, kind, low, high) in enumerate(SETTINGS):
             ttk.Label(grid, text=label).grid(row=row, column=0, sticky="w",
-                                             pady=3)
+                                             pady=5, padx=(0, 14))
             value = self.config.get(key, config_module.DEFAULTS[key])
 
             if kind == "bool":
@@ -199,8 +326,9 @@ class Panel:
             self.vars[key] = (variable, kind)
 
         buttons = ttk.Frame(outer)
-        buttons.pack(fill="x", padx=10, pady=(0, 10))
+        buttons.pack(fill="x", padx=16, pady=(0, 16))
         ttk.Button(buttons, text="Apply and restart service",
+                   style="Accent.TButton",
                    command=self.apply_settings).pack(side="left")
         ttk.Button(buttons, text="Reload from file",
                    command=self.reload_settings).pack(side="left", padx=6)
@@ -346,19 +474,20 @@ class Panel:
 
     def _build_status(self, parent):
         outer = ttk.Frame(parent)
-        self.summary = ttk.Label(outer, text="", wraplength=580,
+        self.summary = ttk.Label(outer, text="", wraplength=640,
                                  justify="left")
-        self.summary.pack(anchor="w", padx=10, pady=(10, 4))
+        self.summary.pack(anchor="w", padx=16, pady=(16, 10))
 
         self.checklist = ttk.Frame(outer)
-        self.checklist.pack(fill="both", expand=True, padx=10)
+        self.checklist.pack(fill="both", expand=True, padx=16)
 
         buttons = ttk.Frame(outer)
         buttons.pack(fill="x", padx=10, pady=10)
         ttk.Button(buttons, text="Check again",
                    command=self.refresh_status).pack(side="left")
         ttk.Button(buttons, text="Repair / reinstall",
-                   command=self.reinstall).pack(side="left", padx=6)
+                   style="Accent.TButton",
+                   command=self.reinstall).pack(side="left", padx=8)
         ttk.Label(
             outer,
             text=("A SteamOS update replaces the kernel, and the LED module "
@@ -372,15 +501,24 @@ class Panel:
         for child in self.checklist.winfo_children():
             child.destroy()
         checks = ledpanel.run_checks(config=self.config)
-        self.summary.configure(text=ledpanel.repair_summary(checks))
+        summary = ledpanel.repair_summary(checks)
+        self.summary.configure(
+            text=summary,
+            style="Good.TLabel" if not ledpanel.broken(checks)
+            else "Bad.TLabel")
+        self.headline.configure(text=summary)
         for row, check in enumerate(checks):
-            mark = "OK" if check.ok else "--"
-            ttk.Label(self.checklist, text=mark, width=4).grid(
-                row=row, column=0, sticky="w")
-            text = check.name if check.ok else "%s: %s" % (check.name,
-                                                           check.detail)
-            ttk.Label(self.checklist, text=text, wraplength=520,
-                      justify="left").grid(row=row, column=1, sticky="w")
+            ttk.Label(self.checklist, text="\u2713" if check.ok else "\u2717",
+                      width=3, style="Good.TLabel" if check.ok
+                      else "Bad.TLabel").grid(row=row, column=0, sticky="nw",
+                                              pady=2)
+            ttk.Label(self.checklist, text=check.name,
+                      style="TLabel" if check.ok else "Bad.TLabel").grid(
+                          row=row, column=1, sticky="w", pady=2)
+            if not check.ok:
+                ttk.Label(self.checklist, text=check.detail, wraplength=460,
+                          justify="left", style="Muted.TLabel").grid(
+                              row=row, column=2, sticky="w", pady=2)
 
     def reinstall(self):
         if not os.path.exists(os.path.join(SOURCE_DIR, "install.sh")):

@@ -428,6 +428,14 @@ It runs as you, not as root: flashing the bar and asking Steam questions need
 no rights at all. Only writing the config, the self-test and repairing do, and
 each asks once through the normal system password prompt.
 
+It follows your Plasma theme. tkinter has no idea a desktop theme exists,
+which is why an unstyled window looks like a visitor from another decade -
+but Plasma writes its active colour scheme into `~/.config/kdeglobals` as
+plain INI, so the panel reads it: window and text colours, the accent, the
+font, and whether the scheme is light or dark. Switch Plasma to Breeze Dark
+and reopen the panel and it comes back dark. Without KDE it falls back to
+Breeze light.
+
 > The panel needs Python's `tkinter`. It is present on SteamOS, but a system
 > update can remove it (`sudo pacman -S tk` brings it back). Nothing here is
 > only available in the panel - every button runs a command you can also type,

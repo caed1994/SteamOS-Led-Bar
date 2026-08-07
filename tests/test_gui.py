@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
+import kdetheme  # noqa: E402
 import ledpanel  # noqa: E402
 from steamos_led import config as config_module  # noqa: E402
 
@@ -224,6 +225,195 @@ class PanelSettingsTest(unittest.TestCase):
                 except config_module.ConfigError as exc:
                     self.fail("the panel offers %s=%s, which the service "
                               "rejects: %s" % (key, edge, exc))
+
+
+
+
+class KdeThemeTest(unittest.TestCase):
+    """Reading the desktop's own colours instead of inventing some.
+
+    tkinter knows nothing about Plasma, which is why an unstyled window looks
+    foreign. Plasma writes its scheme to ~/.config/kdeglobals as plain INI, so
+    it can just be read.
+    """
+
+    BREEZE_DARK = """
+[General]
+ColorScheme=BreezeDark
+font=Noto Sans,10,-1,5,50,0,0,0,0,0
+
+[Colors:Window]
+BackgroundNormal=49,54,59
+ForegroundNormal=252,252,252
+
+[Colors:View]
+BackgroundNormal=35,38,41
+ForegroundNormal=252,252,252
+ForegroundNegative=218,68,83
+ForegroundPositive=39,174,96
+
+[Colors:Button]
+BackgroundNormal=49,54,59
+ForegroundNormal=252,252,252
+
+[Colors:Selection]
+BackgroundNormal=61,174,233
+ForegroundNormal=252,252,252
+"""
+
+    def _write(self, text):
+        import tempfile
+        handle = tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False)
+        handle.write(text)
+        handle.close()
+        self.addCleanup(os.unlink, handle.name)
+        return handle.name
+
+    def test_colours_come_from_the_scheme(self):
+        palette = kdetheme.read(self._write(self.BREEZE_DARK))
+        self.assertEqual(palette["window"], "#31363b")
+        self.assertEqual(palette["view"], "#232629")
+        self.assertEqual(palette["selection"], "#3daee9")
+
+    def test_a_dark_scheme_is_recognised_as_dark(self):
+        self.assertTrue(kdetheme.is_dark(kdetheme.read(
+            self._write(self.BREEZE_DARK))))
+        self.assertFalse(kdetheme.is_dark(kdetheme.BREEZE_LIGHT))
+
+    def test_the_font_is_read(self):
+        palette = kdetheme.read(self._write(self.BREEZE_DARK))
+        self.assertEqual(palette["font"], ("Noto Sans", 10))
+
+    def test_a_missing_file_still_gives_a_complete_palette(self):
+        palette = kdetheme.read("/nonexistent/kdeglobals")
+        for key in kdetheme.BREEZE_LIGHT:
+            self.assertIn(key, palette)
+            self.assertTrue(palette[key].startswith("#"), key)
+
+    def test_a_half_written_scheme_is_filled_in(self):
+        # A hand-edited or partial file must not leave holes in the window.
+        palette = kdetheme.read(self._write(
+            "[Colors:Window]\nBackgroundNormal=10,20,30\n"))
+        self.assertEqual(palette["window"], "#0a141e")
+        self.assertEqual(palette["selection"],
+                         kdetheme.BREEZE_LIGHT["selection"])
+
+    def test_nonsense_values_are_ignored_rather_than_crashing(self):
+        palette = kdetheme.read(self._write(
+            "[Colors:Window]\nBackgroundNormal=not,a,colour\n"))
+        self.assertEqual(palette["window"], kdetheme.BREEZE_LIGHT["window"])
+
+    def test_out_of_range_values_are_ignored(self):
+        palette = kdetheme.read(self._write(
+            "[Colors:Window]\nBackgroundNormal=300,0,0\n"))
+        self.assertEqual(palette["window"], kdetheme.BREEZE_LIGHT["window"])
+
+    def test_an_alpha_channel_is_tolerated(self):
+        self.assertEqual(kdetheme.parse_color("1,2,3,255"), "#010203")
+
+    def test_derived_shades_follow_the_scheme(self):
+        # Borders and hover states have no entry in the scheme - Qt draws them
+        # itself - so they are mixed, which has to work in the dark too.
+        for palette in (kdetheme.BREEZE_LIGHT,
+                        kdetheme.read(self._write(self.BREEZE_DARK))):
+            shades = kdetheme.derived(palette)
+            for key in ("border", "hover", "muted", "raised"):
+                self.assertRegex(shades[key], r"^#[0-9a-f]{6}$", key)
+            # A border has to be visible against its own background.
+            self.assertNotEqual(shades["border"], palette["window"])
+
+    def test_dark_and_light_borders_go_opposite_ways(self):
+        dark = kdetheme.read(self._write(self.BREEZE_DARK))
+        light = kdetheme.BREEZE_LIGHT
+        self.assertGreater(kdetheme.luminance(kdetheme.derived(dark)["border"]),
+                           kdetheme.luminance(dark["window"]),
+                           "a dark scheme needs a lighter border")
+        self.assertLess(kdetheme.luminance(kdetheme.derived(light)["border"]),
+                        kdetheme.luminance(light["window"]),
+                        "a light scheme needs a darker one")
+
+    def test_a_broken_font_line_does_not_break_the_palette(self):
+        palette = kdetheme.read(self._write("[General]\nfont=\n"))
+        self.assertIsNone(palette["font"])
+        self.assertEqual(kdetheme.parse_font("Noto Sans"), ("Noto Sans", 10))
+        self.assertEqual(kdetheme.parse_font("Noto Sans,huge"),
+                         ("Noto Sans", 10))
+
+    def test_absurd_font_sizes_are_clamped(self):
+        self.assertEqual(kdetheme.parse_font("X,900")[1], 32)
+        self.assertEqual(kdetheme.parse_font("X,1")[1], 6)
+
+
+
+
+class PanelStyleTest(unittest.TestCase):
+    """Every custom ttk style used has to be one that was configured.
+
+    A misspelled style name is the quietest bug tkinter has: the widget simply
+    keeps the default look and nothing is reported. There is no display on a
+    build machine to notice it either, so the two lists are compared here.
+    """
+
+    def setUp(self):
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(path) as handle:
+            self.tree = ast.parse(handle.read())
+
+    def _configured(self):
+        names = set()
+        for node in ast.walk(self.tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("configure", "map")
+                    and getattr(node.func.value, "id", "") == "style"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)):
+                names.add(node.args[0].value)
+        return names
+
+    def _used(self):
+        names = set()
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "style":
+                    continue
+                # style= is not always a plain string: a check that is either
+                # good or bad picks its style with a conditional, so collect
+                # every name in the expression.
+                for inner in ast.walk(keyword.value):
+                    if isinstance(inner, ast.Constant) and \
+                            isinstance(inner.value, str):
+                        names.add(inner.value)
+        return names
+
+    def test_every_style_used_was_configured(self):
+        configured, used = self._configured(), self._used()
+        for name in used:
+            self.assertIn(name, configured,
+                          "%s is applied to a widget but never configured" % name)
+
+    def test_the_custom_styles_are_all_used(self):
+        # A configured style nobody applies is dead weight, and usually means
+        # a rename happened on one side only.
+        configured, used = self._configured(), self._used()
+        for name in configured:
+            if "." not in name or name.startswith(("T", ".")):
+                continue        # the built-in classes, styled wholesale
+            if name.split(".")[-1].startswith("T") and name.count(".") == 1 \
+                    and name.split(".")[0] not in ("Horizontal",):
+                self.assertIn(name, used, "%s is configured but never used"
+                              % name)
+
+    def test_the_status_marks_use_the_schemes_own_colours(self):
+        # Good and bad have to come from the desktop scheme, not from a
+        # hardcoded green and red that vanish in someone's dark theme.
+        source = ast.dump(self.tree)
+        self.assertIn("Good.TLabel", source)
+        self.assertIn("Bad.TLabel", source)
+        for hardcoded in ("'green'", "'red'", "#00ff00", "#ff0000"):
+            self.assertNotIn(hardcoded, source)
 
 
 if __name__ == "__main__":
