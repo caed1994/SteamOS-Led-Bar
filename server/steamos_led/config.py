@@ -89,6 +89,44 @@ def parse_file(path):
     return values
 
 
+def format_value(value):
+    """A value as the config file spells it: booleans as 1/0."""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
+def update_text(text, values):
+    """Return `text` with these options set, leaving everything else alone.
+
+    Rewriting the file from the parsed values would be shorter and would throw
+    away every comment in it - and this file is mostly comments explaining what
+    each option does. So existing lines are edited in place and anything not
+    already there is appended under a heading.
+    """
+    remaining = dict(values)
+    lines = text.splitlines(keepends=True)
+
+    for index, raw in enumerate(lines):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.partition("=")[0].strip().upper()
+        if key not in remaining:
+            continue
+        ending = "\n" if raw.endswith("\n") else ""
+        lines[index] = "%s=%s%s" % (key, format_value(remaining.pop(key)),
+                                    ending)
+
+    if remaining:
+        if lines and not lines[-1].endswith("\n"):
+            lines.append("\n")
+        lines.append("\n# Added by the control panel.\n")
+        for key in sorted(remaining):
+            lines.append("%s=%s\n" % (key, format_value(remaining[key])))
+    return "".join(lines)
+
+
 def load(path=DEFAULT_CONFIG_PATH, overrides=None):
     """Defaults < config file < environment < CLI overrides."""
     config = dict(DEFAULTS)

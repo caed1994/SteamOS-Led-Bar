@@ -458,3 +458,86 @@ class MisconfiguredDeviceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigRewritingTest(unittest.TestCase):
+    """Changing settings must not shred the file explaining them.
+
+    The shipped config is mostly comments - what each option does, why the
+    baud rate is what it is. A control panel that rewrites it from parsed
+    values would leave a bare list of assignments behind.
+    """
+
+    SAMPLE = (
+        "# Configuration for steamos-led-serial.\n"
+        "\n"
+        "# Number of LEDs on the physical strip.\n"
+        "LED_COUNT=17\n"
+        "\n"
+        "# Brightness limits, 0-255.\n"
+        "MAX_BRIGHTNESS=255\n"
+        "REVERSE=0\n"
+    )
+
+    def test_a_value_is_replaced_in_place(self):
+        result = config.update_text(self.SAMPLE, {"LED_COUNT": 60})
+        self.assertIn("LED_COUNT=60\n", result)
+        self.assertNotIn("LED_COUNT=17", result)
+
+    def test_every_comment_survives(self):
+        result = config.update_text(self.SAMPLE, {"LED_COUNT": 60,
+                                                  "MAX_BRIGHTNESS": 80})
+        for line in self.SAMPLE.splitlines():
+            if line.startswith("#"):
+                self.assertIn(line, result, line)
+
+    def test_the_order_of_the_file_is_kept(self):
+        result = config.update_text(self.SAMPLE, {"MAX_BRIGHTNESS": 80})
+        self.assertLess(result.index("LED_COUNT"), result.index("MAX_BRIGHTNESS"))
+
+    def test_untouched_options_keep_their_value(self):
+        result = config.update_text(self.SAMPLE, {"LED_COUNT": 60})
+        self.assertIn("MAX_BRIGHTNESS=255\n", result)
+        self.assertIn("REVERSE=0\n", result)
+
+    def test_booleans_are_written_as_the_file_spells_them(self):
+        result = config.update_text(self.SAMPLE, {"REVERSE": True})
+        self.assertIn("REVERSE=1\n", result)
+        # And not as Python spells them.
+        self.assertNotIn("True", result)
+
+    def test_an_option_not_in_the_file_is_appended(self):
+        # Options added by a later version are not in an older user's file.
+        result = config.update_text(self.SAMPLE, {"NOTIFY_MESSAGES": False})
+        self.assertIn("NOTIFY_MESSAGES=0\n", result)
+        self.assertIn("LED_COUNT=17\n", result, "and nothing else moved")
+
+    def test_the_result_still_parses_to_what_was_asked_for(self):
+        import tempfile
+        result = config.update_text(self.SAMPLE, {"LED_COUNT": 60,
+                                                  "REVERSE": True,
+                                                  "GAMMA": 2.2})
+        with tempfile.NamedTemporaryFile("w", suffix=".conf",
+                                         delete=False) as handle:
+            handle.write(result)
+            path = handle.name
+        self.addCleanup(os.unlink, path)
+        parsed = config.parse_file(path)
+        self.assertEqual(parsed["LED_COUNT"], 60)
+        self.assertEqual(parsed["REVERSE"], True)
+        self.assertEqual(parsed["GAMMA"], 2.2)
+
+    def test_a_file_without_a_trailing_newline_is_handled(self):
+        result = config.update_text("LED_COUNT=17", {"GAMMA": 2.2})
+        self.assertIn("LED_COUNT=17\n", result)
+        self.assertIn("GAMMA=2.2\n", result)
+
+    def test_the_real_shipped_config_survives_a_round_trip(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        shipped = os.path.join(here, "..", "server", "steamos-led-serial.conf")
+        with open(shipped) as handle:
+            text = handle.read()
+        result = config.update_text(text, {"LED_COUNT": 60, "GAMMA": 2.2})
+        self.assertEqual(text.count("#"), result.count("#"),
+                         "comments were lost")
+        self.assertIn("LED_COUNT=60\n", result)

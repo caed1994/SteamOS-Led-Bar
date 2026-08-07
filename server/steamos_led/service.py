@@ -252,6 +252,19 @@ def _report_route(route, status, detail):
     print("  [%s] %-52s %s" % (ROUTE_MARKS[status], route, detail), flush=True)
 
 
+def run_check_config(config):
+    """Report the settings this configuration adds up to.
+
+    Reaching here at all means the file parsed and passed validate(), because
+    main() loads it before dispatching - so this is also the answer to "would
+    the service accept this file?", which is what anything replacing a working
+    config wants to know before it does.
+    """
+    for key in sorted(config):
+        print("%-18s %s" % (key, config[key]))
+    return 0
+
+
 def run_steam_check(config):
     """Report what the Steamworks path can and cannot find on this machine."""
     print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"),
@@ -770,6 +783,10 @@ def build_parser():
                        dest="watch_achievements",
                        help="flash on every achievement unlocked in the running "
                             "game (run as your normal user, not with sudo)")
+    modes.add_argument("--check-config", action="store_true",
+                       dest="check_config",
+                       help="load and validate the configuration and exit; "
+                            "prints the effective settings")
     modes.add_argument("--steam-check", action="store_true", dest="steam_check",
                        help="report whether realtime achievement detection can "
                             "work on this machine")
@@ -834,6 +851,8 @@ def main(argv=None):
             return run_self_test(config, args.self_test or None)
         if args.notify:
             return run_notify(config, args.notify)
+        if args.check_config:
+            return run_check_config(config)
         if args.steam_check:
             return run_steam_check(config)
         if args.probe_messages is not None:

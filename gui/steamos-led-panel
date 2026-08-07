@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""Control panel for the SteamOS LED bar bridge.
+
+Settings, tests and repair in one window. Installation stays with install.sh -
+this is for everything after it, which is the part you do more than once.
+
+Deliberately tkinter and nothing else: SteamOS has a read-only rootfs, so
+anything installed with a package manager is gone at the next system update.
+Only the standard library survives that.
+
+Unprivileged. Flashing the bar and asking Steam questions need no rights at
+all, and the two things that do - writing the config and restarting the
+service - go through pkexec one prompt at a time.
+"""
+
+from __future__ import annotations
+
+import os
+import queue
+import subprocess
+import sys
+import tempfile
+import threading
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SOURCE_DIR = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(SOURCE_DIR, "server"))
+sys.path.insert(0, HERE)
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, colorchooser, messagebox
+except ImportError:                                         # pragma: no cover
+    sys.exit(
+        "This panel needs Python's tkinter, which is not installed.\n"
+        "On SteamOS everything it does is also available from the terminal -\n"
+        "see the README. To install it: sudo pacman -S tk\n"
+        "(and remember a SteamOS update will remove it again).")
+
+import ledpanel                                             # noqa: E402
+from steamos_led import config as config_module             # noqa: E402
+
+
+# Which settings to show, in this order, and how. The bounds repeat what
+# config.validate() enforces - it raises text rather than exposing numbers, and
+# a slider needs the numbers. The validator stays the authority: everything is
+# handed to it before it is written, so a disagreement here is caught, not
+# shipped.
+SETTINGS = [
+    ("LED_COUNT", "LEDs on the strip", "int", 1, 1024),
+    ("MAPPING", "Mapping of the 17 logical LEDs", "choice",
+     config_module.MAPPINGS, None),
+    ("REVERSE", "Flip the strip direction", "bool", None, None),
+    ("MAX_BRIGHTNESS", "Maximum brightness", "int", 0, 255),
+    ("MIN_BRIGHTNESS", "Minimum brightness", "int", 0, 255),
+    ("GAMMA", "Gamma", "float", 0.1, 4.0),
+    ("SPEED", "Effect speed", "float", 0.1, 4.0),
+    ("PATROL_DOTS", "Patrol dots", "int", 1, 8),
+    ("NOTIFY", "Flash on notifications", "bool", None, None),
+    ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None),
+    ("NOTIFY_DURATION", "Flash duration (seconds)", "float", 0.1, 60.0),
+    ("NOTIFY_STYLE", "Flash shape", "choice", config_module.NOTIFY_STYLES, None),
+    ("FPS", "Frames per second", "int", 1, 240),
+    ("IDLE_FPS", "Frames per second when idle", "int", 1, 240),
+    ("LOG_LEVEL", "Log level", "choice",
+     ("debug", "info", "warning", "error"), None),
+]
+
+
+class Runner:
+    """Runs a command without freezing the window.
+
+    tkinter may only be touched from the thread that owns it, so the worker
+    posts lines into a queue and the UI drains it on a timer.
+    """
+
+    def __init__(self, widget, sink):
+        self.widget = widget
+        self.sink = sink
+        self.queue = queue.Queue()
+        self.busy = False
+        self._drain()
+
+    def start(self, command, done=None):
+        if self.busy:
+            self.sink("Still busy with the last command.\n")
+            return False
+        self.busy = True
+        self.sink("$ %s\n" % " ".join(command))
+        threading.Thread(target=self._work, args=(command, done),
+                         daemon=True).start()
+        return True
+
+    def _work(self, command, done):
+        try:
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1)
+        except OSError as exc:
+            self.queue.put(("line", "cannot run: %s\n" % exc))
+            self.queue.put(("done", (1, done)))
+            return
+        for line in process.stdout:
+            self.queue.put(("line", line))
+        code = process.wait()
+        self.queue.put(("done", (code, done)))
+
+    def _drain(self):
+        try:
+            while True:
+                kind, payload = self.queue.get_nowait()
+                if kind == "line":
+                    self.sink(payload)
+                else:
+                    code, done = payload
+                    self.busy = False
+                    self.sink("[exit %d]\n\n" % code)
+                    if done is not None:
+                        done(code)
+        except queue.Empty:
+            pass
+        self.widget.after(120, self._drain)
+
+
+class Panel:
+    def __init__(self, root):
+        self.root = root
+        root.title("SteamOS LED bar")
+        root.minsize(640, 560)
+
+        self.config = self._load_config()
+        self.vars = {}
+
+        notebook = ttk.Notebook(root)
+        notebook.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+
+        self.output = self._build_output(root)
+        self.runner = Runner(root, self._write)
+
+        notebook.add(self._build_settings(notebook), text="Settings")
+        notebook.add(self._build_tests(notebook), text="Test")
+        notebook.add(self._build_status(notebook), text="Status && repair")
+
+        self.refresh_status()
+
+    # -- helpers ----------------------------------------------------------
+
+    def _load_config(self):
+        try:
+            return config_module.load()
+        except (config_module.ConfigError, OSError) as exc:
+            messagebox.showwarning(
+                "Configuration",
+                "Could not read %s:\n%s\n\nShowing defaults instead."
+                % (config_module.DEFAULT_CONFIG_PATH, exc))
+            return dict(config_module.DEFAULTS)
+
+    def _write(self, text):
+        self.output.configure(state="normal")
+        self.output.insert("end", text)
+        self.output.see("end")
+        self.output.configure(state="disabled")
+
+    def _build_output(self, parent):
+        frame = ttk.LabelFrame(parent, text="Output")
+        frame.pack(fill="both", expand=True, padx=8, pady=8)
+        text = tk.Text(frame, height=10, wrap="word", state="disabled")
+        scroll = ttk.Scrollbar(frame, command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        text.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        return text
+
+    # -- settings ---------------------------------------------------------
+
+    def _build_settings(self, parent):
+        outer = ttk.Frame(parent)
+        grid = ttk.Frame(outer)
+        grid.pack(fill="both", expand=True, padx=10, pady=10)
+        grid.columnconfigure(1, weight=1)
+
+        for row, (key, label, kind, low, high) in enumerate(SETTINGS):
+            ttk.Label(grid, text=label).grid(row=row, column=0, sticky="w",
+                                             pady=3)
+            value = self.config.get(key, config_module.DEFAULTS[key])
+
+            if kind == "bool":
+                variable = tk.BooleanVar(value=bool(value))
+                ttk.Checkbutton(grid, variable=variable).grid(
+                    row=row, column=1, sticky="w")
+            elif kind == "choice":
+                variable = tk.StringVar(value=str(value))
+                ttk.Combobox(grid, textvariable=variable, values=list(low),
+                             state="readonly", width=12).grid(
+                                 row=row, column=1, sticky="w")
+            else:
+                variable = tk.DoubleVar(value=float(value))
+                self._scale(grid, row, variable, kind, low, high)
+            self.vars[key] = (variable, kind)
+
+        buttons = ttk.Frame(outer)
+        buttons.pack(fill="x", padx=10, pady=(0, 10))
+        ttk.Button(buttons, text="Apply and restart service",
+                   command=self.apply_settings).pack(side="left")
+        ttk.Button(buttons, text="Reload from file",
+                   command=self.reload_settings).pack(side="left", padx=6)
+        return outer
+
+    def _scale(self, grid, row, variable, kind, low, high):
+        holder = ttk.Frame(grid)
+        holder.grid(row=row, column=1, sticky="ew")
+        holder.columnconfigure(0, weight=1)
+        readout = ttk.Label(holder, width=6)
+
+        def show(*_args):
+            value = variable.get()
+            readout.configure(text="%d" % round(value) if kind == "int"
+                              else "%.2f" % value)
+
+        scale = ttk.Scale(holder, from_=low, to=high, variable=variable,
+                          command=show)
+        scale.grid(row=0, column=0, sticky="ew")
+        readout.grid(row=0, column=1, padx=(6, 0))
+        show()
+
+    def _collect(self):
+        """Widget values as the config wants them, validated."""
+        values = {}
+        for key, (variable, kind) in self.vars.items():
+            raw = variable.get()
+            values[key] = (bool(raw) if kind == "bool"
+                           else int(round(raw)) if kind == "int"
+                           else float(raw) if kind == "float"
+                           else str(raw))
+        # The two frame rates are coupled - the idle rate cannot exceed the
+        # active one - and two independent sliders cannot express that. Pulling
+        # FPS below IDLE_FPS is an obvious intention, so follow it and move the
+        # other slider rather than refusing the adjustment.
+        if values["IDLE_FPS"] > values["FPS"]:
+            values["IDLE_FPS"] = values["FPS"]
+            self.vars["IDLE_FPS"][0].set(float(values["FPS"]))
+            self._write("Idle frame rate lowered to %d to stay under the "
+                        "active rate.\n" % values["FPS"])
+
+        merged = dict(self.config)
+        merged.update(values)
+        config_module.validate(merged)      # raises ConfigError
+        return values
+
+    def apply_settings(self):
+        try:
+            values = self._collect()
+        except config_module.ConfigError as exc:
+            messagebox.showerror("Not a usable setting", str(exc))
+            return
+
+        try:
+            with open(config_module.DEFAULT_CONFIG_PATH) as handle:
+                text = handle.read()
+        except OSError:
+            # No config yet: start from the one shipped in the repository so
+            # its comments come along.
+            shipped = os.path.join(SOURCE_DIR, "server",
+                                   "steamos-led-serial.conf")
+            try:
+                with open(shipped) as handle:
+                    text = handle.read()
+            except OSError as exc:
+                messagebox.showerror("Configuration", str(exc))
+                return
+
+        staged = tempfile.NamedTemporaryFile(
+            "w", suffix=".conf", prefix="steamos-led-", delete=False)
+        with staged:
+            staged.write(config_module.update_text(text, values))
+        os.chmod(staged.name, 0o644)
+
+        def finished(code):
+            os.unlink(staged.name)
+            if code == 0:
+                self.config.update(values)
+            self.refresh_status()
+
+        self.runner.start(
+            ledpanel.apply_config_command(SOURCE_DIR, staged.name), finished)
+
+    def reload_settings(self):
+        self.config = self._load_config()
+        for key, (variable, kind) in self.vars.items():
+            value = self.config.get(key, config_module.DEFAULTS[key])
+            variable.set(bool(value) if kind == "bool"
+                         else str(value) if kind == "choice"
+                         else float(value))
+        self._write("Reloaded %s\n\n" % config_module.DEFAULT_CONFIG_PATH)
+
+    # -- tests ------------------------------------------------------------
+
+    def _build_tests(self, parent):
+        outer = ttk.Frame(parent)
+        flashes = ttk.LabelFrame(outer, text="Flash the bar")
+        flashes.pack(fill="x", padx=10, pady=10)
+        ttk.Label(
+            flashes,
+            text="Needs no privileges - the trigger pipe is open to anyone.",
+        ).pack(anchor="w", padx=8, pady=(6, 2))
+
+        row = ttk.Frame(flashes)
+        row.pack(fill="x", padx=8, pady=(0, 8))
+        for kind, label in (("achievement", "Achievement (gold)"),
+                            ("message", "Friend message (purple)"),
+                            ("warning", "Warning (orange)")):
+            ttk.Button(row, text=label,
+                       command=lambda k=kind: self.runner.start(
+                           ledpanel.notify_command(k))).pack(side="left",
+                                                             padx=(0, 6))
+        ttk.Button(row, text="Pick a colour...",
+                   command=self.flash_colour).pack(side="left")
+
+        strip = ttk.LabelFrame(outer, text="Strip and Steam")
+        strip.pack(fill="x", padx=10, pady=(0, 10))
+        row = ttk.Frame(strip)
+        row.pack(fill="x", padx=8, pady=8)
+        ttk.Button(row, text="Self-test (stops the service briefly)",
+                   command=lambda: self.runner.start(
+                       ledpanel.self_test_command(SOURCE_DIR))).pack(
+                           side="left", padx=(0, 6))
+        ttk.Button(row, text="Steam check",
+                   command=lambda: self.runner.start(
+                       ledpanel.steam_check_command())).pack(side="left",
+                                                             padx=(0, 6))
+        ttk.Button(row, text="Message probe",
+                   command=lambda: self.runner.start(
+                       ledpanel.probe_messages_command())).pack(side="left")
+        ttk.Label(
+            strip,
+            text="Steam check and the message probe need a game running.",
+        ).pack(anchor="w", padx=8, pady=(0, 8))
+        return outer
+
+    def flash_colour(self):
+        chosen = colorchooser.askcolor(title="Flash this colour")[1]
+        if chosen:
+            self.runner.start(ledpanel.notify_command(chosen))
+
+    # -- status and repair ------------------------------------------------
+
+    def _build_status(self, parent):
+        outer = ttk.Frame(parent)
+        self.summary = ttk.Label(outer, text="", wraplength=580,
+                                 justify="left")
+        self.summary.pack(anchor="w", padx=10, pady=(10, 4))
+
+        self.checklist = ttk.Frame(outer)
+        self.checklist.pack(fill="both", expand=True, padx=10)
+
+        buttons = ttk.Frame(outer)
+        buttons.pack(fill="x", padx=10, pady=10)
+        ttk.Button(buttons, text="Check again",
+                   command=self.refresh_status).pack(side="left")
+        ttk.Button(buttons, text="Repair / reinstall",
+                   command=self.reinstall).pack(side="left", padx=6)
+        ttk.Label(
+            outer,
+            text=("A SteamOS update replaces the kernel, and the LED module "
+                  "has to be rebuilt for it. Repairing keeps your settings "
+                  "and never touches the ESP."),
+            wraplength=580, justify="left",
+        ).pack(anchor="w", padx=10, pady=(0, 10))
+        return outer
+
+    def refresh_status(self):
+        for child in self.checklist.winfo_children():
+            child.destroy()
+        checks = ledpanel.run_checks(config=self.config)
+        self.summary.configure(text=ledpanel.repair_summary(checks))
+        for row, check in enumerate(checks):
+            mark = "OK" if check.ok else "--"
+            ttk.Label(self.checklist, text=mark, width=4).grid(
+                row=row, column=0, sticky="w")
+            text = check.name if check.ok else "%s: %s" % (check.name,
+                                                           check.detail)
+            ttk.Label(self.checklist, text=text, wraplength=520,
+                      justify="left").grid(row=row, column=1, sticky="w")
+
+    def reinstall(self):
+        if not os.path.exists(os.path.join(SOURCE_DIR, "install.sh")):
+            messagebox.showerror(
+                "Repair",
+                "install.sh is not next to this panel (%s).\nRepairing needs "
+                "the cloned repository." % SOURCE_DIR)
+            return
+        if not messagebox.askokcancel(
+                "Repair", "Re-run the installer?\n\nYour configuration is "
+                          "kept and the ESP is not touched. This asks for "
+                          "your password."):
+            return
+        self.runner.start(ledpanel.reinstall_command(SOURCE_DIR),
+                          lambda _code: self.refresh_status())
+
+
+def main():
+    root = tk.Tk()
+    try:
+        ttk.Style().theme_use("clam")
+    except tk.TclError:                                     # pragma: no cover
+        pass
+    Panel(root)
+    root.mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

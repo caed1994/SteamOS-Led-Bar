@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=SteamOS LED bar
+GenericName=LED strip control panel
+Comment=Settings, tests and repair for the LED bar bridge
+# @SOURCE_DIR@ is replaced by install.sh with the path of the clone, because
+# repairing runs install.sh from there - the panel has to stay next to it.
+Exec=@SOURCE_DIR@/gui/steamos-led-panel
+Path=@SOURCE_DIR@
+Icon=preferences-desktop-display
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=LED;strip;Steam;

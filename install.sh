@@ -388,6 +388,43 @@ if [[ -n "$FLASH_ENV" ]]; then
     fi
 fi
 
+# --- control panel ----------------------------------------------------------
+
+PANEL_STATUS="not installed"
+
+install_control_panel() {
+    local source="$SOURCE_DIR/gui/steamos-led-panel.desktop"
+    [[ -f "$source" ]] || { PANEL_STATUS="not in the repository"; return 1; }
+
+    if ! watcher_user_dirs; then
+        PANEL_STATUS="skipped - no desktop user to install it for"
+        return 1
+    fi
+
+    # The menu entry points into the clone rather than into INSTALL_DIR: the
+    # panel's repair button re-runs install.sh, which only exists here.
+    local dir="$WATCHER_HOME/.local/share/applications"
+    runuser -u "$WATCHER_USER" -- mkdir -p "$dir" || {
+        PANEL_STATUS="could not write to $dir"; return 1; }
+    sed "s|@SOURCE_DIR@|$SOURCE_DIR|g" "$source" \
+        > "$dir/steamos-led-panel.desktop"
+    chown "$WATCHER_USER:$WATCHER_USER" "$dir/steamos-led-panel.desktop"
+    chmod 0644 "$dir/steamos-led-panel.desktop"
+
+    if runuser -u "$WATCHER_USER" -- python3 -c 'import tkinter' >/dev/null 2>&1
+    then
+        PANEL_STATUS="in the application menu as \"SteamOS LED bar\""
+    else
+        PANEL_STATUS="installed, but python3-tk is missing - see the README"
+        warn "the control panel needs tkinter, which is not installed."
+        warn "Everything it does is also available from the terminal."
+    fi
+    return 0
+}
+
+say "Installing the control panel menu entry"
+install_control_panel || true
+
 # --- start it --------------------------------------------------------------
 
 say "Enabling steamos-led-serial.service"
@@ -438,6 +475,7 @@ cat <<EOF
 
 Done.
 
+  Panel:    $PANEL_STATUS
   Firmware: $FIRMWARE_STATUS
   Config:   $CONFIG_PATH
   Logs:     journalctl -u steamos-led-serial -f

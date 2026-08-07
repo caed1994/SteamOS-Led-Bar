@@ -399,6 +399,40 @@ can already tell an achievement happened only has to `echo achievement` into
 it. A game launcher hook, a script watching a log, an overlay - all of them
 work without this service knowing they exist.
 
+## The control panel
+
+Everything after the first install has a window, so you do not have to edit
+`/etc/steamos-led-serial.conf` by hand and restart the service:
+
+```bash
+./gui/steamos-led-panel
+```
+
+`install.sh` also puts it in the application menu as **SteamOS LED bar**. It
+has three tabs:
+
+- **Settings** — LED count, brightness, gamma, speed, notification style and
+  the rest, as sliders and switches. Apply writes the file (keeping every
+  comment in it) and restarts the service.
+- **Test** — flash gold, purple or any colour you pick; run the strip
+  self-test; run the Steam check and the message probe.
+- **Status & repair** — what is installed, what is running, and one button
+  that puts it back.
+
+**After a SteamOS update, use the repair button.** A system update brings a new
+kernel, and the LED module was built for the old one - so it is gone, and with
+it `/dev/valve-leds-shim`. The panel names that as the problem and rebuilds it.
+Your configuration is kept, and the ESP is never reflashed.
+
+It runs as you, not as root: flashing the bar and asking Steam questions need
+no rights at all. Only writing the config, the self-test and repairing do, and
+each asks once through the normal system password prompt.
+
+> The panel needs Python's `tkinter`. It is present on SteamOS, but a system
+> update can remove it (`sudo pacman -S tk` brings it back). Nothing here is
+> only available in the panel - every button runs a command you can also type,
+> and the panel prints the command it ran.
+
 ## Testing and diagnostics
 
 The service holds the serial port exclusively, so stop it before testing:
