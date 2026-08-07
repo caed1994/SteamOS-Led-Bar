@@ -77,9 +77,14 @@ _IMAGES = []
 TAB_RADIUS = 9
 BOX_RADIUS = 10
 BUTTON_RADIUS = 9
-CHECKBOX_SIZE = 20          # clam's own indicator is barely a third of this
-TRACK_THICKNESS = 10        # the groove a slider runs in
-KNOB_DIAMETER = 20          # thick enough to grab, round enough to read as a pill
+# Sizes are set for fingers and a trackpad, not for a mouse on a desk: this
+# runs on a machine people also use handheld, where a hairline control is
+# genuinely hard to hit. Everything here is comfortably above the ~20 px that
+# desktop guidelines treat as the smallest sensible target.
+CHECKBOX_SIZE = 24          # clam's own indicator is barely a quarter of this
+TRACK_THICKNESS = 12        # the groove a slider runs in
+KNOB_DIAMETER = 24          # thick enough to grab, round enough to read as a pill
+ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
 
 
 def _photo(picture):
@@ -208,9 +213,18 @@ def round_the_corners(style, palette, shade):
     def sliders():
         # A pill-shaped groove and a round knob.
         radius = TRACK_THICKNESS / 2.0
-        track = _photo(roundrect.pill(TRACK_THICKNESS * 3, TRACK_THICKNESS,
-                                      view, window, border=shade["border"],
-                                      border_width=1))
+
+        # The groove is drawn inside an image as tall as the knob. ttk sizes
+        # the widget from the trough element, so a groove-sized image would
+        # crop a knob that is deliberately bigger than it.
+        groove = roundrect.pill(TRACK_THICKNESS * 3, TRACK_THICKNESS, view,
+                                window, border=shade["border"], border_width=1)
+        padding = (KNOB_DIAMETER - TRACK_THICKNESS) // 2
+        picture = [[window] * (TRACK_THICKNESS * 3)
+                   for _ in range(KNOB_DIAMETER)]
+        for offset, line in enumerate(groove):
+            picture[padding + offset] = line
+        track = _photo(picture)
         knob = _photo(roundrect.pill(KNOB_DIAMETER, KNOB_DIAMETER, accent,
                                      window, border=shade["border"],
                                      border_width=1))
@@ -320,7 +334,8 @@ def apply_theme(root):
                     background=palette["button"],
                     foreground=palette["view_text"],
                     arrowcolor=palette["window_text"],
-                    bordercolor=shade["border"], padding=(8, 6))
+                    bordercolor=shade["border"], padding=(8, 7),
+                    arrowsize=ARROW_SIZE)
     # A read-only combobox draws its text as a *selection*, so without these
     # the label comes out in the selection colours - which is how it ended up
     # pale grey on pale grey and all but unreadable.

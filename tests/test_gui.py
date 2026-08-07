@@ -639,5 +639,55 @@ class ComboboxReadabilityTest(unittest.TestCase):
         self.assertIn(("foreground", "disabled"), states)
 
 
+
+
+class TouchTargetTest(unittest.TestCase):
+    """The controls have to be big enough to hit.
+
+    This runs on a machine people also use handheld, with a trackpad rather
+    than a mouse on a desk. Desktop guidelines put the smallest sensible
+    target at around twenty pixels; ttk's own defaults are well under that,
+    which is what made the first version fiddly.
+    """
+
+    MINIMUM = 20
+
+    def setUp(self):
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(path) as handle:
+            tree = ast.parse(handle.read())
+        self.sizes = {node.targets[0].id: node.value.value
+                      for node in tree.body
+                      if isinstance(node, ast.Assign)
+                      and isinstance(node.value, ast.Constant)
+                      and getattr(node.targets[0], "id", "").isupper()}
+
+    def test_the_checkbox_is_hittable(self):
+        self.assertGreaterEqual(self.sizes["CHECKBOX_SIZE"], self.MINIMUM)
+
+    def test_the_slider_knob_is_hittable(self):
+        self.assertGreaterEqual(self.sizes["KNOB_DIAMETER"], self.MINIMUM)
+
+    def test_the_dropdown_arrow_is_hittable(self):
+        # Not the full twenty: the arrow sits inside a field that is taller
+        # than it, so the clickable area is larger than the glyph.
+        self.assertGreaterEqual(self.sizes["ARROW_SIZE"], 16)
+
+    def test_the_knob_stands_proud_of_its_groove(self):
+        # A knob no bigger than the groove is invisible as a handle.
+        self.assertGreater(self.sizes["KNOB_DIAMETER"],
+                           self.sizes["TRACK_THICKNESS"])
+
+    def test_the_groove_is_centred_evenly_in_the_knob_sized_image(self):
+        # The groove is drawn inside an image as tall as the knob, so ttk
+        # sizes the widget to fit the knob. An odd difference would put the
+        # groove half a pixel off centre.
+        slack = self.sizes["KNOB_DIAMETER"] - self.sizes["TRACK_THICKNESS"]
+        self.assertEqual(slack % 2, 0)
+
+    def test_the_groove_is_thick_enough_to_see(self):
+        self.assertGreaterEqual(self.sizes["TRACK_THICKNESS"], 8)
+
+
 if __name__ == "__main__":
     unittest.main()
