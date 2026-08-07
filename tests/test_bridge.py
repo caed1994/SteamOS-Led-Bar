@@ -5,12 +5,14 @@ Everything here is stdlib-only, so it runs on a stock SteamOS image.
 
 import os
 import sys
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "server"))
 
-from steamos_led import config, link, render, shim  # noqa: E402
+from steamos_led import config, link, render, service, shim  # noqa: E402
 
 
 class TestCrc(unittest.TestCase):
@@ -398,6 +400,60 @@ class TestFirmwareConsistency(unittest.TestCase):
         for rate in self._firmware_rates():
             self.assertIn(rate, (config.DEFAULTS["BAUD"],) + link.FALLBACK_BAUD_RATES,
                           "a board flashed at %d baud would never be found" % rate)
+
+
+class MisconfiguredDeviceTest(unittest.TestCase):
+    """DEVICE pointing at something that is not the shim must not spin.
+
+    Every way to get this wrong leaves the device readable, so poll() returns
+    at once every time and the main loop has nothing to wait on. Measured
+    before the backoff: 49k turns a second against a device that reads as
+    garbage, and 288k against one that reads as empty - the second in complete
+    silence, because an empty read raised nothing to log.
+    """
+
+    def _turns_per_second(self, device, window=0.4):
+        """How often the loop comes round against this device."""
+        conf = dict(config.DEFAULTS)
+        conf.update(DEVICE=device, SERIAL_PORT="/dev/does-not-exist",
+                    NOTIFY=False)
+        runner = service.Runner(conf)
+        runner.source = runner._open_source()
+        self.addCleanup(runner.source.close)
+
+        turns = []
+        waited = runner._wait
+        runner._wait = lambda interval: (turns.append(1), waited(interval))[1]
+
+        def drive():
+            try:
+                runner._loop()
+            except service._Stopped:
+                pass
+
+        thread = threading.Thread(target=drive, daemon=True)
+        started = time.monotonic()
+        thread.start()
+        time.sleep(window)
+        runner.running = False
+        thread.join(timeout=10)
+        return len(turns) / (time.monotonic() - started)
+
+    # Comfortably above FPS, far below a spin. FPS only applies once a
+    # snapshot has been read; neither device here ever yields one.
+    CEILING = 500
+
+    def test_a_device_that_reads_as_garbage_does_not_spin(self):
+        rate = self._turns_per_second("/dev/zero")
+        self.assertLess(rate, self.CEILING,
+                        "%.0f turns/s - the loop is not backing off" % rate)
+
+    def test_a_device_that_reads_as_empty_does_not_spin(self):
+        # The quiet one: an empty read is not an error, so this span used to
+        # burn a core without a single line in the journal.
+        rate = self._turns_per_second("/dev/null")
+        self.assertLess(rate, self.CEILING,
+                        "%.0f turns/s - the loop is not backing off" % rate)
 
 
 if __name__ == "__main__":

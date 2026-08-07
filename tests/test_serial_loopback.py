@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "server"))
 
 from steamos_led import link, render, shim  # noqa: E402
-from steamos_led.serialport import SerialPort  # noqa: E402
+from steamos_led.serialport import SerialError, SerialPort  # noqa: E402
 
 BAUD = 115200
 
@@ -207,6 +207,19 @@ class SerialLoopbackTest(unittest.TestCase):
             if port is not bridge.serial:
                 self.assertEqual(port.fd, -1,
                                  "a rejected candidate was left open")
+
+    def test_a_port_that_is_not_a_tty_is_refused_not_fatal(self):
+        # SERIAL_PORT accepts any path that exists, but only a tty can be
+        # configured as one. termios raises its own error type, which is not
+        # an OSError - so an unconfigured one escapes every handler on the way
+        # up and takes the service down, over and over under Restart=always.
+        with self.assertRaises(SerialError):
+            SerialPort("/dev/null", BAUD)
+
+        bridge = link.EspLink(port="/dev/null", baudrate=BAUD, led_count=17,
+                              reconnect_delay=0.0)
+        self.assertFalse(bridge.connect(), "must report failure, not raise")
+        self.assertFalse(bridge.connected)
 
     def test_reconnect_after_device_disappears(self):
         bridge = link.EspLink(port="/dev/does-not-exist", baudrate=BAUD,

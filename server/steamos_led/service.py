@@ -103,6 +103,20 @@ class Runner:
             time.sleep(min(remaining, 0.25))
         raise _Stopped()
 
+    def _recover(self, message, *args):
+        """Wait, then reopen the device after it stopped making sense.
+
+        The pause is the point. Every way this device can misbehave leaves it
+        readable, so poll() keeps returning at once and the loop would reopen
+        and re-read as fast as the CPU allows - a burnt core, and a warning per
+        turn. Backing off makes a misconfigured DEVICE one message every few
+        seconds instead.
+        """
+        LOG.warning(message, *args)
+        self._sleep(DEVICE_RETRY_DELAY)
+        self.source.close()
+        self.source = self._open_source()
+
     # -- main loop --------------------------------------------------------
 
     def run(self):
@@ -178,9 +192,8 @@ class Runner:
             try:
                 changed, triggered = self._wait(interval)
             except OSError as exc:
-                LOG.warning("poll on %s failed: %s", self.config["DEVICE"], exc)
-                self.source.close()
-                self.source = self._open_source()
+                self._recover("poll on %s failed: %s",
+                              self.config["DEVICE"], exc)
                 continue
 
             if triggered:
@@ -190,17 +203,24 @@ class Runner:
                 try:
                     new_snapshot = self.source.read()
                 except (OSError, shim.SnapshotError) as exc:
-                    LOG.warning("reading %s failed: %s", self.config["DEVICE"], exc)
-                    self.source.close()
-                    self.source = self._open_source()
                     snapshot = None
+                    self._recover("reading %s failed: %s",
+                                  self.config["DEVICE"], exc)
                     continue
-                if new_snapshot is not None:
-                    snapshot = new_snapshot
-                    key = snapshot.key()
-                    if key != last_key:
-                        LOG.debug("state change: %s", snapshot)
-                        last_key = key
+                if new_snapshot is None:
+                    # Readable but empty. The shim answers every read with a
+                    # whole snapshot or an error, so this is a different
+                    # device - and one that would spin the loop in silence.
+                    snapshot = None
+                    self._recover("%s is readable but returns no snapshot - "
+                                  "is DEVICE pointing at the shim?",
+                                  self.config["DEVICE"])
+                    continue
+                snapshot = new_snapshot
+                key = snapshot.key()
+                if key != last_key:
+                    LOG.debug("state change: %s", snapshot)
+                    last_key = key
 
             if snapshot is None or not connected:
                 continue

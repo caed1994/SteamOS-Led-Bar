@@ -158,6 +158,14 @@ class SerialPort:
         self.fd = os.open(self.device, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         try:
             self._configure()
+        except termios.error as exc:
+            # Anything can be opened, but only a tty can be configured as one.
+            # termios.error is not an OSError, so callers that handle a failed
+            # open would miss it and the service would die on a SERIAL_PORT
+            # that points at something else.
+            self.close()
+            raise SerialError("%s is not a serial port: %s"
+                              % (self.device, exc))
         except Exception:
             self.close()
             raise
