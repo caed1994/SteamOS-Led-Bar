@@ -38,6 +38,7 @@ except ImportError:                                         # pragma: no cover
         "(and remember a SteamOS update will remove it again).")
 
 import kdetheme                                             # noqa: E402
+import roundrect                                            # noqa: E402
 import ledpanel                                             # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
 
@@ -66,6 +67,140 @@ SETTINGS = [
     ("LOG_LEVEL", "Log level", "choice",
      ("debug", "info", "warning", "error"), None),
 ]
+
+
+# PhotoImage objects are only alive while something references them; a widget
+# element does not count, so an image that goes out of scope leaves the widget
+# blank. They are parked here for the life of the window.
+_IMAGES = []
+
+TAB_RADIUS = 9
+BOX_RADIUS = 10
+BUTTON_RADIUS = 9
+TRACK_THICKNESS = 10        # the groove a slider runs in
+KNOB_DIAMETER = 20          # thick enough to grab, round enough to read as a pill
+
+
+def _photo(picture):
+    """A list of pixel rows as a PhotoImage."""
+    photo = tk.PhotoImage(width=len(picture[0]), height=len(picture))
+    photo.put(roundrect.as_put_string(picture))
+    _IMAGES.append(photo)
+    return photo
+
+
+def _rounded(width, height, radius, fill, background, border=None):
+    return _photo(roundrect.rows(width, height, radius, fill, background,
+                                 border=border,
+                                 border_width=1 if border else 0))
+
+
+def round_the_corners(style, palette, shade):
+    """Replace the square widget parts with rounded pictures.
+
+    ttk has no corner radius and no way to ask for one. It does have image
+    elements: a part of a widget can be a picture, stretched with nine-slice
+    scaling so the corners keep their shape while the middle grows. So the
+    corners are drawn as pixels and handed over.
+
+    Best effort - an older Tk that will not take image elements keeps the flat
+    look rather than an unpainted window.
+    """
+    window, view = palette["window"], palette["view"]
+    accent = palette["selection"]
+
+    def tab(fill, background):
+        return _rounded(TAB_RADIUS * 2 + 4, 34, TAB_RADIUS, fill, background,
+                        border=shade["border"])
+
+    def box(fill, background, radius=BOX_RADIUS):
+        return _rounded(radius * 2 + 4, radius * 2 + 4, radius, fill,
+                        background, border=shade["border"])
+
+    # Each group stands on its own: an older Tk that refuses one element
+    # should leave that part flat, not everything after it as well.
+    def attempt(what, build):
+        try:
+            build()
+        except tk.TclError as exc:                          # pragma: no cover
+            print("could not round %s: %s" % (what, exc), file=sys.stderr)
+
+    def tabs():
+        # --- tabs: rounded on top, square where they meet the page ---------
+        style.element_create(
+            "Rounded.Tab", "image", tab(shade["raised"], window),
+            ("selected", tab(window, window)),
+            ("active", tab(shade["hover"], window)),
+            border=(TAB_RADIUS, TAB_RADIUS, TAB_RADIUS, 0),
+            sticky="nsew", padding=(18, 8))
+        style.layout("TNotebook.Tab", [
+            ("Rounded.Tab", {"sticky": "nsew", "children": [
+                ("Notebook.label", {"side": "top", "sticky": ""})]})])
+
+    def page():
+        style.element_create("Rounded.Client", "image", box(window, window),
+                             border=BOX_RADIUS, sticky="nsew")
+        style.layout("TNotebook", [
+            ("Rounded.Client", {"sticky": "nsew"})])
+
+    def boxes():
+        style.element_create("Rounded.Box", "image", box(window, window),
+                             border=BOX_RADIUS, sticky="nsew")
+        style.layout("TLabelframe", [("Rounded.Box", {"sticky": "nsew"})])
+
+    def buttons():
+        def button_element(name, fill, hover, pressed):
+            style.element_create(
+                name, "image",
+                _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS, fill,
+                         window, border=shade["border"]),
+                ("pressed", _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS,
+                                     pressed, window, border=shade["border"])),
+                ("active", _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS,
+                                    hover, window, border=shade["border"])),
+                border=BUTTON_RADIUS, sticky="nsew", padding=(14, 7))
+
+        button_element("Rounded.Button", palette["button"], shade["hover"],
+                       accent)
+        style.layout("TButton", [
+            ("Rounded.Button", {"sticky": "nsew", "children": [
+                ("Button.label", {"side": "top", "sticky": ""})]})])
+
+        button_element("Accent.Button", accent,
+                       kdetheme.mix(accent, "#ffffff", 0.18),
+                       kdetheme.mix(accent, "#000000", 0.15))
+        style.layout("Accent.TButton", [
+            ("Accent.Button", {"sticky": "nsew", "children": [
+                ("Button.label", {"side": "top", "sticky": ""})]})])
+
+    def sliders():
+        # A pill-shaped groove and a round knob.
+        radius = TRACK_THICKNESS / 2.0
+        track = _photo(roundrect.pill(TRACK_THICKNESS * 3, TRACK_THICKNESS,
+                                      view, window, border=shade["border"],
+                                      border_width=1))
+        knob = _photo(roundrect.pill(KNOB_DIAMETER, KNOB_DIAMETER, accent,
+                                     window, border=shade["border"],
+                                     border_width=1))
+        knob_hot = _photo(roundrect.pill(
+            KNOB_DIAMETER, KNOB_DIAMETER,
+            kdetheme.mix(accent, "#ffffff", 0.22), window,
+            border=shade["border"], border_width=1))
+
+        style.element_create("Pill.trough", "image", track,
+                             border=(int(radius), 0, int(radius), 0),
+                             sticky="ew", padding=0)
+        style.element_create("Pill.slider", "image", knob,
+                             ("active", knob_hot), sticky="")
+        style.layout("Horizontal.TScale", [
+            ("Pill.trough", {"sticky": "ew", "children": [
+                ("Pill.slider", {"side": "left", "sticky": ""})]})])
+
+    attempt("the tabs", tabs)
+    attempt("the page", page)
+    attempt("the boxes", boxes)
+    attempt("the buttons", buttons)
+    attempt("the sliders", sliders)
 
 
 def apply_theme(root):
@@ -167,6 +302,8 @@ def apply_theme(root):
                     troughcolor=palette["window"],
                     bordercolor=shade["border"],
                     arrowcolor=palette["window_text"])
+
+    round_the_corners(style, palette, shade)
 
     palette["_shade"] = shade
     palette["_dark"] = dark

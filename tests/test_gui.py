@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
 import kdetheme  # noqa: E402
 import ledpanel  # noqa: E402
+import roundrect  # noqa: E402
 from steamos_led import config as config_module  # noqa: E402
 
 
@@ -414,6 +415,99 @@ class PanelStyleTest(unittest.TestCase):
         self.assertIn("Bad.TLabel", source)
         for hardcoded in ("'green'", "'red'", "#00ff00", "#ff0000"):
             self.assertNotIn(hardcoded, source)
+
+
+
+
+class RoundedRectangleTest(unittest.TestCase):
+    """The shapes ttk cannot draw itself.
+
+    ttk has no corner radius, so rounded parts are supplied as images. There
+    is no display here to look at them, so the pixels are checked instead.
+    """
+
+    WHITE, BLACK, RED = "#ffffff", "#000000", "#ff0000"
+
+    def test_the_middle_is_filled(self):
+        picture = roundrect.rows(20, 20, 6, self.WHITE, self.BLACK)
+        self.assertEqual(picture[10][10], self.WHITE)
+
+    def test_the_corners_are_cut_away(self):
+        picture = roundrect.rows(20, 20, 8, self.WHITE, self.BLACK)
+        for y, x in ((0, 0), (0, 19), (19, 0), (19, 19)):
+            self.assertEqual(picture[y][x], self.BLACK,
+                             "corner (%d,%d) should be background" % (x, y))
+
+    def test_a_zero_radius_keeps_its_corners(self):
+        # Sharp corners have to fall out of the same formula, or there would
+        # be two code paths and only one of them tested.
+        picture = roundrect.rows(20, 20, 0, self.WHITE, self.BLACK)
+        self.assertEqual(picture[0][0], self.WHITE)
+        self.assertEqual(picture[19][19], self.WHITE)
+
+    def test_the_edges_are_antialiased(self):
+        # A pixel exactly on the curve must be a blend, not one or the other -
+        # that is the whole difference between round and jagged.
+        picture = roundrect.rows(40, 40, 12, self.WHITE, self.BLACK)
+        flat = [pixel for row in picture for pixel in row]
+        blends = [pixel for pixel in flat
+                  if pixel not in (self.WHITE, self.BLACK)]
+        self.assertGreater(len(blends), 20,
+                           "no intermediate shades: the edge is jagged")
+
+    def test_the_size_is_what_was_asked_for(self):
+        picture = roundrect.rows(30, 12, 4, self.WHITE, self.BLACK)
+        self.assertEqual(len(picture), 12)
+        self.assertEqual(len(picture[0]), 30)
+
+    def test_a_radius_larger_than_the_shape_is_clamped(self):
+        # Asking for a radius bigger than half the box would fold the shape
+        # inside out; it has to come out as a pill instead.
+        picture = roundrect.rows(20, 10, 500, self.WHITE, self.BLACK)
+        self.assertEqual(picture[5][10], self.WHITE)
+        self.assertEqual(picture[0][0], self.BLACK)
+
+    def test_a_border_rings_the_shape(self):
+        picture = roundrect.rows(30, 30, 8, self.WHITE, self.BLACK,
+                                 border=self.RED, border_width=2)
+        middle = picture[15][15]
+        edge = picture[15][0]
+        self.assertEqual(middle, self.WHITE, "the fill should survive")
+        self.assertEqual(edge, self.RED, "the border should be on the edge")
+
+    def test_a_pill_is_round_at_both_ends(self):
+        picture = roundrect.pill(40, 12, self.WHITE, self.BLACK)
+        self.assertEqual(picture[6][20], self.WHITE, "filled in the middle")
+        self.assertEqual(picture[0][0], self.BLACK, "cut at the top left")
+        self.assertEqual(picture[11][39], self.BLACK, "and the bottom right")
+
+    def test_a_pill_keeps_its_full_height_in_the_middle(self):
+        picture = roundrect.pill(40, 12, self.WHITE, self.BLACK)
+        column = [picture[y][20] for y in range(12)]
+        self.assertEqual(column[0], self.WHITE)
+        self.assertEqual(column[-1], self.WHITE)
+
+    def test_blending_ends_where_it_should(self):
+        self.assertEqual(roundrect.blend(self.BLACK, self.WHITE, 0), self.BLACK)
+        self.assertEqual(roundrect.blend(self.BLACK, self.WHITE, 1), self.WHITE)
+        self.assertEqual(roundrect.blend(self.BLACK, self.WHITE, 0.5), "#808080")
+
+    def test_the_put_string_has_one_group_per_row(self):
+        # PhotoImage.put() wants {row} {row}; getting that wrong silently
+        # produces a smeared image rather than an error.
+        picture = roundrect.rows(3, 2, 0, self.WHITE, self.BLACK)
+        text = roundrect.as_put_string(picture)
+        self.assertEqual(text.count("{"), 2)
+        self.assertEqual(text, "{#ffffff #ffffff #ffffff} "
+                               "{#ffffff #ffffff #ffffff}")
+
+    def test_it_works_on_a_dark_background_too(self):
+        # The images are blended against whatever they sit on, so both
+        # directions have to come out right.
+        light = roundrect.rows(20, 20, 6, "#eff0f1", "#ffffff")
+        dark = roundrect.rows(20, 20, 6, "#31363b", "#232629")
+        self.assertEqual(light[10][10], "#eff0f1")
+        self.assertEqual(dark[10][10], "#31363b")
 
 
 if __name__ == "__main__":
