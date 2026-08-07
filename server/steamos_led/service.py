@@ -139,9 +139,7 @@ class Runner:
         """Block until the LED state changes, a trigger arrives, or timeout.
 
         Returns (state changed, trigger ready). Waiting on both at once keeps a
-        notification from sitting in the pipe for up to a quarter second while
-        the bar is idle - and reporting which one woke us means the pipe is
-        read exactly when it has something in it.
+        notification from sitting in the pipe while the bar is idle.
         """
         sources = [self.source.fd]
         if self.trigger is not None and self.trigger.fd >= 0:
@@ -208,15 +206,13 @@ class Runner:
                 continue
 
             now = time.monotonic()
-            # A notification takes the whole bar for its duration and then
-            # hands it straight back to whatever Steam is showing - so while
-            # one runs there is nothing underneath worth rendering.
+            # A flash covers the whole bar, so nothing underneath is worth
+            # rendering while one runs.
             payload = self.overlay.frame(now)
             if payload is None:
                 payload = self.renderer.render(snapshot, now - started)
-            # Static scenes still need a periodic frame: the firmware blanks the
-            # strip when the link goes quiet, so an idle heartbeat is what tells
-            # it we are still alive.
+            # Static scenes still send at IDLE_FPS: the firmware blanks the
+            # strip when the link goes quiet, so this is the heartbeat.
             self.link.send_frame(payload, self.config["LED_COUNT"])
 
 
@@ -255,8 +251,8 @@ def run_steam_check(config):
         library = None
 
     if library:
-        # Which route into ISteamUserStats this library offers is the thing
-        # most likely to differ between SDK generations, so show it up front.
+        # The route into ISteamUserStats differs most between SDK generations,
+        # so show it up front.
         try:
             symbols = elf.exported_symbols(library)
         except (OSError, elf.ElfError) as exc:
@@ -331,17 +327,15 @@ def run_steam_check(config):
 def run_probe_messages(config, seconds=None):
     """Find out whether Steam will forward friend messages to us, and how.
 
-    Two unknowns, and neither is worth guessing at after the last two
-    attempts. First: whether the borrowed libsteam_api.so can deliver
-    callbacks to a ctypes binding at all - manual dispatch arrived in SDK
-    1.51 and Proton ships older copies. Second: which callback number carries
-    a chat message, which differs between SDK generations. So this prints
-    every callback that arrives rather than looking for one it expects.
+    Two unknowns: whether the borrowed library can deliver callbacks to a
+    ctypes binding at all (manual dispatch is SDK 1.51+), and which callback
+    number carries a chat message. So every callback that arrives is printed
+    rather than only the expected one.
     """
     _interrupt_on_sigterm()
 
-    # An explicitly configured library may sit outside the search - that is
-    # the whole point of setting one - so survey it alongside what we find.
+    # An explicitly configured library may sit outside the search, so survey it
+    # alongside whatever is found.
     candidates = list(steamworks.find_libraries())
     explicit = config["STEAM_LIBRARY"]
     if explicit and explicit != "auto" and explicit not in candidates:
@@ -452,23 +446,19 @@ def run_probe_messages(config, seconds=None):
     return 0
 
 
-# How often the loop below scans every process for the running app while it is
-# still *searching* for one. The scan reads the environment block of every
-# process the user owns, so doing it every second for a whole login is a lot of
-# work for "still nothing"; noticing a game a few seconds late costs nothing.
+# How often to scan every process while still *searching* for a game. The scan
+# reads the environment block of every process the user owns, so once a second
+# for a whole login is a lot of work for "still nothing".
 PROCESS_SCAN_EVERY = 5          # ticks
 
 
 def _should_scan_processes(tick, attached):
     """Whether this tick should pay for the full process scan.
 
-    While a game is attached the answer is always yes. Not every machine's
-    registry.vdf names the running app - on some it stays empty the whole time
-    and the process scan is the *only* source that reports it - so a tick that
-    skips the scan would read as "no game" and detach a game that is still
-    running. That is not just a missed flash: every reattach opens a fresh
-    Steamworks session as that app, and Steam waits for those to end before it
-    finishes stopping the game.
+    Always yes while attached: on some machines registry.vdf never names the
+    running app, so a skipped scan would read as "no game" and detach a running
+    one - and every reattach opens a fresh Steamworks session that Steam then
+    waits for before it can finish stopping the game.
     """
     return attached or tick % PROCESS_SCAN_EVERY == 0
 
@@ -496,9 +486,8 @@ def _open_message_listener(stats):
 def run_watch_achievements(config, interval=1.0):
     """Flash the bar whenever an achievement unlocks in the running game.
 
-    Runs as your normal user, next to Steam - not as the service, which is
-    sandboxed away from your home directory. It only writes trigger words into
-    the notification pipe, so the service stays untouched.
+    Runs as your normal user next to Steam, not as the sandboxed service, and
+    only writes trigger words into the notification pipe.
     """
     _interrupt_on_sigterm()
 
@@ -524,13 +513,11 @@ def run_watch_achievements(config, interval=1.0):
                         listener = None
                     stats.close()
                     # And then go away entirely. SteamAPI_Init registers this
-                    # process with the Steam client as an instance of that
-                    # game, and Steam will not report a game as stopped while
-                    # such a registration exists. Measured on hardware:
-                    # SteamAPI_Shutdown does not release it - Steam sat on
-                    # "Stopping" until this process ended. Ending it does, so
-                    # one process handles one game session and systemd starts
-                    # the next one (Restart=always in the unit).
+                    # process as an instance of the game, and Steam will not
+                    # report it stopped while that registration exists -
+                    # measured on hardware, SteamAPI_Shutdown does not release
+                    # it, only exiting does. So one process per game session,
+                    # and systemd starts the next (Restart=always).
                     LOG.info("game ended - exiting so Steam can finish "
                              "stopping it; systemd restarts the watcher")
                     return 0
@@ -541,9 +528,8 @@ def run_watch_achievements(config, interval=1.0):
                         library = steamworks.find_library(
                             config["STEAM_LIBRARY"])
                         if not route or route == "auto":
-                            # Probe in child processes first: picking the wrong
-                            # interface version would take the watcher down
-                            # with a segfault rather than an exception.
+                            # Probe in child processes: the wrong interface
+                            # version segfaults instead of raising.
                             route, _count = steamworks.select_route(
                                 app_id, library)
                             if route is None:
@@ -551,13 +537,10 @@ def run_watch_achievements(config, interval=1.0):
                                     "no working route for app %d - run "
                                     "--steam-check for details" % app_id)
                             LOG.info("using route %s", route)
-                        # Friend messages arrive as callbacks, and a
-                        # ctypes binding can only receive those through
-                        # manual dispatch - which the session has to be
-                        # opened with, because Steam fixes the dispatch mode
-                        # the first time either kind is used. Ask for it only
-                        # when the library can actually do it: an older copy
-                        # would refuse, and achievements matter more.
+                        # Friend messages need manual dispatch, which the
+                        # session must be opened with. Ask for it only when the
+                        # library supports it: an older copy would refuse to
+                        # open at all, and achievements matter more.
                         manual = (config["NOTIFY_MESSAGES"]
                                   and steamworks.usable_for_messages(
                                       steamworks.message_support(library)))
@@ -587,9 +570,9 @@ def run_watch_achievements(config, interval=1.0):
                                  stats.display_name(name))
                         _flash(fifo, "achievement")
                     if listener is not None:
-                        # One flash however many arrived at once: a retrigger
-                        # restarts the animation, so a burst would hold the
-                        # strip lit far longer than a single notification.
+                        # One flash however many arrived: a retrigger restarts
+                        # the animation, so a burst would hold the strip lit
+                        # far longer than one notification.
                         messages = listener.messages()
                         if messages:
                             LOG.info("%d friend message(s)", len(messages))

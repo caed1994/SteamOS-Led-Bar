@@ -5,8 +5,8 @@
     +------+------+---------+------+--------+---------+-------+
        1      1        1       1      2 LE      n       2 LE
 
-The CRC (CRC-16/CCITT-FALSE) covers version, type, length and payload, so a
-receiver that resynchronises mid-stream cannot mistake noise for a frame.
+The CRC covers version, type, length and payload, so a receiver resynchronising
+mid-stream cannot mistake noise for a frame.
 """
 
 from __future__ import annotations
@@ -37,9 +37,8 @@ MSG_STATS = 0x30
 MSG_LOG = 0x31
 MSG_PONG = 0x41
 
-# Tried in this order when the configured rate gets no answer: the rate all
-# shipped firmware uses, then the rates earlier builds and hand-rolled firmware
-# are likely to run at.
+# Tried in order when the configured rate gets no answer: the shipped firmware's
+# rate first, then what earlier and hand-rolled builds are likely to use.
 FALLBACK_BAUD_RATES = (230400, 460800, 921600, 115200)
 
 MSG_NAMES = {
@@ -203,8 +202,8 @@ class EspLink:
             # Remember the miss so later reconnects do not repeat the scan.
             self._scanned.add(device)
 
-        # Nothing answered. The firmware may predate the handshake, so keep
-        # streaming at the configured rate instead of giving up entirely.
+        # Nothing answered - the firmware may predate the handshake, so stream
+        # at the configured rate rather than give up.
         if preferred is not None:
             self._adopt(preferred, device, candidates[0], None)
             LOG.warning("no HELLO reply from %s; streaming at %d baud anyway",
@@ -215,9 +214,8 @@ class EspLink:
     def _baud_candidates(self, device):
         """Rates to try, most likely first.
 
-        Firmware and host have to agree on the baud rate, and a mismatch looks
-        exactly like a dead strip. Rather than leave that to the config file
-        alone, fall back to the rates the shipped firmware environments use.
+        A baud mismatch looks exactly like a dead strip, so rather than trust
+        the config file alone, fall back to the rates the firmware ships with.
         """
         first = self._known_good.get(device, self.baudrate)
         if not self.autodetect_baud or device in self._scanned:
@@ -236,8 +234,8 @@ class EspLink:
         except (OSError, SerialError) as exc:
             LOG.warning("cannot open %s at %d baud: %s", device, baudrate, exc)
             return None
-        # Opening the tty pulses DTR/RTS and resets most dev boards; drop both
-        # lines and give the firmware time to come up before we greet it.
+        # Opening the tty pulses DTR/RTS and resets most dev boards, so drop
+        # both lines and let the firmware come up before greeting it.
         port.set_dtr_rts(False)
         time.sleep(self.BOOT_DELAY)
         port.flush_input()

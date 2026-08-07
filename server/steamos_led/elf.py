@@ -1,13 +1,9 @@
 """Just enough ELF parsing to list what a shared object exports.
 
-Guessing symbol names is how the Steamworks binding first went wrong: the flat
-API's accessors carry a version suffix that depends on the SDK a library was
-built from, and Proton's copy has a different set from a current SDK. Reading
-the dynamic symbol table turns that guess into a lookup - and makes
-`--steam-check` able to say what a library actually offers.
-
-binutils is not installed on a stock SteamOS, so this does not shell out to nm
-or objdump.
+The flat Steamworks accessors carry a version suffix that depends on the SDK a
+library was built from, so reading the dynamic symbol table turns a guess into
+a lookup - and lets `--steam-check` say what a library actually offers. Stock
+SteamOS has no binutils, hence no shelling out to nm or objdump.
 """
 
 from __future__ import annotations
@@ -35,7 +31,7 @@ def elf_class(path):
 
 
 def class_name(value):
-    """How to name an ELF class in a message, including "no ELF here"."""
+    """How to name an ELF class in a message, including "not an ELF"."""
     if value is None:
         return "not an ELF file"
     return {ELFCLASS32: "32-bit", ELFCLASS64: "64-bit"}.get(

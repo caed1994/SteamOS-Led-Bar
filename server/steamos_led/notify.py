@@ -1,10 +1,8 @@
 """Notification overlay: briefly take over the bar, then hand it back.
 
-Detecting a Steam achievement is the unsolved half of this feature - Steam
-exposes no documented local signal - so the overlay is driven by an explicit
-trigger instead: anything that can write a line into a FIFO can flash the bar.
-That keeps the light show testable and lets the detector be swapped out later
-without touching this code.
+Driven by an explicit trigger rather than by any detector of its own: anything
+that can write a line into a FIFO can flash the bar. That keeps the light show
+testable and the detector replaceable without touching this code.
 """
 
 from __future__ import annotations
@@ -36,14 +34,13 @@ FADE_TAIL = 0.25    # fraction of the duration spent fading back out
 STYLE_BLOOM = "bloom"
 STYLE_PULSE = "pulse"
 
-# The bloom, as fractions of the notification's duration: grow out of the
-# middle, breathe once while fully out, then shrink back into the middle.
+# The bloom, as fractions of the duration: grow out of the middle, breathe once
+# while fully out, then shrink back in.
 BLOOM_EXPANDED = 0.28
 BLOOM_RETRACT = 0.64
-# How far down the breath dips. Not to zero: a hard off reads as a blink, and
-# the point is that it should look like the bar is taking a breath.
+# How far the breath dips. Not to zero - a hard off reads as a blink.
 BLOOM_BREATH_FLOOR = 0.08
-# How soft the travelling edge is, in units of the half-strip. Without it the
+# Softness of the travelling edge, in units of the half-strip. Without it the
 # front is a hard step, which looks blocky on a short bar.
 BLOOM_FEATHER = 0.18
 
@@ -52,9 +49,8 @@ def _breath(progress):
     """One smooth inhale and exhale across the middle phase, 0..1."""
     span = BLOOM_RETRACT - BLOOM_EXPANDED
     position = (progress - BLOOM_EXPANDED) / span
-    # The shared envelope starts dark; this one starts lit, dips to the floor
-    # and comes back, so it runs half a cycle ahead. It never switches off - a
-    # hard off would read as a blink rather than a breath.
+    # Half a cycle ahead of the shared envelope, which starts dark: this one
+    # starts lit, dips to the floor and comes back.
     return breath_envelope(position + 0.5, BLOOM_BREATH_FLOOR)
 
 
@@ -63,8 +59,8 @@ def bloom_levels(progress, led_count):
     if led_count < 1:
         return []
 
-    # The front has to travel one feather past the last LED, otherwise the
-    # outermost pair sits exactly on the edge and never lights at all.
+    # The front travels one feather past the last LED, or the outermost pair
+    # sits exactly on the edge and never lights.
     full = 1.0 + BLOOM_FEATHER
     brightness = 1.0
 
@@ -77,7 +73,7 @@ def bloom_levels(progress, led_count):
         radius = full * (1.0 - (progress - BLOOM_RETRACT) / (1.0 - BLOOM_RETRACT))
 
     if led_count == 1:
-        # Nothing to travel across, but the timing should still match.
+        # Nothing to travel across, but keep the timing.
         return [max(0.0, min(radius / full * brightness, 1.0))]
 
     centre = (led_count - 1) / 2.0
@@ -91,18 +87,15 @@ def bloom_levels(progress, led_count):
 
 
 def pulse_levels(progress, led_count):
-    """Per-LED brightness for the pulse: swell a few times, then fade out.
-
-    The tail keeps it from ending on a hard edge.
-    """
+    """Per-LED brightness for the pulse: swell a few times, then fade out."""
     pulse = (1.0 - math.cos(2.0 * math.pi * PULSES * progress)) * 0.5
     if progress > 1.0 - FADE_TAIL:
         pulse *= (1.0 - progress) / FADE_TAIL
     return [pulse] * led_count
 
 
-# The shapes a notification can take. config validates NOTIFY_STYLE against
-# STYLES, so this table is the only place a new one has to be registered.
+# The shapes a notification can take; config validates NOTIFY_STYLE against
+# STYLES, so a new one only has to be registered here.
 _STYLES = {
     STYLE_BLOOM: bloom_levels,
     STYLE_PULSE: pulse_levels,
@@ -193,9 +186,8 @@ class NotificationOverlay:
     def frame(self, now):
         """The flash's own frame, or None when no flash is running.
 
-        Kept separate from apply() so the caller can skip rendering the frame
-        underneath: a flash covers the whole bar, so for its whole duration
-        anything rendered below it would only be thrown away.
+        Separate from apply() so the caller can skip rendering underneath: a
+        flash covers the whole bar, so that frame would only be thrown away.
         """
         if self.current is None:
             return None
@@ -221,9 +213,8 @@ class NotificationOverlay:
 class FifoTrigger:
     """A named pipe anything can write a trigger word into.
 
-    Kept deliberately dumb: one line, one flash. A desktop script, a game
-    launcher hook or a future achievement watcher can all drive it without
-    knowing anything about this service.
+    Deliberately dumb - one line, one flash - so a desktop script, a launcher
+    hook or the achievement watcher can drive it without knowing this service.
     """
 
     def __init__(self, path=DEFAULT_FIFO, mode=0o666):
@@ -246,8 +237,8 @@ class FifoTrigger:
         # mkfifo is subject to umask, so set the mode explicitly.
         os.chmod(self.path, self.mode)
 
-        # O_RDWR keeps the pipe open across writers; with O_RDONLY every writer
-        # that closes would leave us in permanent EOF.
+        # O_RDWR keeps the pipe open across writers; O_RDONLY would leave us in
+        # permanent EOF as soon as one closes.
         self.fd = os.open(self.path, os.O_RDWR | os.O_NONBLOCK)
         LOG.info("notification trigger listening on %s", self.path)
 
@@ -267,7 +258,7 @@ class FifoTrigger:
             return []
 
         self._buffer += chunk
-        # Cap the buffer so a writer spamming without newlines cannot grow it.
+        # Cap it so a writer spamming without newlines cannot grow it.
         if len(self._buffer) > 4096:
             self._buffer = self._buffer[-4096:]
 

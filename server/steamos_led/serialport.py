@@ -1,9 +1,9 @@
 """Minimal serial port support built on stdlib termios only.
 
-SteamOS ships a read-only rootfs, so pulling in pyserial means either
-`steamos-readonly disable` or a virtualenv that breaks on every OS update.
-Everything we need from a USB CDC/UART device is a handful of termios and
-TIOCM ioctls, so we do it directly and keep the service dependency-free.
+SteamOS has a read-only rootfs, so pyserial would mean either
+`steamos-readonly disable` or a virtualenv that breaks on every OS update. All
+a USB CDC/UART device needs is a handful of termios and TIOCM ioctls, so those
+are done directly and the service stays dependency-free.
 """
 
 from __future__ import annotations
@@ -120,8 +120,8 @@ def list_ports():
 def find_port(preferred=None):
     """Resolve the port to use.
 
-    ``preferred`` may be a device path, a /dev/serial/by-id link or the string
-    ``auto``/``None`` to pick the first plausible ESP adapter.
+    ``preferred`` is a device path, a /dev/serial/by-id link, or ``auto``/None
+    to pick the first plausible ESP adapter.
     """
     if preferred and preferred != "auto":
         if os.path.exists(preferred):

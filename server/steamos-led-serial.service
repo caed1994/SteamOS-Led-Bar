@@ -15,7 +15,7 @@ RestartSec=3
 KillSignal=SIGTERM
 TimeoutStopSec=10
 
-# The bridge only talks to two character devices - no network, no home, no
+# The bridge only talks to two character devices: no network, no home, no
 # writable filesystem of its own.
 NoNewPrivileges=yes
 PrivateTmp=yes

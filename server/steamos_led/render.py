@@ -1,9 +1,9 @@
 """Turns a shim snapshot into a frame of physical LED colours.
 
-The Steam Machine animates rainbow/breath/patrol on its own microcontroller,
-so the snapshot only carries the parameters, not the per-frame colours. We
-reproduce those animations here and stream finished pixels to the ESP, which
-keeps the firmware a dumb (and therefore reliable) pixel driver.
+The Steam Machine animates rainbow/breath/patrol on its own microcontroller, so
+the snapshot carries only the parameters. Those animations are reproduced here
+and streamed to the ESP as finished pixels, which keeps the firmware a dumb
+(and therefore reliable) pixel driver.
 """
 
 from __future__ import annotations
@@ -12,14 +12,10 @@ import math
 
 from . import shim
 
-# How long one full animation cycle takes at the module's default delay.
-#
-# `delay` is not a duration: leds-valve-shim exposes it as a slider from
-# VALVE_DELAY_RANGE_MIN(0) to VALVE_DELAY_RANGE_MAX(20), starting at
-# VALVE_DELAY_DEFAULT(8). So the cycle times below are stated outright for that
-# default, and delay scales them linearly - 0 is fastest, 20 is 2.5x slower
-# than default. SPEED in the config scales them further. tests/test_shim_abi.py
-# keeps DELAY_DEFAULT and DELAY_MAX tied to the module source.
+# Cycle lengths at the module's default delay. `delay` is not a duration but a
+# slider from 0 to VALVE_DELAY_RANGE_MAX(20) starting at VALVE_DELAY_DEFAULT(8),
+# and it scales these linearly (0 fastest, 20 = 2.5x slower); SPEED scales them
+# further. tests/test_shim_abi.py keeps the two constants tied to the module.
 DELAY_DEFAULT = 8
 DELAY_MAX = 20
 RAINBOW_CYCLE = 3.5     # one full trip around the hue circle
@@ -57,9 +53,9 @@ def hsv_to_rgb(hue, saturation, value):
 def _cycle(snapshot, nominal, speed_scale):
     """Seconds for one full cycle of an effect, honouring delay and SPEED.
 
-    delay 0 is a legitimate setting meaning "as fast as possible", not an
-    unset field - the module initialises it to DELAY_DEFAULT, so a zero got
-    there by being written. MIN_CYCLE_SECONDS keeps it watchable.
+    delay 0 means "as fast as possible", not "unset": the module initialises it
+    to DELAY_DEFAULT, so a zero was written. MIN_CYCLE_SECONDS keeps it
+    watchable.
     """
     delay = min(snapshot.delay, DELAY_MAX)
     seconds = nominal * (delay / float(DELAY_DEFAULT))
@@ -91,7 +87,7 @@ def breath_envelope(phase, floor):
     """A raised cosine over one cycle, lifted so it never reaches zero.
 
     Phase 0 is the dark end. Shared by the breath effect, the demo fade and the
-    notification bloom, so "breathing" looks the same wherever it appears.
+    notification bloom so "breathing" looks the same everywhere.
     """
     swell = (1.0 - math.cos(2.0 * math.pi * phase)) * 0.5
     return floor + (1.0 - floor) * swell
@@ -109,17 +105,15 @@ def _patrol(snapshot, elapsed, options):
     span = shim.LOGICAL_LEDS - 1
     period = _cycle(snapshot, PATROL_CYCLE, options.speed_scale)
     base = (elapsed / period) % 1.0
-    # patrol_num is NOT used as a scanner count. Valve documents none of these
-    # fields, and its neighbours (breath_offset, breath_level) look like live
-    # animation state rather than settings - so patrol_num is most likely the
-    # current position of a single dot, not how many there are. One dot is also
-    # what "patrol" looks like on the real bar. PATROL_DOTS overrides it.
+    # patrol_num is NOT used as a scanner count: none of these fields are
+    # documented, and its neighbours look like live animation state, so it is
+    # most likely a single dot's position - which is also what the real bar
+    # shows. PATROL_DOTS decides instead.
     scanners = max(1, min(int(options.patrol_dots), 8))
     red, green, blue = snapshot.base_color()
 
-    # Offset each scanner in time rather than in position: shifting the
-    # position and wrapping it would teleport a scanner sitting exactly on the
-    # far end back to LED 0 for one frame.
+    # Offset each scanner in time, not in position: a wrapped position would
+    # teleport a scanner sitting on the far end back to LED 0 for one frame.
     heads = []
     for scanner in range(scanners):
         phase = (base + scanner / float(scanners)) % 1.0
@@ -208,8 +202,8 @@ class Renderer:
         elif count == 1:
             frame = [logical[0]]
         else:
-            # Linear interpolation so a 60 LED strip shows smooth gradients
-            # instead of 17 hard steps.
+            # Interpolate, so a 60 LED strip shows a smooth gradient rather
+            # than 17 hard steps.
             frame = []
             for index in range(count):
                 position = index * (source - 1) / float(count - 1)

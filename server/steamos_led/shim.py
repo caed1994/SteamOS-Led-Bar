@@ -1,8 +1,8 @@
 """Reader for the leds-valve-shim character device.
 
-The shim exposes the LED state Steam writes in Game Mode as a packed,
-100 byte snapshot. read() is non-blocking and always returns the current
-state; poll() reports EPOLLIN whenever the sequence counter advanced.
+The shim exposes the LED state Steam writes in Game Mode as a packed 100 byte
+snapshot. read() is non-blocking and always returns the current state; poll()
+reports EPOLLIN whenever the sequence counter advanced.
 """
 
 from __future__ import annotations
@@ -42,9 +42,8 @@ EFFECT_NAMES = {
     EFFECT_DEMO: "demo",
 }
 
-# Effects the firmware of the real hardware animates on its own. For those we
-# have to run the animation locally, because the snapshot only changes when
-# Steam writes new settings.
+# Effects the real hardware animates on its own. The snapshot only changes when
+# Steam writes new settings, so these have to be animated locally.
 ANIMATED_EFFECTS = frozenset(
     (EFFECT_RAINBOW, EFFECT_BREATH, EFFECT_PATROL, EFFECT_FACTORY, EFFECT_DEMO)
 )
@@ -195,7 +194,7 @@ def make_snapshot(effect=EFFECT_MANUAL, color=(255, 255, 255), brightness=255,
                   enabled=1, delay=8, patrol_num=3, color_shift=5):
     """Convenience constructor for simulation and self tests.
 
-    Defaults mirror what the module initialises itself to (VALVE_DELAY_DEFAULT,
+    Defaults mirror the module's own (VALVE_DELAY_DEFAULT,
     VALVE_PATROL_NUM_DEFAULT, VALVE_COLOR_SHIFT_DEFAULT), so simulated output
     matches an untouched device.
     """

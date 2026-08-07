@@ -1,14 +1,10 @@
 """Realtime achievement detection through Valve's local Steamworks API.
 
-No API key, no network, no public profile: the Steam client already knows the
-achievement state, and `libsteam_api.so` is the local door to it. The catch is
-that Steamworks is a *game-side* API - it has to be initialised as a specific
-app, and it offers no way to ask which game is running. So we find the running
-app ID ourselves first, then talk to Steam as that app.
-
-Only the flat C API is used, so ctypes is enough and no callback structs have
-to be marshalled: achievements are polled locally, which is cheap because
-nothing leaves the machine.
+No API key, no network: the Steam client already knows the achievement state
+and `libsteam_api.so` is the local door to it. The catch is that Steamworks is
+a *game-side* API - it must be initialised as a specific app and cannot say
+which game is running, so we find the running app ID ourselves first. Only the
+flat C API is used, so ctypes is enough and no callback structs are marshalled.
 """
 
 from __future__ import annotations
@@ -33,9 +29,8 @@ STEAM_ROOTS = (
     "/home/deck/.local/share/Steam",
 )
 
-# The versioned accessor changes with the SDK a library was built from, so the
-# exported symbols are read rather than guessed. These are only the fallback
-# order for libraries whose symbol table cannot be parsed.
+# The accessor's version suffix depends on the SDK a library was built from, so
+# symbols are read rather than guessed. Fallback for unreadable symbol tables.
 USER_STATS_ACCESSORS = tuple(
     "SteamAPI_SteamUserStats_v%03d" % version for version in (13, 12, 11, 10)
 )
@@ -48,28 +43,24 @@ USER_STATS_INTERFACES = tuple(
 
 # -- friend messages --------------------------------------------------------
 #
-# ISteamFriends can report incoming chat messages, but only as callbacks, and
-# the flat C API has exactly one way to hand callbacks to a non-C++ binding:
-# manual dispatch. That arrived in SDK 1.51, and Proton ships an older library
-# on some machines - so whether this is possible at all is a property of the
-# borrowed libsteam_api.so, which message_support() reports without loading it.
+# ISteamFriends reports incoming chat only as callbacks, and the flat C API's
+# only way to hand those to a non-C++ binding is manual dispatch (SDK 1.51+).
+# Proton ships older copies on some machines, so whether this works at all is a
+# property of the borrowed library - message_support() reports it.
 
 FRIENDS_INTERFACES = tuple(
     "SteamFriends%03d" % version for version in (17, 16, 15, 14, 13, 12)
 )
 
-# GameConnectedFriendChatMsg_t: k_iSteamFriendsCallbacks (300) + 43. Read off
-# a live machine rather than a header, and the payload confirms the struct -
-# eight bytes of CSteamID followed by a message counter that steps by one per
-# message. Identify it by this number and never by its size: PersonaStateChange
-# (304) is also twelve bytes and also starts with the same friend's SteamID,
-# and it arrives when they come online or start typing.
+# GameConnectedFriendChatMsg_t: k_iSteamFriendsCallbacks (300) + 43, read off a
+# live machine. Payload is 8 bytes of CSteamID plus a message counter. Identify
+# it by this number, never by size: PersonaStateChange (304) is also 12 bytes
+# and also starts with the same friend's SteamID.
 FRIEND_CHAT_MESSAGE = 343
 FRIEND_CHAT_MESSAGE_BYTES = 12
 
-# EChatEntryType. Steam announces "they are typing" through the same callback
-# as the message itself, so without reading the entry type the bar flashes
-# twice per message - once when they start typing, once when it arrives.
+# EChatEntryType. Steam announces "they are typing" through the same callback as
+# the message, so without the entry type the bar flashes twice per message.
 CHAT_ENTRY_CHAT_MSG = 1
 CHAT_ENTRY_TYPING = 2
 
@@ -142,11 +133,10 @@ def interesting_symbols(symbols):
             or symbol.startswith("SteamAPI_Init"))
     )
 
-# Where a libsteam_api.so can turn up, relative to a Steam library folder.
-# steamrt32/ and steamrt64/ are the important ones: they belong to the Steam
-# client itself rather than to a game, so they are there on every machine that
-# has Steam at all. Without them this depends on which games or Proton
-# versions happen to be installed - and newer Proton no longer ships one.
+# Where a libsteam_api.so turns up, relative to a Steam library folder.
+# steamrt32/64 belong to the Steam client itself, so they exist on every machine
+# with Steam; game copies depend on what happens to be installed, and newer
+# Proton ships none at all.
 CLIENT_GLOBS = (
     "steamrt64/libsteam_api.so",
     "steamrt32/libsteam_api.so",
@@ -161,9 +151,8 @@ GAME_GLOBS = (
 )
 LIBRARY_GLOBS = CLIENT_GLOBS + GAME_GLOBS
 
-# Games ship a 32-bit and a 64-bit libsteam_api.so, and Proton keeps them in
-# sibling files/lib and files/lib64 directories, so the first match
-# alphabetically is routinely the wrong architecture.
+# Games ship both a 32- and a 64-bit copy in sibling directories, so the first
+# alphabetical match is routinely the wrong architecture.
 WANTED_ELF_CLASS = (elf.ELFCLASS64 if sys.maxsize > 2 ** 32
                     else elf.ELFCLASS32)
 
@@ -171,9 +160,8 @@ WANTED_ELF_CLASS = (elf.ELFCLASS64 if sys.maxsize > 2 ** 32
 def _as_pointer(value):
     """Accept a raw address or an already-wrapped pointer.
 
-    The resolver routes return c_void_p, and wrapping one of those in
-    c_void_p() again raises "cannot be converted to pointer" rather than doing
-    nothing - so normalise instead of assuming which form arrived.
+    Re-wrapping a c_void_p raises instead of doing nothing, and the resolver
+    routes return both forms, so normalise rather than assume.
     """
     if isinstance(value, ctypes.c_void_p):
         return value
@@ -198,9 +186,8 @@ def _call_accessor(lib, name):
 def library_roots():
     """Every Steam library folder: the install itself, plus extra drives.
 
-    A Steam Deck with an SD card keeps its games in a second library folder,
-    and Steam records them in libraryfolders.vdf. Searching only the install
-    directory finds nothing for anyone who put their games elsewhere.
+    Games on an SD card or second drive live in folders Steam records in
+    libraryfolders.vdf, not under the install directory.
     """
     root = steam_root()
     if root is None:
@@ -224,12 +211,10 @@ def library_roots():
 def find_libraries():
     """Every libsteam_api.so across all Steam library folders.
 
-    The Steam client's own copies come first, then games, alphabetically
-    within each group. That order is a choice, not an accident: the client's
-    copy is on every machine whether or not a particular game is installed,
-    it is kept current by Steam itself, and the ones shipped inside games can
-    be years old - the copy that came with Proton 9 here predates the callback
-    dispatch added in SDK 1.51 and cannot receive friend messages at all.
+    The client's own copies come first, then games, alphabetically within each
+    group: the client's copy is always present and kept current, while the ones
+    inside games can be years old (Proton 9's predates SDK 1.51 and cannot
+    receive friend messages at all).
     """
     found = {}
     for root in library_roots():
@@ -256,8 +241,8 @@ def steam_root():
 def find_library(explicit=None):
     """Locate a libsteam_api.so.
 
-    The library is part of the Steamworks SDK and ships inside games, so it is
-    never redistributed here - one of the installed games lends us its copy.
+    Part of the Steamworks SDK, so never redistributed here - Steam or one of
+    the installed games lends us its copy.
     """
     if explicit and explicit != "auto":
         if not os.path.isfile(explicit):
@@ -319,8 +304,7 @@ def _app_id_from_registry():
 def _app_id_from_processes():
     """Steam launches games with SteamAppId in their environment.
 
-    This reads the environment block of every process the user owns, so it is
-    far more expensive than the registry - see running_app_id().
+    Reads every process the user owns, so far more expensive than the registry.
     """
     for entry in glob.glob("/proc/[0-9]*/environ"):
         try:
@@ -328,8 +312,7 @@ def _app_id_from_processes():
                 environ = handle.read()
         except OSError:
             continue        # not ours, or gone again
-        # Nearly every process fails this test, and it is much cheaper than
-        # splitting a Proton-sized environment block into a list first.
+        # Cheaper than splitting a Proton-sized environment block first.
         if b"SteamAppId=" not in environ:
             continue
         for variable in environ.split(b"\0"):
@@ -349,8 +332,8 @@ APP_ID_SOURCES = (
 def app_id_sources():
     """[(label, app id or None)] - what every source says, for diagnostics.
 
-    Unlike running_app_id() this always asks everyone, because the point of
-    --steam-check is to show where the answer did and did not come from.
+    Unlike running_app_id() this always asks all of them: --steam-check should
+    show where the answer did and did not come from.
     """
     return [(label, lookup()) for label, lookup in APP_ID_SOURCES]
 
@@ -358,14 +341,11 @@ def app_id_sources():
 def running_app_id(scan_processes=True):
     """The app ID of the game currently running, or None.
 
-    The registry is one small file read; the process scan reads the whole
-    environment block of every process the user owns, so a caller polling once
-    a second may want to skip it sometimes.
-
-    Be careful with that: on some machines the registry never names the running
-    app at all, and the scan is the only source that finds it. So None from
-    scan_processes=False means "did not look", not "no game" - a caller that
-    already believes a game is running must not conclude it ended from this.
+    The registry is one small file read; the process scan is much more
+    expensive, so a caller polling once a second may skip it. Careful: on some
+    machines the registry never names the running app and the scan is the only
+    source that finds it, so None with scan_processes=False means "did not
+    look", not "no game".
     """
     app_id = _app_id_from_registry()
     if app_id or not scan_processes:
@@ -382,17 +362,14 @@ class UserStats:
     def __init__(self, app_id, library, route, manual_dispatch=False):
         self.app_id = int(app_id)
         self.library_path = find_library(library)
-        # One way in: "accessor:NAME", "userinterface:VERSION" or
-        # "client:VERSION". Required, and deliberately so - the flat wrappers
-        # are built against a single interface version and the wrong one
-        # segfaults instead of failing, so the choice belongs to
-        # select_route(), which probes the candidates in child processes.
+        # "accessor:NAME", "userinterface:VERSION" or "client:VERSION", and
+        # mandatory: the wrong interface version segfaults instead of failing,
+        # so the choice belongs to select_route(), which probes in children.
         self.route = route
-        # Steam allows one callback dispatch mode per session and fixes it the
-        # first time either mode is used - so it has to be decided here,
-        # before open() pumps anything. Manual dispatch is what lets a ctypes
-        # binding see callbacks at all; standard dispatch is cheaper and is
-        # all the achievement polling needs.
+        # Steam fixes the callback dispatch mode the first time either is used,
+        # so it must be decided before open() pumps anything. Manual dispatch is
+        # the only way a ctypes binding sees callbacks; achievement polling
+        # alone is happy with the cheaper standard dispatch.
         self.manual_dispatch = manual_dispatch
         self._lib = None
         self._iface = None
@@ -447,8 +424,8 @@ class UserStats:
             self._start_manual_dispatch(lib)
         self._lib = lib
         self._iface = _as_pointer(iface)
-        # Nothing past this point needs the symbol table, and a large library
-        # keeps a few hundred KiB alive for as long as the game runs.
+        # Nothing past here needs the symbol table, which would otherwise keep
+        # a few hundred KiB alive for as long as the game runs.
         self._symbol_cache = None
 
         if self._request_stats is None:
@@ -476,8 +453,8 @@ class UserStats:
     def _resolve_user_stats(self, lib):
         """Take this instance's route, and only that one - no fallbacks.
 
-        Trying the others in-process is what select_route() exists to avoid:
-        the wrong interface version does not raise, it segfaults.
+        Trying others in-process is what select_route() exists to avoid: the
+        wrong interface version does not raise, it segfaults.
         """
         kind, _, detail = self.route.partition(":")
         if kind == "accessor":
@@ -548,13 +525,9 @@ class UserStats:
             lib.SteamAPI_Shutdown()
 
     def _bind(self, lib):
-        # These two came and went with the SDK. RequestCurrentStats was
-        # removed once stats started arriving with SteamAPI_Init, and a
-        # library built for manual callback dispatch need not export
-        # RunCallbacks either. Absent is normal, so bind them if they are
-        # there and carry on if they are not - refusing a library over a call
-        # it no longer needs would rule out the Steam client's own copy, which
-        # is the one present on every machine.
+        # These two came and went with the SDK, so absent is normal: bind them
+        # if present and carry on otherwise. Refusing a library over a call it
+        # no longer needs would rule out the Steam client's own copy.
         self._run_callbacks = _optional(lib, "SteamAPI_RunCallbacks")
         if self._run_callbacks is not None:
             self._run_callbacks.restype = None
@@ -587,10 +560,9 @@ class UserStats:
     def wait_for_stats(self, timeout=3.0):
         """Give RequestCurrentStats time to answer.
 
-        It is asynchronous: the schema (how many achievements exist) is there
-        at once, but every unlock state reads as false until Steam replies.
-        Taking the baseline too early makes the whole back catalogue look like
-        it unlocked a moment later.
+        It is asynchronous: the schema is there at once, but every unlock state
+        reads as false until Steam replies. A baseline taken too early makes the
+        whole back catalogue look like it unlocked a moment later.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -598,8 +570,8 @@ class UserStats:
             if any(self.achievements().values()):
                 return True
             time.sleep(0.1)
-        # A game with genuinely nothing unlocked ends up here too, which is why
-        # the watcher keeps its own guard against a late flood.
+        # A game with genuinely nothing unlocked lands here too - hence the
+        # watcher's own guard against a late flood.
         LOG.debug("no unlocked achievement seen within %.1fs", timeout)
         return False
 
@@ -608,9 +580,8 @@ class UserStats:
     def _start_manual_dispatch(self, lib):
         """Switch this session to manual callback dispatch.
 
-        Must happen before anything calls SteamAPI_RunCallbacks: whichever
-        mode is used first is the one Steam keeps, and it refuses to change
-        afterwards with "standard dispatch has already been selected".
+        Must happen before anything calls SteamAPI_RunCallbacks: Steam keeps
+        whichever mode is used first and refuses to change afterwards.
         """
         init = _optional(lib, MANUAL_DISPATCH_INIT)
         if init is None:
@@ -650,8 +621,8 @@ class UserStats:
             lib.SteamAPI_ManualDispatch_FreeLastCallback(
                 ctypes.c_int32(self._pipe))
 
-        # With manual dispatch every callback lands here, not only the ones
-        # anyone asked for, so an unread queue must not grow without bound.
+        # Manual dispatch delivers every callback, not just the ones anyone
+        # asked for, so an unread queue must not grow without bound.
         if len(self._pending) > self.MAX_PENDING_CALLBACKS:
             self._pending = self._pending[-self.MAX_PENDING_CALLBACKS:]
 
@@ -697,16 +668,11 @@ class UserStats:
 class FriendMessageListener:
     """Receives Steam friend chat messages while a game is running.
 
-    Borrows an already-open UserStats session: it is the same Steam client
-    connection, initialised as the same app, so there is nothing extra to
-    register with Steam and nothing extra for Steam to wait for when the game
-    stops.
-
-    Callbacks are collected through manual dispatch, which is the only route
-    the flat C API offers a non-C++ binding - so the session has to have been
-    opened with manual_dispatch=True. Steam fixes the dispatch mode the first
-    time either kind is used and will not change it afterwards, which is why
-    that choice belongs to the session and not to this.
+    Borrows an already-open UserStats session - same client connection, same
+    app - so there is nothing extra to register with Steam. Callbacks arrive
+    through manual dispatch, so that session must have been opened with
+    manual_dispatch=True; Steam fixes the mode on first use, which is why the
+    choice belongs to the session and not to this.
     """
 
     def __init__(self, stats):
@@ -722,9 +688,8 @@ class FriendMessageListener:
                 "this session dispatches callbacks the standard way, which "
                 "hands them to nobody - open it with manual_dispatch=True")
 
-        # Read the symbols here rather than borrowing the session's cache,
-        # which open() drops on purpose so a game-long session does not sit on
-        # a few hundred KiB of symbol table.
+        # Read the symbols here: the session's cache is dropped by open() on
+        # purpose, so a game-long session does not sit on the symbol table.
         try:
             symbols = elf.exported_symbols(self.stats.library_path)
         except (OSError, elf.ElfError) as exc:
@@ -772,11 +737,9 @@ class FriendMessageListener:
     def entry_type(self, steam_id, message_id):
         """Whether this entry is a message, someone typing, or something else.
 
-        Returns None when the library cannot tell us, in which case the caller
-        has to take every entry at face value.
-
-        The message text has to be read to get at the type, and is then thrown
-        away on purpose: what a friend wrote has no business in a system log.
+        None when the library cannot tell us, leaving the caller to take every
+        entry at face value. Reading the type also reads the message text,
+        which is then dropped on purpose - it has no place in a system log.
         """
         if self._get_message is None:
             return None
@@ -816,10 +779,9 @@ class FriendMessageListener:
     def messages(self):
         """Friend chat messages received since the last call.
 
-        Returns (steam id, message id) pairs. Only messages *received* produce
-        this callback - sending one from this machine was measured not to, so
-        the bar does not flash while you type. A friend typing does produce
-        one, though, which is why the entry type is checked.
+        Returns (steam id, message id) pairs. Only *received* messages produce
+        this callback, so the bar does not flash while you type - but a friend
+        typing does, which is why the entry type is checked.
         """
         found = []
         for number, payload in self.callbacks():
@@ -841,10 +803,9 @@ class FriendMessageListener:
     def callbacks(self):
         """Every callback dispatched since the last call, as (id, payload).
 
-        Deliberately returns all of them rather than filtering: which callback
-        number carries a chat message differs between SDK generations, and
-        reading it off a live machine beats guessing from a header. Pumping
-        belongs to the session, which owns the one dispatcher Steam allows.
+        Unfiltered on purpose: which number carries a chat message differs
+        between SDK generations, so --probe-messages can read it off a live
+        machine. Pumping belongs to the session, which owns the dispatcher.
         """
         self.stats.run_callbacks()
         return self.stats.take_callbacks()
@@ -862,8 +823,8 @@ class FriendMessageListener:
 class AchievementWatcher:
     """Reports achievements that flip from locked to unlocked."""
 
-    # More than this appearing between two polls is Steam delivering state,
-    # not the player earning them a tenth of a second apart.
+    # More than this between two polls is Steam delivering state, not the
+    # player earning them a tenth of a second apart.
     FLOOD_THRESHOLD = 3
 
     def __init__(self, stats, flood_threshold=FLOOD_THRESHOLD):
@@ -879,7 +840,7 @@ class AchievementWatcher:
             return []
 
         if self.previous is None:
-            # First look: adopt the state, everything already earned is old news.
+            # First look: everything already earned is old news.
             self.previous = current
             LOG.info("tracking %d achievements, %d already unlocked",
                      len(current), sum(1 for value in current.values() if value))
@@ -898,13 +859,12 @@ class AchievementWatcher:
 
 # -- picking a route safely -------------------------------------------------
 #
-# The flat SteamAPI_ISteamUserStats_* wrappers in a library are compiled
-# against one specific interface version. Fetching a different version through
-# the older routes hands back a pointer whose vtable does not match, and
-# calling through it does not fail - it segfaults. Which version a given
-# libsteam_api.so expects is not discoverable from the outside, so each
-# candidate is tried in a child process: a crash costs one fork instead of the
-# whole program, and the survivor is the answer.
+# The flat SteamAPI_ISteamUserStats_* wrappers are compiled against one
+# interface version. Fetching a different one hands back a pointer with a
+# mismatched vtable, and calling through it segfaults rather than failing.
+# Which version a library expects is not discoverable from the outside, so each
+# candidate is tried in a child process: a crash costs one fork, and the
+# survivor is the answer.
 
 
 def candidate_routes(library):
@@ -928,10 +888,8 @@ def candidate_routes(library):
 def _suppress_core_dumps():
     """Crashing is the expected outcome here, so do not save the wreck.
 
-    A probe that picks the wrong interface version segfaults - that is the
-    whole reason for the child. Left alone, each one hands systemd-coredump a
-    full dump of a Python process with steamclient.so mapped, which lands in
-    the journal and on disk every single time a game starts.
+    Otherwise every wrong-version probe hands systemd-coredump a full dump of a
+    Python process with steamclient.so mapped, once per game start.
     """
     try:
         import resource
@@ -943,9 +901,8 @@ def _suppress_core_dumps():
 def _run_in_child(target, timeout=15.0):
     """Run target(write_fd) in a forked child and report how it ended.
 
-    Returns (status, message) with status "ok" or "crashed". Surviving the
-    crash is the whole point, so this is the only place the fork, the timeout
-    and the exit-status handling are written.
+    Returns (status, message) with status "ok" or "crashed" - the one place
+    the fork, the timeout and the exit-status handling live.
     """
     import select as _select
     import signal as _signal
@@ -958,8 +915,8 @@ def _run_in_child(target, timeout=15.0):
         try:
             target(write_fd)
         finally:
-            # _exit, not exit: no atexit handlers, no flushing the parent's
-            # buffers, which this process shares copies of.
+            # _exit, not exit: no atexit handlers, and no flushing the copies
+            # of the parent's buffers this process inherited.
             os._exit(0)
 
     os.close(write_fd)
@@ -1019,9 +976,8 @@ _ROUTE_CACHE = {}
 def select_route(app_id, library, reporter=None):
     """Find a route that survives being used. Returns (route, achievements).
 
-    Which route works depends on the library, not on the app, so one that has
-    already worked in this process is tried first - that turns the search on
-    every later game start into a single fork instead of up to fifteen.
+    Which route works depends on the library, not the app, so a known-good one
+    goes first: later game starts cost one fork instead of up to fifteen.
     """
     routes = candidate_routes(library)
     known = _ROUTE_CACHE.get(library)

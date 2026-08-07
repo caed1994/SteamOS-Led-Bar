@@ -1,7 +1,7 @@
 """Configuration loading: /etc/steamos-led-serial.conf plus CLI overrides.
 
-The file uses plain KEY=value lines so it can be read by shell scripts and by
-systemd's EnvironmentFile as well.
+Plain KEY=value lines, so shell scripts and systemd's EnvironmentFile can read
+the same file.
 """
 
 from __future__ import annotations
@@ -111,8 +111,7 @@ def load(path=DEFAULT_CONFIG_PATH, overrides=None):
 
 
 MAPPINGS = ("stretch", "repeat", "crop")
-# Taken from the module that implements them, so the validator cannot drift
-# away from the styles a notification can actually take.
+# Taken from the module that implements them, so the validator cannot drift.
 NOTIFY_STYLES = notify.STYLES
 
 
@@ -122,8 +121,8 @@ def validate(config):
     if config["MAPPING"] not in MAPPINGS:
         raise ConfigError("MAPPING must be one of: %s" % ", ".join(MAPPINGS))
     if config["BAUD"] not in BAUD_CONSTANTS:
-        # Linux can only set the rates termios has a constant for; anything
-        # else fails at open() time, which looks like dead hardware.
+        # Linux can only set rates termios has a constant for; anything else
+        # fails at open() time, which looks like dead hardware.
         raise ConfigError(
             "BAUD=%s cannot be set on a Linux serial port. Supported rates: %s"
             % (config["BAUD"],

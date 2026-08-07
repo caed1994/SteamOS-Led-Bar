@@ -1,31 +1,24 @@
 [Unit]
-# A *user* unit, not a system one: Steamworks talks to the Steam client of the
-# logged-in user, so this has to live in that session. The LED service itself
-# stays sandboxed as root and only receives trigger words through its FIFO.
-#
-# install.sh puts this in place for you. Log:
-#   journalctl --user -u steamos-led-achievements -f
+# A *user* unit: Steamworks talks to the logged-in user's Steam client, so this
+# has to live in that session. The LED service stays sandboxed as root and only
+# receives trigger words through its FIFO.
+# Log: journalctl --user -u steamos-led-achievements -f
 Description=Flash the LED bar when a Steam achievement unlocks
-# Ordering only. Deliberately NOT PartOf=graphical-session.target: that would
-# stop the watcher whenever the desktop session goes away, which is exactly
-# what switching to Game Mode does - and Game Mode does not bring that target
-# back, so nothing would restart it. This should live as long as the login
-# does, across both modes.
+# Ordering only, deliberately NOT PartOf=: that would stop the watcher whenever
+# the desktop session goes away - which is what switching to Game Mode does,
+# and Game Mode never brings the target back.
 After=graphical-session.target
 
 [Service]
 Type=simple
 ExecStart=@INSTALL_DIR@/steamos-led-serial --watch-achievements
-# Restart is not just crash recovery here, it is how the watcher works. A
-# process that has initialised Steamworks as a game stays registered with the
-# Steam client as an instance of it, and Steam will not report the game as
-# stopped while that registration exists - SteamAPI_Shutdown does not clear
-# it, only the process ending does. So the watcher handles one game session
-# and exits, and this brings it back for the next one.
+# Not just crash recovery - it is how the watcher works. A process that has
+# initialised Steamworks stays registered as an instance of that game, and
+# Steam will not report the game stopped while that lasts (SteamAPI_Shutdown
+# does not clear it, only exiting does). So one game session per process.
 Restart=always
-# Long enough that Steam has finished stopping the game before the next
-# watcher looks: coming back while Steam is still winding down would find the
-# app still present, attach to it, and block the shutdown all over again.
+# Long enough for Steam to finish stopping the game: coming back too early
+# would find the app still present and block the shutdown all over again.
 RestartSec=20
 
 [Install]
