@@ -185,6 +185,29 @@ class SerialLoopbackTest(unittest.TestCase):
         self.assertEqual(bridge._baud_candidates(os.path.realpath(self.device)),
                          [BAUD])
 
+    def test_a_later_rate_answering_does_not_leak_the_first_port(self):
+        # The first candidate is held open in case nothing answers and we have
+        # to stream blind. Once a later rate does answer, that port is dead
+        # weight - and leaking one fd per reconnect adds up over a long login.
+        self.start_esp()
+        bridge = link.EspLink(port=self.device, baudrate=BAUD, led_count=17)
+        bridge.BOOT_DELAY = 0.0
+        self.addCleanup(bridge.disconnect)
+
+        opened = []
+        open_port, greet = bridge._open, bridge._greet
+        bridge._open = lambda device, rate: opened.append(
+            open_port(device, rate)) or opened[-1]
+        # Silence only the first candidate, so the scan moves on to the next.
+        bridge._greet = lambda port: None if len(opened) == 1 else greet(port)
+
+        self.assertTrue(bridge.connect())
+        self.assertGreater(len(opened), 1, "expected a second candidate")
+        for port in opened:
+            if port is not bridge.serial:
+                self.assertEqual(port.fd, -1,
+                                 "a rejected candidate was left open")
+
     def test_reconnect_after_device_disappears(self):
         bridge = link.EspLink(port="/dev/does-not-exist", baudrate=BAUD,
                               led_count=17, reconnect_delay=0.0)

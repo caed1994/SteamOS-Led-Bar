@@ -172,15 +172,30 @@ class Renderer:
         self.speed_scale = speed_scale
         self.patrol_dots = max(1, min(int(patrol_dots), 8))
         self._gamma_table = self._build_gamma(gamma)
+        self._stretch = {}
 
     @staticmethod
     def _build_gamma(gamma):
+        """A 256 entry lookup; the identity table when gamma is off."""
         if abs(gamma - 1.0) < 1e-6:
-            return None
+            return list(range(256))
         return [
             int(round(((value / 255.0) ** gamma) * 255.0))
             for value in range(256)
         ]
+
+    def _stretch_weights(self, source):
+        """(low, high, blend) per physical LED - fixed for a given strip."""
+        weights = self._stretch.get(source)
+        if weights is None:
+            span = source - 1
+            weights = []
+            for index in range(self.led_count):
+                position = index * span / float(self.led_count - 1)
+                low = int(position)
+                weights.append((low, min(low + 1, span), position - low))
+            self._stretch[source] = weights
+        return weights
 
     def render_logical(self, snapshot, elapsed):
         """The 17 logical LEDs of the Steam Machine bar, floats in 0..255."""
@@ -203,16 +218,12 @@ class Renderer:
         else:
             # Interpolate: a 60 LED strip gets a gradient, not 17 hard steps.
             frame = []
-            for index in range(count):
-                position = index * (source - 1) / float(count - 1)
-                low = int(math.floor(position))
-                high = min(low + 1, source - 1)
-                blend = position - low
+            for low, high, blend in self._stretch_weights(source):
                 first, second = logical[low], logical[high]
-                frame.append(tuple(
-                    first[channel] * (1.0 - blend) + second[channel] * blend
-                    for channel in range(3)
-                ))
+                inverse = 1.0 - blend
+                frame.append((first[0] * inverse + second[0] * blend,
+                              first[1] * inverse + second[1] * blend,
+                              first[2] * inverse + second[2] * blend))
 
         if self.reverse:
             frame.reverse()
@@ -228,12 +239,11 @@ class Renderer:
             level = 0
         scale = (level / 255.0) * (self.max_brightness / 255.0)
 
+        table = self._gamma_table
         payload = bytearray()
-        for red, green, blue in frame:
-            for channel in (red, green, blue):
+        for pixel in frame:
+            for channel in pixel:
                 value = int(channel * scale + 0.5)
                 value = 0 if value < 0 else (255 if value > 255 else value)
-                if self._gamma_table is not None:
-                    value = self._gamma_table[value]
-                payload.append(value)
+                payload.append(table[value])
         return bytes(payload)

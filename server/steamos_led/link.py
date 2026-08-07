@@ -48,13 +48,26 @@ MSG_NAMES = {
 }
 
 
+def _crc16_table():
+    table = []
+    for value in range(256):
+        crc = value << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+        table.append(crc)
+    return tuple(table)
+
+
+# A frame is checksummed per LED update, so this runs FPS times a second over
+# the whole payload - byte at a time rather than bit at a time.
+_CRC16_TABLE = _crc16_table()
+
+
 def crc16(data):
     """CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF)."""
     crc = 0xFFFF
     for byte in data:
-        crc ^= byte << 8
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+        crc = ((crc << 8) & 0xFFFF) ^ _CRC16_TABLE[(crc >> 8) ^ byte]
     return crc
 
 
@@ -190,6 +203,10 @@ class EspLink:
             if info is not None:
                 if index > 0:
                     self._scanned.discard(device)
+                    if preferred is not None:
+                        # Held open for the blind-mode fallback below, which
+                        # this answer makes unnecessary.
+                        preferred.close()
                 self._adopt(port, device, rate, info)
                 return True
 
@@ -218,10 +235,8 @@ class EspLink:
         the config file alone, fall back to the rates the firmware ships with.
         """
         first = self._known_good.get(device, self.baudrate)
-        if not self.autodetect_baud or device in self._scanned:
-            candidates = [first]
-        else:
-            candidates = [first]
+        candidates = [first]
+        if self.autodetect_baud and device not in self._scanned:
             for rate in (self.baudrate,) + FALLBACK_BAUD_RATES:
                 if rate not in candidates:
                     candidates.append(rate)

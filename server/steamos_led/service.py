@@ -224,6 +224,14 @@ def _interrupt_on_sigterm():
     signal.signal(signal.SIGTERM, handler)
 
 
+ROUTE_MARKS = {"ok": "WORKS ", "crashed": "CRASH ", "failed": "no    "}
+
+
+def _report_route(route, status, detail):
+    """One probed route per line, as select_route() works through them."""
+    print("  [%s] %-52s %s" % (ROUTE_MARKS[status], route, detail), flush=True)
+
+
 def run_steam_check(config):
     """Report what the Steamworks path can and cannot find on this machine."""
     print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"),
@@ -284,11 +292,8 @@ def run_steam_check(config):
     print("version, and the wrong one segfaults rather than failing politely.")
     print(flush=True)
 
-    def report(route, status, detail):
-        mark = {"ok": "WORKS ", "crashed": "CRASH ", "failed": "no    "}[status]
-        print("  [%s] %-52s %s" % (mark, route, detail), flush=True)
-
-    route, count = steamworks.select_route(app_id, library, reporter=report)
+    route, count = steamworks.select_route(app_id, library,
+                                           reporter=_report_route)
     print(flush=True)
 
     if route is None:
@@ -382,14 +387,8 @@ def run_probe_messages(config, seconds=None):
     route = config["STEAM_ROUTE"]
     if not route or route == "auto":
         print("Finding a way into Steamworks with this library:")
-
-        def report(candidate, status, detail):
-            mark = {"ok": "WORKS ", "crashed": "CRASH ", "failed": "no    "}
-            print("  [%s] %-52s %s" % (mark[status], candidate, detail),
-                  flush=True)
-
         route, _count = steamworks.select_route(app_id, library,
-                                                reporter=report)
+                                                reporter=_report_route)
         print(flush=True)
         if route is None:
             print("None of them worked, so there is no session to listen on.")
