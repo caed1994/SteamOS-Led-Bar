@@ -45,17 +45,15 @@ USER_STATS_INTERFACES = tuple(
 #
 # ISteamFriends reports incoming chat only as callbacks, and the flat C API's
 # only way to hand those to a non-C++ binding is manual dispatch (SDK 1.51+).
-# Proton ships older copies on some machines, so whether this works at all is a
-# property of the borrowed library - message_support() reports it.
+# Proton ships older copies, so message_support() reports this per library.
 
 FRIENDS_INTERFACES = tuple(
     "SteamFriends%03d" % version for version in (17, 16, 15, 14, 13, 12)
 )
 
 # GameConnectedFriendChatMsg_t: k_iSteamFriendsCallbacks (300) + 43, read off a
-# live machine. Payload is 8 bytes of CSteamID plus a message counter. Identify
-# it by this number, never by size: PersonaStateChange (304) is also 12 bytes
-# and also starts with the same friend's SteamID.
+# live machine. Identify it by number, never by size: PersonaStateChange (304)
+# is also 12 bytes and also starts with the same friend's SteamID.
 FRIEND_CHAT_MESSAGE = 343
 FRIEND_CHAT_MESSAGE_BYTES = 12
 
@@ -79,10 +77,7 @@ class CallbackMsg(ctypes.Structure):
 
 
 def message_support(library):
-    """What a library offers for friend messages. Reads symbols, loads nothing.
-
-    Returns a dict of findings, or {"error": ...} if the symbols are unreadable.
-    """
+    """Findings dict, or {"error": ...}. Reads symbols, loads nothing."""
     try:
         symbols = elf.exported_symbols(library)
     except (OSError, elf.ElfError) as exc:
@@ -120,7 +115,6 @@ def versioned_accessors(symbols, interface):
 
 
 def user_stats_accessors(symbols):
-    """Versioned ISteamUserStats accessors a library exports, newest first."""
     return versioned_accessors(symbols, "UserStats")
 
 
@@ -133,10 +127,9 @@ def interesting_symbols(symbols):
             or symbol.startswith("SteamAPI_Init"))
     )
 
-# Where a libsteam_api.so turns up, relative to a Steam library folder.
-# steamrt32/64 belong to the Steam client itself, so they exist on every machine
-# with Steam; game copies depend on what happens to be installed, and newer
-# Proton ships none at all.
+# Where a libsteam_api.so turns up inside a Steam library folder. steamrt32/64
+# belong to the Steam client, so they exist on every machine with Steam; game
+# copies depend on what is installed, and newer Proton ships none.
 CLIENT_GLOBS = (
     "steamrt64/libsteam_api.so",
     "steamrt32/libsteam_api.so",
@@ -160,8 +153,7 @@ WANTED_ELF_CLASS = (elf.ELFCLASS64 if sys.maxsize > 2 ** 32
 def _as_pointer(value):
     """Accept a raw address or an already-wrapped pointer.
 
-    Re-wrapping a c_void_p raises instead of doing nothing, and the resolver
-    routes return both forms, so normalise rather than assume.
+    Re-wrapping a c_void_p raises rather than doing nothing.
     """
     if isinstance(value, ctypes.c_void_p):
         return value
@@ -169,12 +161,10 @@ def _as_pointer(value):
 
 
 def _optional(lib, name):
-    """A bound symbol, or None if the library does not have it."""
     return getattr(lib, name, None)
 
 
 def _call_accessor(lib, name):
-    """Call a zero-argument accessor that hands back an interface pointer."""
     if not hasattr(lib, name):
         return None
     accessor = getattr(lib, name)
@@ -239,11 +229,7 @@ def steam_root():
 
 
 def find_library(explicit=None):
-    """Locate a libsteam_api.so.
-
-    Part of the Steamworks SDK, so never redistributed here - Steam or one of
-    the installed games lends us its copy.
-    """
+    """Locate a libsteam_api.so, borrowed from Steam or an installed game."""
     if explicit and explicit != "auto":
         if not os.path.isfile(explicit):
             raise SteamworksError("no library at %s" % explicit)
@@ -302,10 +288,7 @@ def _app_id_from_registry():
 
 
 def _app_id_from_processes():
-    """Steam launches games with SteamAppId in their environment.
-
-    Reads every process the user owns, so far more expensive than the registry.
-    """
+    """SteamAppId is in a game's environment; pricier than the registry."""
     for entry in glob.glob("/proc/[0-9]*/environ"):
         try:
             with open(entry, "rb") as handle:
@@ -330,10 +313,9 @@ APP_ID_SOURCES = (
 
 
 def app_id_sources():
-    """[(label, app id or None)] - what every source says, for diagnostics.
+    """[(label, app id or None)] - what every source says, for --steam-check.
 
-    Unlike running_app_id() this always asks all of them: --steam-check should
-    show where the answer did and did not come from.
+    Unlike running_app_id(), always asks all of them.
     """
     return [(label, lookup()) for label, lookup in APP_ID_SOURCES]
 
@@ -363,13 +345,10 @@ class UserStats:
         self.app_id = int(app_id)
         self.library_path = find_library(library)
         # "accessor:NAME", "userinterface:VERSION" or "client:VERSION", and
-        # mandatory: the wrong interface version segfaults instead of failing,
-        # so the choice belongs to select_route(), which probes in children.
+        # mandatory - see "picking a route safely" at the end of this file.
         self.route = route
-        # Steam fixes the callback dispatch mode the first time either is used,
-        # so it must be decided before open() pumps anything. Manual dispatch is
-        # the only way a ctypes binding sees callbacks; achievement polling
-        # alone is happy with the cheaper standard dispatch.
+        # Only friend messages need manual dispatch; achievement polling is
+        # happy with the cheaper standard one. Fixed for the whole session.
         self.manual_dispatch = manual_dispatch
         self._lib = None
         self._iface = None
@@ -437,7 +416,6 @@ class UserStats:
 
     @property
     def library(self):
-        """The loaded CDLL, for anything else that wants this same session."""
         return self._lib
 
     def _symbols(self):
@@ -451,11 +429,7 @@ class UserStats:
         return self._symbol_cache
 
     def _resolve_user_stats(self, lib):
-        """Take this instance's route, and only that one - no fallbacks.
-
-        Trying others in-process is what select_route() exists to avoid: the
-        wrong interface version does not raise, it segfaults.
-        """
+        """Take this instance's route, and only that one - no fallbacks."""
         kind, _, detail = self.route.partition(":")
         if kind == "accessor":
             iface = _call_accessor(lib, detail)
@@ -669,10 +643,8 @@ class FriendMessageListener:
     """Receives Steam friend chat messages while a game is running.
 
     Borrows an already-open UserStats session - same client connection, same
-    app - so there is nothing extra to register with Steam. Callbacks arrive
-    through manual dispatch, so that session must have been opened with
-    manual_dispatch=True; Steam fixes the mode on first use, which is why the
-    choice belongs to the session and not to this.
+    app - so there is nothing extra to register with Steam. That session must
+    have been opened with manual_dispatch=True.
     """
 
     def __init__(self, stats):
@@ -731,7 +703,6 @@ class FriendMessageListener:
                            ctypes.POINTER(ctypes.c_int32)]
         self._get_message = reader
 
-    # Big enough for any chat message; the text itself is read and dropped.
     MESSAGE_BUFFER = 4096
 
     def entry_type(self, steam_id, message_id):
@@ -860,11 +831,9 @@ class AchievementWatcher:
 # -- picking a route safely -------------------------------------------------
 #
 # The flat SteamAPI_ISteamUserStats_* wrappers are compiled against one
-# interface version. Fetching a different one hands back a pointer with a
-# mismatched vtable, and calling through it segfaults rather than failing.
-# Which version a library expects is not discoverable from the outside, so each
-# candidate is tried in a child process: a crash costs one fork, and the
-# survivor is the answer.
+# interface version, and fetching a different one returns a pointer whose
+# vtable does not match - calling through it segfaults rather than failing. So
+# each candidate is tried in a child process; the survivor is the answer.
 
 
 def candidate_routes(library):
@@ -899,11 +868,7 @@ def _suppress_core_dumps():
 
 
 def _run_in_child(target, timeout=15.0):
-    """Run target(write_fd) in a forked child and report how it ended.
-
-    Returns (status, message) with status "ok" or "crashed" - the one place
-    the fork, the timeout and the exit-status handling live.
-    """
+    """Fork and run target(write_fd); returns ("ok"|"crashed", message)."""
     import select as _select
     import signal as _signal
 
@@ -949,10 +914,7 @@ def _run_in_child(target, timeout=15.0):
 
 
 def probe_route(app_id, library, route, timeout=15.0):
-    """Try one route in a child process.
-
-    Returns (status, detail) where status is "ok", "failed" or "crashed".
-    """
+    """Try one route in a child. (status, detail); status ok/failed/crashed."""
     def attempt(write_fd):
         try:
             stats = UserStats(app_id, library, route=route)

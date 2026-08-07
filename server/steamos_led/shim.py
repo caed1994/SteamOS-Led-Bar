@@ -134,8 +134,6 @@ def parse(data):
 
 
 class ShimSource:
-    """Polls the shim device and yields snapshots as they change."""
-
     def __init__(self, device=DEFAULT_DEVICE):
         self.device = device
         self.fd = -1

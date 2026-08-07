@@ -206,13 +206,11 @@ class Runner:
                 continue
 
             now = time.monotonic()
-            # A flash covers the whole bar, so nothing underneath is worth
-            # rendering while one runs.
+            # A flash covers the whole bar; nothing underneath is worth drawing.
             payload = self.overlay.frame(now)
             if payload is None:
                 payload = self.renderer.render(snapshot, now - started)
-            # Static scenes still send at IDLE_FPS: the firmware blanks the
-            # strip when the link goes quiet, so this is the heartbeat.
+            # Idle heartbeat too: the firmware blanks the strip if we go quiet.
             self.link.send_frame(payload, self.config["LED_COUNT"])
 
 
@@ -334,8 +332,7 @@ def run_probe_messages(config, seconds=None):
     """
     _interrupt_on_sigterm()
 
-    # An explicitly configured library may sit outside the search, so survey it
-    # alongside whatever is found.
+    # A configured library may sit outside the search, so survey it too.
     candidates = list(steamworks.find_libraries())
     explicit = config["STEAM_LIBRARY"]
     if explicit and explicit != "auto" and explicit not in candidates:
@@ -446,9 +443,8 @@ def run_probe_messages(config, seconds=None):
     return 0
 
 
-# How often to scan every process while still *searching* for a game. The scan
-# reads the environment block of every process the user owns, so once a second
-# for a whole login is a lot of work for "still nothing".
+# How often to scan every process while still searching for a game: the scan is
+# expensive and there is no hurry to notice one.
 PROCESS_SCAN_EVERY = 5          # ticks
 
 
@@ -456,9 +452,8 @@ def _should_scan_processes(tick, attached):
     """Whether this tick should pay for the full process scan.
 
     Always yes while attached: on some machines registry.vdf never names the
-    running app, so a skipped scan would read as "no game" and detach a running
-    one - and every reattach opens a fresh Steamworks session that Steam then
-    waits for before it can finish stopping the game.
+    running app, so a skipped scan would read as "no game" and detach a game
+    that is still running.
     """
     return attached or tick % PROCESS_SCAN_EVERY == 0
 
@@ -512,12 +507,10 @@ def run_watch_achievements(config, interval=1.0):
                         listener.close()
                         listener = None
                     stats.close()
-                    # And then go away entirely. SteamAPI_Init registers this
-                    # process as an instance of the game, and Steam will not
-                    # report it stopped while that registration exists -
-                    # measured on hardware, SteamAPI_Shutdown does not release
-                    # it, only exiting does. So one process per game session,
-                    # and systemd starts the next (Restart=always).
+                    # And then go away entirely: this process is registered
+                    # with Steam as an instance of the game, and only exiting
+                    # clears that - SteamAPI_Shutdown does not. systemd starts
+                    # the next watcher (Restart=always).
                     LOG.info("game ended - exiting so Steam can finish "
                              "stopping it; systemd restarts the watcher")
                     return 0
@@ -528,8 +521,7 @@ def run_watch_achievements(config, interval=1.0):
                         library = steamworks.find_library(
                             config["STEAM_LIBRARY"])
                         if not route or route == "auto":
-                            # Probe in child processes: the wrong interface
-                            # version segfaults instead of raising.
+                            # Probes in child processes; a bad route segfaults.
                             route, _count = steamworks.select_route(
                                 app_id, library)
                             if route is None:
@@ -537,10 +529,8 @@ def run_watch_achievements(config, interval=1.0):
                                     "no working route for app %d - run "
                                     "--steam-check for details" % app_id)
                             LOG.info("using route %s", route)
-                        # Friend messages need manual dispatch, which the
-                        # session must be opened with. Ask for it only when the
-                        # library supports it: an older copy would refuse to
-                        # open at all, and achievements matter more.
+                        # Friend messages need a manual-dispatch session, and
+                        # only a new enough library can open one.
                         manual = (config["NOTIFY_MESSAGES"]
                                   and steamworks.usable_for_messages(
                                       steamworks.message_support(library)))
@@ -556,8 +546,7 @@ def run_watch_achievements(config, interval=1.0):
                             else None
                         LOG.info("attached to app %d", app_id)
                     except steamworks.SteamworksError as exc:
-                        # current_app is already this app, so the loop will
-                        # not try again until a different game starts.
+                        # current_app is set, so no retry until another game.
                         LOG.warning("cannot attach to app %s: %s", app_id, exc)
                         stats, watcher = None, None
                 else:
@@ -571,8 +560,7 @@ def run_watch_achievements(config, interval=1.0):
                         _flash(fifo, "achievement")
                     if listener is not None:
                         # One flash however many arrived: a retrigger restarts
-                        # the animation, so a burst would hold the strip lit
-                        # far longer than one notification.
+                        # the animation, so a burst would hold the bar lit.
                         messages = listener.messages()
                         if messages:
                             LOG.info("%d friend message(s)", len(messages))

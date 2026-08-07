@@ -65,9 +65,9 @@ def bloom_levels(progress, led_count):
     brightness = 1.0
 
     if progress < BLOOM_EXPANDED:
-        radius = full * progress / BLOOM_EXPANDED    # growing out of the middle
+        radius = full * progress / BLOOM_EXPANDED
     elif progress < BLOOM_RETRACT:
-        radius = full                                # fully out, breathing
+        radius = full
         brightness = _breath(progress)
     else:
         radius = full * (1.0 - (progress - BLOOM_RETRACT) / (1.0 - BLOOM_RETRACT))

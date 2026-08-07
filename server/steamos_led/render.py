@@ -105,10 +105,9 @@ def _patrol(snapshot, elapsed, options):
     span = shim.LOGICAL_LEDS - 1
     period = _cycle(snapshot, PATROL_CYCLE, options.speed_scale)
     base = (elapsed / period) % 1.0
-    # patrol_num is NOT used as a scanner count: none of these fields are
-    # documented, and its neighbours look like live animation state, so it is
-    # most likely a single dot's position - which is also what the real bar
-    # shows. PATROL_DOTS decides instead.
+    # patrol_num is NOT a scanner count: these fields are undocumented and its
+    # neighbours look like live animation state, so it is most likely one dot's
+    # position - which is what the real bar shows. PATROL_DOTS decides instead.
     scanners = max(1, min(int(options.patrol_dots), 8))
     red, green, blue = snapshot.base_color()
 
@@ -202,8 +201,7 @@ class Renderer:
         elif count == 1:
             frame = [logical[0]]
         else:
-            # Interpolate, so a 60 LED strip shows a smooth gradient rather
-            # than 17 hard steps.
+            # Interpolate: a 60 LED strip gets a gradient, not 17 hard steps.
             frame = []
             for index in range(count):
                 position = index * (source - 1) / float(count - 1)

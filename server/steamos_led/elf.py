@@ -31,7 +31,6 @@ def elf_class(path):
 
 
 def class_name(value):
-    """How to name an ELF class in a message, including "not an ELF"."""
     if value is None:
         return "not an ELF file"
     return {ELFCLASS32: "32-bit", ELFCLASS64: "64-bit"}.get(

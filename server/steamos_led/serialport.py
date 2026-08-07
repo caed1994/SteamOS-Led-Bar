@@ -118,11 +118,7 @@ def list_ports():
 
 
 def find_port(preferred=None):
-    """Resolve the port to use.
-
-    ``preferred`` is a device path, a /dev/serial/by-id link, or ``auto``/None
-    to pick the first plausible ESP adapter.
-    """
+    """Resolve a device path, a by-id link or ``auto``/None to a port."""
     if preferred and preferred != "auto":
         if os.path.exists(preferred):
             return os.path.realpath(preferred)
