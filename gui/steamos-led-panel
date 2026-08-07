@@ -77,6 +77,7 @@ _IMAGES = []
 TAB_RADIUS = 9
 BOX_RADIUS = 10
 BUTTON_RADIUS = 9
+CHECKBOX_SIZE = 20          # clam's own indicator is barely a third of this
 TRACK_THICKNESS = 10        # the groove a slider runs in
 KNOB_DIAMETER = 20          # thick enough to grab, round enough to read as a pill
 
@@ -110,8 +111,13 @@ def round_the_corners(style, palette, shade):
     accent = palette["selection"]
 
     def tab(fill, background):
-        return _rounded(TAB_RADIUS * 2 + 4, 34, TAB_RADIUS, fill, background,
-                        border=shade["border"])
+        # Square at the bottom and with no border along it: that edge is where
+        # the tab meets the page, and a line there is precisely the stripe
+        # that makes a row of tabs look struck through.
+        return _photo(roundrect.rows(
+            TAB_RADIUS * 2 + 4, 34, (TAB_RADIUS, TAB_RADIUS, 0, 0),
+            fill, background, border=shade["border"], border_width=1,
+            open_bottom=True))
 
     def box(fill, background, radius=BOX_RADIUS):
         return _rounded(radius * 2 + 4, radius * 2 + 4, radius, fill,
@@ -173,6 +179,32 @@ def round_the_corners(style, palette, shade):
             ("Accent.Button", {"sticky": "nsew", "children": [
                 ("Button.label", {"side": "top", "sticky": ""})]})])
 
+    def checkboxes():
+        # clam's indicator is a few pixels of hairline - too small to hit and
+        # too small to read. A drawn one can be any size; the tick is drawn
+        # rather than taken from a font, which would depend on what happens to
+        # be installed.
+        size = CHECKBOX_SIZE
+
+        def indicator(fill, edge, tick=None):
+            picture = roundrect.rows(size, size, 5, fill, window,
+                                     border=edge, border_width=1)
+            if tick:
+                roundrect.draw_check(picture, tick)
+            return _photo(picture)
+
+        style.element_create(
+            "Rounded.Indicator", "image",
+            indicator(view, shade["border"]),
+            ("selected", indicator(accent, accent,
+                                   palette["selection_text"])),
+            ("active", indicator(shade["hover"], accent)),
+            sticky="", padding=2)
+        style.layout("TCheckbutton", [
+            ("Checkbutton.padding", {"sticky": "nsew", "children": [
+                ("Rounded.Indicator", {"side": "left", "sticky": ""}),
+                ("Checkbutton.label", {"side": "left", "sticky": "w"})]})])
+
     def sliders():
         # A pill-shaped groove and a round knob.
         radius = TRACK_THICKNESS / 2.0
@@ -197,6 +229,7 @@ def round_the_corners(style, palette, shade):
                 ("Pill.slider", {"side": "left", "sticky": ""})]})])
 
     attempt("the tabs", tabs)
+    attempt("the checkboxes", checkboxes)
     attempt("the page", page)
     attempt("the boxes", boxes)
     attempt("the buttons", buttons)
@@ -287,7 +320,21 @@ def apply_theme(root):
                     background=palette["button"],
                     foreground=palette["view_text"],
                     arrowcolor=palette["window_text"],
-                    bordercolor=shade["border"], padding=(6, 4))
+                    bordercolor=shade["border"], padding=(8, 6))
+    # A read-only combobox draws its text as a *selection*, so without these
+    # the label comes out in the selection colours - which is how it ended up
+    # pale grey on pale grey and all but unreadable.
+    style.map("TCombobox",
+              fieldbackground=[("readonly", palette["view"]),
+                               ("disabled", palette["window"])],
+              foreground=[("readonly", palette["view_text"]),
+                          ("disabled", shade["muted"])],
+              selectbackground=[("readonly", palette["view"]),
+                                ("focus", palette["view"])],
+              selectforeground=[("readonly", palette["view_text"]),
+                                ("focus", palette["view_text"])],
+              arrowcolor=[("readonly", palette["window_text"])],
+              bordercolor=[("focus", palette["selection"])])
     root.option_add("*TCombobox*Listbox.background", palette["view"])
     root.option_add("*TCombobox*Listbox.foreground", palette["view_text"])
     root.option_add("*TCombobox*Listbox.selectBackground",

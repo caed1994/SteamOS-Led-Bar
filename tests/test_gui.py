@@ -510,5 +510,134 @@ class RoundedRectangleTest(unittest.TestCase):
         self.assertEqual(dark[10][10], "#31363b")
 
 
+
+
+class TabAndCheckboxShapeTest(unittest.TestCase):
+    """Shapes for the two parts that looked wrong on a real screen."""
+
+    FILL, BACK, EDGE = "#ffffff", "#000000", "#808080"
+
+    def test_a_tab_can_be_round_on_top_and_square_below(self):
+        picture = roundrect.rows(24, 14, (6, 6, 0, 0), self.FILL, self.BACK)
+        self.assertEqual(picture[0][0], self.BACK, "top left is cut")
+        self.assertEqual(picture[0][23], self.BACK, "top right is cut")
+        self.assertEqual(picture[13][0], self.FILL, "bottom left stays square")
+        self.assertEqual(picture[13][23], self.FILL, "and bottom right")
+
+    def test_an_open_bottom_has_no_line_across_it(self):
+        # This was the visible bug: a border along the bottom of every tab
+        # reads as one stripe struck through the whole row - and nine-slice
+        # scaling repeats those rows, so it is drawn again and again.
+        picture = roundrect.rows(24, 14, (6, 6, 0, 0), self.FILL, self.BACK,
+                                 border=self.EDGE, border_width=1,
+                                 open_bottom=True)
+        self.assertEqual(set(picture[-1]), {self.FILL},
+                         "the bottom row must be plain fill")
+        self.assertIn(self.EDGE, picture[7], "the sides keep their border")
+
+    def test_without_that_the_bottom_line_is_there(self):
+        # The opposite case, so the flag is shown to be doing the work.
+        picture = roundrect.rows(24, 14, (6, 6, 0, 0), self.FILL, self.BACK,
+                                 border=self.EDGE, border_width=1)
+        self.assertIn(self.EDGE, picture[-1])
+
+    def test_four_radii_have_to_be_four(self):
+        with self.assertRaises(ValueError):
+            roundrect.corner_radii((4, 4, 4))
+
+    def test_one_radius_becomes_four_equal_corners(self):
+        self.assertEqual(roundrect.corner_radii(5), (5.0, 5.0, 5.0, 5.0))
+
+    def test_a_tick_lands_inside_its_box(self):
+        picture = roundrect.rows(20, 20, 5, self.BACK, self.BACK)
+        roundrect.draw_check(picture, self.FILL)
+        ink = [(x, y) for y, row in enumerate(picture)
+               for x, pixel in enumerate(row) if pixel != self.BACK]
+        self.assertTrue(ink, "nothing was drawn")
+        for x, y in ink:
+            self.assertTrue(2 <= x <= 17 and 2 <= y <= 17,
+                            "the tick ran outside the box at (%d,%d)" % (x, y))
+
+    def test_a_tick_looks_like_a_tick(self):
+        # Two strokes meeting low and left: the lowest ink should sit left of
+        # centre, and the highest to the right of it.
+        picture = roundrect.rows(20, 20, 5, self.BACK, self.BACK)
+        roundrect.draw_check(picture, self.FILL)
+        ink = [(x, y) for y, row in enumerate(picture)
+               for x, pixel in enumerate(row) if pixel != self.BACK]
+        lowest = max(ink, key=lambda point: point[1])
+        highest = min(ink, key=lambda point: point[1])
+        self.assertLess(lowest[0], 12, "the corner of the tick is on the left")
+        self.assertGreater(highest[0], lowest[0], "and it rises to the right")
+
+    def test_the_checkbox_is_big_enough_to_hit(self):
+        # clam's own indicator is a handful of pixels; that was the complaint.
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(path) as handle:
+            tree = ast.parse(handle.read())
+        size = next(node.value.value for node in tree.body
+                    if isinstance(node, ast.Assign)
+                    and getattr(node.targets[0], "id", "") == "CHECKBOX_SIZE")
+        self.assertGreaterEqual(size, 16)
+
+    def test_segment_coverage_is_thickest_on_the_line(self):
+        on_line = roundrect.segment_coverage(5, 5, (0, 5), (10, 5), 3)
+        beside = roundrect.segment_coverage(5, 9, (0, 5), (10, 5), 3)
+        self.assertEqual(on_line, 1.0)
+        self.assertEqual(beside, 0.0)
+
+
+
+
+class ComboboxReadabilityTest(unittest.TestCase):
+    """A read-only combobox draws its text as a selection.
+
+    Without saying what the selection colours are, the label comes out in the
+    highlight colours over the field colour - which is how "stretch" and
+    "bloom" ended up pale grey on pale grey and all but unreadable on a real
+    screen.
+    """
+
+    def setUp(self):
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(path) as handle:
+            self.source = handle.read()
+        self.tree = ast.parse(self.source)
+
+    def _map_states(self, style_name):
+        """Which widget states style.map() names for this style."""
+        states = set()
+        for node in ast.walk(self.tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "map"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value == style_name):
+                continue
+            for keyword in node.keywords:
+                for inner in ast.walk(keyword.value):
+                    if isinstance(inner, ast.Constant) and \
+                            isinstance(inner.value, str):
+                        states.add((keyword.arg, inner.value))
+        return states
+
+    def test_the_readonly_state_is_given_its_own_colours(self):
+        states = self._map_states("TCombobox")
+        self.assertIn(("foreground", "readonly"), states)
+        self.assertIn(("fieldbackground", "readonly"), states)
+
+    def test_the_selection_colours_are_pinned_too(self):
+        # This is the actual fix: without it the text keeps the highlight
+        # colours even though nothing is really selected.
+        states = self._map_states("TCombobox")
+        self.assertIn(("selectforeground", "readonly"), states)
+        self.assertIn(("selectbackground", "readonly"), states)
+
+    def test_a_disabled_one_is_muted_rather_than_invisible(self):
+        states = self._map_states("TCombobox")
+        self.assertIn(("foreground", "disabled"), states)
+
+
 if __name__ == "__main__":
     unittest.main()
