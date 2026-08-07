@@ -14,7 +14,6 @@ import struct
 DEFAULT_DEVICE = "/dev/valve-leds-shim"
 
 MAGIC = 0x564C4544  # "VLED"
-MAGIC_SWAPPED = 0x44454C56
 LOGICAL_LEDS = 17
 HEADER_SIZE = 32
 PIXEL_SIZE = 4
@@ -118,7 +117,7 @@ def parse(data):
      delay, breath_offset, breath_level, patrol_num,
      color_shift) = _HEADER.unpack_from(data, 0)
 
-    if magic not in (MAGIC, MAGIC_SWAPPED):
+    if magic != MAGIC:
         raise SnapshotError("bad magic 0x%08x" % magic)
     if size and size > len(data):
         raise SnapshotError("snapshot claims %d bytes, got %d" % (size, len(data)))
