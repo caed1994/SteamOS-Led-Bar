@@ -406,7 +406,11 @@ install_control_panel() {
     local dir="$WATCHER_HOME/.local/share/applications"
     runuser -u "$WATCHER_USER" -- mkdir -p "$dir" || {
         PANEL_STATUS="could not write to $dir"; return 1; }
-    sed "s|@SOURCE_DIR@|$SOURCE_DIR|g" "$source" \
+    # An absolute path is a valid Icon= value, so the icon can live in the
+    # clone next to the panel instead of being copied into an icon theme.
+    local icon="$SOURCE_DIR/gui/steamos-led-panel.png"
+    [[ -f "$icon" ]] || icon="preferences-desktop-display"
+    sed -e "s|@SOURCE_DIR@|$SOURCE_DIR|g" -e "s|@ICON@|$icon|g" "$source" \
         > "$dir/steamos-led-panel.desktop"
     chown "$WATCHER_USER:$WATCHER_USER" "$dir/steamos-led-panel.desktop"
     chmod 0644 "$dir/steamos-led-panel.desktop"

@@ -7,7 +7,9 @@ ledpanel.py with no tkinter in sight.
 
 import ast
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -162,6 +164,42 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(command[0], "pkexec")
         self.assertIn("/repo/scripts/apply-config.sh", command)
         self.assertIn("/tmp/staged.conf", command)
+
+
+class DesktopEntryTest(unittest.TestCase):
+    """The menu entry is written by install.sh from a template."""
+
+    def _template(self):
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel.desktop")
+        with open(path) as handle:
+            return handle.read()
+
+    def test_every_placeholder_is_substituted_by_the_installer(self):
+        # One left behind is a menu entry that does not start, or has no icon.
+        path = os.path.join(HERE, "..", "install.sh")
+        with open(path) as handle:
+            installer = handle.read()
+        for line in self._template().splitlines():
+            for token in ("@SOURCE_DIR@", "@ICON@"):
+                if token in line and not line.startswith("#"):
+                    self.assertIn("s|%s|" % token, installer, token)
+
+    def test_the_icon_is_the_file_next_to_the_panel(self):
+        clone = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, clone, ignore_errors=True)
+        os.makedirs(os.path.join(clone, "gui"))
+        picture = os.path.join(clone, "gui", ledpanel.ICON_NAME)
+        open(picture, "wb").close()
+        self.assertEqual(ledpanel.panel_icon(clone), picture)
+
+    def test_a_missing_icon_falls_back_to_a_theme_name(self):
+        # A menu entry with no picture at all looks broken, and an Icon= line
+        # pointing at a file that is not there gets exactly that.
+        clone = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, clone, ignore_errors=True)
+        icon = ledpanel.panel_icon(clone)
+        self.assertEqual(icon, ledpanel.FALLBACK_ICON)
+        self.assertNotIn("/", icon, "a theme icon is a name, not a path")
 
 
 class SensorMenuTest(unittest.TestCase):

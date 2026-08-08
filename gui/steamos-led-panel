@@ -456,6 +456,7 @@ class Panel:
         self.root = root
         root.title("SteamOS LED bar")
         root.minsize(720, 640)
+        self._set_window_icon()
 
         self.palette = apply_theme(root)
         self.shade = self.palette["_shade"]
@@ -489,6 +490,23 @@ class Panel:
         self.refresh_status()
 
     # -- helpers ----------------------------------------------------------
+
+    def _set_window_icon(self):
+        """The same icon the menu entry uses, in the titlebar and the task bar.
+
+        Optional in every direction: the file may not be there, and Tk only
+        reads PNG from 8.6 on. A window with the default icon is a cosmetic
+        loss, so nothing here is worth failing over.
+        """
+        icon = ledpanel.panel_icon(SOURCE_DIR)
+        if not os.path.isabs(icon):
+            return                              # a theme name, not a file
+        try:
+            picture = tk.PhotoImage(file=icon)
+        except tk.TclError:
+            return
+        _IMAGES.append(picture)                 # Tk keeps no reference itself
+        self.root.iconphoto(True, picture)
 
     def _load_config(self):
         try:

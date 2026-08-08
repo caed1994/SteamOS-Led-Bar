@@ -23,6 +23,18 @@ SERVICE = "steamos-led-serial.service"
 WATCHER = "steamos-led-achievements.service"
 
 
+# The panel's own icon, next to the panel. A theme icon name is the fallback
+# because a missing icon file leaves a menu entry with no picture at all.
+ICON_NAME = "steamos-led-panel.png"
+FALLBACK_ICON = "preferences-desktop-display"
+
+
+def panel_icon(source_dir):
+    """The icon to use: the file shipped with the panel, or a theme name."""
+    path = os.path.join(source_dir, "gui", ICON_NAME)
+    return path if os.path.exists(path) else FALLBACK_ICON
+
+
 def module_path(release=None):
     """Where the built kernel module lives, for the running kernel."""
     return "/usr/lib/modules/%s/updates/%s.ko" % (

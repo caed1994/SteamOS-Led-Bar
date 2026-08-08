@@ -521,6 +521,13 @@ font, and whether the scheme is light or dark. Switch Plasma to Breeze Dark
 and reopen the panel and it comes back dark. Without KDE it falls back to
 Breeze light.
 
+**Its icon is a file you can replace.** The menu entry and the window both use
+`gui/steamos-led-panel.png` if it is there, and fall back to a theme icon if it
+is not. So to change it, drop a PNG in with that name (256x256 is plenty) and
+run `sudo ./install.sh --yes` to rewrite the menu entry — the window picks it up
+on the next start by itself. If you also added the panel to Steam as a non-Steam
+game, the same file works as the artwork there.
+
 > The panel needs Python's `tkinter`. It is present on SteamOS, but a system
 > update can remove it (`sudo pacman -S tk` brings it back). Nothing here is
 > only available in the panel - every button runs a command you can also type,
