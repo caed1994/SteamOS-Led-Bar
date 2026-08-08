@@ -486,11 +486,14 @@ Everything after the first install has a window, so you do not have to edit
 ```
 
 `install.sh` also puts it in the application menu as **SteamOS LED bar**. It
-has three tabs:
+has four tabs:
 
-- **Settings** — LED count, brightness, gamma, speed, notification style and
-  the rest, as sliders and switches. Apply writes the file (keeping every
-  comment in it) and restarts the service.
+- **Settings** — LED count, brightness, patrol dots, the temperature gauge and
+  the notification options, as sliders and switches. Apply writes the file
+  (keeping every comment in it) and restarts the service.
+- **Advanced settings** — the ones you set once, if ever: mapping, gamma,
+  effect speed, the two frame rates and the log level. Apply on either tab
+  writes both.
 - **Test** — flash gold, purple or any colour you pick; run the strip
   self-test; run the Steam check, the message probe and the sensor list behind
   the [temperature gauge](#temperature-gauge).

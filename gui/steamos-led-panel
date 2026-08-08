@@ -50,13 +50,9 @@ from steamos_led import config as config_module             # noqa: E402
 # shipped.
 SETTINGS = [
     ("LED_COUNT", "LEDs on the strip", "int", 1, 1024),
-    ("MAPPING", "Mapping of the 17 logical LEDs", "choice",
-     config_module.MAPPINGS, None),
     ("REVERSE", "Flip the strip direction", "bool", None, None),
     ("MAX_BRIGHTNESS", "Maximum brightness", "int", 0, 255),
     ("MIN_BRIGHTNESS", "Minimum brightness", "int", 0, 255),
-    ("GAMMA", "Gamma", "float", 0.1, 4.0),
-    ("SPEED", "Effect speed", "float", 0.1, 4.0),
     ("PATROL_DOTS", "Patrol dots", "int", 1, 8),
     ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow", "bool",
      None, None),
@@ -76,11 +72,28 @@ SETTINGS = [
     ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None),
     ("NOTIFY_DURATION", "Flash duration (seconds)", "float", 0.1, 60.0),
     ("NOTIFY_STYLE", "Flash shape", "choice", config_module.NOTIFY_STYLES, None),
+]
+
+# Set once and then left alone: the defaults are right for a 17 LED bar on the
+# shipped firmware, and every one of these is a knob you turn because something
+# specific is wrong, not because you are decorating. Same table format, so the
+# two tabs are built by the same code and validated the same way.
+ADVANCED = [
+    ("MAPPING", "Mapping of the 17 logical LEDs", "choice",
+     config_module.MAPPINGS, None),
+    ("GAMMA", "Gamma", "float", 0.1, 4.0),
+    ("SPEED", "Effect speed", "float", 0.1, 4.0),
     ("FPS", "Frames per second", "int", 1, 240),
     ("IDLE_FPS", "Frames per second when idle", "int", 1, 240),
     ("LOG_LEVEL", "Log level", "choice",
      ("debug", "info", "warning", "error"), None),
 ]
+
+ADVANCED_NOTE = (
+    "These are set once, if ever. Mapping and gamma matter when the strip is "
+    "not a 17 LED bar; the frame rates are how often the ESP is sent a "
+    "picture, and the idle rate only has to beat the firmware's 5 second "
+    "blanking watchdog.")
 
 
 # PhotoImage objects are only alive while something references them; a widget
@@ -476,7 +489,10 @@ class Panel:
         self.output = self._build_output(root)
         self.runner = Runner(root, self._write)
 
-        notebook.add(self._build_settings(notebook), text="  Settings  ")
+        notebook.add(self._build_settings(notebook, SETTINGS),
+                     text="  Settings  ")
+        notebook.add(self._build_settings(notebook, ADVANCED, ADVANCED_NOTE),
+                     text="  Advanced settings  ")
         notebook.add(self._build_tests(notebook), text="  Test  ")
         notebook.add(self._build_status(notebook), text="  Status && repair  ")
 
@@ -547,13 +563,17 @@ class Panel:
 
     # -- settings ---------------------------------------------------------
 
-    def _build_settings(self, parent):
+    def _build_settings(self, parent, table, note=None):
         outer = ttk.Frame(parent)
+        if note:
+            ttk.Label(outer, text=note, wraplength=640, justify="left",
+                      style="Muted.TLabel").pack(anchor="w", padx=16,
+                                                 pady=(14, 0))
         grid = ttk.Frame(outer)
         grid.pack(fill="both", expand=True, padx=16, pady=16)
         grid.columnconfigure(1, weight=1)
 
-        for row, (key, label, kind, low, high) in enumerate(SETTINGS):
+        for row, (key, label, kind, low, high) in enumerate(table):
             ttk.Label(grid, text=label).grid(row=row, column=0, sticky="w",
                                              pady=5, padx=(0, 14))
             value = self.config.get(key, config_module.DEFAULTS[key])
@@ -582,6 +602,10 @@ class Panel:
                    command=self.apply_settings).pack(side="left")
         ttk.Button(buttons, text="Reload from file",
                    command=self.reload_settings).pack(side="left", padx=6)
+        # Both tabs edit one file, and Apply writes all of it. Saying so beats
+        # leaving someone to wonder whether the other tab came along.
+        ttk.Label(outer, text="Apply writes every setting, on both tabs.",
+                  style="Muted.TLabel").pack(anchor="w", padx=16, pady=(0, 12))
         return outer
 
     def _build_sensor_menu(self, grid, row, variable, current):

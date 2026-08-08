@@ -288,17 +288,54 @@ class SensorMenuTest(unittest.TestCase):
 class PanelSettingsTest(unittest.TestCase):
     """The settings list has to agree with the configuration it edits."""
 
-    def _settings(self):
-        # Read the table out of the panel rather than importing it: importing
-        # pulls in tkinter, which a build machine has no reason to have.
+    TABLES = ("SETTINGS", "ADVANCED")
+
+    def _tables(self):
+        """Both settings tables, as AST nodes.
+
+        Read out of the panel rather than imported: importing pulls in tkinter,
+        which a build machine has no reason to have.
+        """
         path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
         with open(path) as handle:
             tree = ast.parse(handle.read())
+        found = {}
         for node in tree.body:
-            if (isinstance(node, ast.Assign)
-                    and getattr(node.targets[0], "id", "") == "SETTINGS"):
-                return [entry.elts[0].value for entry in node.value.elts]
-        self.fail("SETTINGS not found in the panel")
+            name = (getattr(node.targets[0], "id", "")
+                    if isinstance(node, ast.Assign) else "")
+            if name in self.TABLES:
+                found[name] = node.value
+        for name in self.TABLES:
+            self.assertIn(name, found, "%s not found in the panel" % name)
+        return [found[name] for name in self.TABLES]
+
+    def _settings(self):
+        """Every key the panel offers, on whichever tab."""
+        return [entry.elts[0].value
+                for table in self._tables() for entry in table.elts]
+
+    def test_the_tabs_are_in_the_order_they_are_worked_through(self):
+        # Everyday settings, then the ones you set once, then testing, then
+        # repair - which is also the order of how often they are opened.
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(path) as handle:
+            tree = ast.parse(handle.read())
+        tabs = [keyword.value.value
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and getattr(node.func, "attr", "") == "add"
+                and getattr(getattr(node.func, "value", None), "id", "")
+                == "notebook"
+                for keyword in node.keywords if keyword.arg == "text"]
+        self.assertEqual([tab.strip() for tab in tabs],
+                         ["Settings", "Advanced settings", "Test",
+                          "Status && repair"])
+
+    def test_the_two_tabs_do_not_offer_the_same_setting_twice(self):
+        # They share one dict of widgets, so a key on both tabs would leave one
+        # of the two silently ignored when Apply collects them.
+        keys = self._settings()
+        self.assertEqual(len(set(keys)), len(keys))
 
     def test_every_setting_shown_is_a_real_option(self):
         for key in self._settings():
@@ -318,14 +355,7 @@ class PanelSettingsTest(unittest.TestCase):
         # The sliders repeat the bounds validate() enforces. If the two ever
         # disagree, the panel offers a value that kills the service on
         # restart - so check the ends of every numeric range against it.
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
-        with open(path) as handle:
-            tree = ast.parse(handle.read())
-        table = next(node.value for node in tree.body
-                     if isinstance(node, ast.Assign)
-                     and getattr(node.targets[0], "id", "") == "SETTINGS")
-
-        for entry in table.elts:
+        for entry in [entry for table in self._tables() for entry in table.elts]:
             key, _label, kind = (entry.elts[0].value, entry.elts[1].value,
                                  entry.elts[2].value)
             if kind not in ("int", "float"):
