@@ -263,10 +263,10 @@ ACHIEVEMENT_COLOURS = (
 
 MESSAGE_COLOURS = (
     ("Purple", "#8000ff"),
-    # The same green the "friend" trigger already flashes, rather than a
-    # second opinion about what green is.
-    ("Green", "#00c850"),
-    ("Blue", "#0080ff"),
+    # Both primaries at full: one LED channel on and nothing else, which is
+    # the most saturated a WS2812 can be.
+    ("Green", "#00ff00"),
+    ("Blue", "#0000ff"),
 )
 
 

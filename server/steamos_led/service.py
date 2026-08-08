@@ -550,6 +550,12 @@ def run_probe_messages(config, seconds=None):
 # expensive and there is no hurry to notice one.
 PROCESS_SCAN_EVERY = 5          # ticks
 
+# Told to watch for nothing at all. The watcher normally exits 0 after one
+# game and is restarted, so "nothing to do" needs an exit systemd can tell
+# apart - otherwise the unit respawns on its RestartSec forever. The user unit
+# names this code in RestartPreventExitStatus.
+NOTHING_TO_WATCH_EXIT = 3
+
 
 def _should_scan_processes(tick, attached):
     """Whether this tick should pay for the full process scan.
@@ -595,7 +601,7 @@ def run_watch_achievements(config, interval=1.0):
         # nothing - and that registration is what keeps Steam on "Stopping".
         print("Both NOTIFY_ACHIEVEMENTS and NOTIFY_MESSAGES are off, so there "
               "is nothing to watch for.")
-        return 0
+        return NOTHING_TO_WATCH_EXIT
 
     fifo = config["NOTIFY_FIFO"]
     watcher = None

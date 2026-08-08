@@ -20,6 +20,9 @@ Restart=always
 # Long enough for Steam to finish stopping the game: coming back too early
 # would find the app still present and block the shutdown all over again.
 RestartSec=20
+# Exit 3 is "NOTIFY_ACHIEVEMENTS and NOTIFY_MESSAGES are both off", which no
+# amount of restarting will change - see NOTHING_TO_WATCH_EXIT in service.py.
+RestartPreventExitStatus=3
 
 [Install]
 WantedBy=default.target

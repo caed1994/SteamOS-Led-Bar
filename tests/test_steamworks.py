@@ -885,7 +885,20 @@ class NothingToWatchForTest(unittest.TestCase):
         steamworks.running_app_id = refuse
         self.addCleanup(setattr, steamworks, "running_app_id", original)
         self.assertEqual(service.run_watch_achievements(settings, interval=0),
-                         0)
+                         service.NOTHING_TO_WATCH_EXIT)
+
+    def test_systemd_is_told_not_to_restart_that(self):
+        # The watcher exits 0 after every game and is restarted on purpose, so
+        # "nothing to do" has to be a different code - or the unit respawns
+        # every RestartSec forever, saying so in the journal each time.
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                            "server", "steamos-led-achievements.service")
+        with open(path) as handle:
+            unit = handle.read()
+        self.assertIn("RestartPreventExitStatus=%d"
+                      % service.NOTHING_TO_WATCH_EXIT, unit)
+        self.assertNotEqual(service.NOTHING_TO_WATCH_EXIT, 0,
+                            "0 is the ordinary end of a game session")
 
 
 
