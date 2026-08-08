@@ -228,3 +228,8 @@ def steam_check_command():
 
 def probe_messages_command():
     return [BINARY, "--probe-messages"]
+
+
+def temperature_command():
+    """List the machine's sensors and what the gauge makes of them."""
+    return [BINARY, "--temperature"]

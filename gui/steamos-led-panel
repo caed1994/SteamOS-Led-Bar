@@ -58,6 +58,16 @@ SETTINGS = [
     ("GAMMA", "Gamma", "float", 0.1, 4.0),
     ("SPEED", "Effect speed", "float", 0.1, 4.0),
     ("PATROL_DOTS", "Patrol dots", "int", 1, 8),
+    ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow", "bool",
+     None, None),
+    # The two marks are coupled - the bar has to fill over a span, not at a
+    # point - and the ranges are kept apart so no combination of the two
+    # sliders can produce a config the service refuses. Anything more exotic
+    # than "starts somewhere under 70, full somewhere over 75" belongs in the
+    # config file, which takes 0-150 for both.
+    ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "float",
+     20.0, 70.0),
+    ("TEMPERATURE_MAX", "Temperature: bar full (C)", "float", 75.0, 120.0),
     ("NOTIFY", "Flash on notifications", "bool", None, None),
     ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None),
     ("NOTIFY_DURATION", "Flash duration (seconds)", "float", 0.1, 60.0),
@@ -673,7 +683,11 @@ class Panel:
                                                              padx=(0, 6))
         ttk.Button(row, text="Message probe",
                    command=lambda: self.runner.start(
-                       ledpanel.probe_messages_command())).pack(side="left")
+                       ledpanel.probe_messages_command())).pack(side="left",
+                                                                padx=(0, 6))
+        ttk.Button(row, text="Temperature sensors",
+                   command=lambda: self.runner.start(
+                       ledpanel.temperature_command())).pack(side="left")
         ttk.Label(
             strip,
             text="Steam check and the message probe need a game running.",

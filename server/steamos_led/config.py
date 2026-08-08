@@ -31,6 +31,10 @@ DEFAULTS = {
     "NOTIFY_FIFO": notify.DEFAULT_FIFO,
     "NOTIFY_STYLE": "bloom",
     "NOTIFY_MESSAGES": True,
+    "TEMPERATURE_GAUGE": False,
+    "TEMPERATURE_MIN": 40.0,
+    "TEMPERATURE_MAX": 85.0,
+    "TEMPERATURE_SENSOR": "auto",
     "STEAM_LIBRARY": "auto",
     "STEAM_ROUTE": "auto",
     "FPS": 60,
@@ -152,6 +156,13 @@ MAPPINGS = ("stretch", "repeat", "crop")
 # Taken from the module that implements them, so the validator cannot drift.
 NOTIFY_STYLES = notify.STYLES
 
+# Where the temperature gauge's two marks may sit. The range is deliberately
+# wide - people watch different sensors - but not unbounded: a mark outside it
+# means a unit mix-up (millidegrees, or Fahrenheit) rather than an intention.
+TEMPERATURE_FLOOR = 0.0
+TEMPERATURE_CEILING = 150.0
+TEMPERATURE_SPAN = 5.0
+
 
 def validate(config):
     if not 1 <= config["LED_COUNT"] <= 1024:
@@ -184,4 +195,13 @@ def validate(config):
     if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
         raise ConfigError("NOTIFY_STYLE must be one of: %s"
                           % ", ".join(NOTIFY_STYLES))
+    for key in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
+        if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
+            raise ConfigError("%s must be between %g and %g degrees"
+                              % (key, TEMPERATURE_FLOOR, TEMPERATURE_CEILING))
+    # Equal ends would be a division by zero in the gauge, and a bar that
+    # jumps from empty to full with nothing in between.
+    if config["TEMPERATURE_MAX"] - config["TEMPERATURE_MIN"] < TEMPERATURE_SPAN:
+        raise ConfigError("TEMPERATURE_MAX must be at least %g degrees above "
+                          "TEMPERATURE_MIN" % TEMPERATURE_SPAN)
     return config

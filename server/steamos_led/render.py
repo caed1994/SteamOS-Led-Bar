@@ -143,6 +143,42 @@ def _demo(snapshot, elapsed, options):
     return [(r * level, g * level, b * level) for r, g, b in frame]
 
 
+# The gauge's colour runs from green to red the way a hue circle does, which
+# passes through yellow and orange - the sequence everybody already reads as
+# "getting worse". Green is a third of the way round it.
+GREEN_HUE = 1.0 / 3.0
+
+
+def _temperature(snapshot, elapsed, options):
+    """A gauge: fills as the machine warms, greening to red as it fills.
+
+    Below the cold mark nothing is lit, which is what "starts filling at 40"
+    means - and a bar that is dark when the machine is cool is also the least
+    distracting thing it can do.
+    """
+    celsius = options.temperature.celsius()
+    if celsius is None:
+        # No sensor. Falling back to the rainbow beats a dark strip, which
+        # would look like the service had died; the log says what happened.
+        return _rainbow(snapshot, elapsed, options)
+
+    low, high = options.temperature_range
+    fraction = 0.0 if high <= low else (celsius - low) / (high - low)
+    fraction = max(0.0, min(fraction, 1.0))
+
+    red, green, blue = hsv_to_rgb(GREEN_HUE * (1.0 - fraction), 1.0, 1.0)
+
+    # The lit length is fractional, so the leading LED fades in rather than
+    # the whole bar stepping a notch at a time - at 17 LEDs a whole step is
+    # nearly three degrees.
+    lit = fraction * shim.LOGICAL_LEDS
+    frame = []
+    for index in range(shim.LOGICAL_LEDS):
+        level = max(0.0, min(lit - index, 1.0))
+        frame.append((red * level, green * level, blue * level))
+    return frame
+
+
 _EFFECTS = {
     shim.EFFECT_MANUAL: lambda snap, t, options: _static(snap),
     shim.EFFECT_NORMAL: lambda snap, t, options: _static(snap),
@@ -159,7 +195,8 @@ class Renderer:
 
     def __init__(self, led_count, mapping=MAPPING_STRETCH, reverse=False,
                  max_brightness=255, min_brightness=0, gamma=1.0,
-                 speed_scale=1.0, patrol_dots=1):
+                 speed_scale=1.0, patrol_dots=1, temperature=None,
+                 temperature_range=(40.0, 85.0)):
         if led_count < 1:
             raise ValueError("led_count must be >= 1")
         if mapping not in MAPPINGS:
@@ -171,6 +208,9 @@ class Renderer:
         self.min_brightness = max(0, min(int(min_brightness), 255))
         self.speed_scale = speed_scale
         self.patrol_dots = max(1, min(int(patrol_dots), 8))
+        # Something with .celsius(), or None to leave the rainbow alone.
+        self.temperature = temperature
+        self.temperature_range = temperature_range
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}
 
@@ -202,6 +242,13 @@ class Renderer:
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
         effect = _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL])
+        # The rainbow slot doubles as the temperature gauge when that is
+        # switched on. Steam's own menu cannot be extended - the entries are
+        # built into the client - so showing something else is only possible
+        # by taking over an entry it already offers, and the rainbow is the
+        # one people are happy to give up.
+        if self.temperature is not None and snapshot.effect == shim.EFFECT_RAINBOW:
+            effect = _temperature
         return effect(snapshot, elapsed, self)
 
     def _map_to_strip(self, logical):

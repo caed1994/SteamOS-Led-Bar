@@ -367,7 +367,11 @@ class TestConfig(unittest.TestCase):
 
     def test_invalid_values_rejected(self):
         for override in ({"LED_COUNT": 0}, {"FPS": 999}, {"MAPPING": "spiral"},
-                         {"GAMMA": 0}, {"MAX_BRIGHTNESS": 300}):
+                         {"GAMMA": 0}, {"MAX_BRIGHTNESS": 300},
+                         # A gauge needs a span to fill over, and a mark
+                         # outside the plausible range means a unit mix-up.
+                         {"TEMPERATURE_MAX": 30}, {"TEMPERATURE_MIN": 200},
+                         {"TEMPERATURE_MIN": 84, "TEMPERATURE_MAX": 85}):
             with self.assertRaises(config.ConfigError):
                 config.load(path=None, overrides=override)
 

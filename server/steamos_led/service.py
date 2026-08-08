@@ -12,7 +12,7 @@ import sys
 import time
 
 from . import config as config_module
-from . import elf, notify, render, serialport, shim, steamworks
+from . import elf, notify, render, serialport, shim, steamworks, temperature
 from .link import EspLink
 
 LOG = logging.getLogger("steamos-led")
@@ -25,6 +25,13 @@ class _Stopped(Exception):
     """Raised internally when a signal asks us to shut down."""
 
 
+def build_temperature_source(config):
+    """A sensor to read, or None when the gauge is switched off."""
+    if not config["TEMPERATURE_GAUGE"]:
+        return None
+    return temperature.TemperatureSource(path=config["TEMPERATURE_SENSOR"])
+
+
 def build_renderer(config):
     return render.Renderer(
         led_count=config["LED_COUNT"],
@@ -35,6 +42,9 @@ def build_renderer(config):
         gamma=config["GAMMA"],
         speed_scale=config["SPEED"],
         patrol_dots=config["PATROL_DOTS"],
+        temperature=build_temperature_source(config),
+        temperature_range=(config["TEMPERATURE_MIN"],
+                           config["TEMPERATURE_MAX"]),
     )
 
 
@@ -262,6 +272,57 @@ def run_check_config(config):
     """
     for key in sorted(config):
         print("%-18s %s" % (key, config[key]))
+    return 0
+
+
+def run_temperature(config):
+    """List the machine's temperature sensors and show what the gauge does.
+
+    Which sensor is the right one is a per-machine question - a laptop reports
+    a dozen and most of them measure something nobody means by "how hot is it".
+    So every one is listed with its current reading, and the chosen one is
+    marked, which is what a TEMPERATURE_SENSOR line needs to be written by hand.
+    """
+    sensors = temperature.find_sensors()
+    if not sensors:
+        print("This machine reports no temperature sensors at all under %s."
+              % temperature.HWMON_ROOT)
+        print("The gauge cannot work here; the rainbow is shown instead.")
+        return 1
+
+    chosen = temperature.pick_sensor(sensors)
+    print("Temperature sensors on this machine:")
+    for sensor in sorted(sensors, key=lambda entry: entry["rank"]):
+        celsius = temperature.read_celsius(sensor["path"])
+        print("  [%s] %-12s %-12s %6s  %s"
+              % ("use " if sensor is chosen else "    ",
+                 sensor["chip"], sensor["label"] or "-",
+                 "%.1f C" % celsius if celsius is not None else "-",
+                 sensor["path"]))
+
+    print()
+    source = build_temperature_source(config)
+    if source is None:
+        print("The gauge is off (TEMPERATURE_GAUGE=0), so the rainbow effect")
+        print("is shown as usual. Set TEMPERATURE_GAUGE=1 to swap it for this.")
+        return 0
+
+    celsius = source.celsius()
+    print("Reading %s: %s"
+          % (source.path,
+             "%.1f C" % celsius if celsius is not None else "nothing"))
+    low, high = config["TEMPERATURE_MIN"], config["TEMPERATURE_MAX"]
+    print("Gauge: empty at or below %g C, full at %g C." % (low, high))
+    if celsius is not None:
+        renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                                   temperature=source,
+                                   temperature_range=(low, high))
+        frame = renderer.render_logical(
+            shim.make_snapshot(shim.EFFECT_RAINBOW), 0.0)
+        lit = sum(1 for pixel in frame if max(pixel) > 0.5)
+        print("Right now: %d of %d LEDs lit, colour #%02x%02x%02x"
+              % ((lit, shim.LOGICAL_LEDS)
+                 + tuple(int(value) for value in max(frame, key=max))))
     return 0
 
 
@@ -787,6 +848,9 @@ def build_parser():
                        dest="check_config",
                        help="load and validate the configuration and exit; "
                             "prints the effective settings")
+    modes.add_argument("--temperature", action="store_true",
+                       help="list the machine's temperature sensors and show "
+                            "what the gauge would display right now")
     modes.add_argument("--steam-check", action="store_true", dest="steam_check",
                        help="report whether realtime achievement detection can "
                             "work on this machine")
@@ -853,6 +917,8 @@ def main(argv=None):
             return run_notify(config, args.notify)
         if args.check_config:
             return run_check_config(config)
+        if args.temperature:
+            return run_temperature(config)
         if args.steam_check:
             return run_steam_check(config)
         if args.probe_messages is not None:

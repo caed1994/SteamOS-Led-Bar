@@ -17,13 +17,14 @@ different transport — no Wi-Fi, no IP configuration, no access point.
 3. [Changing settings](#changing-settings)
 4. [All options](#all-options)
 5. [Effects](#effects)
-6. [Notifications](#notifications)
-7. [Testing and diagnostics](#testing-and-diagnostics)
-8. [When something does not work](#when-something-does-not-work)
-9. [Updating](#updating)
-10. [Uninstalling](#uninstalling)
-11. [How it works](#how-it-works)
-12. [Development](#development)
+6. [Temperature gauge](#temperature-gauge)
+7. [Notifications](#notifications)
+8. [Testing and diagnostics](#testing-and-diagnostics)
+9. [When something does not work](#when-something-does-not-work)
+10. [Updating](#updating)
+11. [Uninstalling](#uninstalling)
+12. [How it works](#how-it-works)
+13. [Development](#development)
 
 ## What you need
 
@@ -154,6 +155,7 @@ sudo systemctl restart steamos-led-serial
 | **Too bright**, or the strip runs off USB power | `MAX_BRIGHTNESS=80` | `sudo sed -i 's/^MAX_BRIGHTNESS=.*/MAX_BRIGHTNESS=80/' /etc/steamos-led-serial.conf` |
 | Effects run **too fast** | `SPEED=0.5` | `sudo sed -i 's/^SPEED=.*/SPEED=0.5/' /etc/steamos-led-serial.conf` |
 | Patrol with **three dots** instead of one | `PATROL_DOTS=3` | `sudo sed -i 's/^PATROL_DOTS=.*/PATROL_DOTS=3/' /etc/steamos-led-serial.conf` |
+| The bar shows the **temperature** instead of the rainbow | `TEMPERATURE_GAUGE=1` | `sudo sed -i 's/^TEMPERATURE_GAUGE=.*/TEMPERATURE_GAUGE=1/' /etc/steamos-led-serial.conf` |
 | Strip stays **dark** although an effect is on | `MIN_BRIGHTNESS=40` | `sudo sed -i 's/^MIN_BRIGHTNESS=.*/MIN_BRIGHTNESS=40/' /etc/steamos-led-serial.conf` |
 | Dimmed colours look **blotchy** | `GAMMA=2.2` | `sudo sed -i 's/^GAMMA=.*/GAMMA=2.2/' /etc/steamos-led-serial.conf` |
 | A **fixed port** instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` | `sudo sed -i 's#^SERIAL_PORT=.*#SERIAL_PORT=/dev/steamos-led-esp#' /etc/steamos-led-serial.conf` |
@@ -193,6 +195,9 @@ sudo systemctl start steamos-led-serial
 | `GAMMA` | `1.0` | `2.2` looks smoother when dimmed |
 | `SPEED` | `1.0` | animation speed (`0.5` = half as fast) |
 | `PATROL_DOTS` | `1` | number of dots in the patrol effect |
+| `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
+| `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `85.0` | degrees at which the gauge is empty / full |
+| `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
 | `BAUD` | `230400` | preferred baud rate; corrected on connect if needed |
 | `BAUD_AUTODETECT` | `1` | if there is no reply, also try the other firmware baud rates |
@@ -246,6 +251,66 @@ a default of **3**, stored and passed through untouched — so it is a *setting*
 not live animation state. "Number of scanners" is therefore plausible; the
 default of 3 simply did not look like what one expects from "patrol". To take
 the module at its word, set `PATROL_DOTS=3`.
+
+## Temperature gauge
+
+The bar can show how hot the machine is instead of running the rainbow: it
+fills up as the temperature rises, and its colour walks from green through
+yellow and orange to red as it fills.
+
+```
+ 35 C |·················|   below the lower mark: dark
+ 50 C |####·············|   green
+ 62 C |#########········|   yellow
+ 75 C |##############···|   orange
+ 85 C |#################|   red
+```
+
+Switch it on and then pick **Rainbow** in Steam's LED menu:
+
+```bash
+sudo sed -i 's/^TEMPERATURE_GAUGE=.*/TEMPERATURE_GAUGE=1/' /etc/steamos-led-serial.conf
+sudo systemctl restart steamos-led-serial
+```
+
+It replaces the rainbow rather than adding an entry because Steam's menu cannot
+be extended — those entries are built into the client, and nothing outside it
+can add one. Taking over an effect Steam already offers is the only way to show
+something new, and the rainbow is the one most people are happy to give up.
+Every other effect keeps working exactly as before, and switching the gauge off
+gives the rainbow back.
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `TEMPERATURE_GAUGE` | `0` | show the gauge instead of the rainbow |
+| `TEMPERATURE_MIN` | `40.0` | at or below this the bar is dark |
+| `TEMPERATURE_MAX` | `85.0` | at this the bar is full and red |
+| `TEMPERATURE_SENSOR` | `auto` | which sensor to read |
+
+`auto` picks the CPU or GPU package sensor — `k10temp`/`amdgpu` on a Steam
+Machine — ahead of the dozen other things a PC measures, such as the SSD, the
+wifi card or the battery. To see what your machine reports, what the automatic
+choice landed on, and what the bar makes of it right now:
+
+```bash
+/var/lib/steamos-led-serial/steamos-led-serial --temperature
+```
+
+```
+Temperature sensors on this machine:
+  [use ] k10temp      Tctl          63.5 C  /sys/class/hwmon/hwmon1/temp2_input
+  [    ] k10temp      Tccd1         49.0 C  /sys/class/hwmon/hwmon1/temp1_input
+  [    ] nvme         Composite     41.0 C  /sys/class/hwmon/hwmon0/temp1_input
+
+Reading /sys/class/hwmon/hwmon1/temp2_input: 63.5 C
+Gauge: empty at or below 40 C, full at 85 C.
+Right now: 9 of 17 LEDs lit, colour #fff300
+```
+
+To watch something else — the GPU while the CPU is what `auto` chose, say — put
+that path into `TEMPERATURE_SENSOR`. If a machine reports no temperature at
+all, the rainbow is shown as usual; a dark bar would just look like the service
+had died.
 
 ## Notifications
 
@@ -415,7 +480,8 @@ has three tabs:
   the rest, as sliders and switches. Apply writes the file (keeping every
   comment in it) and restarts the service.
 - **Test** — flash gold, purple or any colour you pick; run the strip
-  self-test; run the Steam check and the message probe.
+  self-test; run the Steam check, the message probe and the sensor list behind
+  the [temperature gauge](#temperature-gauge).
 - **Status & repair** — what is installed, what is running, and one button
   that puts it back.
 
@@ -464,6 +530,7 @@ The commands below live in `/var/lib/steamos-led-serial/`:
 | `steamos-led-serial --self-test` | test patterns — works without Steam and without the kernel module |
 | `steamos-led-serial --simulate rainbow` | show one effect continuously |
 | `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs |
+| `steamos-led-serial --temperature` | list the machine's temperature sensors and what the [gauge](#temperature-gauge) makes of them |
 | `steamos-led-serial -v` | run in the foreground with debug output |
 
 Afterwards, start it again:
