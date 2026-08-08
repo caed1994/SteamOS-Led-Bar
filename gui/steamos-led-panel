@@ -96,6 +96,10 @@ ADVANCED_NOTE = (
     "blanking watchdog.")
 
 
+# What the window calls itself to the desktop. Tk derives WM_CLASS from this,
+# and the .desktop file names the same string in StartupWMClass.
+WM_CLASS = "steamos-led-panel"
+
 # PhotoImage objects are only alive while something references them; a widget
 # element does not count, so an image that goes out of scope leaves the widget
 # blank. They are parked here for the life of the window.
@@ -858,7 +862,13 @@ class Panel:
 
 
 def main():
-    root = tk.Tk()
+    # Without a class of its own the window says WM_CLASS "Tk", which matches
+    # no menu entry - so the desktop falls back to naming it after the process
+    # that happens to be running it, and the task bar reads "python3". This
+    # has to be passed at creation; it cannot be set afterwards. It must stay
+    # equal to StartupWMClass in the .desktop file, which is how the desktop
+    # ties the window to the menu entry (and so to its icon and name).
+    root = tk.Tk(className=WM_CLASS)
     try:
         ttk.Style().theme_use("clam")
     except tk.TclError:                                     # pragma: no cover

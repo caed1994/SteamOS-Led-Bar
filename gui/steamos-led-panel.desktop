@@ -11,5 +11,9 @@ Path=@SOURCE_DIR@
 # if that file is not there.
 Icon=@ICON@
 Terminal=false
+# Ties the running window to this entry, so the task bar shows its name and
+# icon instead of naming it after the interpreter. Must match the className
+# the panel passes to tkinter.Tk().
+StartupWMClass=steamos-led-panel
 Categories=Settings;HardwareSettings;
 Keywords=LED;strip;Steam;

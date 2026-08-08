@@ -184,6 +184,30 @@ class DesktopEntryTest(unittest.TestCase):
                 if token in line and not line.startswith("#"):
                     self.assertIn("s|%s|" % token, installer, token)
 
+    def test_the_window_and_the_entry_agree_on_the_wm_class(self):
+        # This pair is what ties the running window to the menu entry. Get it
+        # wrong and the desktop names the window after the interpreter that
+        # happens to run it - "python3" in the task bar, with a stock icon.
+        panel = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(panel) as handle:
+            tree = ast.parse(handle.read())
+        declared = next(node.value.value for node in tree.body
+                        if isinstance(node, ast.Assign)
+                        and getattr(node.targets[0], "id", "") == "WM_CLASS")
+
+        entry = [line.partition("=")[2] for line in
+                 self._template().splitlines()
+                 if line.startswith("StartupWMClass=")]
+        self.assertEqual(entry, [declared])
+
+        # ... and it has to actually reach Tk, which cannot be told afterwards.
+        used = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                and getattr(node.func, "attr", "") == "Tk"]
+        self.assertTrue(used, "the panel does not create a Tk root")
+        for call in used:
+            names = [keyword.arg for keyword in call.keywords]
+            self.assertIn("className", names)
+
     def test_the_icon_is_the_file_next_to_the_panel(self):
         clone = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, clone, ignore_errors=True)
