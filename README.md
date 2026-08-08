@@ -311,10 +311,10 @@ Right now: 9 of 17 LEDs lit, colour #fff300
 ```
 
 To watch something else — the GPU while the CPU is what `auto` chose, say — put
-that path into `TEMPERATURE_SENSOR`, or pick it from the drop-down in the
-control panel, which lists the same sensors with their current readings. If a
-machine reports no temperature at all, the rainbow is shown as usual; a dark
-bar would just look like the service had died.
+that path into `TEMPERATURE_SENSOR`, or pick it from the control panel's
+drop-down, which lists the same sensors by name. If a machine reports no
+temperature at all, the rainbow is shown as usual; a dark bar would just look
+like the service had died.
 
 **Reading rate.** The sensor is read once a second and the readings are
 averaged over about six seconds. Both matter: a CPU sensor moves a degree or

@@ -231,14 +231,13 @@ class SensorMenuTest(unittest.TestCase):
     """The sensor setting is a path into /sys, which is no way to ask someone
     a question - so the menu is built out of what the machine reports."""
 
-    def _sensor(self, chip, label, celsius, path=None, rank=(0, 0)):
+    def _sensor(self, chip, label, path=None, rank=(0, 0)):
         return {"chip": chip, "label": label, "rank": rank,
-                "celsius": celsius,
                 "path": path or "/sys/class/hwmon/hwmon0/temp1_input"}
 
     def test_automatic_comes_first_and_says_what_it_picked(self):
         # Otherwise "Automatic" is a promise with no way to check it.
-        chosen = self._sensor("k10temp", "Tctl", 63.5)
+        chosen = self._sensor("k10temp", "Tctl")
         label, value = ledpanel.sensor_choices([chosen], chosen)[0]
         self.assertEqual(value, "auto")
         self.assertIn("k10temp", label)
@@ -249,32 +248,30 @@ class SensorMenuTest(unittest.TestCase):
                          [("Automatic", "auto")])
 
     def test_every_sensor_is_offered_by_its_path(self):
-        sensors = [self._sensor("k10temp", "Tctl", 63.5, "/sys/a", (0, 0)),
-                   self._sensor("nvme", "Composite", 41.0, "/sys/b", (5, 4))]
+        sensors = [self._sensor("k10temp", "Tctl", "/sys/a", (0, 0)),
+                   self._sensor("nvme", "Composite", "/sys/b", (5, 4))]
         values = [value for _label, value in
                   ledpanel.sensor_choices(sensors, sensors[0])]
         self.assertEqual(values, ["auto", "/sys/a", "/sys/b"])
 
     def test_the_better_answer_is_listed_first(self):
-        sensors = [self._sensor("nvme", "Composite", 41.0, "/sys/b", (5, 4)),
-                   self._sensor("k10temp", "Tctl", 63.5, "/sys/a", (0, 0))]
+        sensors = [self._sensor("nvme", "Composite", "/sys/b", (5, 4)),
+                   self._sensor("k10temp", "Tctl", "/sys/a", (0, 0))]
         values = [value for _label, value in
                   ledpanel.sensor_choices(sensors, sensors[1])]
         self.assertEqual(values, ["auto", "/sys/a", "/sys/b"])
 
-    def test_the_reading_is_shown_so_they_can_be_told_apart(self):
-        # Two sensors on the same chip with no labels are otherwise identical
-        # lines, and the number is what says which is which.
-        sensors = [self._sensor("k10temp", "", 63.5, "/sys/hwmon0/temp1_input")]
+    def test_an_entry_is_a_name_and_not_a_measurement(self):
+        # A temperature in the menu would be stale the moment it opened, and
+        # the menu is a place to choose a sensor, not to read one.
+        sensors = [self._sensor("k10temp", "Tctl", "/sys/hwmon0/temp1_input")]
         label = ledpanel.sensor_choices(sensors, sensors[0])[1][0]
-        self.assertIn("temp1", label, "unlabelled sensors keep their name")
-        self.assertIn("63.5", label)
+        self.assertEqual(label, "k10temp Tctl")
 
-    def test_a_sensor_that_cannot_be_read_is_still_listed(self):
-        sensors = [self._sensor("k10temp", "Tctl", None)]
+    def test_an_unlabelled_sensor_keeps_its_own_name(self):
+        sensors = [self._sensor("k10temp", "", "/sys/hwmon0/temp1_input")]
         label = ledpanel.sensor_choices(sensors, sensors[0])[1][0]
-        self.assertIn("k10temp", label)
-        self.assertNotIn("None", label)
+        self.assertEqual(label, "k10temp temp1")
 
     def test_a_configured_sensor_that_is_gone_is_kept_visible(self):
         # Dropping it would look like the setting had changed by itself.
@@ -283,7 +280,7 @@ class SensorMenuTest(unittest.TestCase):
         self.assertIn("not found", choices[-1][0])
 
     def test_the_configured_sensor_is_not_listed_twice(self):
-        sensors = [self._sensor("k10temp", "Tctl", 63.5, "/sys/a")]
+        sensors = [self._sensor("k10temp", "Tctl", "/sys/a")]
         choices = ledpanel.sensor_choices(sensors, sensors[0],
                                           current="/sys/a")
         self.assertEqual([value for _label, value in choices],
@@ -291,18 +288,19 @@ class SensorMenuTest(unittest.TestCase):
 
     def test_the_labels_are_distinct(self):
         # They are what the menu is keyed on, so two identical ones would make
-        # a choice unreachable.
-        sensors = [self._sensor("k10temp", "", 63.5, "/sys/hwmon0/temp1_input"),
-                   self._sensor("k10temp", "", 49.0, "/sys/hwmon0/temp2_input")]
+        # a choice unreachable - and without a reading to tell them apart,
+        # two inputs on one chip collide that much more easily.
+        sensors = [self._sensor("k10temp", "", "/sys/hwmon0/temp1_input"),
+                   self._sensor("k10temp", "", "/sys/hwmon0/temp2_input")]
         labels = [label for label, _value in
                   ledpanel.sensor_choices(sensors, sensors[0])]
         self.assertEqual(len(set(labels)), len(labels))
 
     def test_sensors_that_describe_themselves_the_same_are_told_apart(self):
-        # An amdgpu with two "edge" inputs reading alike: identical lines, and
-        # one of them would be unreachable in the menu.
-        sensors = [self._sensor("amdgpu", "edge", 41.0, "/sys/hwmon1/temp1_input"),
-                   self._sensor("amdgpu", "edge", 41.0, "/sys/hwmon2/temp1_input")]
+        # An amdgpu with two "edge" inputs: identical lines, and one of them
+        # would be unreachable in the menu.
+        sensors = [self._sensor("amdgpu", "edge", "/sys/hwmon1/temp1_input"),
+                   self._sensor("amdgpu", "edge", "/sys/hwmon2/temp1_input")]
         labels = [label for label, _value in
                   ledpanel.sensor_choices(sensors, sensors[0])]
         self.assertEqual(len(set(labels)), len(labels))

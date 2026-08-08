@@ -256,22 +256,21 @@ def temperature_command():
 
 
 def read_sensors():
-    """Every temperature sensor on this machine, each with its reading."""
+    """Every temperature sensor on this machine, and the best of them."""
     sensors = temperature.find_sensors()
-    for sensor in sensors:
-        sensor["celsius"] = temperature.read_celsius(sensor["path"])
     return sensors, temperature.pick_sensor(sensors)
 
 
-def sensor_label(sensor, reading=True):
-    """One sensor, as a line in a menu: what it is, and how hot it says it is."""
+def sensor_label(sensor):
+    """One sensor, as a line in a menu: the chip and what it measures.
+
+    Deliberately not its current reading. A menu entry is a name, and a number
+    in it would be stale the moment the menu opened - `--temperature` is where
+    to look at what they say.
+    """
     name = sensor.get("label") or os.path.basename(
         sensor["path"]).replace("_input", "")
-    text = "%s %s" % (sensor.get("chip") or "?", name)
-    celsius = sensor.get("celsius")
-    if reading and celsius is not None:
-        text += " - %.1f C" % celsius
-    return text
+    return "%s %s" % (sensor.get("chip") or "?", name)
 
 
 def sensor_choices(sensors, chosen=None, current="auto"):
@@ -283,7 +282,7 @@ def sensor_choices(sensors, chosen=None, current="auto"):
     """
     automatic = "Automatic"
     if chosen is not None:
-        automatic += " (%s)" % sensor_label(chosen, reading=False)
+        automatic += " (%s)" % sensor_label(chosen)
     choices = [(automatic, "auto")]
 
     for sensor in sorted(sensors, key=lambda entry: entry["rank"]):

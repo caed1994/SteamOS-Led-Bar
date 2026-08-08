@@ -95,12 +95,6 @@ ADVANCED = [
      ("debug", "info", "warning", "error"), None),
 ]
 
-ADVANCED_NOTE = (
-    "These are set once, if ever. Mapping and gamma matter when the strip is "
-    "not a 17 LED bar; the frame rates are how often the ESP is sent a "
-    "picture, and the idle rate only has to beat the firmware's 5 second "
-    "blanking watchdog.")
-
 
 # What the window calls itself to the desktop. Tk derives WM_CLASS from this,
 # and the .desktop file names the same string in StartupWMClass.
@@ -501,7 +495,7 @@ class Panel:
 
         notebook.add(self._build_settings(notebook, SETTINGS),
                      text="  Settings  ")
-        notebook.add(self._build_settings(notebook, ADVANCED, ADVANCED_NOTE),
+        notebook.add(self._build_settings(notebook, ADVANCED),
                      text="  Advanced settings  ")
         notebook.add(self._build_tests(notebook), text="  Test  ")
         notebook.add(self._build_status(notebook), text="  Status && repair  ")
@@ -573,12 +567,8 @@ class Panel:
 
     # -- settings ---------------------------------------------------------
 
-    def _build_settings(self, parent, table, note=None):
+    def _build_settings(self, parent, table):
         outer = ttk.Frame(parent)
-        if note:
-            ttk.Label(outer, text=note, wraplength=640, justify="left",
-                      style="Muted.TLabel").pack(anchor="w", padx=16,
-                                                 pady=(14, 0))
         grid = ttk.Frame(outer)
         grid.pack(fill="both", expand=True, padx=16, pady=16)
         grid.columnconfigure(1, weight=1)
