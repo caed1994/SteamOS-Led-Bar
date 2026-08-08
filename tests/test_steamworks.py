@@ -897,6 +897,10 @@ class NothingToWatchForTest(unittest.TestCase):
             unit = handle.read()
         self.assertIn("RestartPreventExitStatus=%d"
                       % service.NOTHING_TO_WATCH_EXIT, unit)
+        # And it is a setting, not a failure - without this the journal calls
+        # doing as it was told "Failed with result 'exit-code'".
+        self.assertIn("SuccessExitStatus=%d" % service.NOTHING_TO_WATCH_EXIT,
+                      unit)
         self.assertNotEqual(service.NOTHING_TO_WATCH_EXIT, 0,
                             "0 is the ordinary end of a game session")
 

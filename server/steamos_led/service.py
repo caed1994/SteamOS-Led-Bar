@@ -600,7 +600,7 @@ def run_watch_achievements(config, interval=1.0):
         # Attaching would open a Steamworks session as the running game for
         # nothing - and that registration is what keeps Steam on "Stopping".
         print("Both NOTIFY_ACHIEVEMENTS and NOTIFY_MESSAGES are off, so there "
-              "is nothing to watch for.")
+              "is nothing to watch for.", flush=True)
         return NOTHING_TO_WATCH_EXIT
 
     fifo = config["NOTIFY_FIFO"]
@@ -609,11 +609,16 @@ def run_watch_achievements(config, interval=1.0):
     current_app = None
     stats = None
 
+    # flush, because this runs as a service: Python block-buffers stdout when
+    # it is a pipe rather than a terminal, so without it these lines sit in
+    # the buffer until the process is stopped - and then land in the journal
+    # next to the shutdown, describing a run that is already over.
     print("Watching for %s; flashes go to %s"
           % (" and ".join(filter(None, [
               "achievements" if achievements_on else "",
-              "friend messages" if config["NOTIFY_MESSAGES"] else ""])), fifo))
-    print("Press Ctrl-C to stop.")
+              "friend messages" if config["NOTIFY_MESSAGES"] else ""])), fifo),
+          flush=True)
+    print("Press Ctrl-C to stop.", flush=True)
 
     try:
         for tick in itertools.count():

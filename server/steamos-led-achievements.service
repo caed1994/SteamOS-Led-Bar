@@ -22,7 +22,10 @@ Restart=always
 RestartSec=20
 # Exit 3 is "NOTIFY_ACHIEVEMENTS and NOTIFY_MESSAGES are both off", which no
 # amount of restarting will change - see NOTHING_TO_WATCH_EXIT in service.py.
+# It is also not a failure but a setting, so say so: otherwise the journal
+# reports "Failed with result 'exit-code'" for doing exactly as it was told.
 RestartPreventExitStatus=3
+SuccessExitStatus=3
 
 [Install]
 WantedBy=default.target
