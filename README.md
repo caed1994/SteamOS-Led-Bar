@@ -428,6 +428,13 @@ It runs as you, not as root: flashing the bar and asking Steam questions need
 no rights at all. Only writing the config, the self-test and repairing do, and
 each asks once through the normal system password prompt.
 
+**In Game Mode the privileged half cannot work.** You can add the panel as a
+non-Steam game and the Test tab works fine there - but changing settings, the
+self-test and repairing all need a password, and Game Mode has nothing that
+can ask for one: no polkit agent runs in it, and there is no terminal to fall
+back on. The panel says so rather than failing with pkexec's own message about
+`/dev/tty`, which explains nothing. Switch to Desktop Mode for those.
+
 It follows your Plasma theme. tkinter has no idea a desktop theme exists,
 which is why an unstyled window looks like a visitor from another decade -
 but Plasma writes its active colour scheme into `~/.config/kdeglobals` as

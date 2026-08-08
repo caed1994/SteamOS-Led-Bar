@@ -689,5 +689,51 @@ class TouchTargetTest(unittest.TestCase):
         self.assertGreaterEqual(self.sizes["TRACK_THICKNESS"], 8)
 
 
+
+
+class GameModeTest(unittest.TestCase):
+    """Privileged actions cannot work in Game Mode, and must say so.
+
+    pkexec needs a polkit agent to ask for a password with. Game Mode runs
+    none, and pkexec's fallback wants a controlling terminal, which a program
+    Steam launched does not have - so it exits 127 complaining about /dev/tty,
+    which explains nothing at all to whoever pressed the button.
+    """
+
+    def test_gamescope_is_recognised(self):
+        self.assertTrue(ledpanel.in_game_mode(
+            {"GAMESCOPE_WAYLAND_DISPLAY": "gamescope-0"}))
+        self.assertTrue(ledpanel.in_game_mode(
+            {"XDG_CURRENT_DESKTOP": "gamescope"}))
+
+    def test_a_desktop_session_is_not_game_mode(self):
+        self.assertFalse(ledpanel.in_game_mode({"XDG_CURRENT_DESKTOP": "KDE"}))
+        self.assertFalse(ledpanel.in_game_mode({}))
+
+    def test_the_real_failure_is_recognised(self):
+        # Verbatim from the machine.
+        output = ("Error creating textual authentication agent: Error opening "
+                  "current controlling terminal for the process ('/dev/tty'): "
+                  "No such device or address")
+        self.assertTrue(ledpanel.looks_like_no_auth_agent(output, 127))
+
+    def test_a_command_that_worked_is_never_blamed_on_the_agent(self):
+        self.assertFalse(ledpanel.looks_like_no_auth_agent("", 0))
+        self.assertFalse(ledpanel.looks_like_no_auth_agent(
+            "Error creating textual authentication agent", 0))
+
+    def test_an_ordinary_failure_is_not_mistaken_for_it(self):
+        # A refused password or a broken config must keep its own message.
+        self.assertFalse(ledpanel.looks_like_no_auth_agent(
+            "the new configuration was rejected, keeping the old one", 1))
+        self.assertFalse(ledpanel.looks_like_no_auth_agent(
+            "Request dismissed", 126))
+
+    def test_the_advice_says_where_to_go_instead(self):
+        self.assertIn("Desktop Mode", ledpanel.NO_AGENT_ADVICE)
+        # And that not everything is lost here.
+        self.assertIn("Test tab", ledpanel.NO_AGENT_ADVICE)
+
+
 if __name__ == "__main__":
     unittest.main()

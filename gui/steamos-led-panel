@@ -385,6 +385,7 @@ class Runner:
         self.sink = sink
         self.queue = queue.Queue()
         self.busy = False
+        self.transcript = []
         self._drain()
 
     def start(self, command, done=None):
@@ -392,6 +393,7 @@ class Runner:
             self.sink("Still busy with the last command.\n")
             return False
         self.busy = True
+        self.transcript = []
         self.sink("$ %s\n" % " ".join(command), "command")
         threading.Thread(target=self._work, args=(command, done),
                          daemon=True).start()
@@ -407,6 +409,7 @@ class Runner:
             self.queue.put(("done", (1, done)))
             return
         for line in process.stdout:
+            self.transcript.append(line)
             self.queue.put(("line", line))
         code = process.wait()
         self.queue.put(("done", (code, done)))
@@ -420,7 +423,13 @@ class Runner:
                 else:
                     code, done = payload
                     self.busy = False
-                    self.sink("[exit %d]\n\n" % code, "command")
+                    self.sink("[exit %d]\n" % code, "command")
+                    # pkexec's own complaint explains nothing to anyone who
+                    # has not met it before; say what it means instead.
+                    if ledpanel.looks_like_no_auth_agent(
+                            "".join(self.transcript), code):
+                        self.sink("\n%s\n" % ledpanel.NO_AGENT_ADVICE)
+                    self.sink("\n")
                     if done is not None:
                         done(code)
         except queue.Empty:
@@ -455,6 +464,13 @@ class Panel:
         notebook.add(self._build_settings(notebook), text="  Settings  ")
         notebook.add(self._build_tests(notebook), text="  Test  ")
         notebook.add(self._build_status(notebook), text="  Status && repair  ")
+
+        if ledpanel.in_game_mode():
+            self._write(
+                "Running in Game Mode. Flashing the bar and the Steam checks "
+                "work here;\nchanging settings, the self-test and repairing "
+                "need administrator rights,\nwhich only Desktop Mode can ask "
+                "for.\n\n")
 
         self.refresh_status()
 

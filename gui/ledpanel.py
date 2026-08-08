@@ -143,6 +143,48 @@ def repair_summary(checks):
     return "%d problem(s) found." % len(problems)
 
 
+# What Steam's Game Mode session looks like from inside a program it started.
+GAME_MODE_MARKERS = ("GAMESCOPE_WAYLAND_DISPLAY", "STEAM_GAMESCOPE_VRR_ENABLED")
+
+NO_AGENT_SIGNS = ("authentication agent", "/dev/tty",
+                  "polkit-agent-helper", "No such device or address")
+
+
+def in_game_mode(environ=None):
+    """Whether this is running inside Steam's Game Mode session.
+
+    Told apart by gamescope's own variables rather than by asking Steam:
+    gamescope is the compositor Game Mode runs under, and it is what makes the
+    difference that matters here.
+    """
+    environ = os.environ if environ is None else environ
+    if any(marker in environ for marker in GAME_MODE_MARKERS):
+        return True
+    return "gamescope" in environ.get("XDG_CURRENT_DESKTOP", "").lower()
+
+
+def looks_like_no_auth_agent(output, exit_code):
+    """Whether a privileged command failed for want of a password prompt.
+
+    pkexec needs a polkit agent to ask with. Game Mode runs none, and pkexec's
+    fallback wants a controlling terminal, which a program Steam launched does
+    not have - so it exits 127 complaining about /dev/tty, which explains
+    nothing to anyone who has not met it before.
+    """
+    if exit_code == 0:
+        return False
+    lowered = (output or "").lower()
+    return any(sign.lower() in lowered for sign in NO_AGENT_SIGNS)
+
+
+NO_AGENT_ADVICE = (
+    "That needs administrator rights, and Game Mode has nothing that can ask "
+    "for your password - there is no polkit agent running in it, and no "
+    "terminal to fall back on.\n"
+    "Switch to Desktop Mode and do it there. Everything on the Test tab works "
+    "here, though: flashing the bar needs no rights at all.")
+
+
 def reinstall_command(source_dir, rebuild_module=True):
     """How to put an installation back together, unattended.
 
