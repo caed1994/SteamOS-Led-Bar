@@ -392,6 +392,56 @@ fi
 
 PANEL_STATUS="not installed"
 
+png_width() {  # png_width <file> - pixels, or nothing if it will not read
+    # Bytes 16-19 of a PNG are the width, big endian. Worth reading: the icon
+    # is a file anyone can replace, and it has to land in the directory for
+    # its own size or the menu picks a scaled copy of the wrong one.
+    od -An -tu4 -j16 -N4 --endian=big "$1" 2>/dev/null | tr -d ' '
+}
+
+install_panel_icon() {
+    # Prints what the Icon= line should say. An icon theme is where a menu
+    # looks first, so the picture goes in there under the entry's own name;
+    # a name also survives the clone being moved, which an absolute path
+    # would not. Falls back to the path, and then to a stock icon, because
+    # an entry with no picture at all looks broken.
+    local source_icon="$SOURCE_DIR/gui/steamos-led-panel.png"
+    if [[ ! -f "$source_icon" ]]; then
+        printf 'preferences-desktop-display'
+        return 0
+    fi
+
+    local width
+    width="$(png_width "$source_icon")"
+    [[ "$width" =~ ^[0-9]+$ ]] || width=512
+    local icon_dir="$WATCHER_HOME/.local/share/icons/hicolor/${width}x${width}/apps"
+
+    if runuser -u "$WATCHER_USER" -- mkdir -p "$icon_dir" \
+       && cp "$source_icon" "$icon_dir/steamos-led-panel.png"; then
+        chown "$WATCHER_USER:$WATCHER_USER" "$icon_dir/steamos-led-panel.png"
+        chmod 0644 "$icon_dir/steamos-led-panel.png"
+        printf 'steamos-led-panel'
+    else
+        printf '%s' "$source_icon"
+    fi
+}
+
+refresh_desktop_caches() {  # refresh_desktop_caches <applications dir>
+    # Plasma reads the menu from a cache it builds itself, so a rewritten
+    # entry keeps its old icon until that is rebuilt - which is exactly what
+    # "the icon did not change" looks like. Best effort: none of this is
+    # worth failing an install over, and a logout fixes it anyway.
+    runuser -u "$WATCHER_USER" -- update-desktop-database "$1" >/dev/null 2>&1 \
+        || true
+    local cache
+    for cache in kbuildsycoca6 kbuildsycoca5; do
+        command -v "$cache" >/dev/null 2>&1 || continue
+        runuser -u "$WATCHER_USER" -- "$cache" --noincremental >/dev/null 2>&1 \
+            || true
+        break
+    done
+}
+
 install_control_panel() {
     local source="$SOURCE_DIR/gui/steamos-led-panel.desktop"
     [[ -f "$source" ]] || { PANEL_STATUS="not in the repository"; return 1; }
@@ -406,14 +456,12 @@ install_control_panel() {
     local dir="$WATCHER_HOME/.local/share/applications"
     runuser -u "$WATCHER_USER" -- mkdir -p "$dir" || {
         PANEL_STATUS="could not write to $dir"; return 1; }
-    # An absolute path is a valid Icon= value, so the icon can live in the
-    # clone next to the panel instead of being copied into an icon theme.
-    local icon="$SOURCE_DIR/gui/steamos-led-panel.png"
-    [[ -f "$icon" ]] || icon="preferences-desktop-display"
-    sed -e "s|@SOURCE_DIR@|$SOURCE_DIR|g" -e "s|@ICON@|$icon|g" "$source" \
+    sed -e "s|@SOURCE_DIR@|$SOURCE_DIR|g" \
+        -e "s|@ICON@|$(install_panel_icon)|g" "$source" \
         > "$dir/steamos-led-panel.desktop"
     chown "$WATCHER_USER:$WATCHER_USER" "$dir/steamos-led-panel.desktop"
     chmod 0644 "$dir/steamos-led-panel.desktop"
+    refresh_desktop_caches "$dir"
 
     if runuser -u "$WATCHER_USER" -- python3 -c 'import tkinter' >/dev/null 2>&1
     then

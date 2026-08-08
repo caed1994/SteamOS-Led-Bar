@@ -524,12 +524,22 @@ font, and whether the scheme is light or dark. Switch Plasma to Breeze Dark
 and reopen the panel and it comes back dark. Without KDE it falls back to
 Breeze light.
 
-**Its icon is a file you can replace.** The menu entry and the window both use
-`gui/steamos-led-panel.png` if it is there, and fall back to a theme icon if it
-is not. So to change it, drop a PNG in with that name (256x256 is plenty) and
-run `sudo ./install.sh --yes` to rewrite the menu entry — the window picks it up
-on the next start by itself. If you also added the panel to Steam as a non-Steam
-game, the same file works as the artwork there.
+**Its icon is a file you can replace.** Drop a PNG in as
+`gui/steamos-led-panel.png` (512x512 is a good size) and run
+`sudo ./install.sh --yes`. The installer copies it into your icon theme under
+`~/.local/share/icons/hicolor/`, points the menu entry at it and rebuilds
+Plasma's menu cache — that cache is why a changed icon otherwise seems not to
+take. The panel window reads the same file directly, so it picks up a new icon
+on the next start without reinstalling. Without the file, both fall back to a
+stock icon. If you also added the panel to Steam as a non-Steam game, the same
+file works as the artwork there.
+
+If the menu still shows the old icon, the cache is stale — log out and back in,
+or run `kbuildsycoca6 --noincremental`. To check what the entry actually says:
+
+```bash
+grep Icon= ~/.local/share/applications/steamos-led-panel.desktop
+```
 
 > The panel needs Python's `tkinter`. It is present on SteamOS, but a system
 > update can remove it (`sudo pacman -S tk` brings it back). Nothing here is
