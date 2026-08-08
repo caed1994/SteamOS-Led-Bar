@@ -48,6 +48,12 @@ def build_renderer(config):
     )
 
 
+def notification_colors(config):
+    """The named triggers whose colour the configuration can change."""
+    return {"achievement": notify.parse_color(config["ACHIEVEMENT_COLOR"]),
+            "message": notify.parse_color(config["MESSAGE_COLOR"])}
+
+
 def build_link(config):
     return EspLink(
         port=config["SERIAL_PORT"],
@@ -69,6 +75,7 @@ class Runner:
             duration=config["NOTIFY_DURATION"],
             led_count=config["LED_COUNT"],
             style=config["NOTIFY_STYLE"],
+            colors=notification_colors(config),
         )
         self.trigger = None
         self.source = None

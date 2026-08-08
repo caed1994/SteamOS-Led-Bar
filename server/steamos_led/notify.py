@@ -103,11 +103,16 @@ _STYLES = {
 STYLES = tuple(_STYLES)
 
 
-def parse_color(text):
-    """Accept a kind name, '#rrggbb', 'rrggbb' or 'r,g,b'."""
+def parse_color(text, kinds=None):
+    """Accept a kind name, '#rrggbb', 'rrggbb' or 'r,g,b'.
+
+    `kinds` is the name table to resolve against; the built-in one is only the
+    default, so a service told to flash a different gold can hand in its own.
+    """
+    kinds = KINDS if kinds is None else kinds
     value = str(text).strip().lower()
-    if value in KINDS:
-        return KINDS[value]
+    if value in kinds:
+        return kinds[value]
 
     if "," in value:
         parts = [part.strip() for part in value.split(",")]
@@ -159,11 +164,15 @@ class NotificationOverlay:
     """Holds the active flash and paints it over a rendered frame."""
 
     def __init__(self, enabled=True, duration=3.5, led_count=17,
-                 style=STYLE_BLOOM):
+                 style=STYLE_BLOOM, colors=None):
         self.enabled = enabled
         self.duration = duration
         self.led_count = led_count
         self.style = style if style in STYLES else STYLE_BLOOM
+        # The named triggers, with any the configuration overrides replaced.
+        # A trigger word stays the interface - callers ask for "achievement",
+        # not for a colour - so which gold that is stays a local decision.
+        self.colors = dict(KINDS, **(colors or {}))
         self.current = None
 
     @property
@@ -175,7 +184,7 @@ class NotificationOverlay:
         if not self.enabled:
             return False
         try:
-            color = parse_color(kind)
+            color = parse_color(kind, self.colors)
         except ValueError as exc:
             LOG.warning("ignoring notification %r: %s", kind, exc)
             return False

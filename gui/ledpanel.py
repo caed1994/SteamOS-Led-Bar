@@ -249,6 +249,57 @@ def temperature_command():
     return [BINARY, "--temperature"]
 
 
+# -- notification colours --------------------------------------------------
+#
+# (label, value) pairs, and the value is what goes in the config file - which
+# takes any colour, so these are the offered ones and not the possible ones.
+# The first of each is the default the service ships with.
+
+ACHIEVEMENT_COLOURS = (
+    ("Gold", "#ffd700"),
+    ("Bronze", "#cd7f32"),
+    ("Platinum", "#e5e4e2"),
+)
+
+MESSAGE_COLOURS = (
+    ("Purple", "#8000ff"),
+    # The same green the "friend" trigger already flashes, rather than a
+    # second opinion about what green is.
+    ("Green", "#00c850"),
+    ("Blue", "#0080ff"),
+)
+
+
+# -- menus whose entries are not what gets written -------------------------
+#
+# A sensor is a path into /sys and a colour is six hex digits; neither is
+# something to show someone. Both menus are therefore (label, value) pairs,
+# and these two translate between the halves.
+
+
+def menu_label(choices, value):
+    """The entry for a configured value, or None if the menu lacks it."""
+    for label, known in choices:
+        if known == value:
+            return label
+    for label, known in choices:
+        if known.lower() == value.lower():      # #CD7F32 is #cd7f32
+            return label
+    return None
+
+
+def menu_value(choices, label):
+    """Back from an entry to what the config file wants.
+
+    An entry nobody put there is its own value: that is how a hand-written
+    setting the menu does not offer stays what it was.
+    """
+    for known, value in choices:
+        if known == label:
+            return value
+    return label
+
+
 # -- the temperature sensor menu ------------------------------------------
 #
 # The setting is a path into /sys, which is no way to ask a person a question.

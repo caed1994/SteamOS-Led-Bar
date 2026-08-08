@@ -371,9 +371,26 @@ class TestConfig(unittest.TestCase):
                          # A gauge needs a span to fill over, and a mark
                          # outside the plausible range means a unit mix-up.
                          {"TEMPERATURE_MAX": 30}, {"TEMPERATURE_MIN": 200},
-                         {"TEMPERATURE_MIN": 84, "TEMPERATURE_MAX": 85}):
+                         {"TEMPERATURE_MIN": 84, "TEMPERATURE_MAX": 85},
+                         # A colour the service cannot parse would be found
+                         # out at flash time, which is no time to find out.
+                         {"ACHIEVEMENT_COLOR": "goldish"},
+                         {"MESSAGE_COLOR": "#12345"}):
             with self.assertRaises(config.ConfigError):
                 config.load(path=None, overrides=override)
+
+    def test_the_default_notification_colours_are_the_built_in_ones(self):
+        # The config file states them so they can be changed; if the two ever
+        # disagree, a fresh install changes colour for no stated reason.
+        from steamos_led import notify
+        for key, kind in (("ACHIEVEMENT_COLOR", "achievement"),
+                          ("MESSAGE_COLOR", "message")):
+            self.assertEqual(notify.parse_color(config.DEFAULTS[key]),
+                             notify.KINDS[kind], key)
+
+    def test_a_configured_colour_survives_the_round_trip(self):
+        path = self._write("ACHIEVEMENT_COLOR=#CD7F32\n")
+        self.assertEqual(config.load(path)["ACHIEVEMENT_COLOR"], "#CD7F32")
 
 
 class TestFirmwareConsistency(unittest.TestCase):

@@ -31,6 +31,8 @@ DEFAULTS = {
     "NOTIFY_FIFO": notify.DEFAULT_FIFO,
     "NOTIFY_STYLE": "bloom",
     "NOTIFY_MESSAGES": True,
+    "ACHIEVEMENT_COLOR": "#ffd700",
+    "MESSAGE_COLOR": "#8000ff",
     "TEMPERATURE_GAUGE": False,
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 85.0,
@@ -195,6 +197,11 @@ def validate(config):
     if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
         raise ConfigError("NOTIFY_STYLE must be one of: %s"
                           % ", ".join(NOTIFY_STYLES))
+    for key in ("ACHIEVEMENT_COLOR", "MESSAGE_COLOR"):
+        try:
+            notify.parse_color(config[key])
+        except ValueError as exc:
+            raise ConfigError("%s: %s" % (key, exc))
     for key in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
         if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
             raise ConfigError("%s must be between %g and %g degrees"

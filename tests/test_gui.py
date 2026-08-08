@@ -227,6 +227,64 @@ class DesktopEntryTest(unittest.TestCase):
         self.assertNotIn("/", icon, "a theme icon is a name, not a path")
 
 
+class NotificationColourTest(unittest.TestCase):
+    """The panel offers a few colours; the config file takes any."""
+
+    PALETTES = (("ACHIEVEMENT_COLOR", ledpanel.ACHIEVEMENT_COLOURS),
+                ("MESSAGE_COLOR", ledpanel.MESSAGE_COLOURS))
+
+    def test_every_offered_colour_is_one_the_service_accepts(self):
+        from steamos_led import notify
+        for _key, palette in self.PALETTES:
+            for label, value in palette:
+                notify.parse_color(value)       # raises if it is not one
+                self.assertTrue(label, value)
+
+    def test_the_first_entry_is_what_the_service_ships_with(self):
+        # The menu opens on the default, so the default has to be in it - and
+        # first, because that is where "Gold (default)" belongs.
+        for key, palette in self.PALETTES:
+            self.assertEqual(palette[0][1].lower(),
+                             config_module.DEFAULTS[key].lower(), key)
+
+    def test_the_entries_are_distinct(self):
+        # Labels are what the menu is keyed on, values what gets written.
+        for key, palette in self.PALETTES:
+            labels = [label for label, _value in palette]
+            values = [value.lower() for _label, value in palette]
+            self.assertEqual(len(set(labels)), len(labels), key)
+            self.assertEqual(len(set(values)), len(values), key)
+
+
+class MenuTranslationTest(unittest.TestCase):
+    """Both drop-downs show one thing and write another."""
+
+    CHOICES = (("Gold", "#ffd700"), ("Bronze", "#cd7f32"))
+
+    def test_a_value_finds_its_entry(self):
+        self.assertEqual(ledpanel.menu_label(self.CHOICES, "#cd7f32"), "Bronze")
+
+    def test_the_case_of_a_hand_written_colour_does_not_matter(self):
+        self.assertEqual(ledpanel.menu_label(self.CHOICES, "#CD7F32"), "Bronze")
+
+    def test_a_value_the_menu_does_not_offer_has_no_entry(self):
+        self.assertIsNone(ledpanel.menu_label(self.CHOICES, "#123456"))
+
+    def test_an_entry_finds_its_value(self):
+        self.assertEqual(ledpanel.menu_value(self.CHOICES, "Gold"), "#ffd700")
+
+    def test_an_entry_nobody_put_there_is_its_own_value(self):
+        # This is how a colour typed into the config file by hand survives
+        # being shown and applied again.
+        self.assertEqual(ledpanel.menu_value(self.CHOICES, "#123456"),
+                         "#123456")
+
+    def test_a_value_round_trips_through_its_entry(self):
+        for _label, value in self.CHOICES:
+            entry = ledpanel.menu_label(self.CHOICES, value)
+            self.assertEqual(ledpanel.menu_value(self.CHOICES, entry), value)
+
+
 class SensorMenuTest(unittest.TestCase):
     """The sensor setting is a path into /sys, which is no way to ask someone
     a question - so the menu is built out of what the machine reports."""

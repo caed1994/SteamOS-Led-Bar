@@ -198,6 +198,7 @@ sudo systemctl start steamos-led-serial
 | `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `85.0` | degrees at which the gauge is empty / full |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
+| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` | `#ffd700` / `#8000ff` | what the two automatic [notifications](#notifications) flash |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
 | `BAUD` | `230400` | preferred baud rate; corrected on connect if needed |
 | `BAUD_AUTODETECT` | `1` | if there is no reply, also try the other firmware baud rates |
@@ -371,6 +372,14 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | shape of the flash: `bloom` (out of the middle) or `pulse` (whole bar swells three times) |
+| `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
+| `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
+
+The two colours take any `#rrggbb` or `r,g,b`. The trigger word stays the same
+either way — everything that flashes the bar asks for `achievement`, so which
+gold that is stays one setting in one place. The control panel offers a few
+ready-made ones (Gold, Bronze, Platinum; Purple, Green, Blue) and writes the
+value for you. `friend` and `warning` keep their colours.
 
 ### Flashing on a real achievement
 
@@ -489,7 +498,8 @@ Everything after the first install has a window, so you do not have to edit
 has four tabs:
 
 - **Settings** — LED count, brightness, patrol dots, the temperature gauge and
-  the notification options, as sliders and switches. Apply writes the file
+  the notification options including the two flash colours, as sliders,
+  switches and drop-downs. Apply writes the file
   (keeping every comment in it) and restarts the service. The strip length
   stops at 120: that is where the GPIO14 firmware's `MAX_LEDS` sits and where
   230400 baud stops keeping up at 60 fps. Longer strips work, but they are a

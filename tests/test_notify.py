@@ -115,6 +115,48 @@ class OverlayTest(unittest.TestCase):
         self.assertGreater(blue, 0)
 
 
+class ConfiguredColourTest(unittest.TestCase):
+    """The trigger word stays the interface; which colour it means is local.
+
+    Callers ask for "achievement" - the watcher, a launcher hook, the panel's
+    test button - so the colour has to be settled here rather than by every
+    one of them.
+    """
+
+    def _middle(self, overlay):
+        """The colour at the centre LED, where a bloom starts."""
+        frame = overlay.frame(0.5)
+        return tuple(frame[3:6])
+
+    def test_a_configured_colour_replaces_the_built_in_one(self):
+        overlay = notify.NotificationOverlay(
+            led_count=4, colors={"achievement": (205, 127, 50)})
+        overlay.trigger("achievement", 0.0)
+        red, green, blue = self._middle(overlay)
+        self.assertGreater(red, green)
+        self.assertGreater(green, blue)
+        self.assertEqual(overlay.colors["achievement"], (205, 127, 50))
+
+    def test_the_kinds_nobody_configured_keep_their_colour(self):
+        overlay = notify.NotificationOverlay(
+            led_count=4, colors={"achievement": (205, 127, 50)})
+        self.assertEqual(overlay.colors["warning"], notify.KINDS["warning"])
+
+    def test_the_built_in_table_is_not_edited(self):
+        # dict(KINDS, **colors) rather than KINDS.update(): one overlay must
+        # not change what every other one flashes.
+        gold = notify.KINDS["achievement"]
+        notify.NotificationOverlay(led_count=4,
+                                   colors={"achievement": (1, 2, 3)})
+        self.assertEqual(notify.KINDS["achievement"], gold)
+
+    def test_an_arbitrary_colour_still_works_alongside(self):
+        overlay = notify.NotificationOverlay(
+            led_count=4, colors={"message": (0, 200, 80)})
+        overlay.trigger("#0000ff", 0.0)
+        self.assertEqual(self._middle(overlay)[:2], (0, 0))
+
+
 class FifoTriggerTest(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

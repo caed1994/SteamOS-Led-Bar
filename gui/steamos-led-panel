@@ -81,8 +81,13 @@ SETTINGS = [
     # Not a "choice": the values are paths into /sys and the machine decides
     # what they are, so the menu is built from what it reports.
     ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor", None, None, None),
-    ("NOTIFY", "Flash on notifications", "bool", None, None, None),
+    ("NOTIFY", "Flash on achievements", "bool", None, None, None),
+    # Under the switch it belongs to, so the pair reads as one setting.
+    ("ACHIEVEMENT_COLOR", "Achievement colour", "named",
+     ledpanel.ACHIEVEMENT_COLOURS, None, None),
     ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None, None),
+    ("MESSAGE_COLOR", "Friend message colour", "named",
+     ledpanel.MESSAGE_COLOURS, None, None),
     # From half a second, in half seconds: the validator allows a tenth, but
     # the flash grows, breathes and retracts, and none of that is visible in
     # a tenth of a second.
@@ -495,6 +500,11 @@ class Panel:
         self.shade = self.palette["_shade"]
         self.config = self._load_config()
         self.vars = {}
+        # Menus whose entries are labels for something else: key -> the
+        # (label, value) pairs, and the widget, so a value that turns up later
+        # can be added to both.
+        self._menus = {}
+        self._widgets = {}
 
         header = ttk.Frame(root)
         header.pack(fill="x", padx=16, pady=(14, 0))
@@ -603,9 +613,16 @@ class Panel:
                 ttk.Combobox(grid, textvariable=variable, values=list(low),
                              state="readonly", width=12).grid(
                                  row=row, column=1, sticky="w")
-            elif kind == "sensor":
+            elif kind in ("sensor", "named"):
+                # Menus whose entries are not what gets written: a sensor is a
+                # path into /sys, a colour is six hex digits, and neither is
+                # something to show someone.
                 variable = tk.StringVar()
-                self._build_sensor_menu(grid, row, variable, str(value))
+                choices = (ledpanel.sensor_choices(*ledpanel.read_sensors(),
+                                                   current=str(value))
+                           if kind == "sensor" else list(low))
+                self._menu(grid, row, key, variable, choices, str(value),
+                           width=34 if kind == "sensor" else 14)
             else:
                 variable = tk.DoubleVar(value=float(value))
                 self._scale(grid, row, variable, low, high, step)
@@ -624,35 +641,36 @@ class Panel:
                   style="Muted.TLabel").pack(anchor="w", padx=16, pady=(0, 12))
         return outer
 
-    def _build_sensor_menu(self, grid, row, variable, current):
-        """A menu of the sensors this machine has, rather than a path to type."""
-        sensors, chosen = ledpanel.read_sensors()
-        self._sensors = ledpanel.sensor_choices(sensors, chosen, current)
-        self.sensor_menu = ttk.Combobox(
-            grid, textvariable=variable, state="readonly", width=34,
-            values=[label for label, _value in self._sensors])
-        self.sensor_menu.grid(row=row, column=1, sticky="w")
-        variable.set(self._sensor_label(current))
+    def _menu(self, grid, row, key, variable, choices, current, width):
+        """A drop-down of (label, value) pairs, showing labels."""
+        self._menus[key] = list(choices)
+        widget = ttk.Combobox(grid, textvariable=variable, state="readonly",
+                              width=width,
+                              values=[label for label, _value in choices])
+        widget.grid(row=row, column=1, sticky="w")
+        self._widgets[key] = widget
+        variable.set(self._label_for(key, current))
 
-    def _sensor_label(self, value):
-        """The menu entry for a configured value, added if it is new to us."""
-        for label, known in self._sensors:
-            if known == value:
-                return label
-        # Someone edited the file by hand while the panel was open, which is
-        # exactly how this setting is meant to be used from the terminal.
-        label = "%s (not found)" % value
-        self._sensors.append((label, value))
-        self.sensor_menu.configure(
-            values=[entry for entry, _value in self._sensors])
-        return label
+    def _label_for(self, key, value):
+        """The entry for a configured value, added to the menu if it is new.
 
-    def _sensor_value(self, label):
-        """Back from the menu entry to the path the service wants."""
-        for known, value in self._sensors:
-            if known == label:
-                return value
-        return "auto"
+        Someone editing the file by hand and pressing Reload is exactly how
+        the sensor and colour settings are meant to be used from a terminal,
+        so a value the menu does not offer has to become an entry rather than
+        being silently replaced by one that is.
+        """
+        choices = self._menus[key]
+        label = ledpanel.menu_label(choices, value)
+        if label is not None:
+            return label
+        choices.append((value, value))
+        self._widgets[key].configure(
+            values=[entry for entry, _value in choices])
+        return value
+
+    def _value_for(self, key, label):
+        """Back from the menu entry to what the config file wants."""
+        return ledpanel.menu_value(self._menus[key], label)
 
     def _scale(self, grid, row, variable, low, high, step):
         holder = ttk.Frame(grid)
@@ -691,7 +709,8 @@ class Panel:
             values[key] = (bool(raw) if kind == "bool"
                            else int(round(raw)) if kind == "int"
                            else float(raw) if kind == "float"
-                           else self._sensor_value(raw) if kind == "sensor"
+                           else self._value_for(key, raw)
+                           if kind in ("sensor", "named")
                            else str(raw))
         # The two frame rates are coupled - the idle rate cannot exceed the
         # active one - and two independent sliders cannot express that. Pulling
@@ -750,7 +769,8 @@ class Panel:
         for key, (variable, kind) in self.vars.items():
             value = self.config.get(key, config_module.DEFAULTS[key])
             variable.set(bool(value) if kind == "bool"
-                         else self._sensor_label(str(value)) if kind == "sensor"
+                         else self._label_for(key, str(value))
+                         if kind in ("sensor", "named")
                          else str(value) if kind == "choice"
                          else float(value))
         self._write("Reloaded %s\n\n" % config_module.DEFAULT_CONFIG_PATH)
