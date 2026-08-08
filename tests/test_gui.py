@@ -7,6 +7,7 @@ ledpanel.py with no tkinter in sight.
 
 import ast
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -354,6 +355,24 @@ class PanelSettingsTest(unittest.TestCase):
         self.assertEqual([tab.strip() for tab in tabs],
                          ["Settings", "Advanced settings", "Test",
                           "Status && repair"])
+
+    def _firmware_max_leds(self):
+        path = os.path.join(HERE, "..", "firmware", "led-client",
+                            "platformio.ini")
+        with open(path) as handle:
+            limits = [int(value) for value
+                      in re.findall(r"-D MAX_LEDS=(\d+)", handle.read())]
+        self.assertTrue(limits, "no MAX_LEDS flags found in platformio.ini")
+        return min(limits)
+
+    def test_the_strip_length_stays_within_what_the_firmware_accepts(self):
+        # A board rejects a frame longer than its MAX_LEDS and the strip goes
+        # dark, so a slider that can ask for more is a slider that can break
+        # the bar. The service still takes longer strips from the config file
+        # for firmware built with a higher limit.
+        entry = next(entry for table in self._tables() for entry in table.elts
+                     if entry.elts[0].value == "LED_COUNT")
+        self.assertLessEqual(entry.elts[4].value, self._firmware_max_leds())
 
     def test_the_two_tabs_do_not_offer_the_same_setting_twice(self):
         # They share one dict of widgets, so a key on both tabs would leave one

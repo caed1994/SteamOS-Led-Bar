@@ -490,7 +490,10 @@ has four tabs:
 
 - **Settings** — LED count, brightness, patrol dots, the temperature gauge and
   the notification options, as sliders and switches. Apply writes the file
-  (keeping every comment in it) and restarts the service.
+  (keeping every comment in it) and restarts the service. The strip length
+  stops at 120: that is where the GPIO14 firmware's `MAX_LEDS` sits and where
+  230400 baud stops keeping up at 60 fps. Longer strips work, but they are a
+  config file edit, because they also need firmware and frame rate to match.
 - **Advanced settings** — the ones you set once, if ever: mapping, gamma,
   effect speed, the two frame rates and the log level. Apply on either tab
   writes both.
