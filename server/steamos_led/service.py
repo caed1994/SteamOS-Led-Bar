@@ -642,9 +642,28 @@ def run_watch_achievements(config, interval=1.0):
                 current_app = app_id
                 if app_id:
                     try:
-                        route = config["STEAM_ROUTE"]
                         library = steamworks.find_library(
                             config["STEAM_LIBRARY"])
+                        # Friend messages need a manual-dispatch session, and
+                        # only a new enough library can open one.
+                        manual = (config["NOTIFY_MESSAGES"]
+                                  and steamworks.usable_for_messages(
+                                      steamworks.message_support(library)))
+                        if config["NOTIFY_MESSAGES"] and not manual:
+                            LOG.info("%s is too old to deliver friend "
+                                     "messages; achievements only", library)
+                        if not achievements_on and not manual:
+                            # Decided before opening anything, because a
+                            # session is not free: it registers this process
+                            # as the game, and only the process ending clears
+                            # that. Attaching to poll nothing would hold the
+                            # game on "Stopping" for no flash at all.
+                            print("Achievements are switched off and %s cannot "
+                                  "deliver friend messages, so there is "
+                                  "nothing to watch for." % library, flush=True)
+                            return NOTHING_TO_WATCH_EXIT
+
+                        route = config["STEAM_ROUTE"]
                         if not route or route == "auto":
                             # Probes in child processes; a bad route segfaults.
                             route, _count = steamworks.select_route(
@@ -654,14 +673,6 @@ def run_watch_achievements(config, interval=1.0):
                                     "no working route for app %d - run "
                                     "--steam-check for details" % app_id)
                             LOG.info("using route %s", route)
-                        # Friend messages need a manual-dispatch session, and
-                        # only a new enough library can open one.
-                        manual = (config["NOTIFY_MESSAGES"]
-                                  and steamworks.usable_for_messages(
-                                      steamworks.message_support(library)))
-                        if config["NOTIFY_MESSAGES"] and not manual:
-                            LOG.info("%s is too old to deliver friend "
-                                     "messages; achievements only", library)
                         stats = steamworks.UserStats(app_id, library,
                                                      route=route,
                                                      manual_dispatch=manual)
@@ -670,6 +681,17 @@ def run_watch_achievements(config, interval=1.0):
                                    if achievements_on else None)
                         listener = _open_message_listener(stats) if manual \
                             else None
+                        if watcher is None and listener is None:
+                            # The library could have done it, but Steam
+                            # declined to forward chat - and achievements are
+                            # off, so this session has nothing left to report.
+                            # Ending the process is also what releases the
+                            # registration it just took out.
+                            print("Steam will not forward friend messages to "
+                                  "this app and achievements are switched "
+                                  "off, so there is nothing to watch for.",
+                                  flush=True)
+                            return NOTHING_TO_WATCH_EXIT
                         LOG.info("attached to app %d", app_id)
                     except steamworks.SteamworksError as exc:
                         # current_app is set, so no retry until another game.

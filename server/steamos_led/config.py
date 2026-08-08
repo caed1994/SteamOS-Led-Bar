@@ -110,26 +110,30 @@ def update_text(text, values):
     every comment, and this file is mostly comments. So existing lines are
     edited in place and anything new is appended under a heading.
     """
-    remaining = dict(values)
     lines = text.splitlines(keepends=True)
+    written = set()
 
     for index, raw in enumerate(lines):
         stripped = raw.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key = stripped.partition("=")[0].strip().upper()
-        if key not in remaining:
+        if key not in values:
             continue
+        # Every occurrence, not only the first. A hand-edited file can name an
+        # option twice, and parse_file() takes the last one - so a duplicate
+        # left behind would quietly outrank the change and nothing would say so.
+        written.add(key)
         ending = "\n" if raw.endswith("\n") else ""
-        lines[index] = "%s=%s%s" % (key, format_value(remaining.pop(key)),
-                                    ending)
+        lines[index] = "%s=%s%s" % (key, format_value(values[key]), ending)
 
-    if remaining:
+    missing = [key for key in sorted(values) if key not in written]
+    if missing:
         if lines and not lines[-1].endswith("\n"):
             lines.append("\n")
         lines.append("\n# Added by the control panel.\n")
-        for key in sorted(remaining):
-            lines.append("%s=%s\n" % (key, format_value(remaining[key])))
+        for key in missing:
+            lines.append("%s=%s\n" % (key, format_value(values[key])))
     return "".join(lines)
 
 

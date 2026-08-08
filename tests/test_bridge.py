@@ -553,6 +553,33 @@ class ConfigRewritingTest(unittest.TestCase):
         self.assertIn("LED_COUNT=17\n", result)
         self.assertIn("GAMMA=2.2\n", result)
 
+    def test_an_option_named_twice_is_rewritten_everywhere(self):
+        """A duplicate must not outrank the change.
+
+        Hand-editing is how this file is meant to be used, so a key can end up
+        in it twice - and parse_file() takes the last one. Rewriting only the
+        first left the stale duplicate to win, with the panel reporting success
+        and the service quietly keeping the old value.
+        """
+        doubled = ("LED_COUNT=17\n"
+                   "MAX_BRIGHTNESS=255\n"
+                   "\n"
+                   "# tried this out later\n"
+                   "LED_COUNT=60\n")
+        result = config.update_text(doubled, {"LED_COUNT": 30})
+        self.assertEqual(result.count("LED_COUNT=30"), 2)
+        self.assertNotIn("LED_COUNT=17", result)
+        self.assertNotIn("LED_COUNT=60", result)
+
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".conf",
+                                         delete=False) as handle:
+            handle.write(result)
+            path = handle.name
+        self.addCleanup(os.unlink, path)
+        self.assertEqual(config.parse_file(path)["LED_COUNT"], 30,
+                         "what the service reads must be what was asked for")
+
     def test_the_real_shipped_config_survives_a_round_trip(self):
         here = os.path.dirname(os.path.abspath(__file__))
         shipped = os.path.join(here, "..", "server", "steamos-led-serial.conf")

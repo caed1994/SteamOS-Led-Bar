@@ -458,6 +458,33 @@ class PanelSettingsTest(unittest.TestCase):
                     msg="%s cannot stop on %s in steps of %s"
                         % (key, edge, step))
 
+    def test_no_setting_of_the_coupled_pair_is_refused(self):
+        """The two temperature marks are the one pair of sliders that interact.
+
+        validate() wants a span between them, and two independent knobs cannot
+        express that - so the ranges are kept apart instead. If they ever
+        overlap, Apply starts refusing settings the panel itself offered.
+        """
+        marks = {}
+        for entry in [entry for table in self._tables()
+                      for entry in table.elts]:
+            if entry.elts[0].value in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
+                marks[entry.elts[0].value] = (entry.elts[3].value,
+                                              entry.elts[4].value)
+        self.assertEqual(len(marks), 2, "both marks should be on a tab")
+
+        low, high = marks["TEMPERATURE_MIN"], marks["TEMPERATURE_MAX"]
+        for cold in range(int(low[0]), int(low[1]) + 1):
+            for hot in range(int(high[0]), int(high[1]) + 1):
+                settings = dict(config_module.DEFAULTS)
+                settings["TEMPERATURE_MIN"] = float(cold)
+                settings["TEMPERATURE_MAX"] = float(hot)
+                try:
+                    config_module.validate(settings)
+                except config_module.ConfigError as exc:
+                    self.fail("the panel offers %d/%d, which the service "
+                              "refuses: %s" % (cold, hot, exc))
+
     def test_the_two_tabs_do_not_offer_the_same_setting_twice(self):
         # They share one dict of widgets, so a key on both tabs would leave one
         # of the two silently ignored when Apply collects them.

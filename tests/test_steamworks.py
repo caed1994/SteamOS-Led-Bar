@@ -864,6 +864,49 @@ class AchievementsSwitchedOffTest(MessageFlashTest):
         self.assertEqual(self.flashes, ["message"])
 
 
+class NothingLeftToWatchForTest(MessageFlashTest):
+    """Messages wanted, achievements off - and messages turn out impossible.
+
+    The switches allow it and the config is valid, so nothing catches this at
+    startup: it only comes out once a game starts and the library is asked.
+    Attaching anyway would register the process as the game and report
+    nothing, and only the process ending clears that registration - so the
+    session must not be opened, or must not be kept.
+    """
+
+    achievements_enabled = True     # overridden per test
+
+    def _run_with(self, achievements, usable, listener_opens=True):
+        self.achievements_enabled = achievements
+        self._patch(steamworks, "usable_for_messages",
+                    lambda _support: usable)
+        self._patch(service, "_open_message_listener",
+                    lambda _stats: self if listener_opens else None)
+        return self._run([1942280, 1942280, None])
+
+    def test_an_old_library_with_achievements_off_never_attaches(self):
+        code = self._run_with(achievements=False, usable=False)
+        self.assertEqual(code, service.NOTHING_TO_WATCH_EXIT)
+        self.assertEqual(self.opened, [],
+                         "a session registers the process as the game")
+
+    def test_steam_refusing_chat_with_achievements_off_lets_the_session_go(self):
+        # Here the library could have done it, so the session is already open
+        # before the refusal shows up. Ending the process is what releases it.
+        code = self._run_with(achievements=False, usable=True,
+                              listener_opens=False)
+        self.assertEqual(code, service.NOTHING_TO_WATCH_EXIT)
+        self.assertEqual(self.closed, self.opened,
+                         "whatever was opened has to be closed again")
+
+    def test_achievements_alone_still_attach_with_an_old_library(self):
+        # The same old library is no obstacle when achievements are wanted.
+        code = self._run_with(achievements=True, usable=False)
+        self.assertEqual(code, 0, "an ordinary end of a game session")
+        self.assertEqual(self.opened, [1942280])
+        self.assertIn("achievement", self.flashes)
+
+
 class NothingToWatchForTest(unittest.TestCase):
     """Both switches off: the watcher must not attach to anything.
 

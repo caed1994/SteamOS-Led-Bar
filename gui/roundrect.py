@@ -9,6 +9,7 @@ having no alpha to speak of.
 
 from __future__ import annotations
 
+import functools
 import math
 
 
@@ -87,6 +88,40 @@ def coverage(x, y, width, height, radius):
     return max(0.0, min(1.0, 0.5 - distance(x, y, width, height, radius)))
 
 
+@functools.lru_cache(maxsize=64)
+def _coverage_grid(width, height, radii, border_width):
+    """Per pixel: how much of the shape covers it, and how much of the border.
+
+    Keyed on the geometry alone, because the panel draws one shape in several
+    colours - a button in its normal, hover and pressed shades are three
+    pictures of the same rectangle - and measuring it is the expensive half.
+    The result is read, never written, so one grid can serve all of them.
+    """
+    outer = _shape(width, height, radii)
+    inner = (_shape(width - 2 * border_width, height - 2 * border_width,
+                    tuple(max(0.0, value - border_width) for value in radii))
+             if border_width > 0 else None)
+
+    grid = []
+    for y in range(height):
+        row = []
+        for x in range(width):
+            edge = _distance_in(outer, x, y)
+            covered = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
+                                               else 0.5 - edge)
+            if inner is None:
+                row.append((covered, 0.0))
+                continue
+            # The ring is what the outer shape covers and the inner does not,
+            # so the border keeps its width around the corner.
+            edge = _distance_in(inner, x - border_width, y - border_width)
+            within = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
+                                              else 0.5 - edge)
+            row.append((covered, max(0.0, covered - within)))
+        grid.append(row)
+    return grid
+
+
 def rows(width, height, radius, fill, background, border=None, border_width=1,
          open_bottom=False):
     """The pixels of one rounded rectangle, as rows of "#rrggbb".
@@ -95,31 +130,17 @@ def rows(width, height, radius, fill, background, border=None, border_width=1,
     onto that colour seamlessly - the price of having no alpha, and why every
     caller has to say what it is sitting on.
     """
-    # Both shapes are the same for every pixel, so they are measured out once
-    # rather than rebuilt inside the loop.
-    radii = corner_radii(radius)
-    outer = _shape(width, height, radii)
     ring = bool(border) and border_width > 0
-    inner_shape = _shape(width - 2 * border_width, height - 2 * border_width,
-                         tuple(max(0.0, value - border_width)
-                               for value in radii)) if ring else None
+    grid = _coverage_grid(width, height, corner_radii(radius),
+                          border_width if ring else 0)
 
     picture = []
-    for y in range(height):
+    for line in grid:
         row = []
-        for x in range(width):
-            edge = _distance_in(outer, x, y)
-            inside = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
-                                              else 0.5 - edge)
-            color = blend(background, fill, inside)
-            if ring:
-                # The ring is what the outer shape covers and the inner does
-                # not, so the border keeps its width around the corner.
-                edge = _distance_in(inner_shape, x - border_width,
-                                    y - border_width)
-                inner = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
-                                                 else 0.5 - edge)
-                color = blend(color, border, max(0.0, inside - inner))
+        for covered, ringed in line:
+            color = blend(background, fill, covered)
+            if ringed:
+                color = blend(color, border, ringed)
             row.append(color)
         picture.append(row)
 
@@ -129,10 +150,7 @@ def rows(width, height, radius, fill, background, border=None, border_width=1,
         # through. Nine-slice repeats these rows, so it would show up doubly.
         for y in range(height - int(math.ceil(border_width)), height):
             for x in range(width):
-                edge = _distance_in(outer, x, y)
-                inside = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
-                                                  else 0.5 - edge)
-                picture[y][x] = blend(background, fill, inside)
+                picture[y][x] = blend(background, fill, grid[y][x][0])
     return picture
 
 
