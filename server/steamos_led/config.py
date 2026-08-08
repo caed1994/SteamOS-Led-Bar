@@ -30,6 +30,7 @@ DEFAULTS = {
     "NOTIFY_DURATION": 3.5,
     "NOTIFY_FIFO": notify.DEFAULT_FIFO,
     "NOTIFY_STYLE": "bloom",
+    "NOTIFY_ACHIEVEMENTS": True,
     "NOTIFY_MESSAGES": True,
     "ACHIEVEMENT_COLOR": "#ffd700",
     "MESSAGE_COLOR": "#8000ff",

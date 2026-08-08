@@ -582,12 +582,20 @@ def _open_message_listener(stats):
 
 
 def run_watch_achievements(config, interval=1.0):
-    """Flash the bar whenever an achievement unlocks in the running game.
+    """Flash the bar on achievements and friend messages in the running game.
 
     Runs as your normal user next to Steam, not as the sandboxed service, and
     only writes trigger words into the notification pipe.
     """
     _interrupt_on_sigterm()
+
+    achievements_on = config["NOTIFY_ACHIEVEMENTS"]
+    if not achievements_on and not config["NOTIFY_MESSAGES"]:
+        # Attaching would open a Steamworks session as the running game for
+        # nothing - and that registration is what keeps Steam on "Stopping".
+        print("Both NOTIFY_ACHIEVEMENTS and NOTIFY_MESSAGES are off, so there "
+              "is nothing to watch for.")
+        return 0
 
     fifo = config["NOTIFY_FIFO"]
     watcher = None
@@ -595,7 +603,10 @@ def run_watch_achievements(config, interval=1.0):
     current_app = None
     stats = None
 
-    print("Watching for achievements; flashes go to %s" % fifo)
+    print("Watching for %s; flashes go to %s"
+          % (" and ".join(filter(None, [
+              "achievements" if achievements_on else "",
+              "friend messages" if config["NOTIFY_MESSAGES"] else ""])), fifo))
     print("Press Ctrl-C to stop.")
 
     try:
@@ -644,7 +655,8 @@ def run_watch_achievements(config, interval=1.0):
                                                      route=route,
                                                      manual_dispatch=manual)
                         stats.open()
-                        watcher = steamworks.AchievementWatcher(stats)
+                        watcher = (steamworks.AchievementWatcher(stats)
+                                   if achievements_on else None)
                         listener = _open_message_listener(stats) if manual \
                             else None
                         LOG.info("attached to app %d", app_id)
@@ -655,12 +667,13 @@ def run_watch_achievements(config, interval=1.0):
                 else:
                     LOG.info("no game running")
 
-            if watcher is not None:
+            if stats is not None:
                 try:
-                    for name in watcher.poll():
-                        LOG.info("achievement unlocked: %s",
-                                 stats.display_name(name))
-                        _flash(fifo, "achievement")
+                    if watcher is not None:
+                        for name in watcher.poll():
+                            LOG.info("achievement unlocked: %s",
+                                     stats.display_name(name))
+                            _flash(fifo, "achievement")
                     if listener is not None:
                         # One flash however many arrived: a retrigger restarts
                         # the animation, so a burst would hold the bar lit.

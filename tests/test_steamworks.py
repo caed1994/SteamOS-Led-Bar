@@ -13,6 +13,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
+from steamos_led import config as config_module  # noqa: E402
 from steamos_led import elf, service, steamworks  # noqa: E402
 
 
@@ -338,6 +339,7 @@ class WatcherSessionLifetimeTest(unittest.TestCase):
     """
 
     messages_enabled = False
+    achievements_enabled = True
 
     def setUp(self):
         self.opened, self.closed, self.flashes = [], [], []
@@ -370,10 +372,14 @@ class WatcherSessionLifetimeTest(unittest.TestCase):
                 raise KeyboardInterrupt      # same exit the user's Ctrl-C takes
 
         self._patch(steamworks, "running_app_id", next_answer)
-        return service.run_watch_achievements(
-            {"NOTIFY_FIFO": "/dev/null", "STEAM_ROUTE": "auto",
-             "STEAM_LIBRARY": "auto",
-             "NOTIFY_MESSAGES": self.messages_enabled}, interval=0)
+        # Built on the real defaults, so a new option does not quietly get a
+        # different value here than the one the service ships with.
+        settings = dict(config_module.DEFAULTS)
+        settings.update({"NOTIFY_FIFO": "/dev/null", "STEAM_ROUTE": "auto",
+                         "STEAM_LIBRARY": "auto",
+                         "NOTIFY_ACHIEVEMENTS": self.achievements_enabled,
+                         "NOTIFY_MESSAGES": self.messages_enabled})
+        return service.run_watch_achievements(settings, interval=0)
 
     def test_it_exits_once_the_game_is_gone(self):
         # The None is the game ending; anything after it must not be reached.
@@ -828,6 +834,58 @@ class MessageFlashTest(WatcherSessionLifetimeTest):
     def test_no_messages_means_no_flash(self):
         self._run([1942280, 1942280, None])
         self.assertNotIn("message", self.flashes)
+
+
+class AchievementsSwitchedOffTest(MessageFlashTest):
+    """Someone who wants message flashes but not achievement ones.
+
+    Both are found through one Steamworks session, so switching one off has to
+    leave the other working rather than taking the session with it - which is
+    why this runs the whole session-lifetime suite again with it off.
+    """
+
+    achievements_enabled = False
+
+    def test_an_unlock_no_longer_flashes(self):
+        self._run([1942280, 1942280, None])
+        self.assertNotIn("achievement", self.flashes)
+
+    def test_the_session_is_still_opened_and_closed(self):
+        self._run([1942280, 1942280, None])
+        self.assertEqual(self.opened, [1942280])
+        self.assertEqual(self.closed, [1942280])
+
+    def test_the_flash_still_fires_before_it_exits(self):
+        # Same property as the inherited test it replaces - a flash detected
+        # on the last poll still goes out before the process leaves - but the
+        # achievement is no longer the one that can prove it.
+        self.pending_messages = [(1, 2)]
+        self._run([1942280, 1942280, None])
+        self.assertEqual(self.flashes, ["message"])
+
+
+class NothingToWatchForTest(unittest.TestCase):
+    """Both switches off: the watcher must not attach to anything.
+
+    A Steamworks session registers this process with Steam as an instance of
+    the running game, and that registration is what keeps Steam on "Stopping".
+    Opening one only to poll nothing would pay that price for no flash.
+    """
+
+    def test_it_exits_without_even_looking_for_a_game(self):
+        settings = dict(config_module.DEFAULTS)
+        settings.update({"NOTIFY_ACHIEVEMENTS": False,
+                         "NOTIFY_MESSAGES": False,
+                         "NOTIFY_FIFO": "/dev/null"})
+
+        def refuse(scan_processes=True):
+            self.fail("it went looking for a game with nothing to watch for")
+
+        original = steamworks.running_app_id
+        steamworks.running_app_id = refuse
+        self.addCleanup(setattr, steamworks, "running_app_id", original)
+        self.assertEqual(service.run_watch_achievements(settings, interval=0),
+                         0)
 
 
 

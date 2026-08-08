@@ -368,7 +368,9 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `NOTIFY` | `1` | enable the overlay at all |
+| `NOTIFY` | `1` | enable the overlay at all — with this off nothing flashes, `--notify` included |
+| `NOTIFY_ACHIEVEMENTS` | `1` | watch for achievement unlocks |
+| `NOTIFY_MESSAGES` | `1` | watch for friend messages |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | shape of the flash: `bloom` (out of the middle) or `pulse` (whole bar swells three times) |
@@ -449,9 +451,12 @@ the bar would flash twice per message. Reading it means reading the message
 text, which is then discarded: what a friend wrote does not belong in a
 system log.
 
-Set `NOTIFY_MESSAGES=0` in the config to turn it off. Achievements are
-unaffected either way: if no suitable library is found, the watcher says so in
-the log once and carries on flashing gold.
+Set `NOTIFY_MESSAGES=0` in the config to turn it off, and
+`NOTIFY_ACHIEVEMENTS=0` for the other half. They are independent: both are
+found through the same Steamworks session, so switching one off leaves the
+other working. With both off the watcher attaches to nothing at all. If no
+suitable library is found for messages, the watcher says so in the log once
+and carries on flashing gold.
 
 **Why only while a game runs?** Steamworks has to be initialised *as* an app,
 so there is nothing to attach to otherwise - and a process registered with

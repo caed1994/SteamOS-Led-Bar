@@ -81,8 +81,12 @@ SETTINGS = [
     # Not a "choice": the values are paths into /sys and the machine decides
     # what they are, so the menu is built from what it reports.
     ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor", None, None, None),
-    ("NOTIFY", "Flash on achievements", "bool", None, None, None),
-    # Under the switch it belongs to, so the pair reads as one setting.
+    # The master switch: with this off nothing flashes at all, not even
+    # --notify, because the trigger pipe is never opened.
+    ("NOTIFY", "Flash on notifications", "bool", None, None, None),
+    # Then one switch per thing worth watching for, each with the colour it
+    # flashes underneath it, so the pair reads as one setting.
+    ("NOTIFY_ACHIEVEMENTS", "Flash on achievements", "bool", None, None, None),
     ("ACHIEVEMENT_COLOR", "Achievement colour", "named",
      ledpanel.ACHIEVEMENT_COLOURS, None, None),
     ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None, None),
