@@ -106,10 +106,9 @@ def format_value(value):
 def update_text(text, values):
     """Return `text` with these options set, leaving everything else alone.
 
-    Rewriting the file from the parsed values would be shorter and would throw
-    away every comment in it - and this file is mostly comments explaining what
-    each option does. So existing lines are edited in place and anything not
-    already there is appended under a heading.
+    Rewriting from the parsed values would be shorter but would throw away
+    every comment, and this file is mostly comments. So existing lines are
+    edited in place and anything new is appended under a heading.
     """
     remaining = dict(values)
     lines = text.splitlines(keepends=True)
@@ -159,9 +158,8 @@ MAPPINGS = ("stretch", "repeat", "crop")
 # Taken from the module that implements them, so the validator cannot drift.
 NOTIFY_STYLES = notify.STYLES
 
-# Where the temperature gauge's two marks may sit. The range is deliberately
-# wide - people watch different sensors - but not unbounded: a mark outside it
-# means a unit mix-up (millidegrees, or Fahrenheit) rather than an intention.
+# Where the gauge's two marks may sit. Wide, because people watch different
+# sensors, but not unbounded: outside this is a unit mix-up, not an intention.
 TEMPERATURE_FLOOR = 0.0
 TEMPERATURE_CEILING = 150.0
 TEMPERATURE_SPAN = 5.0
@@ -207,8 +205,7 @@ def validate(config):
         if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
             raise ConfigError("%s must be between %g and %g degrees"
                               % (key, TEMPERATURE_FLOOR, TEMPERATURE_CEILING))
-    # Equal ends would be a division by zero in the gauge, and a bar that
-    # jumps from empty to full with nothing in between.
+    # Equal ends would divide by zero, and a bar that jumps empty to full.
     if config["TEMPERATURE_MAX"] - config["TEMPERATURE_MIN"] < TEMPERATURE_SPAN:
         raise ConfigError("TEMPERATURE_MAX must be at least %g degrees above "
                           "TEMPERATURE_MIN" % TEMPERATURE_SPAN)

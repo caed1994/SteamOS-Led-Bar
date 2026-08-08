@@ -1,10 +1,8 @@
 """Read the colours and font KDE Plasma is using.
 
 tkinter has no idea a desktop theme exists, which is why an unstyled panel
-looks like a visitor from another decade. Plasma, however, writes its active
-colour scheme into ~/.config/kdeglobals as plain INI - so the colours can
-simply be read and handed to ttk.
-
+looks like a visitor from another decade. Plasma writes its active scheme into
+~/.config/kdeglobals as plain INI, so it can simply be read and handed to ttk.
 No tkinter in here: parsing a file is worth testing, painting widgets is not.
 """
 
@@ -58,8 +56,8 @@ def parse_color(text):
 def parse_font(text):
     """Plasma's font line, e.g. "Noto Sans,10,-1,5,50,0,0,0,0,0".
 
-    Only the family and size are of interest; the rest describes weight and
-    style in Qt's own numbering, which Tk does not share.
+    Only family and size are of interest; the rest is weight and style in Qt's
+    own numbering, which Tk does not share.
     """
     parts = [part.strip() for part in str(text).split(",")]
     if not parts or not parts[0]:
@@ -99,8 +97,8 @@ def mix(first, second, weight=0.5):
 def read(path=None):
     """The desktop's palette, falling back to Breeze where anything is missing.
 
-    Every value is filled in: a partial or hand-edited kdeglobals must not
-    produce a window with three colours and two holes.
+    Every value is filled in: a hand-edited kdeglobals must not produce a
+    window with three colours and two holes.
     """
     palette = dict(BREEZE_LIGHT)
     palette["font"] = None
@@ -127,9 +125,8 @@ def read(path=None):
 def derived(palette):
     """The few shades a widget set needs that Plasma does not name.
 
-    Borders and hover states are drawn by Qt itself, so the scheme has no entry
-    for them - they get mixed from the colours it does name, which keeps them
-    right in a dark scheme as well as a light one.
+    Qt draws borders and hover states itself, so the scheme has no entry for
+    them. Mixing from the named colours keeps them right in a dark scheme too.
     """
     text = palette["window_text"]
     window = palette["window"]

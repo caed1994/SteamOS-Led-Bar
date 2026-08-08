@@ -285,10 +285,9 @@ def run_check_config(config):
 def run_temperature(config):
     """List the machine's temperature sensors and show what the gauge does.
 
-    Which sensor is the right one is a per-machine question - a laptop reports
-    a dozen and most of them measure something nobody means by "how hot is it".
-    So every one is listed with its current reading, and the chosen one is
-    marked, which is what a TEMPERATURE_SENSOR line needs to be written by hand.
+    Which one is right is a per-machine question, so all of them are listed
+    with their readings and the chosen one marked - which is what writing a
+    TEMPERATURE_SENSOR line by hand needs.
     """
     sensors = temperature.find_sensors()
     if not sensors:
@@ -551,9 +550,8 @@ def run_probe_messages(config, seconds=None):
 PROCESS_SCAN_EVERY = 5          # ticks
 
 # Told to watch for nothing at all. The watcher normally exits 0 after one
-# game and is restarted, so "nothing to do" needs an exit systemd can tell
-# apart - otherwise the unit respawns on its RestartSec forever. The user unit
-# names this code in RestartPreventExitStatus.
+# game and is restarted, so this needs an exit systemd can tell apart or the
+# unit respawns forever. RestartPreventExitStatus names it.
 NOTHING_TO_WATCH_EXIT = 3
 
 
@@ -609,10 +607,9 @@ def run_watch_achievements(config, interval=1.0):
     current_app = None
     stats = None
 
-    # flush, because this runs as a service: Python block-buffers stdout when
-    # it is a pipe rather than a terminal, so without it these lines sit in
-    # the buffer until the process is stopped - and then land in the journal
-    # next to the shutdown, describing a run that is already over.
+    # flush, because this runs as a service: Python block-buffers a piped
+    # stdout, so these lines would sit there until the process stopped and
+    # then land in the journal describing a run that is already over.
     print("Watching for %s; flashes go to %s"
           % (" and ".join(filter(None, [
               "achievements" if achievements_on else "",

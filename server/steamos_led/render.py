@@ -143,23 +143,21 @@ def _demo(snapshot, elapsed, options):
     return [(r * level, g * level, b * level) for r, g, b in frame]
 
 
-# The gauge's colour runs from green to red the way a hue circle does, which
-# passes through yellow and orange - the sequence everybody already reads as
-# "getting worse". Green is a third of the way round it.
+# Green to red around the hue circle, which passes through yellow and orange -
+# the sequence everybody already reads as "getting worse".
 GREEN_HUE = 1.0 / 3.0
 
 
 def _temperature(snapshot, elapsed, options):
     """A gauge: fills as the machine warms, greening to red as it fills.
 
-    Below the cold mark nothing is lit, which is what "starts filling at 40"
-    means - and a bar that is dark when the machine is cool is also the least
-    distracting thing it can do.
+    Below the cold mark nothing is lit - which is what "starts filling at 40"
+    means, and the least distracting thing a cool machine can do.
     """
     celsius = options.temperature.celsius()
     if celsius is None:
-        # No sensor. Falling back to the rainbow beats a dark strip, which
-        # would look like the service had died; the log says what happened.
+        # Falling back to the rainbow beats a dark strip, which would look
+        # like the service had died. The log says what happened.
         return _rainbow(snapshot, elapsed, options)
 
     low, high = options.temperature_range
@@ -168,16 +166,14 @@ def _temperature(snapshot, elapsed, options):
 
     red, green, blue = hsv_to_rgb(GREEN_HUE * (1.0 - fraction), 1.0, 1.0)
 
-    # The lit length is fractional, so the leading LED fades in rather than
-    # the whole bar stepping a notch at a time - at 17 LEDs a whole step is
-    # nearly three degrees.
+    # Fractional, so the leading LED fades in rather than the bar stepping a
+    # notch at a time - at 17 LEDs a step is nearly three degrees.
     lit = fraction * shim.LOGICAL_LEDS
     last = shim.LOGICAL_LEDS - 1
     frame = []
     for index in range(shim.LOGICAL_LEDS):
-        # Grows from the far end, which is the direction the other effects
-        # run in on the bar. REVERSE still flips the whole strip on top of
-        # this, so a bar mounted the other way round stays consistent.
+        # Grows from the far end, the way the other effects run. REVERSE
+        # still flips the whole strip on top of this.
         level = max(0.0, min(lit - (last - index), 1.0))
         frame.append((red * level, green * level, blue * level))
     return frame
@@ -246,11 +242,9 @@ class Renderer:
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
         effect = _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL])
-        # The rainbow slot doubles as the temperature gauge when that is
-        # switched on. Steam's own menu cannot be extended - the entries are
-        # built into the client - so showing something else is only possible
-        # by taking over an entry it already offers, and the rainbow is the
-        # one people are happy to give up.
+        # Steam's menu cannot be extended - the entries are built into the
+        # client - so the gauge has to take over an entry it already offers,
+        # and the rainbow is the one people are happy to give up.
         if self.temperature is not None and snapshot.effect == shim.EFFECT_RAINBOW:
             effect = _temperature
         return effect(snapshot, elapsed, self)

@@ -1,12 +1,10 @@
 """Rounded rectangles as pixels, for widgets that ttk draws with sharp corners.
 
-ttk has no corner radius. What it does have is image elements: a widget part
-can be a picture, stretched with nine-slice scaling. So the corners are drawn
-here and handed over as images.
-
-Pure arithmetic, no tkinter - the shapes are worth checking, and a build
-machine has no display. Antialiasing is done by blending against a known
-background, because tkinter's PhotoImage has no alpha channel to speak of.
+ttk has no corner radius, but a widget part can be an image, stretched with
+nine-slice scaling - so the corners are drawn here and handed over as pictures.
+Pure arithmetic, no tkinter: the shapes are worth testing, and a build machine
+has no display. Antialiasing blends against a known background, PhotoImage
+having no alpha to speak of.
 """
 
 from __future__ import annotations
@@ -37,8 +35,7 @@ def blend(background, foreground, amount):
 def corner_radii(radius):
     """One radius or four, as (top left, top right, bottom right, bottom left).
 
-    Four of them is what a notebook tab needs: round on top, square where it
-    meets the page.
+    Four is what a notebook tab needs: round on top, square against the page.
     """
     if isinstance(radius, (int, float)):
         return (float(radius),) * 4
@@ -51,10 +48,9 @@ def corner_radii(radius):
 def distance(x, y, width, height, radius):
     """Signed distance from a rounded rectangle's edge; negative is inside.
 
-    The usual rounded-box formula: shrink the box by the radius, measure to
-    that, then subtract the radius back off. Sharp corners fall out of it as
-    the radius-zero case, so there is no separate path for them - and with a
-    radius per corner, neither do tabs.
+    The usual rounded-box formula: shrink by the radius, measure, subtract it
+    back off. Sharp corners fall out as the radius-zero case, tabs as the
+    radius-per-corner one, so neither needs a path of its own.
     """
     radii = corner_radii(radius)
     cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
@@ -81,8 +77,8 @@ def rows(width, height, radius, fill, background, border=None, border_width=1,
     """The pixels of one rounded rectangle, as rows of "#rrggbb".
 
     Anything outside the shape comes back as `background`, so the result drops
-    onto that colour without a visible seam - which is the price of having no
-    alpha, and the reason every caller has to say what it is sitting on.
+    onto that colour seamlessly - the price of having no alpha, and why every
+    caller has to say what it is sitting on.
     """
     picture = []
     for y in range(height):
@@ -91,9 +87,8 @@ def rows(width, height, radius, fill, background, border=None, border_width=1,
             inside = coverage(x, y, width, height, radius)
             color = blend(background, fill, inside)
             if border and border_width > 0:
-                # The ring is what the outer shape covers and the inner one
-                # does not, so a rounded border stays the same width all the
-                # way around the corner.
+                # The ring is what the outer shape covers and the inner does
+                # not, so the border keeps its width around the corner.
                 inner = coverage(x - border_width, y - border_width,
                                  width - 2 * border_width,
                                  height - 2 * border_width,
@@ -104,10 +99,9 @@ def rows(width, height, radius, fill, background, border=None, border_width=1,
         picture.append(row)
 
     if open_bottom and border and border_width > 0:
-        # A tab has no line along its bottom: that edge is where it joins the
-        # page, and a border there is exactly the stripe that makes a row of
-        # tabs look like it has been struck through. It matters twice over,
-        # because nine-slice scaling repeats the bottom rows to fill height.
+        # A tab has no line along its bottom: that edge joins the page, and a
+        # border there is the stripe that makes a row of tabs look struck
+        # through. Nine-slice repeats these rows, so it would show up doubly.
         for y in range(height - int(math.ceil(border_width)), height):
             for x in range(width):
                 inside = coverage(x, y, width, height, radius)
@@ -131,8 +125,8 @@ def segment_coverage(x, y, start, end, thickness):
 def draw_check(picture, color, thickness=2.2):
     """Put a tick in the middle of an existing picture.
 
-    Drawn rather than taken from a font: a glyph would depend on what is
-    installed, and at sixteen pixels the wrong fallback font is unreadable.
+    Drawn rather than taken from a font: at this size the wrong fallback font
+    is unreadable, and which one that is depends on the machine.
     """
     height, width = len(picture), len(picture[0])
     points = ((0.26 * width, 0.53 * height),

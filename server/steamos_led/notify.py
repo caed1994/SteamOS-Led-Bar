@@ -106,8 +106,8 @@ STYLES = tuple(_STYLES)
 def parse_color(text, kinds=None):
     """Accept a kind name, '#rrggbb', 'rrggbb' or 'r,g,b'.
 
-    `kinds` is the name table to resolve against; the built-in one is only the
-    default, so a service told to flash a different gold can hand in its own.
+    `kinds` is the name table; the built-in one is only the default, so a
+    service told to flash a different gold can hand in its own.
     """
     kinds = KINDS if kinds is None else kinds
     value = str(text).strip().lower()
@@ -169,7 +169,6 @@ class NotificationOverlay:
         self.duration = duration
         self.led_count = led_count
         self.style = style if style in STYLES else STYLE_BLOOM
-        # The named triggers, with any the configuration overrides replaced.
         # A trigger word stays the interface - callers ask for "achievement",
         # not for a colour - so which gold that is stays a local decision.
         self.colors = dict(KINDS, **(colors or {}))

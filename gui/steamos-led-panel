@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """Control panel for the SteamOS LED bar bridge.
 
-Settings, tests and repair in one window. Installation stays with install.sh -
-this is for everything after it, which is the part you do more than once.
+Settings, tests and repair in one window. Installation stays with install.sh;
+this is for everything after it, the part you do more than once.
 
 Deliberately tkinter and nothing else: SteamOS has a read-only rootfs, so
-anything installed with a package manager is gone at the next system update.
-Only the standard library survives that.
-
-Unprivileged. Flashing the bar and asking Steam questions need no rights at
-all, and the two things that do - writing the config and restarting the
-service - go through pkexec one prompt at a time.
+anything a package manager installs is gone at the next system update. Only
+the standard library survives that. Unprivileged except for writing the config
+and restarting the service, which go through pkexec one prompt at a time.
 """
 
 from __future__ import annotations
@@ -43,24 +40,18 @@ import ledpanel                                             # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
 
 
-# Which settings to show, in this order, and how: key, label, kind, and for
-# the numeric ones the two ends and the step the slider moves in. The bounds
-# repeat what config.validate() enforces - it raises text rather than exposing
-# numbers, and a slider needs the numbers. The validator stays the authority:
-# everything is handed to it before it is written, so a disagreement here is
-# caught, not shipped.
-#
-# The step is what the slider can stop on. ttk.Scale is continuous whatever is
-# drawn on it, so without one a gamma of 2.4 is really 2.4372 and the readout
-# quietly lies about it. Every range starts on a multiple of its own step, so
-# both ends are reachable.
+# Which settings to show, in order: key, label, kind, and for numeric ones the
+# two ends and the step. The bounds repeat what config.validate() enforces,
+# which raises text where a slider needs numbers - but the validator stays the
+# authority, so a disagreement here is caught rather than shipped. The step is
+# what the slider can stop on, ttk.Scale being continuous whatever is drawn on
+# it. Every range starts on a multiple of its step, so both ends are reachable.
 SETTINGS = [
     # 120, not the 1024 the service accepts. Two limits meet there: the
-    # GPIO14 firmware is built with MAX_LEDS=120 and rejects a longer frame
-    # outright, and 230400 baud carries about 125 LEDs at 60 fps before the
-    # link is the bottleneck. Past that the slider would be offering lengths
-    # that go dark or stutter - and this is a strip around a small machine,
-    # not stage lighting. Longer strips are still a config file away.
+    # GPIO14 firmware is built with MAX_LEDS=120 and rejects longer frames,
+    # and 230400 baud carries about 125 LEDs at 60 fps. Past that the slider
+    # would offer lengths that go dark or stutter. Longer strips are still a
+    # config file away.
     ("LED_COUNT", "LEDs on the strip", "int", 1, 120, 1),
     ("REVERSE", "Flip the strip direction", "bool", None, None, None),
     ("MAX_BRIGHTNESS", "Maximum brightness", "int", 0, 255, 1),
@@ -68,13 +59,11 @@ SETTINGS = [
     ("PATROL_DOTS", "Patrol dots", "int", 1, 8, 1),
     ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow", "bool",
      None, None, None),
-    # The two marks are coupled - the bar has to fill over a span, not at a
-    # point - and the ranges are kept apart so no combination of the two
-    # sliders can produce a config the service refuses. Anything more exotic
-    # than "starts somewhere under 70, full somewhere over 75" belongs in the
-    # config file, which takes 0-150 for both.
-    # Whole degrees: half a degree is below what a bar of 17 LEDs can show
-    # anyway, and "85.38" reads like a measurement rather than a setting.
+    # The two marks are coupled - the bar fills over a span, not at a point -
+    # and the ranges are kept apart so no combination can produce a config the
+    # service refuses. Anything more exotic belongs in the file, which takes
+    # 0-150 for both. Whole degrees: half of one is below what 17 LEDs show,
+    # and "85.38" reads like a measurement rather than a setting.
     ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "int",
      20, 70, 1),
     ("TEMPERATURE_MAX", "Temperature: bar full (C)", "int", 75, 120, 1),
@@ -92,18 +81,16 @@ SETTINGS = [
     ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None, None),
     ("MESSAGE_COLOR", "Friend message colour", "named",
      ledpanel.MESSAGE_COLOURS, None, None),
-    # From half a second, in half seconds: the validator allows a tenth, but
-    # the flash grows, breathes and retracts, and none of that is visible in
-    # a tenth of a second.
+    # From half a second: the validator allows a tenth, but the flash grows,
+    # breathes and retracts, none of which is visible in that.
     ("NOTIFY_DURATION", "Flash duration (seconds)", "float", 0.5, 60.0, 0.5),
     ("NOTIFY_STYLE", "Flash shape", "choice", config_module.NOTIFY_STYLES,
      None, None),
 ]
 
-# Set once and then left alone: the defaults are right for a 17 LED bar on the
-# shipped firmware, and every one of these is a knob you turn because something
-# specific is wrong, not because you are decorating. Same table format, so the
-# two tabs are built by the same code and validated the same way.
+# Set once and left alone: the defaults suit a 17 LED bar on the shipped
+# firmware, and each of these is a knob you turn because something specific is
+# wrong. Same format, so both tabs are built and validated by the same code.
 ADVANCED = [
     ("MAPPING", "Mapping of the 17 logical LEDs", "choice",
      config_module.MAPPINGS, None, None),
@@ -120,18 +107,16 @@ ADVANCED = [
 # and the .desktop file names the same string in StartupWMClass.
 WM_CLASS = "steamos-led-panel"
 
-# PhotoImage objects are only alive while something references them; a widget
-# element does not count, so an image that goes out of scope leaves the widget
-# blank. They are parked here for the life of the window.
+# PhotoImage objects live only while something references them, and a widget
+# element does not count - so they are parked here for the window's life.
 _IMAGES = []
 
 TAB_RADIUS = 9
 BOX_RADIUS = 10
 BUTTON_RADIUS = 9
-# Sizes are set for fingers and a trackpad, not for a mouse on a desk: this
-# runs on a machine people also use handheld, where a hairline control is
-# genuinely hard to hit. Everything here is comfortably above the ~20 px that
-# desktop guidelines treat as the smallest sensible target.
+# Sized for fingers and a trackpad, not a mouse on a desk: this runs on a
+# machine people also use handheld. Everything here is comfortably above the
+# ~20 px that desktop guidelines call the smallest sensible target.
 CHECKBOX_SIZE = 24          # clam's own indicator is barely a quarter of this
 TRACK_THICKNESS = 12        # the groove a slider runs in
 KNOB_DIAMETER = 24          # thick enough to grab, round enough to read as a pill
@@ -158,23 +143,17 @@ def _rounded(width, height, radius, fill, background, border=None):
 
 
 def round_the_corners(style, palette, shade):
-    """Replace the square widget parts with rounded pictures.
+    """Replace the square widget parts with rounded pictures - see roundrect.
 
-    ttk has no corner radius and no way to ask for one. It does have image
-    elements: a part of a widget can be a picture, stretched with nine-slice
-    scaling so the corners keep their shape while the middle grows. So the
-    corners are drawn as pixels and handed over.
-
-    Best effort - an older Tk that will not take image elements keeps the flat
-    look rather than an unpainted window.
+    Best effort: an older Tk that will not take image elements keeps the flat
+    look rather than leaving an unpainted window.
     """
     window, view = palette["window"], palette["view"]
     accent = palette["selection"]
 
     def tab(fill, background):
-        # Square at the bottom and with no border along it: that edge is where
-        # the tab meets the page, and a line there is precisely the stripe
-        # that makes a row of tabs look struck through.
+        # Square at the bottom, no border along it - see roundrect's
+        # open_bottom for why.
         return _photo(roundrect.rows(
             TAB_RADIUS * 2 + 4, 34, (TAB_RADIUS, TAB_RADIUS, 0, 0),
             fill, background, border=shade["border"], border_width=1,
@@ -242,9 +221,7 @@ def round_the_corners(style, palette, shade):
 
     def checkboxes():
         # clam's indicator is a few pixels of hairline - too small to hit and
-        # too small to read. A drawn one can be any size; the tick is drawn
-        # rather than taken from a font, which would depend on what happens to
-        # be installed.
+        # too small to read. A drawn one can be any size.
         size = CHECKBOX_SIZE
 
         def indicator(fill, edge, tick=None):
@@ -270,9 +247,8 @@ def round_the_corners(style, palette, shade):
         # A pill-shaped groove and a round knob.
         radius = TRACK_THICKNESS / 2.0
 
-        # The groove is drawn inside an image as tall as the knob. ttk sizes
-        # the widget from the trough element, so a groove-sized image would
-        # crop a knob that is deliberately bigger than it.
+        # Drawn inside an image as tall as the knob: ttk sizes the widget
+        # from the trough, so a groove-sized one would crop the larger knob.
         groove = roundrect.pill(TRACK_THICKNESS * 3, TRACK_THICKNESS, view,
                                 window, border=shade["border"], border_width=1)
         padding = (KNOB_DIAMETER - TRACK_THICKNESS) // 2
@@ -309,13 +285,10 @@ def round_the_corners(style, palette, shade):
 def apply_theme(root):
     """Dress the window in whatever colours Plasma is using.
 
-    ttk ships no theme that resembles a modern desktop, and it cannot ask one
-    either - so the scheme is read from KDE's own config and painted on. clam
-    is the base because it is the only built-in theme that honours colour
-    options at all; the others draw fixed bitmaps.
-
-    Returns the palette, so the parts tkinter styles cannot reach - the text
-    pane, the status marks - can use the same colours.
+    ttk ships no theme resembling a modern desktop and cannot ask one either,
+    so the scheme is read from KDE's config and painted on. clam is the base:
+    the only built-in theme that honours colour options rather than drawing
+    fixed bitmaps. Returns the palette, for the parts ttk cannot reach.
     """
     palette = kdetheme.read()
     shade = kdetheme.derived(palette)
@@ -393,8 +366,7 @@ def apply_theme(root):
                     bordercolor=shade["border"], padding=(8, 7),
                     arrowsize=ARROW_SIZE)
     # A read-only combobox draws its text as a *selection*, so without these
-    # the label comes out in the selection colours - which is how it ended up
-    # pale grey on pale grey and all but unreadable.
+    # the label comes out pale grey on pale grey.
     style.map("TCombobox",
               fieldbackground=[("readonly", palette["view"]),
                                ("disabled", palette["window"])],
@@ -504,9 +476,8 @@ class Panel:
         self.shade = self.palette["_shade"]
         self.config = self._load_config()
         self.vars = {}
-        # Menus whose entries are labels for something else: key -> the
-        # (label, value) pairs, and the widget, so a value that turns up later
-        # can be added to both.
+        # key -> the (label, value) pairs and the widget, so a value that
+        # turns up later can be added to both.
         self._menus = {}
         self._widgets = {}
 
@@ -542,11 +513,10 @@ class Panel:
     # -- helpers ----------------------------------------------------------
 
     def _set_window_icon(self):
-        """The same icon the menu entry uses, in the titlebar and the task bar.
+        """The same icon the menu entry uses, in the titlebar and task bar.
 
-        Optional in every direction: the file may not be there, and Tk only
-        reads PNG from 8.6 on. A window with the default icon is a cosmetic
-        loss, so nothing here is worth failing over.
+        Optional in every direction - the file may be missing, and Tk reads
+        PNG only from 8.6 on. A default icon is not worth failing over.
         """
         icon = ledpanel.panel_icon(SOURCE_DIR)
         if not os.path.isabs(icon):
@@ -577,9 +547,8 @@ class Panel:
     def _build_output(self, parent):
         frame = ttk.LabelFrame(parent, text="Output", padding=1)
         frame.pack(fill="both", expand=True, padx=16, pady=14)
-        # tk.Text is not a themed widget, so its colours have to be set by
-        # hand - and it is the one place a fixed-width font is right, because
-        # everything landing here is command output.
+        # tk.Text is not themed, so its colours are set by hand - and it is
+        # the one place a fixed-width font is right: this is command output.
         text = tk.Text(frame, height=9, wrap="word", state="disabled",
                        relief="flat", borderwidth=0, padx=10, pady=8,
                        background=self.palette["view"],
@@ -618,9 +587,8 @@ class Panel:
                              state="readonly", width=12).grid(
                                  row=row, column=1, sticky="w")
             elif kind in ("sensor", "named"):
-                # Menus whose entries are not what gets written: a sensor is a
-                # path into /sys, a colour is six hex digits, and neither is
-                # something to show someone.
+                # Entries that are labels for something else - see the menu
+                # helpers in ledpanel.
                 variable = tk.StringVar()
                 choices = (ledpanel.sensor_choices(*ledpanel.read_sensors(),
                                                    current=str(value))
@@ -639,8 +607,7 @@ class Panel:
                    command=self.apply_settings).pack(side="left")
         ttk.Button(buttons, text="Reload from file",
                    command=self.reload_settings).pack(side="left", padx=6)
-        # Both tabs edit one file, and Apply writes all of it. Saying so beats
-        # leaving someone to wonder whether the other tab came along.
+        # Both tabs edit one file and Apply writes all of it, so say so.
         ttk.Label(outer, text="Apply writes every setting, on both tabs.",
                   style="Muted.TLabel").pack(anchor="w", padx=16, pady=(0, 12))
         return outer
@@ -658,10 +625,9 @@ class Panel:
     def _label_for(self, key, value):
         """The entry for a configured value, added to the menu if it is new.
 
-        Someone editing the file by hand and pressing Reload is exactly how
-        the sensor and colour settings are meant to be used from a terminal,
-        so a value the menu does not offer has to become an entry rather than
-        being silently replaced by one that is.
+        Editing the file by hand and pressing Reload is how these settings are
+        meant to be used from a terminal, so a value the menu does not offer
+        has to become an entry rather than be silently replaced.
         """
         choices = self._menus[key]
         label = ledpanel.menu_label(choices, value)
@@ -685,13 +651,10 @@ class Panel:
 
         def show(*_args):
             value = variable.get()
-            # Snap to the step, so the knob rests where the readout says it
-            # is: ttk.Scale is continuous whatever is drawn on it, and a
-            # slider showing 2.4 while holding 2.4372 is a slider that lies.
-            # Rounding to the step's own decimals keeps 2.4000000000000004
-            # out of the config file. The guard ends the recursion - setting
-            # the variable calls this again, and the second time round the
-            # value is already on a step.
+            # Snap to the step, so the knob rests where the readout says: a
+            # slider showing 2.4 while holding 2.4372 lies. Rounding to the
+            # step's decimals keeps 2.4000000000000004 out of the file, and
+            # the guard ends the recursion that setting the variable starts.
             snapped = round(round(value / step) * step, _decimals(step))
             snapped = min(max(snapped, low), high)
             if abs(value - snapped) > 1e-9:
@@ -716,10 +679,9 @@ class Panel:
                            else self._value_for(key, raw)
                            if kind in ("sensor", "named")
                            else str(raw))
-        # The two frame rates are coupled - the idle rate cannot exceed the
-        # active one - and two independent sliders cannot express that. Pulling
-        # FPS below IDLE_FPS is an obvious intention, so follow it and move the
-        # other slider rather than refusing the adjustment.
+        # The idle rate cannot exceed the active one, which two independent
+        # sliders cannot express. Pulling FPS below IDLE_FPS is an obvious
+        # intention, so follow it rather than refuse the adjustment.
         if values["IDLE_FPS"] > values["FPS"]:
             values["IDLE_FPS"] = values["FPS"]
             self.vars["IDLE_FPS"][0].set(float(values["FPS"]))
@@ -765,10 +727,9 @@ class Panel:
                 self.refresh_status()
                 return
             self.config.update(values)
-            # The helper restarted the service, but the watcher reads the same
-            # file and is a user unit, so it is out of that helper's reach -
-            # and without this, switching achievement or message flashing on
-            # would not take effect until the next game ended.
+            # The helper restarted the service, but the watcher reads the
+            # same file and is a user unit, out of its reach - without this a
+            # changed flash setting waits for the next game to end.
             self.runner.start(ledpanel.restart_watcher_command(),
                               lambda _code: self.refresh_status())
 
@@ -799,10 +760,9 @@ class Panel:
 
         row = ttk.Frame(flashes)
         row.pack(fill="x", padx=8, pady=(0, 8))
-        # No colour in the labels: two of the three are a setting on the
-        # Settings tab now, so naming one here would be a promise this button
-        # cannot keep. The button flashes whatever that trigger is set to,
-        # which is the point of pressing it.
+        # No colour in the labels: two of the three are a setting now, so
+        # naming one here would be a promise the button cannot keep. It
+        # flashes whatever the trigger is set to, which is the point.
         for kind, label in (("achievement", "Achievement"),
                             ("message", "Friend message"),
                             ("warning", "Warning")):
@@ -911,11 +871,9 @@ class Panel:
 
 def main():
     # Without a class of its own the window says WM_CLASS "Tk", which matches
-    # no menu entry - so the desktop falls back to naming it after the process
-    # that happens to be running it, and the task bar reads "python3". This
-    # has to be passed at creation; it cannot be set afterwards. It must stay
-    # equal to StartupWMClass in the .desktop file, which is how the desktop
-    # ties the window to the menu entry (and so to its icon and name).
+    # no menu entry, so the task bar falls back to reading "python3". It has
+    # to be passed at creation, and must stay equal to StartupWMClass in the
+    # .desktop file - that is how the desktop ties the window to its icon.
     root = tk.Tk(className=WM_CLASS)
     try:
         ttk.Style().theme_use("clam")

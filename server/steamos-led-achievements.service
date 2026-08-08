@@ -20,10 +20,9 @@ Restart=always
 # Long enough for Steam to finish stopping the game: coming back too early
 # would find the app still present and block the shutdown all over again.
 RestartSec=20
-# Exit 3 is "NOTIFY_ACHIEVEMENTS and NOTIFY_MESSAGES are both off", which no
-# amount of restarting will change - see NOTHING_TO_WATCH_EXIT in service.py.
-# It is also not a failure but a setting, so say so: otherwise the journal
-# reports "Failed with result 'exit-code'" for doing exactly as it was told.
+# Exit 3 is "both notification switches are off" - a setting, not a failure,
+# and no amount of restarting will change it. Without these the journal reports
+# a failure for doing exactly as it was told. See NOTHING_TO_WATCH_EXIT.
 RestartPreventExitStatus=3
 SuccessExitStatus=3
 

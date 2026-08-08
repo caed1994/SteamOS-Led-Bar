@@ -1,9 +1,9 @@
 """Reading how hot the machine is, from the kernel's hwmon interface.
 
-Every temperature sensor a Linux machine has shows up under /sys/class/hwmon
-as a chip with one or more inputs, in thousandths of a degree. The work is not
-reading one - it is picking the right one out of a dozen, most of which
-measure something nobody means by "how hot is it".
+Every sensor shows up under /sys/class/hwmon as a chip with one or more
+inputs, in thousandths of a degree. The work is not reading one - it is
+picking the right one out of a dozen, most of which measure something nobody
+means by "how hot is it".
 """
 
 from __future__ import annotations
@@ -18,10 +18,9 @@ LOG = logging.getLogger(__name__)
 HWMON_ROOT = "/sys/class/hwmon"
 
 # Chips worth watching, best first. On a Steam Machine the APU is the answer:
-# k10temp is its CPU side, amdgpu its graphics side. coretemp is the Intel
-# equivalent, and the last two turn up on handhelds and ARM boards. Everything
-# else a machine reports - the SSD, the wifi card, the battery - is a real
-# temperature but not the one anybody means.
+# k10temp is its CPU side, amdgpu its graphics side; coretemp is the Intel
+# equivalent, the last two turn up on handhelds and ARM boards. The SSD, the
+# wifi card and the battery are real temperatures, but not the one meant.
 PREFERRED_CHIPS = ("k10temp", "amdgpu", "coretemp", "cpu_thermal", "acpitz")
 
 # Within a chip, the sensor that speaks for the whole package. Tctl is what AMD
@@ -40,8 +39,8 @@ def _read_text(path):
 def read_celsius(path):
     """One hwmon input, in degrees, or None if it will not read.
 
-    hwmon reports thousandths of a degree - a raw 52000 is 52 C, and reporting
-    it unconverted would peg any gauge at maximum forever.
+    hwmon reports thousandths: a raw 52000 is 52 C, and unconverted it would
+    peg any gauge at maximum forever.
     """
     text = _read_text(path)
     if not text:
@@ -55,8 +54,8 @@ def read_celsius(path):
 def find_sensors(root=HWMON_ROOT):
     """Every temperature input on the machine, as dicts.
 
-    Each has: chip (the driver's name), label (what the input measures, if it
-    says), path, and rank - lower is a better answer to "how hot is it".
+    Each has chip, label, path and rank - lower is a better answer to "how hot
+    is it".
     """
     found = []
     for chip_dir in sorted(glob.glob(os.path.join(root, "hwmon*"))):
@@ -90,7 +89,7 @@ def _rank(chip, label):
     else:
         label_rank = len(PREFERRED_LABELS)
 
-    # The chip decides first: a well-labelled SSD sensor must not beat an
+    # The chip decides first, or a well-labelled SSD sensor would beat an
     # unlabelled CPU one.
     return (chip_rank, label_rank)
 
@@ -102,14 +101,11 @@ def pick_sensor(sensors):
     return min(sensors, key=lambda sensor: sensor["rank"])
 
 
-# How long a reading is kept, and how hard the readings are smoothed.
-#
-# A CPU sensor is noisy in a way the eye picks up immediately: Tctl jumps a
-# degree or two between one second and the next while the machine is doing
-# nothing in particular. Over the gauge's 45 degree span that is most of an
-# LED, so the leading one - the only one lit part way - would flicker on every
-# reading. Averaging over a few seconds settles it without hiding a real
-# warm-up, which takes far longer than that.
+# How long a reading is kept, and how hard readings are smoothed. A CPU sensor
+# is noisy in a way the eye picks up: Tctl jumps a degree or two second to
+# second while nothing is happening, which over the gauge's 45 degree span is
+# most of an LED - so the leading one would flicker on every reading. A few
+# seconds of averaging settles it without hiding a real warm-up.
 READ_INTERVAL = 1.0
 SMOOTHING_SECONDS = 6.0
 
@@ -117,10 +113,9 @@ SMOOTHING_SECONDS = 6.0
 class TemperatureSource:
     """The current temperature, read no more often than it changes.
 
-    Sysfs is cheap but not free, and the render loop runs at up to 60 frames a
-    second while a CPU temperature moves on the scale of seconds. So a reading
-    is kept for `interval` and handed out until it goes stale, and what is
-    handed out is smoothed - see SMOOTHING_SECONDS.
+    The render loop runs at up to 60 frames a second while a CPU temperature
+    moves on the scale of seconds, so a reading is kept for `interval` and
+    handed out smoothed - see SMOOTHING_SECONDS.
     """
 
     def __init__(self, path="auto", interval=READ_INTERVAL,
@@ -172,13 +167,12 @@ class TemperatureSource:
     def _smooth(self, sample, elapsed):
         """Move the reported value part of the way towards a new sample.
 
-        The step is sized by how long it has been rather than by a fixed
-        fraction, so a skipped frame or a slower loop does not change how
-        quickly the gauge follows.
+        Sized by elapsed time rather than a fixed fraction, so a skipped frame
+        does not change how quickly the gauge follows.
         """
         if sample is None or self._value is None or self.smoothing <= 0:
-            # Nothing to smooth against - the first reading, or a sensor that
-            # stopped answering. Report the truth rather than a memory of it.
+            # Nothing to smooth against - first reading, or a sensor that
+            # stopped answering. Report the truth, not a memory of it.
             return sample
         weight = elapsed / (elapsed + self.smoothing)
         return self._value + (sample - self._value) * weight

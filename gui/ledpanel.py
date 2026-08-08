@@ -57,8 +57,7 @@ class Check:
 
 
 class Probe:
-    """Reads the state of the installation. Every lookup goes through here so
-    the tests can answer them instead of the machine."""
+    """One place for every lookup, so tests can answer them, not the machine."""
 
     def exists(self, path):
         return os.path.exists(path)
@@ -167,9 +166,8 @@ NO_AGENT_SIGNS = ("authentication agent", "/dev/tty",
 def in_game_mode(environ=None):
     """Whether this is running inside Steam's Game Mode session.
 
-    Told apart by gamescope's own variables rather than by asking Steam:
-    gamescope is the compositor Game Mode runs under, and it is what makes the
-    difference that matters here.
+    Told apart by gamescope's own variables: it is the compositor Game Mode
+    runs under, and what makes the difference that matters here.
     """
     environ = os.environ if environ is None else environ
     if any(marker in environ for marker in GAME_MODE_MARKERS):
@@ -181,9 +179,8 @@ def looks_like_no_auth_agent(output, exit_code):
     """Whether a privileged command failed for want of a password prompt.
 
     pkexec needs a polkit agent to ask with. Game Mode runs none, and pkexec's
-    fallback wants a controlling terminal, which a program Steam launched does
-    not have - so it exits 127 complaining about /dev/tty, which explains
-    nothing to anyone who has not met it before.
+    fallback wants a controlling terminal that a Steam-launched program has
+    not got - so it exits 127 complaining about /dev/tty.
     """
     if exit_code == 0:
         return False
@@ -202,9 +199,8 @@ NO_AGENT_ADVICE = (
 def reinstall_command(source_dir, rebuild_module=True):
     """How to put an installation back together, unattended.
 
-    Runs the same installer as a first install - it keeps an existing config,
-    so nothing the user set is lost. --flash 0 is explicit: repairing after a
-    system update must never touch the board.
+    The same installer as a first install, which keeps an existing config.
+    --flash 0 is explicit: repairing must never touch the board.
     """
     command = ["pkexec", os.path.join(source_dir, "install.sh"), "--yes",
                "--flash", "0"]
@@ -222,9 +218,8 @@ def apply_config_command(source_dir, staged_path):
 def restart_watcher_command():
     """Restart the achievement watcher so it re-reads the configuration.
 
-    Unprivileged, and separate from applying the config for the same reason:
-    the watcher is a *user* unit, so the privileged helper that installs the
-    file cannot restart it - but the panel already runs as the right user.
+    Unprivileged and separate on purpose: the watcher is a *user* unit, out of
+    the privileged helper's reach - but the panel already runs as that user.
     """
     return ["systemctl", "--user", "restart", WATCHER]
 
@@ -237,9 +232,8 @@ def notify_command(kind):
 def self_test_command(source_dir, seconds=12):
     """Drive test patterns on the strip.
 
-    Privileged, and not only because of the serial port: the service holds
-    that port exclusively, so the helper has to stop it, run the test and
-    start it again.
+    Privileged not only for the serial port: the service holds it exclusively,
+    so the helper has to stop it, run the test and start it again.
     """
     return ["pkexec", os.path.join(source_dir, "scripts", "self-test.sh"),
             str(seconds)]
@@ -261,9 +255,9 @@ def temperature_command():
 
 # -- notification colours --------------------------------------------------
 #
-# (label, value) pairs, and the value is what goes in the config file - which
-# takes any colour, so these are the offered ones and not the possible ones.
-# The first of each is the default the service ships with.
+# (label, value) pairs; the value goes in the config file, which takes any
+# colour. These are the offered ones, not the possible ones - first is the
+# default the service ships with.
 
 ACHIEVEMENT_COLOURS = (
     ("Gold", "#ffd700"),
@@ -282,9 +276,8 @@ MESSAGE_COLOURS = (
 
 # -- menus whose entries are not what gets written -------------------------
 #
-# A sensor is a path into /sys and a colour is six hex digits; neither is
-# something to show someone. Both menus are therefore (label, value) pairs,
-# and these two translate between the halves.
+# A sensor is a path into /sys and a colour is six hex digits - neither is
+# something to show someone. These two translate between label and value.
 
 
 def menu_label(choices, value):
@@ -301,7 +294,7 @@ def menu_label(choices, value):
 def menu_value(choices, label):
     """Back from an entry to what the config file wants.
 
-    An entry nobody put there is its own value: that is how a hand-written
+    An entry nobody put there is its own value - that is how a hand-written
     setting the menu does not offer stays what it was.
     """
     for known, value in choices:
@@ -312,8 +305,8 @@ def menu_value(choices, label):
 
 # -- the temperature sensor menu ------------------------------------------
 #
-# The setting is a path into /sys, which is no way to ask a person a question.
-# So the machine is asked instead, and what it answers becomes the menu.
+# The setting is a path into /sys, so the machine is asked what it has and
+# the answer becomes the menu.
 
 
 def read_sensors():
@@ -323,11 +316,10 @@ def read_sensors():
 
 
 def sensor_label(sensor):
-    """One sensor, as a line in a menu: the chip and what it measures.
+    """One sensor, as a menu line: the chip and what it measures.
 
-    Deliberately not its current reading. A menu entry is a name, and a number
-    in it would be stale the moment the menu opened - `--temperature` is where
-    to look at what they say.
+    Deliberately not its reading, which would be stale the moment the menu
+    opened. `--temperature` is where to look at what they say.
     """
     name = sensor.get("label") or os.path.basename(
         sensor["path"]).replace("_input", "")
@@ -337,9 +329,8 @@ def sensor_label(sensor):
 def sensor_choices(sensors, chosen=None, current="auto"):
     """(label, value) pairs for the menu, best answer first.
 
-    Automatic leads because it is the right answer for almost everyone, and it
-    names what it landed on so the choice is not a mystery. The rest follow in
-    the order the automatic choice ranked them.
+    Automatic leads, and names what it landed on so the choice is not a
+    mystery. The rest follow in the order it ranked them.
     """
     automatic = "Automatic"
     if chosen is not None:
@@ -350,10 +341,9 @@ def sensor_choices(sensors, chosen=None, current="auto"):
         choices.append((sensor_label(sensor), sensor["path"]))
 
     if current and current not in [value for _label, value in choices]:
-        # A sensor that was configured by hand and is not there any more -
-        # an eGPU unplugged, a driver unloaded, or simply a typo. Showing it
-        # says what the service is actually set to; dropping it would look
-        # like the setting had changed by itself.
+        # Configured by hand and not there any more - an eGPU unplugged, a
+        # driver unloaded, a typo. Showing it says what the service is set to;
+        # dropping it would look like the setting had changed by itself.
         choices.append(("%s (not found)" % current, current))
     return _uniquify(choices)
 
@@ -361,9 +351,8 @@ def sensor_choices(sensors, chosen=None, current="auto"):
 def _uniquify(choices):
     """Pull apart labels that would otherwise be the same line twice.
 
-    Two inputs on one chip can describe themselves identically - an amdgpu
-    with two "edge" sensors reading the same - and the menu is keyed on what
-    it shows, so a repeated line makes one of them unreachable.
+    Two inputs on one chip can describe themselves identically, and the menu
+    is keyed on what it shows - so a repeated line makes one unreachable.
     """
     counts = {}
     for label, _value in choices:
