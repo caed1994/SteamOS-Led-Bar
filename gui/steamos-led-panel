@@ -65,9 +65,10 @@ SETTINGS = [
     # sliders can produce a config the service refuses. Anything more exotic
     # than "starts somewhere under 70, full somewhere over 75" belongs in the
     # config file, which takes 0-150 for both.
-    ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "float",
-     20.0, 70.0),
-    ("TEMPERATURE_MAX", "Temperature: bar full (C)", "float", 75.0, 120.0),
+    # Whole degrees: half a degree is below what a bar of 17 LEDs can show
+    # anyway, and "85.38" reads like a measurement rather than a setting.
+    ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "int", 20, 70),
+    ("TEMPERATURE_MAX", "Temperature: bar full (C)", "int", 75, 120),
     ("NOTIFY", "Flash on notifications", "bool", None, None),
     ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None),
     ("NOTIFY_DURATION", "Flash duration (seconds)", "float", 0.1, 60.0),
@@ -567,8 +568,19 @@ class Panel:
 
         def show(*_args):
             value = variable.get()
-            readout.configure(text="%d" % round(value) if kind == "int"
-                              else "%.2f" % value)
+            if kind == "int":
+                # Snap to whole numbers, so the knob rests where the readout
+                # says it is - ttk.Scale is continuous, and a slider showing
+                # 40 while holding 40.38 is a slider that lies. The guard ends
+                # the recursion: setting the variable calls this again, and
+                # the second time round the value is already whole.
+                whole = round(value)
+                if abs(value - whole) > 1e-9:
+                    variable.set(whole)
+                    return
+                readout.configure(text="%d" % whole)
+            else:
+                readout.configure(text="%.2f" % value)
 
         scale = ttk.Scale(holder, from_=low, to=high, variable=variable,
                           command=show)
