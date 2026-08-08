@@ -505,7 +505,8 @@ has four tabs:
 - **Settings** — LED count, brightness, patrol dots, the temperature gauge and
   the notification options including the two flash colours, as sliders,
   switches and drop-downs. Apply writes the file
-  (keeping every comment in it) and restarts the service. The strip length
+  (keeping every comment in it) and restarts both the service and the
+  achievement watcher, so a changed switch takes effect now. The strip length
   stops at 120: that is where the GPIO14 firmware's `MAX_LEDS` sits and where
   230400 baud stops keeping up at 60 fps. Longer strips work, but they are a
   config file edit, because they also need firmware and frame rate to match.

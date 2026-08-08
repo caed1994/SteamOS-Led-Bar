@@ -155,6 +155,15 @@ class CommandTest(unittest.TestCase):
                         ledpanel.probe_messages_command()):
             self.assertNotIn("pkexec", command)
 
+    def test_restarting_the_watcher_needs_no_rights_and_stays_the_user(self):
+        # It is a user unit: "systemctl restart" as root would look for a
+        # system unit of that name and find nothing, and pkexec would put a
+        # password prompt in front of something that needs none.
+        command = ledpanel.restart_watcher_command()
+        self.assertNotIn("pkexec", command)
+        self.assertIn("--user", command)
+        self.assertIn(ledpanel.WATCHER, command)
+
     def test_the_self_test_needs_rights_to_free_the_port(self):
         command = ledpanel.self_test_command("/repo", seconds=5)
         self.assertEqual(command[0], "pkexec")

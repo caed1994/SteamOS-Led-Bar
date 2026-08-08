@@ -761,9 +761,16 @@ class Panel:
 
         def finished(code):
             os.unlink(staged.name)
-            if code == 0:
-                self.config.update(values)
-            self.refresh_status()
+            if code != 0:
+                self.refresh_status()
+                return
+            self.config.update(values)
+            # The helper restarted the service, but the watcher reads the same
+            # file and is a user unit, so it is out of that helper's reach -
+            # and without this, switching achievement or message flashing on
+            # would not take effect until the next game ended.
+            self.runner.start(ledpanel.restart_watcher_command(),
+                              lambda _code: self.refresh_status())
 
         self.runner.start(
             ledpanel.apply_config_command(SOURCE_DIR, staged.name), finished)

@@ -219,6 +219,16 @@ def apply_config_command(source_dir, staged_path):
             staged_path]
 
 
+def restart_watcher_command():
+    """Restart the achievement watcher so it re-reads the configuration.
+
+    Unprivileged, and separate from applying the config for the same reason:
+    the watcher is a *user* unit, so the privileged helper that installs the
+    file cannot restart it - but the panel already runs as the right user.
+    """
+    return ["systemctl", "--user", "restart", WATCHER]
+
+
 def notify_command(kind):
     """Flash the bar. Deliberately unprivileged: the FIFO is world-writable."""
     return [BINARY, "--notify", kind]
