@@ -102,17 +102,32 @@ def pick_sensor(sensors):
     return min(sensors, key=lambda sensor: sensor["rank"])
 
 
+# How long a reading is kept, and how hard the readings are smoothed.
+#
+# A CPU sensor is noisy in a way the eye picks up immediately: Tctl jumps a
+# degree or two between one second and the next while the machine is doing
+# nothing in particular. Over the gauge's 45 degree span that is most of an
+# LED, so the leading one - the only one lit part way - would flicker on every
+# reading. Averaging over a few seconds settles it without hiding a real
+# warm-up, which takes far longer than that.
+READ_INTERVAL = 1.0
+SMOOTHING_SECONDS = 6.0
+
+
 class TemperatureSource:
     """The current temperature, read no more often than it changes.
 
     Sysfs is cheap but not free, and the render loop runs at up to 60 frames a
     second while a CPU temperature moves on the scale of seconds. So a reading
-    is kept for `interval` and handed out until it goes stale.
+    is kept for `interval` and handed out until it goes stale, and what is
+    handed out is smoothed - see SMOOTHING_SECONDS.
     """
 
-    def __init__(self, path="auto", interval=1.0, root=HWMON_ROOT):
+    def __init__(self, path="auto", interval=READ_INTERVAL,
+                 smoothing=SMOOTHING_SECONDS, root=HWMON_ROOT):
         self.wanted = path
         self.interval = max(0.0, float(interval))
+        self.smoothing = max(0.0, float(smoothing))
         self.root = root
         self.path = None
         self.chip = None
@@ -137,18 +152,33 @@ class TemperatureSource:
         return self.path
 
     def celsius(self, now=None):
-        """The temperature, or None if there is nothing to read."""
+        """The smoothed temperature, or None if there is nothing to read."""
         now = time.monotonic() if now is None else now
         if self._taken is not None and now - self._taken < self.interval:
             return self._value
 
         path = self.resolve()
-        value = read_celsius(path) if path else None
+        sample = read_celsius(path) if path else None
+        elapsed = self.interval if self._taken is None else now - self._taken
         self._taken = now
-        self._value = value
+        self._value = self._smooth(sample, elapsed)
 
-        if value is None and not self._complained:
+        if sample is None and not self._complained:
             self._complained = True
             LOG.warning("no temperature to read%s",
                         " at " + path if path else " - no sensor found")
-        return value
+        return self._value
+
+    def _smooth(self, sample, elapsed):
+        """Move the reported value part of the way towards a new sample.
+
+        The step is sized by how long it has been rather than by a fixed
+        fraction, so a skipped frame or a slower loop does not change how
+        quickly the gauge follows.
+        """
+        if sample is None or self._value is None or self.smoothing <= 0:
+            # Nothing to smooth against - the first reading, or a sensor that
+            # stopped answering. Report the truth rather than a memory of it.
+            return sample
+        weight = elapsed / (elapsed + self.smoothing)
+        return self._value + (sample - self._value) * weight

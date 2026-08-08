@@ -10,6 +10,8 @@ import os
 import platform
 import subprocess
 
+from steamos_led import temperature
+
 INSTALL_DIR = "/var/lib/steamos-led-serial"
 BINARY = os.path.join(INSTALL_DIR, "steamos-led-serial")
 CONFIG_PATH = "/etc/steamos-led-serial.conf"
@@ -233,3 +235,72 @@ def probe_messages_command():
 def temperature_command():
     """List the machine's sensors and what the gauge makes of them."""
     return [BINARY, "--temperature"]
+
+
+# -- the temperature sensor menu ------------------------------------------
+#
+# The setting is a path into /sys, which is no way to ask a person a question.
+# So the machine is asked instead, and what it answers becomes the menu.
+
+
+def read_sensors():
+    """Every temperature sensor on this machine, each with its reading."""
+    sensors = temperature.find_sensors()
+    for sensor in sensors:
+        sensor["celsius"] = temperature.read_celsius(sensor["path"])
+    return sensors, temperature.pick_sensor(sensors)
+
+
+def sensor_label(sensor, reading=True):
+    """One sensor, as a line in a menu: what it is, and how hot it says it is."""
+    name = sensor.get("label") or os.path.basename(
+        sensor["path"]).replace("_input", "")
+    text = "%s %s" % (sensor.get("chip") or "?", name)
+    celsius = sensor.get("celsius")
+    if reading and celsius is not None:
+        text += " - %.1f C" % celsius
+    return text
+
+
+def sensor_choices(sensors, chosen=None, current="auto"):
+    """(label, value) pairs for the menu, best answer first.
+
+    Automatic leads because it is the right answer for almost everyone, and it
+    names what it landed on so the choice is not a mystery. The rest follow in
+    the order the automatic choice ranked them.
+    """
+    automatic = "Automatic"
+    if chosen is not None:
+        automatic += " (%s)" % sensor_label(chosen, reading=False)
+    choices = [(automatic, "auto")]
+
+    for sensor in sorted(sensors, key=lambda entry: entry["rank"]):
+        choices.append((sensor_label(sensor), sensor["path"]))
+
+    if current and current not in [value for _label, value in choices]:
+        # A sensor that was configured by hand and is not there any more -
+        # an eGPU unplugged, a driver unloaded, or simply a typo. Showing it
+        # says what the service is actually set to; dropping it would look
+        # like the setting had changed by itself.
+        choices.append(("%s (not found)" % current, current))
+    return _uniquify(choices)
+
+
+def _uniquify(choices):
+    """Pull apart labels that would otherwise be the same line twice.
+
+    Two inputs on one chip can describe themselves identically - an amdgpu
+    with two "edge" sensors reading the same - and the menu is keyed on what
+    it shows, so a repeated line makes one of them unreachable.
+    """
+    counts = {}
+    for label, _value in choices:
+        counts[label] = counts.get(label, 0) + 1
+    return [(label if counts[label] == 1 else "%s [%s]" % (label, _where(value)),
+             value) for label, value in choices]
+
+
+def _where(path):
+    """A sensor's place in /sys, short: "hwmon1/temp2"."""
+    directory, name = os.path.split(path)
+    return "%s/%s" % (os.path.basename(directory), name.replace("_input", ""))

@@ -313,6 +313,9 @@ def run_temperature(config):
              "%.1f C" % celsius if celsius is not None else "nothing"))
     low, high = config["TEMPERATURE_MIN"], config["TEMPERATURE_MAX"]
     print("Gauge: empty at or below %g C, full at %g C." % (low, high))
+    print("Read every %g s and averaged over %g s, because a CPU sensor jumps "
+          "a degree" % (source.interval, source.smoothing))
+    print("or two between readings and the leading LED would flicker with it.")
     if celsius is not None:
         renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
                                    temperature=source,

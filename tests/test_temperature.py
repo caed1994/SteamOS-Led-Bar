@@ -129,7 +129,9 @@ class CachingTest(unittest.TestCase):
         hwmon = FakeHwmon(self.root)
         self.directory = hwmon.chip("k10temp", [("Tctl", 50000)])
         self.path = os.path.join(self.directory, "temp1_input")
-        self.source = temperature.TemperatureSource(interval=1.0,
+        # Smoothing off here: this is about when the file is read, and it has
+        # its own tests below.
+        self.source = temperature.TemperatureSource(interval=1.0, smoothing=0,
                                                     root=self.root)
 
     def _set(self, millidegrees):
@@ -162,6 +164,87 @@ class CachingTest(unittest.TestCase):
         self.assertEqual(source.path, self.path)
 
 
+class SmoothingTest(unittest.TestCase):
+    """A CPU sensor is noisy enough to make the leading LED flicker.
+
+    Tctl moves a degree or two between one second and the next on an idle
+    machine, which over the gauge's span is most of an LED - so what the
+    gauge is handed is an average, not the latest sample.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        hwmon = FakeHwmon(self.root)
+        directory = hwmon.chip("k10temp", [("Tctl", 50000)])
+        self.path = os.path.join(directory, "temp1_input")
+        self.source = temperature.TemperatureSource(interval=1.0,
+                                                    smoothing=6.0,
+                                                    root=self.root)
+
+    def _set(self, celsius):
+        with open(self.path, "w") as handle:
+            handle.write("%d\n" % int(celsius * 1000))
+
+    def test_the_first_reading_is_not_smoothed_against_nothing(self):
+        # Starting from zero would send the bar climbing from empty on every
+        # service restart.
+        self.assertEqual(self.source.celsius(now=0.0), 50.0)
+
+    def test_a_jump_is_followed_gradually(self):
+        self.source.celsius(now=0.0)
+        self._set(80.0)
+        moved = self.source.celsius(now=1.0)
+        self.assertGreater(moved, 50.0)
+        self.assertLess(moved, 60.0)
+
+    def test_it_gets_there_in_the_end(self):
+        self.source.celsius(now=0.0)
+        self._set(80.0)
+        for second in range(1, 60):
+            value = self.source.celsius(now=float(second))
+        self.assertAlmostEqual(value, 80.0, delta=0.5)
+
+    def test_sensor_noise_barely_moves_the_reading(self):
+        # A degree of jitter each way, which is what an idle Tctl does.
+        self.source.celsius(now=0.0)
+        seen = []
+        for second in range(1, 40):
+            self._set(50.0 + (1.0 if second % 2 else -1.0))
+            seen.append(self.source.celsius(now=float(second)))
+        self.assertLess(max(seen) - min(seen), 0.5,
+                        "the gauge should not chase the noise")
+
+    def test_a_longer_gap_moves_it_further(self):
+        # Sized by elapsed time, so a slower loop follows at the same speed
+        # rather than lagging further behind.
+        self.source.celsius(now=0.0)
+        self._set(80.0)
+        slow = self.source.celsius(now=6.0)
+
+        other = temperature.TemperatureSource(interval=1.0, smoothing=6.0,
+                                              root=self.root)
+        self._set(50.0)
+        other.celsius(now=0.0)
+        self._set(80.0)
+        quick = other.celsius(now=1.0)
+        self.assertGreater(slow, quick)
+
+    def test_smoothing_can_be_switched_off(self):
+        source = temperature.TemperatureSource(interval=0, smoothing=0,
+                                               root=self.root)
+        self.assertEqual(source.celsius(now=0.0), 50.0)
+        self._set(80.0)
+        self.assertEqual(source.celsius(now=1.0), 80.0)
+
+    def test_a_sensor_that_stops_answering_is_not_remembered(self):
+        # Holding the last average would leave a plausible-looking bar lit
+        # for a sensor that is no longer there.
+        self.source.celsius(now=0.0)
+        os.unlink(self.path)
+        self.assertIsNone(self.source.celsius(now=1.0))
+
+
 class FakeSource:
     """A thermometer that reads whatever the test says."""
 
@@ -170,6 +253,9 @@ class FakeSource:
 
     def celsius(self, now=None):
         return self.value
+
+
+LAST = shim.LOGICAL_LEDS - 1        # the end the gauge fills from
 
 
 class GaugeTest(unittest.TestCase):
@@ -215,35 +301,41 @@ class GaugeTest(unittest.TestCase):
         counts = [self._lit(value) for value in range(30, 100, 5)]
         self.assertEqual(counts, sorted(counts))
 
-    def test_it_fills_from_the_first_led(self):
+    def test_it_fills_from_the_far_end(self):
+        # The same end the other effects run from, so the bar does not look
+        # like it is going backwards when the effect changes.
         frame = self._frame(50.0)
         lit = [index for index, pixel in enumerate(frame) if max(pixel) > 127]
-        self.assertEqual(lit, list(range(len(lit))))
+        self.assertEqual(lit, list(range(LAST + 1 - len(lit), LAST + 1)))
 
     def test_the_leading_led_fades_in(self):
         # A whole LED is nearly three degrees at this range; stepping a notch
-        # at a time would make a warming machine look jumpy.
-        # At these three readings LED 3 is the leading one, partly lit.
-        levels = [max(self._frame(value)[3]) for value in (48.0, 48.5, 49.0)]
+        # at a time would make a warming machine look jumpy. At these three
+        # readings LED 13 is the leading one, partly lit.
+        levels = [max(self._frame(value)[LAST - 3]) for value in (48.0, 48.5,
+                                                                  49.0)]
         self.assertEqual(levels, sorted(levels))
         self.assertNotEqual(levels[0], levels[-1])
 
     def test_it_starts_green_and_ends_red(self):
-        cool = self._frame(self.LOW + 0.5)[0]
-        hot = self._frame(self.HIGH)[0]
+        cool = self._frame(self.LOW + 0.5)[LAST]
+        hot = self._frame(self.HIGH)[LAST]
         self.assertGreater(cool[1], cool[0], "the cool end should be green")
         self.assertGreater(hot[0], hot[1], "the hot end should be red")
 
     def test_the_colour_walks_from_green_to_red(self):
         # Through yellow and orange, which is the sequence everyone reads as
-        # "getting worse" - so red rises and green falls the whole way.
+        # "getting worse" - so red rises and green falls the whole way. Read
+        # off the LED that lights first, which is lit at every reading here.
         reds, greens = [], []
         for value in range(45, 90, 5):
-            red, green, _blue = self._frame(float(value))[0]
+            red, green, _blue = self._frame(float(value))[LAST]
             reds.append(round(red))
             greens.append(round(green))
         self.assertEqual(reds, sorted(reds))
         self.assertEqual(greens, sorted(greens, reverse=True))
+        self.assertGreater(max(reds), 200, "it should reach red")
+        self.assertGreater(max(greens), 200, "it should start green")
 
     def test_no_sensor_falls_back_to_the_rainbow(self):
         # A dark strip would look like the service had died.

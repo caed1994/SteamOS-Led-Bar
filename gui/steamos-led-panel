@@ -69,6 +69,9 @@ SETTINGS = [
     # anyway, and "85.38" reads like a measurement rather than a setting.
     ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "int", 20, 70),
     ("TEMPERATURE_MAX", "Temperature: bar full (C)", "int", 75, 120),
+    # Not a "choice": the values are paths into /sys and the machine decides
+    # what they are, so the menu is built from what it reports.
+    ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor", None, None),
     ("NOTIFY", "Flash on notifications", "bool", None, None),
     ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None),
     ("NOTIFY_DURATION", "Flash duration (seconds)", "float", 0.1, 60.0),
@@ -546,6 +549,9 @@ class Panel:
                 ttk.Combobox(grid, textvariable=variable, values=list(low),
                              state="readonly", width=12).grid(
                                  row=row, column=1, sticky="w")
+            elif kind == "sensor":
+                variable = tk.StringVar()
+                self._build_sensor_menu(grid, row, variable, str(value))
             else:
                 variable = tk.DoubleVar(value=float(value))
                 self._scale(grid, row, variable, kind, low, high)
@@ -559,6 +565,36 @@ class Panel:
         ttk.Button(buttons, text="Reload from file",
                    command=self.reload_settings).pack(side="left", padx=6)
         return outer
+
+    def _build_sensor_menu(self, grid, row, variable, current):
+        """A menu of the sensors this machine has, rather than a path to type."""
+        sensors, chosen = ledpanel.read_sensors()
+        self._sensors = ledpanel.sensor_choices(sensors, chosen, current)
+        self.sensor_menu = ttk.Combobox(
+            grid, textvariable=variable, state="readonly", width=34,
+            values=[label for label, _value in self._sensors])
+        self.sensor_menu.grid(row=row, column=1, sticky="w")
+        variable.set(self._sensor_label(current))
+
+    def _sensor_label(self, value):
+        """The menu entry for a configured value, added if it is new to us."""
+        for label, known in self._sensors:
+            if known == value:
+                return label
+        # Someone edited the file by hand while the panel was open, which is
+        # exactly how this setting is meant to be used from the terminal.
+        label = "%s (not found)" % value
+        self._sensors.append((label, value))
+        self.sensor_menu.configure(
+            values=[entry for entry, _value in self._sensors])
+        return label
+
+    def _sensor_value(self, label):
+        """Back from the menu entry to the path the service wants."""
+        for known, value in self._sensors:
+            if known == label:
+                return value
+        return "auto"
 
     def _scale(self, grid, row, variable, kind, low, high):
         holder = ttk.Frame(grid)
@@ -596,6 +632,7 @@ class Panel:
             values[key] = (bool(raw) if kind == "bool"
                            else int(round(raw)) if kind == "int"
                            else float(raw) if kind == "float"
+                           else self._sensor_value(raw) if kind == "sensor"
                            else str(raw))
         # The two frame rates are coupled - the idle rate cannot exceed the
         # active one - and two independent sliders cannot express that. Pulling
@@ -654,6 +691,7 @@ class Panel:
         for key, (variable, kind) in self.vars.items():
             value = self.config.get(key, config_module.DEFAULTS[key])
             variable.set(bool(value) if kind == "bool"
+                         else self._sensor_label(str(value)) if kind == "sensor"
                          else str(value) if kind == "choice"
                          else float(value))
         self._write("Reloaded %s\n\n" % config_module.DEFAULT_CONFIG_PATH)

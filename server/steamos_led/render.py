@@ -172,9 +172,13 @@ def _temperature(snapshot, elapsed, options):
     # the whole bar stepping a notch at a time - at 17 LEDs a whole step is
     # nearly three degrees.
     lit = fraction * shim.LOGICAL_LEDS
+    last = shim.LOGICAL_LEDS - 1
     frame = []
     for index in range(shim.LOGICAL_LEDS):
-        level = max(0.0, min(lit - index, 1.0))
+        # Grows from the far end, which is the direction the other effects
+        # run in on the bar. REVERSE still flips the whole strip on top of
+        # this, so a bar mounted the other way round stays consistent.
+        level = max(0.0, min(lit - (last - index), 1.0))
         frame.append((red * level, green * level, blue * level))
     return frame
 

@@ -260,11 +260,14 @@ yellow and orange to red as it fills.
 
 ```
  35 C |·················|   below the lower mark: dark
- 50 C |####·············|   green
- 62 C |#########········|   yellow
- 75 C |##############···|   orange
+ 50 C |·············####|   green
+ 62 C |········#########|   yellow
+ 75 C |···##############|   orange
  85 C |#################|   red
 ```
+
+It grows from the same end the other effects run from, and `REVERSE` flips it
+along with everything else.
 
 Switch it on and then pick **Rainbow** in Steam's LED menu:
 
@@ -308,9 +311,18 @@ Right now: 9 of 17 LEDs lit, colour #fff300
 ```
 
 To watch something else — the GPU while the CPU is what `auto` chose, say — put
-that path into `TEMPERATURE_SENSOR`. If a machine reports no temperature at
-all, the rainbow is shown as usual; a dark bar would just look like the service
-had died.
+that path into `TEMPERATURE_SENSOR`, or pick it from the drop-down in the
+control panel, which lists the same sensors with their current readings. If a
+machine reports no temperature at all, the rainbow is shown as usual; a dark
+bar would just look like the service had died.
+
+**Reading rate.** The sensor is read once a second and the readings are
+averaged over about six seconds. Both matter: a CPU sensor moves a degree or
+two between one reading and the next while nothing is happening, and over the
+45 degree span that is most of an LED — so the leading one, the only one lit
+part way, would flicker on every read. Averaging settles it without hiding a
+real warm-up, which takes far longer than six seconds. The two constants are
+at the top of `server/steamos_led/temperature.py`.
 
 ## Notifications
 
