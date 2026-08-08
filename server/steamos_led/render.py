@@ -237,15 +237,34 @@ class Renderer:
             self._stretch[source] = weights
         return weights
 
+    def _gauge_active(self, snapshot):
+        """Whether the gauge has taken the rainbow's place for this snapshot.
+
+        Steam's menu cannot be extended - the entries are built into the client
+        - so the gauge has to take over one it already offers, and the rainbow
+        is the one people are happy to give up.
+        """
+        return (self.temperature is not None
+                and snapshot.effect == shim.EFFECT_RAINBOW)
+
+    def is_animated(self, snapshot):
+        """Whether this scene changes from frame to frame.
+
+        The gauge does not: it redraws when the sensor moves, which is orders
+        of magnitude slower than a frame, so driving it at the full rate sends
+        the same bytes sixty times a second. Without a sensor it falls back to
+        the rainbow, which does animate.
+        """
+        if self._gauge_active(snapshot):
+            return self.temperature.celsius() is None
+        return snapshot.is_animated
+
     def render_logical(self, snapshot, elapsed):
         """The 17 logical LEDs of the Steam Machine bar, floats in 0..255."""
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
         effect = _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL])
-        # Steam's menu cannot be extended - the entries are built into the
-        # client - so the gauge has to take over an entry it already offers,
-        # and the rainbow is the one people are happy to give up.
-        if self.temperature is not None and snapshot.effect == shim.EFFECT_RAINBOW:
+        if self._gauge_active(snapshot):
             effect = _temperature
         return effect(snapshot, elapsed, self)
 

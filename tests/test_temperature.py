@@ -368,5 +368,53 @@ class GaugeTest(unittest.TestCase):
         renderer.render_logical(self.snapshot, 0.0)
 
 
+class GaugeFrameRateTest(unittest.TestCase):
+    """The gauge redraws when the sensor moves, not sixty times a second.
+
+    Steam calls the rainbow animated, and the gauge sits in its slot - so the
+    main loop drove it at the full frame rate while the sensor answered once a
+    second. Every frame in between was the same bytes, rendered and sent again.
+    """
+
+    def setUp(self):
+        self.source = FakeSource(62.5)
+        self.renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                                        mapping=render.MAPPING_CROP,
+                                        temperature=self.source)
+        self.snapshot = shim.make_snapshot(shim.EFFECT_RAINBOW)
+
+    def test_a_second_of_frames_is_one_picture(self):
+        frames = {bytes(self.renderer.render(self.snapshot, tick / 60.0))
+                  for tick in range(60)}
+        self.assertEqual(len(frames), 1, "the gauge does not animate")
+
+    def test_the_gauge_is_not_treated_as_animated(self):
+        self.assertTrue(self.snapshot.is_animated, "Steam says it is")
+        self.assertFalse(self.renderer.is_animated(self.snapshot),
+                         "but the gauge in its place is not")
+
+    def test_without_a_sensor_the_rainbow_underneath_still_animates(self):
+        # The fallback really is a rainbow, and running that at the idle rate
+        # would make it stutter.
+        self.source.value = None
+        self.assertTrue(self.renderer.is_animated(self.snapshot))
+
+    def test_the_other_effects_are_unaffected(self):
+        for effect in (shim.EFFECT_BREATH, shim.EFFECT_PATROL,
+                       shim.EFFECT_DEMO):
+            snapshot = shim.make_snapshot(effect)
+            self.assertTrue(self.renderer.is_animated(snapshot), effect)
+        self.assertFalse(
+            self.renderer.is_animated(shim.make_snapshot(shim.EFFECT_MANUAL)))
+
+    def test_a_renderer_without_a_gauge_just_asks_the_snapshot(self):
+        plain = render.Renderer(led_count=shim.LOGICAL_LEDS)
+        for effect in (shim.EFFECT_RAINBOW, shim.EFFECT_MANUAL,
+                       shim.EFFECT_PATROL, shim.EFFECT_OFF):
+            snapshot = shim.make_snapshot(effect)
+            self.assertEqual(plain.is_animated(snapshot),
+                             snapshot.is_animated, effect)
+
+
 if __name__ == "__main__":
     unittest.main()

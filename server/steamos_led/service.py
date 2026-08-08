@@ -202,7 +202,10 @@ class Runner:
             self.link.poll()
 
             interval = 1.0 / self.config["FPS"]
-            if (snapshot is not None and not snapshot.is_animated
+            # The renderer decides, not the snapshot: the temperature gauge
+            # occupies the rainbow's slot, and Steam still calls that animated.
+            if (snapshot is not None
+                    and not self.renderer.is_animated(snapshot)
                     and not self.overlay.active):
                 interval = 1.0 / self.config["IDLE_FPS"]
 

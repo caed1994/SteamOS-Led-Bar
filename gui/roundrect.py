@@ -45,6 +45,33 @@ def corner_radii(radius):
     return values
 
 
+def _shape(width, height, radii):
+    """Everything about a rounded rectangle that no pixel changes.
+
+    rows() measures a shape once and then asks it about tens of thousands of
+    pixels, so the centre, the half-sides and the clamped radii are worked out
+    here rather than again for every one of them.
+    """
+    cap = min(width, height) / 2.0
+    return ((width - 1) / 2.0, (height - 1) / 2.0, width / 2.0, height / 2.0,
+            tuple(max(0.0, min(value, cap)) for value in radii))
+
+
+def _distance_in(shape, x, y):
+    """Signed distance from one pixel to a measured shape's edge."""
+    cx, cy, half_width, half_height, radii = shape
+    if y <= cy:
+        here = radii[0] if x <= cx else radii[1]
+    else:
+        here = radii[3] if x <= cx else radii[2]
+
+    dx = abs(x - cx) - (half_width - here)
+    dy = abs(y - cy) - (half_height - here)
+    outside = math.hypot(max(dx, 0.0), max(dy, 0.0))
+    inside = min(max(dx, dy), 0.0)
+    return outside + inside - here
+
+
 def distance(x, y, width, height, radius):
     """Signed distance from a rounded rectangle's edge; negative is inside.
 
@@ -52,19 +79,7 @@ def distance(x, y, width, height, radius):
     back off. Sharp corners fall out as the radius-zero case, tabs as the
     radius-per-corner one, so neither needs a path of its own.
     """
-    radii = corner_radii(radius)
-    cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
-    if y <= cy:
-        here = radii[0] if x <= cx else radii[1]
-    else:
-        here = radii[3] if x <= cx else radii[2]
-
-    here = max(0.0, min(here, min(width, height) / 2.0))
-    dx = abs(x - cx) - (width / 2.0 - here)
-    dy = abs(y - cy) - (height / 2.0 - here)
-    outside = math.hypot(max(dx, 0.0), max(dy, 0.0))
-    inside = min(max(dx, dy), 0.0)
-    return outside + inside - here
+    return _distance_in(_shape(width, height, corner_radii(radius)), x, y)
 
 
 def coverage(x, y, width, height, radius):
@@ -80,31 +95,43 @@ def rows(width, height, radius, fill, background, border=None, border_width=1,
     onto that colour seamlessly - the price of having no alpha, and why every
     caller has to say what it is sitting on.
     """
+    # Both shapes are the same for every pixel, so they are measured out once
+    # rather than rebuilt inside the loop.
+    radii = corner_radii(radius)
+    outer = _shape(width, height, radii)
+    ring = bool(border) and border_width > 0
+    inner_shape = _shape(width - 2 * border_width, height - 2 * border_width,
+                         tuple(max(0.0, value - border_width)
+                               for value in radii)) if ring else None
+
     picture = []
     for y in range(height):
         row = []
         for x in range(width):
-            inside = coverage(x, y, width, height, radius)
+            edge = _distance_in(outer, x, y)
+            inside = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
+                                              else 0.5 - edge)
             color = blend(background, fill, inside)
-            if border and border_width > 0:
+            if ring:
                 # The ring is what the outer shape covers and the inner does
                 # not, so the border keeps its width around the corner.
-                inner = coverage(x - border_width, y - border_width,
-                                 width - 2 * border_width,
-                                 height - 2 * border_width,
-                                 tuple(max(0.0, value - border_width)
-                                       for value in corner_radii(radius)))
+                edge = _distance_in(inner_shape, x - border_width,
+                                    y - border_width)
+                inner = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
+                                                 else 0.5 - edge)
                 color = blend(color, border, max(0.0, inside - inner))
             row.append(color)
         picture.append(row)
 
-    if open_bottom and border and border_width > 0:
+    if open_bottom and ring:
         # A tab has no line along its bottom: that edge joins the page, and a
         # border there is the stripe that makes a row of tabs look struck
         # through. Nine-slice repeats these rows, so it would show up doubly.
         for y in range(height - int(math.ceil(border_width)), height):
             for x in range(width):
-                inside = coverage(x, y, width, height, radius)
+                edge = _distance_in(outer, x, y)
+                inside = 0.0 if edge >= 0.5 else (1.0 if edge <= -0.5
+                                                  else 0.5 - edge)
                 picture[y][x] = blend(background, fill, inside)
     return picture
 

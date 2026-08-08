@@ -753,6 +753,25 @@ class RoundedRectangleTest(unittest.TestCase):
         self.assertEqual(middle, self.WHITE, "the fill should survive")
         self.assertEqual(edge, self.RED, "the border should be on the edge")
 
+    def test_the_fast_path_agrees_with_the_plain_one(self):
+        """rows() measures a shape once and reuses it for every pixel.
+
+        coverage() is the same arithmetic written the obvious way, per pixel,
+        so it is the reference the shortcut has to keep matching.
+        """
+        for width, height, radius in ((20, 20, 6), (24, 14, (6, 6, 0, 0)),
+                                      (13, 31, 0), (40, 12, 6.0)):
+            picture = roundrect.rows(width, height, radius,
+                                     self.WHITE, self.BLACK)
+            for y in range(height):
+                for x in range(width):
+                    expected = roundrect.blend(
+                        self.BLACK, self.WHITE,
+                        roundrect.coverage(x, y, width, height, radius))
+                    self.assertEqual(picture[y][x], expected,
+                                     "%dx%d radius %r at (%d, %d)"
+                                     % (width, height, radius, x, y))
+
     def test_a_pill_is_round_at_both_ends(self):
         picture = roundrect.pill(40, 12, self.WHITE, self.BLACK)
         self.assertEqual(picture[6][20], self.WHITE, "filled in the middle")
