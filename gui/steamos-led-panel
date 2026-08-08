@@ -799,9 +799,13 @@ class Panel:
 
         row = ttk.Frame(flashes)
         row.pack(fill="x", padx=8, pady=(0, 8))
-        for kind, label in (("achievement", "Achievement (gold)"),
-                            ("message", "Friend message (purple)"),
-                            ("warning", "Warning (orange)")):
+        # No colour in the labels: two of the three are a setting on the
+        # Settings tab now, so naming one here would be a promise this button
+        # cannot keep. The button flashes whatever that trigger is set to,
+        # which is the point of pressing it.
+        for kind, label in (("achievement", "Achievement"),
+                            ("message", "Friend message"),
+                            ("warning", "Warning")):
             ttk.Button(row, text=label,
                        command=lambda k=kind: self.runner.start(
                            ledpanel.notify_command(k))).pack(side="left",

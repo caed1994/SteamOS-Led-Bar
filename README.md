@@ -513,9 +513,10 @@ has four tabs:
 - **Advanced settings** — the ones you set once, if ever: mapping, gamma,
   effect speed, the two frame rates and the log level. Apply on either tab
   writes both.
-- **Test** — flash gold, purple or any colour you pick; run the strip
-  self-test; run the Steam check, the message probe and the sensor list behind
-  the [temperature gauge](#temperature-gauge).
+- **Test** — fire each notification in whatever colour it is set to, or any
+  colour you pick; run the strip self-test; run the Steam check, the message
+  probe and the sensor list behind the
+  [temperature gauge](#temperature-gauge).
 - **Status & repair** — what is installed, what is running, and one button
   that puts it back.
 
