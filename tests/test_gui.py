@@ -372,6 +372,25 @@ class PanelSettingsTest(unittest.TestCase):
                      if entry.elts[0].value == "LED_COUNT")
         self.assertLessEqual(entry.elts[4].value, self._firmware_max_leds())
 
+    def test_every_slider_can_stop_on_both_of_its_ends(self):
+        # The knob snaps to multiples of the step, so an end that is not one
+        # cannot be set: the top of a range would be quietly unreachable, and
+        # a bottom end could snap below what the service accepts.
+        for entry in [entry for table in self._tables() for entry in table.elts]:
+            key, kind = entry.elts[0].value, entry.elts[2].value
+            step = entry.elts[5].value
+            if kind not in ("int", "float"):
+                self.assertIsNone(step, key)
+                continue
+            self.assertGreater(step, 0, key)
+            if kind == "int":
+                self.assertEqual(step, int(step), key)
+            for edge in (entry.elts[3].value, entry.elts[4].value):
+                self.assertAlmostEqual(
+                    round(edge / step) * step, edge, places=6,
+                    msg="%s cannot stop on %s in steps of %s"
+                        % (key, edge, step))
+
     def test_the_two_tabs_do_not_offer_the_same_setting_twice(self):
         # They share one dict of widgets, so a key on both tabs would leave one
         # of the two silently ignored when Apply collects them.
