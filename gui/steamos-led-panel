@@ -123,6 +123,21 @@ KNOB_DIAMETER = 24          # thick enough to grab, round enough to read as a pi
 ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
 
 
+def speak_english(root):
+    """Keep Tk's own dialogs in the language the rest of the panel is in.
+
+    The buttons on a message box are Tk's, not ours, and it translates them
+    from the system locale through msgcat - so on a German desktop an English
+    question would come with "Ja" and "Nein" under it. Best effort: a Tk that
+    will not take this keeps its own idea of the language, which is a worse
+    dialog and not a broken one.
+    """
+    try:
+        root.tk.eval("package require msgcat; ::msgcat::mclocale en")
+    except tk.TclError:                                     # pragma: no cover
+        pass
+
+
 def _decimals(step):
     """How many decimals a step needs: 1 -> 0, 0.5 -> 1, 0.05 -> 2."""
     return len(("%g" % step).partition(".")[2])
@@ -989,6 +1004,7 @@ def main():
     # to be passed at creation, and must stay equal to StartupWMClass in the
     # .desktop file - that is how the desktop ties the window to its icon.
     root = tk.Tk(className=WM_CLASS)
+    speak_english(root)
     try:
         ttk.Style().theme_use("clam")
     except tk.TclError:                                     # pragma: no cover
