@@ -7,7 +7,9 @@ has to cost nothing at all - in particular it must not stop the service.
 """
 
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +65,43 @@ class FlashScriptTest(unittest.TestCase):
         self.assertIn("PlatformIO", result.stderr)
         self.assertIn("Nothing was changed", result.stderr)
         self.assertNotIn("Stopping", result.stdout)
+
+
+class WorkingDirectoryTest(unittest.TestCase):
+    """Where the flasher stands while it runs.
+
+    pkexec starts the script in root's home, and the flashing itself runs as
+    the caller, who cannot get back into /root. PlatformIO restores the
+    directory it started in on the way out, so a flash that had already
+    written and verified the board ended with "PermissionError: [Errno 13]
+    Permission denied: '/root'" and an exit code claiming it had failed.
+    """
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
+        os.makedirs(os.path.join(self.repo, "scripts"))
+        os.makedirs(os.path.join(self.repo, "firmware", "led-client"))
+        shutil.copy(SCRIPT, os.path.join(self.repo, "scripts",
+                                         "flash-firmware.sh"))
+        with open(os.path.join(self.repo, "firmware", "led-client",
+                               "platformio.ini"), "w") as handle:
+            handle.write("[env:fake]\nplatform = native\n")
+        # Stands in for the real flasher, which wants a board on a cable.
+        with open(os.path.join(self.repo, "flash-esp.sh"), "w") as handle:
+            handle.write('#!/usr/bin/env bash\necho "flashing from $PWD"\n')
+
+    def test_it_flashes_from_the_clone_whatever_it_was_started_in(self):
+        if not shutil.which("pio") and not any(
+                os.path.exists(os.path.expanduser(path)) for path in
+                ("~/.platformio/penv/bin/pio", "~/.local/bin/pio")):
+            self.skipTest("no PlatformIO to get past the check with")
+        result = subprocess.run(
+            ["bash", os.path.join(self.repo, "scripts", "flash-firmware.sh"),
+             "fake"],
+            cwd="/", capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("flashing from %s" % self.repo, result.stdout)
 
 
 if __name__ == "__main__":

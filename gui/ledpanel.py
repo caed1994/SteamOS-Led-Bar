@@ -159,8 +159,11 @@ def repair_summary(checks):
 # What Steam's Game Mode session looks like from inside a program it started.
 GAME_MODE_MARKERS = ("GAMESCOPE_WAYLAND_DISPLAY", "STEAM_GAMESCOPE_VRR_ENABLED")
 
-NO_AGENT_SIGNS = ("authentication agent", "/dev/tty",
-                  "polkit-agent-helper", "No such device or address")
+# Phrases only pkexec's own complaint uses. "/dev/tty" was in here once and
+# matched the serial port a firmware flash prints - /dev/ttyUSB0 - so a
+# perfectly good flash came with advice about Game Mode under it.
+NO_AGENT_SIGNS = ("authentication agent", "polkit-agent-helper",
+                  "controlling terminal")
 
 
 def in_game_mode(environ=None):

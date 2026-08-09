@@ -75,9 +75,19 @@ if systemctl is-active --quiet "$SERVICE"; then
 fi
 
 restore() {
-    [[ $RESTART -eq 1 ]] && systemctl start "$SERVICE" || true
+    if [[ $RESTART -eq 1 ]]; then
+        echo "Starting $SERVICE again ..."
+        systemctl start "$SERVICE" || true
+    fi
 }
 trap restore EXIT
+
+# pkexec starts us in root's home, and the flashing runs as the caller - who
+# cannot get back into /root afterwards. PlatformIO restores the directory it
+# started in on the way out, so it ended a successful flash with
+# "PermissionError: [Errno 13] Permission denied: '/root'" and an exit code
+# that said the whole thing had failed. Stand somewhere they can both reach.
+cd "$SOURCE_DIR"
 
 echo "Flashing '$ENVIRONMENT' as $TARGET_USER ($PIO)"
 if [[ "$(id -u)" == "$TARGET_UID" ]]; then

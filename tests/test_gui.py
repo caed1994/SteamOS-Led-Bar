@@ -1096,6 +1096,15 @@ class GameModeTest(unittest.TestCase):
         self.assertFalse(ledpanel.looks_like_no_auth_agent(
             "Error creating textual authentication agent", 0))
 
+    def test_a_serial_port_is_not_a_missing_authentication_agent(self):
+        # "/dev/tty" was one of the signs, and a firmware flash prints
+        # /dev/ttyUSB0 - so a flash that worked perfectly came with advice
+        # about Game Mode underneath it. Verbatim from the machine.
+        output = ("Looking for upload port...\nAuto-detected: /dev/ttyUSB0\n"
+                  "Uploading .pio/build/esp8266_gpio14/firmware.bin\n"
+                  "Hash of data verified.")
+        self.assertFalse(ledpanel.looks_like_no_auth_agent(output, 1))
+
     def test_an_ordinary_failure_is_not_mistaken_for_it(self):
         # A refused password or a broken config must keep its own message.
         self.assertFalse(ledpanel.looks_like_no_auth_agent(
