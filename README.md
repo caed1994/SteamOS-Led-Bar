@@ -538,7 +538,7 @@ has four tabs:
   230400 baud stops keeping up at 60 fps. Longer strips work, but they are a
   config file edit, because they also need firmware and frame rate to match.
 - **Advanced settings** — the ones you set once, if ever: mapping, gamma,
-  effect speed, the notification [repeat cooldown](#when-several-arrive-at-once),
+  effect speed, the [notify repeat cooldown](#when-several-arrive-at-once),
   the two frame rates and the log level. Apply on either tab writes both.
 - **Test** — fire each notification in whatever colour it is set to, or any
   colour you pick; run the strip self-test; run the Steam check, the message
