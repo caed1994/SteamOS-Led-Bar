@@ -636,8 +636,9 @@ succeed is worse than one that stops. Untracked files of your own are fine.
 The kernel module is only rebuilt when `leds-valve-shim/` actually changed —
 that costs half a minute and needs kernel headers, so it has to be worth it.
 
-Afterwards, close and reopen the panel: it is still running from the files it
-started with.
+When it is done it offers to restart itself, since it is still running from
+the files it started with. Saying no costs nothing: the new version is
+installed either way, it is only this window that is still the old one.
 
 **From the terminal**, the same thing:
 

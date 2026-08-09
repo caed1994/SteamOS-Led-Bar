@@ -905,14 +905,44 @@ class Panel:
                 ledpanel.reinstall_command(
                     SOURCE_DIR,
                     rebuild_module=ledpanel.module_changed(SOURCE_DIR, before)),
-                lambda _code: self._installed())
+                self._installed)
 
         self.runner.start(ledpanel.update_command(SOURCE_DIR, wanted), updated)
 
-    def _installed(self):
+    def _installed(self, code):
         self.refresh_status()
-        self._write("The panel is running from the old files until you close "
-                    "and reopen it.\n\n")
+        if code != 0:
+            self._write("The install did not finish, so the panel is still "
+                        "running the old files.\n\n")
+            return
+        if messagebox.askyesno(
+                "Update",
+                "Installed.\n\nThe panel itself is still running the files it "
+                "started with. Restart it now?"):
+            self._restart()
+        else:
+            self._write("Restart the panel when it suits you; until then it "
+                        "is the old one you are looking at.\n\n")
+
+    def _restart(self):
+        """Replace this process with a fresh copy of the panel.
+
+        execv rather than starting a second one and quitting: same process,
+        same place in the task bar, and never two panels open at once. It does
+        not return, so everything after it is the failure case.
+        """
+        self._write("Restarting the panel...\n")
+        self.root.update_idletasks()
+        try:
+            self.root.destroy()
+        except tk.TclError:                                 # pragma: no cover
+            pass
+        try:
+            os.execv(sys.executable,
+                     [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
+        except OSError as exc:                              # pragma: no cover
+            sys.exit("The panel could not restart itself (%s).\n"
+                     "Start it again from the application menu." % exc)
 
     def refresh_status(self):
         for child in self.checklist.winfo_children():
