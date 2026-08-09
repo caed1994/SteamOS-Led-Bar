@@ -597,6 +597,9 @@ class Panel:
                 "for.\n\n")
 
         self.refresh_status()
+        # Open at the height the content needs, so the first thing anyone does
+        # is not what resizes the window.
+        self._fit_window()
 
     # -- helpers ----------------------------------------------------------
 
@@ -634,7 +637,11 @@ class Panel:
 
     def _build_output(self, parent):
         frame = ttk.LabelFrame(parent, text="Output", padding=1)
-        frame.pack(fill="both", expand=True, padx=16, pady=14)
+        # Fixed height, with the notebook above taking all the spare room.
+        # With both of them expanding, every change in what a tab asks for was
+        # split between the two - so the log grew and shrank under whatever
+        # you had just done, which is a strange thing for a log to do.
+        frame.pack(fill="x", padx=16, pady=14)
         # tk.Text is not themed, so its colours are set by hand - and it is
         # the one place a fixed-width font is right: this is command output.
         text = tk.Text(frame, height=9, wrap="word", state="disabled",
@@ -1001,14 +1008,15 @@ class Panel:
         self._note(outer, "Keeps your settings, never touches the ESP."
                    ).pack(anchor="w", padx=10, pady=(0, 8))
 
-        # An always-packed slot, so unfolding puts the list back here rather
-        # than after everything below it.
-        slot = ttk.Frame(outer)
-        slot.pack(fill="x")
-        self.checklist = ttk.Frame(slot)
+        # Packed straight into the page, not into a slot of its own. Measured:
+        # Tk does not reset a frame's requested size when its *last* child is
+        # unpacked, so a list living alone in a slot left that slot - and the
+        # window - at the height it had needed. Among siblings it shrinks
+        # properly, and "before" is what keeps its place in the order.
+        self.checklist = ttk.Frame(outer)
         self._details_open = False
 
-        self._build_update(outer)
+        self.update_box = self._build_update(outer)
         self._build_firmware(outer)
         return outer
 
@@ -1018,7 +1026,8 @@ class Panel:
     def _show_details(self, show):
         self._details_open = show
         if show:
-            self.checklist.pack(fill="x", padx=16, pady=(0, 10))
+            self.checklist.pack(fill="x", padx=16, pady=(0, 10),
+                                before=self.update_box)
         else:
             self.checklist.pack_forget()
         self.details.configure(text="Details \u25b4" if show
@@ -1026,19 +1035,28 @@ class Panel:
         self._fit_window()
 
     def _fit_window(self):
-        """Let the window follow its content again, in both directions.
+        """Give the window the height its content needs, and no more.
 
-        Tk grows a toplevel when its content asks for more room, but once the
-        window manager has resized it, the window keeps that size - so folding
-        the list away left the height it had needed and a hole where it was.
-        Clearing the geometry hands the size back to the content. after_idle,
-        because the new size is only known once the layout has been redone.
+        after_idle, because the new height is only known once the layout has
+        been redone.
         """
         self.root.after_idle(self._refit)
 
     def _refit(self):
+        """Set the height outright; asking nicely does not work.
+
+        Tk grows a toplevel to fit its content, but once the window manager
+        has sized the window that size stays. Clearing the geometry is
+        documented to cancel a *user-specified* size, and measured here it
+        changed nothing, because this one came from the window manager. The
+        width is left alone: that one is genuinely the user's.
+        """
         try:
-            self.root.geometry("")
+            self.root.update_idletasks()
+            width = self.root.winfo_width()
+            if width <= 1:                      # not on screen yet
+                width = self.root.winfo_reqwidth()
+            self.root.geometry("%dx%d" % (width, self.root.winfo_reqheight()))
         except tk.TclError:                                 # pragma: no cover
             pass
 
@@ -1087,7 +1105,7 @@ class Panel:
                 "this is what downloading a zip leaves you with. Clone it "
                 "with git to get updates here." % SOURCE_DIR,
             ).pack(anchor="w", padx=8, pady=8)
-            return
+            return frame
 
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=(8, 2))
@@ -1106,6 +1124,7 @@ class Panel:
                    "Fetches into the clone and installs it. Local changes or "
                    "commits of your own stop it, with a message.").pack(
                        anchor="w", padx=8, pady=(0, 8))
+        return frame
 
     def _refresh_branches(self):
         """Fill the menu from what the clone knows, keeping the selection."""
