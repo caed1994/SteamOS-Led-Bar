@@ -841,14 +841,17 @@ class Panel:
             value = variable.get()
             # Snap to the step, so the knob rests where the readout says: a
             # slider showing 2.4 while holding 2.4372 lies. Rounding to the
-            # step's decimals keeps 2.4000000000000004 out of the file, and
-            # the guard ends the recursion that setting the variable starts.
+            # step's decimals also keeps 2.4000000000000004 out of the file.
             snapped = round(round(value / step) * step, _decimals(step))
             snapped = min(max(snapped, low), high)
+            # The readout first, and unconditionally. Measured: a ttk.Scale
+            # does not call its command again for a value the command itself
+            # set, so anything after that set is skipped - and while dragging,
+            # every value arrives off the step, so the number beside the
+            # slider never moved.
+            readout.configure(text=pattern % snapped)
             if abs(value - snapped) > 1e-9:
                 variable.set(snapped)
-                return
-            readout.configure(text=pattern % snapped)
 
         scale = ttk.Scale(holder, from_=low, to=high, variable=variable,
                           command=show)
