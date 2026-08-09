@@ -215,6 +215,79 @@ def apply_config_command(source_dir, staged_path):
             staged_path]
 
 
+# -- updating the clone ----------------------------------------------------
+#
+# Unprivileged: the clone belongs to whoever made it. Only installing what an
+# update brings needs rights, and that is the separate step afterwards.
+
+
+def update_command(source_dir, branch=None, check=False):
+    """Bring the clone up to date, or with check=True only report what would."""
+    command = [os.path.join(source_dir, "scripts", "update.sh")]
+    if check:
+        command.append("--check")
+    if branch:
+        command.append(branch)
+    return command
+
+
+def _git(source_dir, *args):
+    """git's output, or "" if it fails - including "this is not a clone"."""
+    try:
+        result = subprocess.run(("git", "-C", source_dir) + args,
+                                capture_output=True, text=True)
+    except OSError:
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def is_git_clone(source_dir):
+    return bool(_git(source_dir, "rev-parse", "--is-inside-work-tree"))
+
+
+def current_branch(source_dir):
+    """The branch the clone is on, or "" when it is on none."""
+    return _git(source_dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+
+
+def known_branches(source_dir, remote="origin"):
+    """Branches this clone has heard of, without asking the network.
+
+    Enough to fill a menu at startup; a branch made since the last fetch turns
+    up once the update itself has fetched.
+    """
+    return parse_branches(_git(source_dir, "for-each-ref",
+                               "--format=%(refname:strip=3)",
+                               "refs/remotes/%s" % remote))
+
+
+def parse_branches(text):
+    """Branch names out of for-each-ref, minus the origin/HEAD pointer."""
+    names = {line.strip() for line in text.splitlines() if line.strip()}
+    return sorted(names - {"HEAD"})
+
+
+def head_commit(source_dir):
+    return _git(source_dir, "rev-parse", "HEAD")
+
+
+def module_changed(source_dir, since):
+    """Whether the kernel module's source moved since that commit.
+
+    The installer leaves a loaded module alone unless told otherwise, which is
+    right for a repair and wrong after an update that changed it. Not knowing
+    counts as changed: rebuilding costs half a minute, a stale module costs
+    the bar.
+    """
+    if not since:
+        return True
+    return bool(_git(source_dir, "diff", "--name-only",
+                     "%s..HEAD" % since, "--", MODULE_SOURCE_DIR))
+
+
+MODULE_SOURCE_DIR = "leds-valve-shim"
+
+
 def restart_watcher_command():
     """Restart the achievement watcher so it re-reads the configuration.
 

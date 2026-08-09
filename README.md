@@ -517,8 +517,9 @@ has four tabs:
   colour you pick; run the strip self-test; run the Steam check, the message
   probe and the sensor list behind the
   [temperature gauge](#temperature-gauge).
-- **Status & repair** — what is installed, what is running, and one button
-  that puts it back.
+- **Status & repair** — what is installed, what is running, one button that
+  puts it back, and [updating](#updating) to the newest version of whichever
+  branch you pick.
 
 **After a SteamOS update, use the repair button.** A system update brings a new
 kernel, and the LED module was built for the old one - so it is gone, and with
@@ -623,6 +624,22 @@ If it does not, the problem is hardware or firmware.
 | While flashing: `No module named 'intelhex'` | `flash-esp.sh` installs it for you; otherwise: `~/.platformio/penv/bin/python -m pip install intelhex` |
 
 ## Updating
+
+**From the control panel:** *Status & repair* → *Update*. Pick a branch, press
+**Check for updates** to see what would arrive, then **Update and reinstall**.
+It fetches into your clone and runs the installer, asking for your password
+once — for the install only, since the clone is yours already.
+
+It refuses rather than resolves. Local edits or commits of your own stop it
+with a message naming them, because an updater that throws away your work to
+succeed is worse than one that stops. Untracked files of your own are fine.
+The kernel module is only rebuilt when `leds-valve-shim/` actually changed —
+that costs half a minute and needs kernel headers, so it has to be worth it.
+
+Afterwards, close and reopen the panel: it is still running from the files it
+started with.
+
+**From the terminal**, the same thing:
 
 ```bash
 cd ~/SteamOS-Led-Bar

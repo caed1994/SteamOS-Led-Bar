@@ -828,7 +828,91 @@ class Panel:
                   "and never touches the ESP."),
             wraplength=580, justify="left",
         ).pack(anchor="w", padx=10, pady=(0, 10))
+
+        self._build_update(outer)
         return outer
+
+    def _build_update(self, parent):
+        """Fetch a branch and install it: the two halves of "get the new one"."""
+        frame = ttk.LabelFrame(parent, text="Update")
+        frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        if not ledpanel.is_git_clone(SOURCE_DIR):
+            ttk.Label(
+                frame, wraplength=580, justify="left", style="Muted.TLabel",
+                text=("%s is not a git clone, so there is nothing to update "
+                      "from - this is what downloading a zip leaves you with. "
+                      "Clone it with git to get updates here." % SOURCE_DIR),
+            ).pack(anchor="w", padx=8, pady=8)
+            return
+
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=8, pady=(8, 2))
+        ttk.Label(row, text="Branch").pack(side="left", padx=(0, 8))
+        self.branch = tk.StringVar(value=ledpanel.current_branch(SOURCE_DIR))
+        self.branch_menu = ttk.Combobox(row, textvariable=self.branch,
+                                        state="readonly", width=22)
+        self.branch_menu.pack(side="left", padx=(0, 12))
+        self._refresh_branches()
+        ttk.Button(row, text="Check for updates",
+                   command=self.check_for_updates).pack(side="left",
+                                                        padx=(0, 6))
+        ttk.Button(row, text="Update and reinstall", style="Accent.TButton",
+                   command=self.update_now).pack(side="left")
+        ttk.Label(
+            frame, wraplength=580, justify="left",
+            text=("Downloads the newest version into %s and installs it. Your "
+                  "configuration is kept, and the ESP is never reflashed. "
+                  "Local changes or commits of your own stop it, with a "
+                  "message saying what they are." % SOURCE_DIR),
+        ).pack(anchor="w", padx=8, pady=(0, 8))
+
+    def _refresh_branches(self):
+        """Fill the menu from what the clone knows, keeping the selection."""
+        branches = ledpanel.known_branches(SOURCE_DIR)
+        current = self.branch.get()
+        if current and current not in branches:
+            branches = sorted(branches + [current])
+        self.branch_menu.configure(values=branches)
+
+    def check_for_updates(self):
+        self.runner.start(
+            ledpanel.update_command(SOURCE_DIR, self.branch.get(), check=True),
+            lambda _code: self._refresh_branches())
+
+    def update_now(self):
+        wanted = self.branch.get()
+        if wanted != ledpanel.current_branch(SOURCE_DIR) and not messagebox.askyesno(
+                "Switch branch",
+                "This will switch from %s to %s and install that instead.\n\n"
+                "Carry on?" % (ledpanel.current_branch(SOURCE_DIR) or "?",
+                               wanted)):
+            return
+
+        before = ledpanel.head_commit(SOURCE_DIR)
+
+        def updated(code):
+            self._refresh_branches()
+            if code != 0:
+                return                      # the script said why
+            if ledpanel.head_commit(SOURCE_DIR) == before:
+                self._write("Nothing new, so nothing to install.\n\n")
+                return
+            # Only force a module rebuild when its source actually moved: the
+            # installer skips a module that is loaded and working, which is
+            # right after a repair and wrong after an update that changed it.
+            self.runner.start(
+                ledpanel.reinstall_command(
+                    SOURCE_DIR,
+                    rebuild_module=ledpanel.module_changed(SOURCE_DIR, before)),
+                lambda _code: self._installed())
+
+        self.runner.start(ledpanel.update_command(SOURCE_DIR, wanted), updated)
+
+    def _installed(self):
+        self.refresh_status()
+        self._write("The panel is running from the old files until you close "
+                    "and reopen it.\n\n")
 
     def refresh_status(self):
         for child in self.checklist.winfo_children():
