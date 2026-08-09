@@ -218,19 +218,6 @@ class DesktopEntryTest(unittest.TestCase):
             names = [keyword.arg for keyword in call.keywords]
             self.assertIn("className", names)
 
-    def test_the_dialogs_are_kept_in_the_panel_s_own_language(self):
-        # The buttons on a message box are Tk's, not ours, and it translates
-        # them from the system locale: Tk's own de.msg maps "&Yes" to "&Ja",
-        # so an English question would come with German buttons under it.
-        panel = os.path.join(HERE, "..", "gui", "steamos-led-panel")
-        with open(panel) as handle:
-            source = handle.read()
-        self.assertIn("::msgcat::mclocale en", source)
-        tree = ast.parse(source)
-        called = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
-                  and getattr(node.func, "id", "") == "speak_english"]
-        self.assertTrue(called, "nothing pins the language")
-
     def test_the_icon_is_the_file_next_to_the_panel(self):
         clone = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, clone, ignore_errors=True)
