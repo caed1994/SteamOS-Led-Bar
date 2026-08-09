@@ -533,19 +533,19 @@ Everything after the first install has a window, so you do not have to edit
 ```
 
 `install.sh` also puts it in the application menu as **SteamOS LED bar**. It
-has four tabs:
+has five tabs:
 
-- **Settings** — LED count, brightness, patrol dots, the temperature gauge and
-  the notification options including the two flash colours, as sliders,
-  switches and drop-downs. Apply writes the file
-  (keeping every comment in it) and restarts both the service and the
-  achievement watcher, so a changed switch takes effect now. The strip length
-  stops at 120: that is where the GPIO14 firmware's `MAX_LEDS` sits and where
-  230400 baud stops keeping up at 60 fps. Longer strips work, but they are a
-  config file edit, because they also need firmware and frame rate to match.
-- **Advanced settings** — the ones you set once, if ever: mapping, gamma,
-  effect speed, the [notify repeat cooldown](#when-several-arrive-at-once),
-  the two frame rates and the log level. Apply on either tab writes both.
+- **Strip** — the bar itself (length, direction, brightness limits) and what
+  runs on it (patrol dots, effect speed, the temperature gauge). The strip
+  length stops at 120: that is where the GPIO14 firmware's `MAX_LEDS` sits and
+  where 230400 baud stops keeping up at 60 fps. Longer strips work, but they
+  are a config file edit, because they also need firmware and frame rate to
+  match.
+- **Notifications** — what flashes (the master switch, achievements and
+  friend messages with a colour each) and how it looks (duration, shape).
+- **Advanced** — the ones you set once, if ever: mapping, gamma, the
+  [notify repeat cooldown](#when-several-arrive-at-once), the two frame rates
+  and the log level.
 - **Test** — fire each notification in whatever colour it is set to, or any
   colour you pick; run the strip self-test; run the Steam check, the message
   probe and the sensor list behind the
@@ -553,6 +553,13 @@ has four tabs:
 - **Status & repair** — what is installed, what is running, one button that
   puts it back, [updating](#updating) to the newest version of whichever
   branch you pick, and flashing the ESP firmware.
+
+**Apply and Reload sit under all of them**, because there is one config file:
+Apply writes every setting from every tab (keeping the comments in the file)
+and restarts both the service and the achievement watcher, so a changed switch
+takes effect now. Settings that depend on a switch — the temperature marks,
+the two flash colours — are greyed out while that switch is off, so you can
+see they exist without them asking for attention they have not earned.
 
 **After a SteamOS update, use the repair button.** A system update brings a new
 kernel, and the LED module was built for the old one - so it is gone, and with

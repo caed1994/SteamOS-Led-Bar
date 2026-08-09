@@ -428,19 +428,19 @@ class SensorMenuTest(unittest.TestCase):
 class PanelSettingsTest(unittest.TestCase):
     """The settings list has to agree with the configuration it edits."""
 
-    TABLES = ("SETTINGS", "ADVANCED")
+    TABLES = ("STRIP", "NOTIFICATIONS", "ADVANCED")
 
-    def _tables(self):
-        """Both settings tables, as AST nodes.
-
-        Read out of the panel rather than imported: importing pulls in tkinter,
-        which a build machine has no reason to have.
-        """
+    def _panel(self):
+        # Read out of the panel rather than imported: importing pulls in
+        # tkinter, which a build machine has no reason to have.
         path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
         with open(path) as handle:
-            tree = ast.parse(handle.read())
+            return ast.parse(handle.read())
+
+    def _tables(self):
+        """The settings table of each tab, as AST nodes."""
         found = {}
-        for node in tree.body:
+        for node in self._panel().body:
             name = (getattr(node.targets[0], "id", "")
                     if isinstance(node, ast.Assign) else "")
             if name in self.TABLES:
@@ -449,27 +449,47 @@ class PanelSettingsTest(unittest.TestCase):
             self.assertIn(name, found, "%s not found in the panel" % name)
         return [found[name] for name in self.TABLES]
 
+    def _rows(self):
+        """Every setting row, from every group of every tab."""
+        return [row for table in self._tables() for group in table.elts
+                for row in group.elts[1].elts]
+
     def _settings(self):
         """Every key the panel offers, on whichever tab."""
-        return [entry.elts[0].value
-                for table in self._tables() for entry in table.elts]
+        return [row.elts[0].value for row in self._rows()]
 
     def test_the_tabs_are_in_the_order_they_are_worked_through(self):
-        # Everyday settings, then the ones you set once, then testing, then
-        # repair - which is also the order of how often they are opened.
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
-        with open(path) as handle:
-            tree = ast.parse(handle.read())
+        # What you set, then what you rarely set, then what you do - which is
+        # also the order of how often they are opened.
         tabs = [keyword.value.value
-                for node in ast.walk(tree)
+                for node in ast.walk(self._panel())
                 if isinstance(node, ast.Call)
                 and getattr(node.func, "attr", "") == "add"
                 and getattr(getattr(node.func, "value", None), "id", "")
                 == "notebook"
                 for keyword in node.keywords if keyword.arg == "text"]
         self.assertEqual([tab.strip() for tab in tabs],
-                         ["Settings", "Advanced settings", "Test",
+                         ["Strip", "Notifications", "Advanced", "Test",
                           "Status && repair"])
+
+    def test_every_group_has_settings_in_it(self):
+        # An empty box is a heading with nothing under it.
+        for table in self._tables():
+            for group in table.elts:
+                self.assertTrue(group.elts[1].elts)
+
+    def test_what_a_switch_governs_is_a_real_setting(self):
+        # The greying-out map names keys on both sides; a typo in either would
+        # quietly leave a row enabled forever.
+        panel = self._panel()
+        depends = next(node.value for node in panel.body
+                       if isinstance(node, ast.Assign)
+                       and getattr(node.targets[0], "id", "") == "DEPENDS_ON")
+        shown = set(self._settings())
+        for key, needs in zip(depends.keys, depends.values):
+            self.assertIn(key.value, shown, key.value)
+            for need in needs.elts:
+                self.assertIn(need.value, shown, need.value)
 
     def _firmware_max_leds(self):
         path = os.path.join(HERE, "..", "firmware", "led-client",
@@ -485,15 +505,15 @@ class PanelSettingsTest(unittest.TestCase):
         # dark, so a slider that can ask for more is a slider that can break
         # the bar. The service still takes longer strips from the config file
         # for firmware built with a higher limit.
-        entry = next(entry for table in self._tables() for entry in table.elts
-                     if entry.elts[0].value == "LED_COUNT")
+        entry = next(row for row in self._rows()
+                     if row.elts[0].value == "LED_COUNT")
         self.assertLessEqual(entry.elts[4].value, self._firmware_max_leds())
 
     def test_every_slider_can_stop_on_both_of_its_ends(self):
         # The knob snaps to multiples of the step, so an end that is not one
         # cannot be set: the top of a range would be quietly unreachable, and
         # a bottom end could snap below what the service accepts.
-        for entry in [entry for table in self._tables() for entry in table.elts]:
+        for entry in self._rows():
             key, kind = entry.elts[0].value, entry.elts[2].value
             step = entry.elts[5].value
             if kind not in ("int", "float"):
@@ -516,8 +536,7 @@ class PanelSettingsTest(unittest.TestCase):
         overlap, Apply starts refusing settings the panel itself offered.
         """
         marks = {}
-        for entry in [entry for table in self._tables()
-                      for entry in table.elts]:
+        for entry in self._rows():
             if entry.elts[0].value in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
                 marks[entry.elts[0].value] = (entry.elts[3].value,
                                               entry.elts[4].value)
@@ -559,7 +578,7 @@ class PanelSettingsTest(unittest.TestCase):
         # The sliders repeat the bounds validate() enforces. If the two ever
         # disagree, the panel offers a value that kills the service on
         # restart - so check the ends of every numeric range against it.
-        for entry in [entry for table in self._tables() for entry in table.elts]:
+        for entry in self._rows():
             key, _label, kind = (entry.elts[0].value, entry.elts[1].value,
                                  entry.elts[2].value)
             if kind not in ("int", "float"):

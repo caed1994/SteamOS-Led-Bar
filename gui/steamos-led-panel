@@ -46,64 +46,99 @@ from steamos_led import config as config_module             # noqa: E402
 # authority, so a disagreement here is caught rather than shipped. The step is
 # what the slider can stop on, ttk.Scale being continuous whatever is drawn on
 # it. Every range starts on a multiple of its step, so both ends are reachable.
-SETTINGS = [
-    # 120, not the 1024 the service accepts. Two limits meet there: the
-    # GPIO14 firmware is built with MAX_LEDS=120 and rejects longer frames,
-    # and 230400 baud carries about 125 LEDs at 60 fps. Past that the slider
-    # would offer lengths that go dark or stutter. Longer strips are still a
-    # config file away.
-    ("LED_COUNT", "LEDs on the strip", "int", 1, 120, 1),
-    ("REVERSE", "Flip the strip direction", "bool", None, None, None),
-    ("MAX_BRIGHTNESS", "Maximum brightness", "int", 0, 255, 1),
-    ("MIN_BRIGHTNESS", "Minimum brightness", "int", 0, 255, 1),
-    ("PATROL_DOTS", "Patrol dots", "int", 1, 8, 1),
-    ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow", "bool",
-     None, None, None),
-    # The two marks are coupled - the bar fills over a span, not at a point -
-    # and the ranges are kept apart so no combination can produce a config the
-    # service refuses. Anything more exotic belongs in the file, which takes
-    # 0-150 for both. Whole degrees: half of one is below what 17 LEDs show,
-    # and "85.38" reads like a measurement rather than a setting.
-    ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "int",
-     20, 70, 1),
-    ("TEMPERATURE_MAX", "Temperature: bar full (C)", "int", 75, 120, 1),
-    # Not a "choice": the values are paths into /sys and the machine decides
-    # what they are, so the menu is built from what it reports.
-    ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor", None, None, None),
-    # The master switch: with this off nothing flashes at all, not even
-    # --notify, because the trigger pipe is never opened.
-    ("NOTIFY", "Flash on notifications", "bool", None, None, None),
-    # Then one switch per thing worth watching for, each with the colour it
-    # flashes underneath it, so the pair reads as one setting.
-    ("NOTIFY_ACHIEVEMENTS", "Flash on achievements", "bool", None, None, None),
-    ("ACHIEVEMENT_COLOR", "Achievement colour", "named",
-     ledpanel.ACHIEVEMENT_COLOURS, None, None),
-    ("NOTIFY_MESSAGES", "Flash on friend messages", "bool", None, None, None),
-    ("MESSAGE_COLOR", "Friend message colour", "named",
-     ledpanel.MESSAGE_COLOURS, None, None),
-    # From half a second: the validator allows a tenth, but the flash grows,
-    # breathes and retracts, none of which is visible in that.
-    ("NOTIFY_DURATION", "Flash duration (seconds)", "float", 0.5, 60.0, 0.5),
-    ("NOTIFY_STYLE", "Flash shape", "choice", config_module.NOTIFY_STYLES,
-     None, None),
+STRIP = [
+    ("The strip", [
+        # 120, not the 1024 the service accepts. Two limits meet there: the
+        # GPIO14 firmware is built with MAX_LEDS=120 and rejects longer
+        # frames, and 230400 baud carries about 125 LEDs at 60 fps. Past that
+        # the slider would offer lengths that go dark or stutter. Longer
+        # strips are still a config file away.
+        ("LED_COUNT", "LEDs on the strip", "int", 1, 120, 1),
+        ("REVERSE", "Flip the strip direction", "bool", None, None, None),
+        ("MAX_BRIGHTNESS", "Maximum brightness", "int", 0, 255, 1),
+        ("MIN_BRIGHTNESS", "Minimum brightness", "int", 0, 255, 1),
+    ]),
+    ("Effects", [
+        ("PATROL_DOTS", "Patrol dots", "int", 1, 8, 1),
+        ("SPEED", "Effect speed", "float", 0.1, 4.0, 0.1),
+        ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow",
+         "bool", None, None, None),
+        # The two marks are coupled - the bar fills over a span, not at a
+        # point - and the ranges are kept apart so no combination can produce
+        # a config the service refuses. Anything more exotic belongs in the
+        # file, which takes 0-150 for both. Whole degrees: half of one is
+        # below what 17 LEDs show, and "85.38" reads like a measurement.
+        ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "int",
+         20, 70, 1),
+        ("TEMPERATURE_MAX", "Temperature: bar full (C)", "int", 75, 120, 1),
+        # Not a "choice": the values are paths into /sys and the machine
+        # decides what they are, so the menu is built from what it reports.
+        ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor",
+         None, None, None),
+    ]),
+]
+
+NOTIFICATIONS = [
+    ("What flashes", [
+        # The master switch: with this off nothing flashes at all, not even
+        # --notify, because the trigger pipe is never opened.
+        ("NOTIFY", "Flash on notifications", "bool", None, None, None),
+        # Then one switch per thing worth watching for, each with the colour
+        # it flashes underneath it, so the pair reads as one setting.
+        ("NOTIFY_ACHIEVEMENTS", "Flash on achievements", "bool",
+         None, None, None),
+        ("ACHIEVEMENT_COLOR", "Achievement colour", "named",
+         ledpanel.ACHIEVEMENT_COLOURS, None, None),
+        ("NOTIFY_MESSAGES", "Flash on friend messages", "bool",
+         None, None, None),
+        ("MESSAGE_COLOR", "Friend message colour", "named",
+         ledpanel.MESSAGE_COLOURS, None, None),
+    ]),
+    ("How it looks", [
+        # From half a second: the validator allows a tenth, but the flash
+        # grows, breathes and retracts, none of which is visible in that.
+        ("NOTIFY_DURATION", "Flash duration (seconds)", "float",
+         0.5, 60.0, 0.5),
+        ("NOTIFY_STYLE", "Flash shape", "choice", config_module.NOTIFY_STYLES,
+         None, None),
+    ]),
 ]
 
 # Set once and left alone: the defaults suit a 17 LED bar on the shipped
 # firmware, and each of these is a knob you turn because something specific is
-# wrong. Same format, so both tabs are built and validated by the same code.
+# wrong - a strip that is not 17 LEDs, colours that look blotchy when dimmed,
+# a link that cannot keep up. One unnamed group: this tab is allowed to be a
+# list, since nobody browses it.
 ADVANCED = [
-    ("MAPPING", "Mapping of the logical LEDs", "choice",
-     config_module.MAPPINGS, None, None),
-    ("GAMMA", "Gamma", "float", 0.1, 4.0, 0.1),
-    ("SPEED", "Effect speed", "float", 0.1, 4.0, 0.1),
-    # Whole seconds: this is "how long before the bar mentions it again",
-    # which nobody thinks about in halves.
-    ("NOTIFY_REPEAT_GAP", "Notify repeat cooldown (s)", "int", 0, 120, 1),
-    ("FPS", "Frames per second", "int", 1, 240, 1),
-    ("IDLE_FPS", "Frames per second when idle", "int", 1, 240, 1),
-    ("LOG_LEVEL", "Log level", "choice",
-     ("debug", "info", "warning", "error"), None, None),
+    (None, [
+        ("MAPPING", "Mapping of the logical LEDs", "choice",
+         config_module.MAPPINGS, None, None),
+        ("GAMMA", "Gamma", "float", 0.1, 4.0, 0.1),
+        # Whole seconds: this is "how long before the bar mentions it again",
+        # which nobody thinks about in halves.
+        ("NOTIFY_REPEAT_GAP", "Notify repeat cooldown (s)", "int", 0, 120, 1),
+        ("FPS", "Frames per second", "int", 1, 240, 1),
+        ("IDLE_FPS", "Frames per second when idle", "int", 1, 240, 1),
+        ("LOG_LEVEL", "Log level", "choice",
+         ("debug", "info", "warning", "error"), None, None),
+    ]),
 ]
+
+# Settings that only mean something while another switch is on. They are
+# greyed out rather than hidden: you can still see that the setting exists,
+# and where it lives, without it asking for attention it has not earned.
+DEPENDS_ON = {
+    "TEMPERATURE_MIN": ("TEMPERATURE_GAUGE",),
+    "TEMPERATURE_MAX": ("TEMPERATURE_GAUGE",),
+    "TEMPERATURE_SENSOR": ("TEMPERATURE_GAUGE",),
+    "NOTIFY_ACHIEVEMENTS": ("NOTIFY",),
+    "NOTIFY_MESSAGES": ("NOTIFY",),
+    "NOTIFY_DURATION": ("NOTIFY",),
+    "NOTIFY_STYLE": ("NOTIFY",),
+    "NOTIFY_REPEAT_GAP": ("NOTIFY",),
+    "ACHIEVEMENT_COLOR": ("NOTIFY", "NOTIFY_ACHIEVEMENTS"),
+    "MESSAGE_COLOR": ("NOTIFY", "NOTIFY_MESSAGES"),
+}
 
 
 # What the window calls itself to the desktop. Tk derives WM_CLASS from this,
@@ -483,6 +518,8 @@ class Panel:
         # turns up later can be added to both.
         self._menus = {}
         self._widgets = {}
+        # key -> (labels, controls), so a setting can be greyed out whole
+        self._rows = {}
 
         header = ttk.Frame(root)
         header.pack(fill="x", padx=16, pady=(14, 0))
@@ -494,15 +531,19 @@ class Panel:
         notebook = ttk.Notebook(root)
         notebook.pack(fill="both", expand=True, padx=16, pady=(12, 0))
 
+        # Under the tabs, not inside them: one file, one Apply.
+        self._build_apply(root)
         self.output = self._build_output(root)
         self.runner = Runner(root, self._write)
 
-        notebook.add(self._build_settings(notebook, SETTINGS),
-                     text="  Settings  ")
+        notebook.add(self._build_settings(notebook, STRIP), text="  Strip  ")
+        notebook.add(self._build_settings(notebook, NOTIFICATIONS),
+                     text="  Notifications  ")
         notebook.add(self._build_settings(notebook, ADVANCED),
-                     text="  Advanced settings  ")
+                     text="  Advanced  ")
         notebook.add(self._build_tests(notebook), text="  Test  ")
         notebook.add(self._build_status(notebook), text="  Status && repair  ")
+        self._refresh_enabled()
 
         if ledpanel.in_game_mode():
             self._write(
@@ -569,51 +610,95 @@ class Panel:
 
     # -- settings ---------------------------------------------------------
 
-    def _build_settings(self, parent, table):
+    def _build_settings(self, parent, groups):
+        """One tab: a titled box per group, a row per setting."""
         outer = ttk.Frame(parent)
-        grid = ttk.Frame(outer)
-        grid.pack(fill="both", expand=True, padx=16, pady=16)
-        grid.columnconfigure(1, weight=1)
-
-        for row, (key, label, kind, low, high, step) in enumerate(table):
-            ttk.Label(grid, text=label).grid(row=row, column=0, sticky="w",
-                                             pady=5, padx=(0, 14))
-            value = self.config.get(key, config_module.DEFAULTS[key])
-
-            if kind == "bool":
-                variable = tk.BooleanVar(value=bool(value))
-                ttk.Checkbutton(grid, variable=variable).grid(
-                    row=row, column=1, sticky="w")
-            elif kind == "choice":
-                variable = tk.StringVar(value=str(value))
-                ttk.Combobox(grid, textvariable=variable, values=list(low),
-                             state="readonly", width=12).grid(
-                                 row=row, column=1, sticky="w")
-            elif kind in ("sensor", "named"):
-                # Entries that are labels for something else - see the menu
-                # helpers in ledpanel.
-                variable = tk.StringVar()
-                choices = (ledpanel.sensor_choices(*ledpanel.read_sensors(),
-                                                   current=str(value))
-                           if kind == "sensor" else list(low))
-                self._menu(grid, row, key, variable, choices, str(value),
-                           width=34 if kind == "sensor" else 14)
+        for title, rows in groups:
+            if title is None:
+                box = ttk.Frame(outer)
+                box.pack(fill="x", padx=6, pady=10)
             else:
-                variable = tk.DoubleVar(value=float(value))
-                self._scale(grid, row, variable, low, high, step)
-            self.vars[key] = (variable, kind)
+                box = ttk.LabelFrame(outer, text=title)
+                box.pack(fill="x", padx=10, pady=(10, 0))
+            grid = ttk.Frame(box)
+            grid.pack(fill="x", padx=10, pady=8)
+            grid.columnconfigure(1, weight=1)
+            for row, entry in enumerate(rows):
+                self._build_row(grid, row, *entry)
+        return outer
 
-        buttons = ttk.Frame(outer)
-        buttons.pack(fill="x", padx=16, pady=(0, 16))
+    def _build_row(self, grid, row, key, label, kind, low, high, step):
+        """One setting: its name, its control, and a way to grey both out."""
+        name = ttk.Label(grid, text=label)
+        name.grid(row=row, column=0, sticky="w", pady=5, padx=(0, 14))
+        value = self.config.get(key, config_module.DEFAULTS[key])
+        labels, controls = [name], []
+
+        if kind == "bool":
+            variable = tk.BooleanVar(value=bool(value))
+            control = ttk.Checkbutton(grid, variable=variable)
+            control.grid(row=row, column=1, sticky="w")
+            controls.append(control)
+            # Anything can be the switch another row hangs off, and following
+            # the variable costs nothing.
+            variable.trace_add("write", lambda *_args: self._refresh_enabled())
+        elif kind == "choice":
+            variable = tk.StringVar(value=str(value))
+            control = ttk.Combobox(grid, textvariable=variable,
+                                   values=list(low), state="readonly",
+                                   width=12)
+            control.grid(row=row, column=1, sticky="w")
+            controls.append(control)
+        elif kind in ("sensor", "named"):
+            # Entries that are labels for something else - see the menu
+            # helpers in ledpanel.
+            variable = tk.StringVar()
+            choices = (ledpanel.sensor_choices(*ledpanel.read_sensors(),
+                                               current=str(value))
+                       if kind == "sensor" else list(low))
+            self._menu(grid, row, key, variable, choices, str(value),
+                       width=34 if kind == "sensor" else 14)
+            controls.append(self._widgets[key])
+        else:
+            variable = tk.DoubleVar(value=float(value))
+            scale, readout = self._scale(grid, row, variable, low, high, step)
+            controls.append(scale)
+            labels.append(readout)
+
+        self.vars[key] = (variable, kind)
+        self._rows[key] = (labels, controls)
+
+    def _refresh_enabled(self):
+        """Grey out every setting whose switch is off."""
+        for key, needs in DEPENDS_ON.items():
+            if key not in self._rows:
+                continue
+            self._set_enabled(key, all(bool(self.vars[need][0].get())
+                                       for need in needs if need in self.vars))
+
+    def _set_enabled(self, key, on):
+        labels, controls = self._rows[key]
+        for label in labels:
+            # Labels take a disabled state but clam draws them the same, so
+            # the muted style does the greying that people actually see.
+            label.configure(style="TLabel" if on else "Muted.TLabel")
+        for control in controls:
+            control.state(["!disabled"] if on else ["disabled"])
+
+    def _build_apply(self, parent):
+        """Apply and Reload, once, below every tab.
+
+        They were in each settings tab before, with a line explaining that
+        Apply writes the other tab too. One row under all of them says the
+        same thing by standing where it does.
+        """
+        buttons = ttk.Frame(parent)
+        buttons.pack(fill="x", padx=16, pady=(12, 0))
         ttk.Button(buttons, text="Apply and restart service",
                    style="Accent.TButton",
                    command=self.apply_settings).pack(side="left")
         ttk.Button(buttons, text="Reload from file",
                    command=self.reload_settings).pack(side="left", padx=6)
-        # Both tabs edit one file and Apply writes all of it, so say so.
-        ttk.Label(outer, text="Apply writes every setting, on both tabs.",
-                  style="Muted.TLabel").pack(anchor="w", padx=16, pady=(0, 12))
-        return outer
 
     def _menu(self, grid, row, key, variable, choices, current, width):
         """A drop-down of (label, value) pairs, showing labels."""
@@ -670,6 +755,7 @@ class Panel:
         scale.grid(row=0, column=0, sticky="ew")
         readout.grid(row=0, column=1, padx=(6, 0))
         show()
+        return scale, readout
 
     def _collect(self):
         """Widget values as the config wants them, validated."""
@@ -748,6 +834,7 @@ class Panel:
                          if kind in ("sensor", "named")
                          else str(value) if kind == "choice"
                          else float(value))
+        self._refresh_enabled()
         self._write("Reloaded %s\n\n" % config_module.DEFAULT_CONFIG_PATH)
 
     # -- tests ------------------------------------------------------------
