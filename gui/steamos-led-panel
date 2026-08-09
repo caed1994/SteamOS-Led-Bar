@@ -98,8 +98,7 @@ ADVANCED = [
     ("SPEED", "Effect speed", "float", 0.1, 4.0, 0.1),
     # Whole seconds: this is "how long before the bar mentions it again",
     # which nobody thinks about in halves.
-    ("NOTIFY_REPEAT_GAP", "Quiet time before the same flash repeats (s)",
-     "int", 0, 120, 1),
+    ("NOTIFY_REPEAT_GAP", "Repeat cooldown (s)", "int", 0, 120, 1),
     ("FPS", "Frames per second", "int", 1, 240, 1),
     ("IDLE_FPS", "Frames per second when idle", "int", 1, 240, 1),
     ("LOG_LEVEL", "Log level", "choice",
