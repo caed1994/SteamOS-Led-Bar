@@ -124,6 +124,15 @@ ADVANCED = [
     ]),
 ]
 
+# The tabs that carry settings, in the order they are shown. Test and
+# Status & repair come after them and are things you do rather than set,
+# which is why the Apply row does not appear under those two.
+SETTINGS_TABS = (
+    ("  Strip  ", STRIP),
+    ("  Notifications  ", NOTIFICATIONS),
+    ("  Advanced  ", ADVANCED),
+)
+
 # Settings that only mean something while another switch is on. They are
 # greyed out rather than hidden: you can still see that the setting exists,
 # and where it lives, without it asking for attention it has not earned.
@@ -520,6 +529,9 @@ class Panel:
         self._widgets = {}
         # key -> (labels, controls), so a setting can be greyed out whole
         self._rows = {}
+        # Explanations that should use the width the window actually has
+        self._wrapped = []
+        self._wrap_width = 0
 
         header = ttk.Frame(root)
         header.pack(fill="x", padx=16, pady=(14, 0))
@@ -528,7 +540,7 @@ class Panel:
         self.headline = ttk.Label(header, text="", style="Muted.TLabel")
         self.headline.pack(anchor="w", pady=(2, 0))
 
-        notebook = ttk.Notebook(root)
+        notebook = self.notebook = ttk.Notebook(root)
         notebook.pack(fill="both", expand=True, padx=16, pady=(12, 0))
 
         # Under the tabs, not inside them: one file, one Apply.
@@ -536,14 +548,20 @@ class Panel:
         self.output = self._build_output(root)
         self.runner = Runner(root, self._write)
 
-        notebook.add(self._build_settings(notebook, STRIP), text="  Strip  ")
-        notebook.add(self._build_settings(notebook, NOTIFICATIONS),
-                     text="  Notifications  ")
-        notebook.add(self._build_settings(notebook, ADVANCED),
-                     text="  Advanced  ")
+        # Which tabs the Apply row belongs under, by widget rather than by
+        # position - reordering the tabs must not silently change this.
+        self._settings_tabs = set()
+        for title, table in SETTINGS_TABS:
+            tab = self._build_settings(notebook, table)
+            notebook.add(tab, text=title)
+            self._settings_tabs.add(str(tab))
         notebook.add(self._build_tests(notebook), text="  Test  ")
-        notebook.add(self._build_status(notebook), text="  Status && repair  ")
+        notebook.add(self._build_status(notebook), text="  Status & repair  ")
         self._refresh_enabled()
+
+        notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
+        self._tab_changed()
+        root.bind("<Configure>", self._rewrap)
 
         if ledpanel.in_game_mode():
             self._write(
@@ -685,20 +703,58 @@ class Panel:
         for control in controls:
             control.state(["!disabled"] if on else ["disabled"])
 
+    def _note(self, parent, text, **kwargs):
+        """A line of explanation that wraps at the window's width, not at 580.
+
+        A fixed wraplength breaks mid-sentence on a wide window and leaves the
+        right half of it empty, which is what made this page look ragged.
+        """
+        label = ttk.Label(parent, text=text, justify="left",
+                          style="Muted.TLabel", wraplength=560, **kwargs)
+        self._wrapped.append(label)
+        return label
+
+    def _rewrap(self, event):
+        """Follow the window's width - only when it actually changed.
+
+        Setting wraplength changes what the label asks for, which can bring
+        another Configure straight back; comparing first ends that.
+        """
+        width = max(320, event.width - 90)
+        if width == self._wrap_width:
+            return
+        self._wrap_width = width
+        for label in self._wrapped:
+            label.configure(wraplength=width)
+
     def _build_apply(self, parent):
-        """Apply and Reload, once, below every tab.
+        """Apply and Reload, once, below the tabs that have settings.
 
         They were in each settings tab before, with a line explaining that
         Apply writes the other tab too. One row under all of them says the
-        same thing by standing where it does.
+        same thing by standing where it does - but only under the tabs it
+        belongs to: on Status & repair it sat right below the firmware box
+        and read like "apply the firmware".
+
+        The slot stays packed and the buttons come and go inside it, so
+        showing them again puts them back where they were rather than at the
+        bottom of the window.
         """
-        buttons = ttk.Frame(parent)
-        buttons.pack(fill="x", padx=16, pady=(12, 0))
-        ttk.Button(buttons, text="Apply and restart service",
+        self.apply_slot = ttk.Frame(parent)
+        self.apply_slot.pack(fill="x")
+        self.apply_row = ttk.Frame(self.apply_slot)
+        ttk.Button(self.apply_row, text="Apply and restart service",
                    style="Accent.TButton",
                    command=self.apply_settings).pack(side="left")
-        ttk.Button(buttons, text="Reload from file",
+        ttk.Button(self.apply_row, text="Reload from file",
                    command=self.reload_settings).pack(side="left", padx=6)
+
+    def _tab_changed(self, _event=None):
+        """Show the Apply row only where there is something to apply."""
+        if self.notebook.select() in self._settings_tabs:
+            self.apply_row.pack(fill="x", padx=16, pady=(12, 0))
+        else:
+            self.apply_row.pack_forget()
 
     def _menu(self, grid, row, key, variable, choices, current, width):
         """A drop-down of (label, value) pairs, showing labels."""
@@ -896,32 +952,49 @@ class Panel:
     # -- status and repair ------------------------------------------------
 
     def _build_status(self, parent):
-        outer = ttk.Frame(parent)
-        self.summary = ttk.Label(outer, text="", wraplength=640,
-                                 justify="left")
-        self.summary.pack(anchor="w", padx=16, pady=(16, 10))
+        """Three things you might do here, each one row: check, update, flash.
 
-        self.checklist = ttk.Frame(outer)
-        self.checklist.pack(fill="both", expand=True, padx=16)
+        The checklist used to be nine lines of "yes" whenever nothing was
+        wrong, which is nearly always. It folds away instead, and unfolds
+        itself the moment something is not in order.
+        """
+        outer = ttk.Frame(parent)
 
         buttons = ttk.Frame(outer)
-        buttons.pack(fill="x", padx=10, pady=10)
+        buttons.pack(fill="x", padx=10, pady=(12, 2))
+        self.details = ttk.Button(buttons, text="Details \u25be",
+                                  command=self.toggle_details)
+        self.details.pack(side="left", padx=(0, 6))
         ttk.Button(buttons, text="Check again",
-                   command=self.refresh_status).pack(side="left")
-        ttk.Button(buttons, text="Repair / reinstall",
+                   command=self.refresh_status).pack(side="left", padx=(0, 6))
+        ttk.Button(buttons, text="Rebuild and reinstall",
                    style="Accent.TButton",
-                   command=self.reinstall).pack(side="left", padx=8)
-        ttk.Label(
-            outer,
-            text=("A SteamOS update replaces the kernel, and the LED module "
-                  "has to be rebuilt for it. Repairing keeps your settings "
-                  "and never touches the ESP."),
-            wraplength=580, justify="left",
-        ).pack(anchor="w", padx=10, pady=(0, 10))
+                   command=self.reinstall).pack(side="left")
+        self._note(outer, "Keeps your settings, never touches the ESP."
+                   ).pack(anchor="w", padx=10, pady=(0, 8))
+
+        # An always-packed slot, so unfolding puts the list back here rather
+        # than after everything below it.
+        slot = ttk.Frame(outer)
+        slot.pack(fill="x")
+        self.checklist = ttk.Frame(slot)
+        self._details_open = False
 
         self._build_update(outer)
         self._build_firmware(outer)
         return outer
+
+    def toggle_details(self):
+        self._show_details(not self._details_open)
+
+    def _show_details(self, show):
+        self._details_open = show
+        if show:
+            self.checklist.pack(fill="x", padx=16, pady=(0, 10))
+        else:
+            self.checklist.pack_forget()
+        self.details.configure(text="Details \u25b4" if show
+                               else "Details \u25be")
 
     def _build_firmware(self, parent):
         """The last thing that still needed a terminal after installing."""
@@ -931,19 +1004,16 @@ class Panel:
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=8, pady=(8, 2))
         self.firmware = tk.StringVar(value=ledpanel.FIRMWARE_ENVS[0][0])
+        # Grows with the window: at a fixed width the longest build name was
+        # cut off mid-word, and which pin it drives is the whole point.
         ttk.Combobox(row, textvariable=self.firmware, state="readonly",
-                     width=48,
                      values=[label for label, _env in ledpanel.FIRMWARE_ENVS]
-                     ).pack(side="left", padx=(0, 12))
+                     ).pack(side="left", fill="x", expand=True, padx=(0, 12))
         ttk.Button(row, text="Flash firmware",
                    command=self.flash_firmware).pack(side="left")
-        ttk.Label(
-            frame, wraplength=580, justify="left",
-            text=("Overwrites what is on the board, which takes a minute or "
-                  "two - the strip is dark and the service stopped while it "
-                  "runs. Needs PlatformIO installed for your user, and the "
-                  "ESP plugged in. Your settings are not touched."),
-        ).pack(anchor="w", padx=8, pady=(0, 8))
+        self._note(frame,
+                   "Takes a minute; the strip is dark and the service stops "
+                   "while it runs.").pack(anchor="w", padx=8, pady=(0, 8))
 
     def flash_firmware(self):
         environment = ledpanel.menu_value(ledpanel.FIRMWARE_ENVS,
@@ -965,11 +1035,11 @@ class Panel:
         frame.pack(fill="x", padx=10, pady=(0, 10))
 
         if not ledpanel.is_git_clone(SOURCE_DIR):
-            ttk.Label(
-                frame, wraplength=580, justify="left", style="Muted.TLabel",
-                text=("%s is not a git clone, so there is nothing to update "
-                      "from - this is what downloading a zip leaves you with. "
-                      "Clone it with git to get updates here." % SOURCE_DIR),
+            self._note(
+                frame,
+                "%s is not a git clone, so there is nothing to update from - "
+                "this is what downloading a zip leaves you with. Clone it "
+                "with git to get updates here." % SOURCE_DIR,
             ).pack(anchor="w", padx=8, pady=8)
             return
 
@@ -984,15 +1054,12 @@ class Panel:
         ttk.Button(row, text="Check for updates",
                    command=self.check_for_updates).pack(side="left",
                                                         padx=(0, 6))
-        ttk.Button(row, text="Update and reinstall", style="Accent.TButton",
+        ttk.Button(row, text="Update and install", style="Accent.TButton",
                    command=self.update_now).pack(side="left")
-        ttk.Label(
-            frame, wraplength=580, justify="left",
-            text=("Downloads the newest version into %s and installs it. Your "
-                  "configuration is kept, and the ESP is never reflashed. "
-                  "Local changes or commits of your own stop it, with a "
-                  "message saying what they are." % SOURCE_DIR),
-        ).pack(anchor="w", padx=8, pady=(0, 8))
+        self._note(frame,
+                   "Fetches into the clone and installs it. Local changes or "
+                   "commits of your own stop it, with a message.").pack(
+                       anchor="w", padx=8, pady=(0, 8))
 
     def _refresh_branches(self):
         """Fill the menu from what the clone knows, keeping the selection."""
@@ -1075,12 +1142,15 @@ class Panel:
         for child in self.checklist.winfo_children():
             child.destroy()
         checks = ledpanel.run_checks(config=self.config)
-        summary = ledpanel.repair_summary(checks)
-        self.summary.configure(
-            text=summary,
-            style="Good.TLabel" if not ledpanel.broken(checks)
-            else "Bad.TLabel")
-        self.headline.configure(text=summary)
+        broken = ledpanel.broken(checks)
+        # One place says how it is, under the title, where every tab can see
+        # it - the same sentence at the top of this tab as well was saying it
+        # twice to someone already looking at it.
+        self.headline.configure(
+            text=ledpanel.repair_summary(checks),
+            style="Bad.TLabel" if broken else "Good.TLabel")
+        if broken:
+            self._show_details(True)
         for row, check in enumerate(checks):
             ttk.Label(self.checklist, text="\u2713" if check.ok else "\u2717",
                       width=3, style="Good.TLabel" if check.ok

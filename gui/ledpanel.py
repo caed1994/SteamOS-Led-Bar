@@ -297,12 +297,14 @@ MODULE_SOURCE_DIR = "leds-valve-shim"
 # environments themselves live in firmware/led-client/platformio.ini; a test
 # keeps all three lists naming the same set.
 
+# Short enough to read at a glance, because the pin is the whole decision -
+# the installer's prompt has room for the longer wording, a drop-down has not.
 FIRMWARE_ENVS = (
-    ("ESP8266 (NodeMCU, D1 mini), strip on GPIO2 - recommended", "nodemcuv2"),
-    ("ESP8266, strip on GPIO14 / D5 - keeps older wiring", "esp8266_gpio14"),
-    ("ESP32, strip on GPIO16", "esp32dev"),
-    ("ESP32-S3, strip on GPIO16", "esp32s3"),
-    ("ESP8266 with the D1 mini board profile, strip on GPIO2", "d1_mini"),
+    ("ESP8266 - GPIO2 (recommended)", "nodemcuv2"),
+    ("ESP8266 - GPIO14 / D5", "esp8266_gpio14"),
+    ("ESP32 - GPIO16", "esp32dev"),
+    ("ESP32-S3 - GPIO16", "esp32s3"),
+    ("ESP8266 D1 mini - GPIO2", "d1_mini"),
 )
 
 

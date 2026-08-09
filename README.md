@@ -561,7 +561,7 @@ takes effect now. Settings that depend on a switch — the temperature marks,
 the two flash colours — are greyed out while that switch is off, so you can
 see they exist without them asking for attention they have not earned.
 
-**After a SteamOS update, use the repair button.** A system update brings a new
+**After a SteamOS update, press *Rebuild and reinstall*.** A system update brings a new
 kernel, and the LED module was built for the old one - so it is gone, and with
 it `/dev/valve-leds-shim`. The panel names that as the problem and rebuilds it.
 Your configuration is kept, and the ESP is never reflashed.
@@ -666,7 +666,7 @@ If it does not, the problem is hardware or firmware.
 ## Updating
 
 **From the control panel:** *Status & repair* → *Update*. Pick a branch, press
-**Check for updates** to see what would arrive, then **Update and reinstall**.
+**Check for updates** to see what would arrive, then **Update and install**.
 It fetches into your clone and runs the installer, asking for your password
 once — for the install only, since the clone is yours already.
 

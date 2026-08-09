@@ -458,19 +458,37 @@ class PanelSettingsTest(unittest.TestCase):
         """Every key the panel offers, on whichever tab."""
         return [row.elts[0].value for row in self._rows()]
 
+    def _tab_titles(self):
+        """Every tab's label: the settings tabs come from their own table,
+        the two that follow are added by name."""
+        panel = self._panel()
+        table = next(node.value for node in panel.body
+                     if isinstance(node, ast.Assign)
+                     and getattr(node.targets[0], "id", "") == "SETTINGS_TABS")
+        titles = [entry.elts[0].value for entry in table.elts]
+        titles += [keyword.value.value
+                   for node in ast.walk(panel)
+                   if isinstance(node, ast.Call)
+                   and getattr(node.func, "attr", "") == "add"
+                   and getattr(getattr(node.func, "value", None), "id", "")
+                   == "notebook"
+                   for keyword in node.keywords
+                   if keyword.arg == "text"
+                   and isinstance(keyword.value, ast.Constant)]
+        return titles
+
     def test_the_tabs_are_in_the_order_they_are_worked_through(self):
         # What you set, then what you rarely set, then what you do - which is
         # also the order of how often they are opened.
-        tabs = [keyword.value.value
-                for node in ast.walk(self._panel())
-                if isinstance(node, ast.Call)
-                and getattr(node.func, "attr", "") == "add"
-                and getattr(getattr(node.func, "value", None), "id", "")
-                == "notebook"
-                for keyword in node.keywords if keyword.arg == "text"]
-        self.assertEqual([tab.strip() for tab in tabs],
+        self.assertEqual([title.strip() for title in self._tab_titles()],
                          ["Strip", "Notifications", "Advanced", "Test",
-                          "Status && repair"])
+                          "Status & repair"])
+
+    def test_no_tab_label_carries_a_menu_escape(self):
+        # "&&" is how a *menu* label spells one ampersand. A notebook tab
+        # takes its text as it is, so the escape simply showed up in it.
+        for title in self._tab_titles():
+            self.assertNotIn("&&", title)
 
     def test_every_group_has_settings_in_it(self):
         # An empty box is a heading with nothing under it.
