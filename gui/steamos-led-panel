@@ -168,6 +168,7 @@ CHECKBOX_SIZE = 24          # clam's own indicator is barely a quarter of this
 TRACK_THICKNESS = 12        # the groove a slider runs in
 KNOB_DIAMETER = 24          # thick enough to grab, round enough to read as a pill
 ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
+DETAILS_GAP = 10            # under the checklist, and part of what it costs
 
 
 def _decimals(step):
@@ -582,7 +583,8 @@ class Panel:
             notebook.add(tab, text=title)
             self._settings_tabs.add(str(tab))
         notebook.add(self._build_tests(notebook), text="  Test  ")
-        notebook.add(self._build_status(notebook), text="  Status & repair  ")
+        self.status_tab = self._build_status(notebook)
+        notebook.add(self.status_tab, text="  Status & repair  ")
         self._refresh_enabled()
 
         notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
@@ -1032,14 +1034,49 @@ class Panel:
 
     def _show_details(self, show):
         self._details_open = show
+        # The height and the content change in one go, and in the order that
+        # never asks for more room than the window has: grow first, then fill
+        # it; empty it first, then shrink. Measured the other way round, a
+        # fold drew three states, one of them with the output pane hanging off
+        # the bottom edge - which is the jerk this is here to avoid.
+        width = self.root.winfo_width()
+        height = self.root.winfo_height() + self._details_change(show)
         if show:
-            self.checklist.pack(fill="x", padx=16, pady=(0, 10),
+            self.root.geometry("%dx%d" % (width, height))
+            self.checklist.pack(fill="x", padx=16, pady=(0, DETAILS_GAP),
                                 before=self.update_box)
         else:
             self.checklist.pack_forget()
+            # Let the page settle into its shorter self before the window
+            # follows: without this the two reflows overlap and one of them
+            # is drawn with the output pane below the bottom edge.
+            self.root.update_idletasks()
+            self.root.geometry("%dx%d" % (width, height))
         self.details.configure(text="Details \u25b4" if show
                                else "Details \u25be")
+        # Arithmetic gets it right to the pixel or it does not; this settles
+        # the difference afterwards, and shows nothing when there is none.
         self._fit_window()
+
+    def _details_change(self, show):
+        """How much taller or shorter the window has to be for the checklist.
+
+        Worked out rather than tried: asking Tk means packing the list, doing
+        a layout pass and reading the answer, and that pass is drawn - which
+        is the squeezed intermediate this is here to avoid. A notebook asks
+        for the tallest of its panes plus its own trim, so what the window
+        gains is what this pane would gain, less the slack the tallest pane
+        already provides. If the arithmetic is ever off, _fit_window puts it
+        right afterwards; it is only the smoothness that depends on this.
+        """
+        gain = self.checklist.winfo_reqheight() + DETAILS_GAP
+        tabs = [self.root.nametowidget(name) for name in self.notebook.tabs()]
+        heights = [tab.winfo_reqheight() for tab in tabs]
+        others = max(height for tab, height in zip(tabs, heights)
+                     if tab is not self.status_tab)
+        wanted = self.status_tab.winfo_reqheight() + (gain if show else -gain)
+        trim = self.notebook.winfo_reqheight() - max(heights)
+        return max(others, wanted) + trim - self.notebook.winfo_reqheight()
 
     def _fit_window(self):
         """Give the window the height its content needs, and no more.
