@@ -87,15 +87,14 @@ class OverlayTest(unittest.TestCase):
         tail = self.overlay.apply(self.base, 1.98)
         self.assertLess(max(tail), 60)
 
-    def test_retrigger_restarts_the_flash(self):
+    def test_a_second_flash_waits_its_turn(self):
         self.overlay.trigger("achievement", 0.0)
         self.overlay.trigger("message", 1.0)
-        frame = self.overlay.apply(self.base, 1.5)
         # Look at the middle: the bloom starts there, so the ends are still
-        # dark this early into the flash.
-        red, green, blue = frame[3:6]
-        self.assertGreater(blue, red, "should be the purple one now")
-        self.assertEqual(green, 0, "gold has green in it, purple does not")
+        # dark this early into a flash.
+        red, green, blue = self.overlay.apply(self.base, 1.5)[3:6]
+        self.assertGreater(red, blue, "the achievement is still being shown")
+        self.assertGreater(green, 0, "gold has green in it, purple does not")
 
     def test_disabled_overlay_never_fires(self):
         overlay = notify.NotificationOverlay(enabled=False, led_count=4)
@@ -113,6 +112,128 @@ class OverlayTest(unittest.TestCase):
         self.assertEqual(red, 0)
         self.assertEqual(green, 0)
         self.assertGreater(blue, 0)
+
+
+class QueueTest(unittest.TestCase):
+    """Two things happening at once are two things to say.
+
+    Before this, a flash replaced whatever was running. An achievement and a
+    message land in the same tick often enough - the watcher checks both on
+    the same poll - and the second one silently ate the first.
+    """
+
+    def setUp(self):
+        # No quiet time here: that has its own tests below, and switching it
+        # off keeps these about the order things are shown in.
+        self.overlay = notify.NotificationOverlay(duration=2.0, led_count=4,
+                                                  repeat_gap=0)
+
+    def _middle(self, now):
+        frame = self.overlay.frame(now)
+        return None if frame is None else tuple(frame[3:6])
+
+    def _is_gold(self, colour):
+        red, green, blue = colour
+        return red > green > blue
+
+    def _is_purple(self, colour):
+        red, green, blue = colour
+        return blue > red and green == 0
+
+    def test_both_are_shown_in_the_order_they_arrived(self):
+        self.overlay.trigger("achievement", 0.0)
+        self.overlay.trigger("message", 0.0)         # the same tick
+        self.assertTrue(self._is_gold(self._middle(0.5)))
+        self.overlay.frame(2.1)      # the gold one ends and the queue moves on
+        self.assertTrue(self._is_purple(self._middle(2.6)),
+                        "the queued message should follow, not be lost")
+
+    def test_the_queued_one_starts_when_the_first_ends(self):
+        self.overlay.trigger("achievement", 0.0)
+        self.overlay.trigger("message", 0.0)
+        self.assertIsNotNone(self.overlay.frame(1.9))
+        self.assertIsNotNone(self.overlay.frame(2.1), "not a gap in between")
+        self.assertIsNotNone(self.overlay.frame(3.9), "the message's own turn")
+        self.assertIsNone(self.overlay.frame(4.5), "and then the bar is free")
+
+    def test_the_bar_is_claimed_while_anything_is_waiting(self):
+        # The service drops to the idle frame rate when nothing is animating,
+        # which would show the queue as a stutter.
+        self.overlay.trigger("achievement", 0.0)
+        self.overlay.trigger("message", 0.0)
+        self.overlay.frame(2.1)
+        self.assertTrue(self.overlay.active)
+
+    def test_a_repeat_is_not_queued_behind_itself(self):
+        # Three achievements in one poll is three trigger words, and gold
+        # three times in a row says nothing gold twice does not.
+        self.overlay.trigger("achievement", 0.0)
+        self.overlay.trigger("achievement", 0.0)
+        self.overlay.trigger("achievement", 0.0)
+        self.assertEqual(self.overlay.pending, [])
+        self.assertIsNone(self.overlay.frame(2.1))
+
+    def test_the_queue_has_an_end(self):
+        self.overlay.trigger("achievement", 0.0)
+        for shade in range(notify.MAX_PENDING + 3):
+            self.overlay.trigger("#0000%02x" % (0x10 + shade), 0.0)
+        self.assertEqual(len(self.overlay.pending), notify.MAX_PENDING)
+
+    def test_nothing_queues_while_the_overlay_is_off(self):
+        overlay = notify.NotificationOverlay(enabled=False, led_count=4)
+        overlay.trigger("achievement", 0.0)
+        overlay.trigger("message", 0.0)
+        self.assertFalse(overlay.active)
+
+
+class RepeatGapTest(unittest.TestCase):
+    """Someone typing at you once a second must not hold the bar lit.
+
+    The watcher already collapses a burst into one trigger per poll, but the
+    polls keep coming - and each one used to restart the flash, so the bar
+    blinked out and regrew every second for as long as the chat lasted.
+    """
+
+    def setUp(self):
+        self.overlay = notify.NotificationOverlay(duration=2.0, led_count=4,
+                                                  repeat_gap=5.0)
+
+    def test_a_repeat_during_the_flash_is_dropped(self):
+        self.assertTrue(self.overlay.trigger("message", 0.0))
+        self.assertFalse(self.overlay.trigger("message", 1.0))
+
+    def test_a_repeat_in_the_quiet_time_after_it_is_dropped(self):
+        self.overlay.trigger("message", 0.0)
+        self.assertFalse(self.overlay.trigger("message", 3.0),
+                         "the flash is over, but the bar only just said it")
+
+    def test_it_may_be_said_again_afterwards(self):
+        self.overlay.trigger("message", 0.0)
+        self.assertTrue(self.overlay.trigger("message", 7.1))
+
+    def test_a_message_storm_leaves_the_bar_dark_between_flashes(self):
+        # One trigger a second for half a minute: what matters is that the bar
+        # spends real time dark, not that it flashes a particular number of
+        # times.
+        for second in range(30):
+            self.overlay.trigger("message", float(second))
+            self.overlay.frame(float(second))
+        dark = sum(1 for tick in range(300)
+                   if self.overlay.frame(tick / 10.0) is None)
+        self.assertGreater(dark, 100, "the bar should get a rest")
+
+    def test_something_else_is_not_held_back_by_it(self):
+        # The quiet time is per trigger: an achievement during a chat storm is
+        # news, and has to get through.
+        self.overlay.trigger("message", 0.0)
+        self.assertTrue(self.overlay.trigger("achievement", 1.0))
+
+    def test_it_can_be_switched_off(self):
+        overlay = notify.NotificationOverlay(duration=2.0, led_count=4,
+                                             repeat_gap=0)
+        overlay.trigger("message", 0.0)
+        self.assertTrue(overlay.trigger("message", 2.0),
+                        "with no gap, a repeat may follow immediately")
 
 
 class ConfiguredColourTest(unittest.TestCase):

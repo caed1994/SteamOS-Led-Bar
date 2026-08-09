@@ -28,6 +28,7 @@ DEFAULTS = {
     "PATROL_DOTS": 1,
     "NOTIFY": True,
     "NOTIFY_DURATION": 3.5,
+    "NOTIFY_REPEAT_GAP": notify.DEFAULT_REPEAT_GAP,
     "NOTIFY_FIFO": notify.DEFAULT_FIFO,
     "NOTIFY_STYLE": "bloom",
     "NOTIFY_ACHIEVEMENTS": True,
@@ -197,6 +198,8 @@ def validate(config):
         raise ConfigError("PATROL_DOTS must be between 1 and 8")
     if not 0.1 <= config["NOTIFY_DURATION"] <= 60:
         raise ConfigError("NOTIFY_DURATION must be between 0.1 and 60 seconds")
+    if not 0 <= config["NOTIFY_REPEAT_GAP"] <= 3600:
+        raise ConfigError("NOTIFY_REPEAT_GAP must be between 0 and 3600 seconds")
     if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
         raise ConfigError("NOTIFY_STYLE must be one of: %s"
                           % ", ".join(NOTIFY_STYLES))

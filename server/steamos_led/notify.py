@@ -139,7 +139,10 @@ def parse_color(text, kinds=None):
 class Notification:
     """One flash in progress."""
 
-    def __init__(self, color, duration, started, style=STYLE_BLOOM):
+    def __init__(self, color, duration, started, style=STYLE_BLOOM, kind=""):
+        # The trigger word, kept so the overlay can tell one flash from
+        # another without comparing colours - two kinds may share one.
+        self.kind = kind
         self.color = color
         self.duration = max(float(duration), 0.1)
         self.started = started
@@ -160,26 +163,53 @@ class Notification:
         return _STYLES[self.style](progress, led_count)
 
 
+# How many flashes may wait their turn. Repeats never queue, so reaching this
+# means several genuinely different things happened at once - and a bar
+# working through a minute of backlog has stopped reporting and started
+# reciting.
+MAX_PENDING = 4
+
+# Quiet time after a flash before the same trigger may fire again, on top of
+# the flash itself. Without it, someone typing at you once a second holds the
+# bar lit indefinitely: the first flash already said "you have messages", and
+# every one after it says the same thing again.
+DEFAULT_REPEAT_GAP = 10.0
+
+
 class NotificationOverlay:
-    """Holds the active flash and paints it over a rendered frame."""
+    """Holds the active flash and paints it over a rendered frame.
+
+    Flashes queue rather than replace one another. An achievement and a
+    message arriving in the same tick used to leave only the second: the bar
+    said "message" and never mentioned the achievement at all.
+    """
 
     def __init__(self, enabled=True, duration=3.5, led_count=17,
-                 style=STYLE_BLOOM, colors=None):
+                 style=STYLE_BLOOM, colors=None,
+                 repeat_gap=DEFAULT_REPEAT_GAP):
         self.enabled = enabled
         self.duration = duration
         self.led_count = led_count
         self.style = style if style in STYLES else STYLE_BLOOM
+        self.repeat_gap = max(0.0, float(repeat_gap))
         # A trigger word stays the interface - callers ask for "achievement",
         # not for a colour - so which gold that is stays a local decision.
         self.colors = dict(KINDS, **(colors or {}))
         self.current = None
+        self.pending = []           # (kind, colour), in the order they arrived
+        self._quiet_until = {}      # kind -> when it may be shown again
 
     @property
     def active(self):
-        return self.current is not None
+        return self.current is not None or bool(self.pending)
 
     def trigger(self, kind, now):
-        """Start a flash. `kind` is a name or a colour; unknown input is logged."""
+        """Show a flash, or put it in the queue. `kind` is a name or a colour.
+
+        Returns whether it will be shown at all: unknown input, a repeat of
+        something the bar just said, and a full queue are each logged and
+        dropped rather than raised.
+        """
         if not self.enabled:
             return False
         try:
@@ -187,9 +217,38 @@ class NotificationOverlay:
         except ValueError as exc:
             LOG.warning("ignoring notification %r: %s", kind, exc)
             return False
-        LOG.info("notification: %s", kind)
-        self.current = Notification(color, self.duration, now, self.style)
+
+        if now < self._quiet_until.get(kind, 0.0):
+            # Still showing this one, or only just finished it. Repeating adds
+            # nothing, and restarting it mid-flash blinks the bar out and
+            # regrows it - which is what a burst used to look like.
+            LOG.debug("skipping %r, the bar just said that", kind)
+            return False
+        if any(waiting == kind for waiting, _color in self.pending):
+            return False
+        if self.current is None:
+            self._start(kind, color, now)
+            return True
+        if len(self.pending) >= MAX_PENDING:
+            LOG.info("dropping %r, %d flashes are already waiting",
+                     kind, len(self.pending))
+            return False
+
+        self.pending.append((kind, color))
+        LOG.info("notification queued: %s (%d waiting)", kind,
+                 len(self.pending))
         return True
+
+    def _start(self, kind, color, now):
+        LOG.info("notification: %s", kind)
+        self.current = Notification(color, self.duration, now, self.style,
+                                    kind)
+        # Measured from the start, so one window covers the flash and the gap
+        # after it. Expired entries are dropped here, or an arbitrary colour
+        # per flash would grow this map without end.
+        self._quiet_until = {name: until for name, until
+                             in self._quiet_until.items() if until > now}
+        self._quiet_until[kind] = now + self.duration + self.repeat_gap
 
     def frame(self, now):
         """The flash's own frame, or None when no flash is running.
@@ -197,11 +256,18 @@ class NotificationOverlay:
         Separate from apply() so the caller can skip rendering underneath: a
         flash covers the whole bar, so that frame would only be thrown away.
         """
-        if self.current is None:
-            return None
-        levels = self.current.levels(now, self.led_count)
-        if levels is None:
+        levels = None
+        while self.current is not None:
+            levels = self.current.levels(now, self.led_count)
+            if levels is not None:
+                break
+            # That one is over. The next in line starts where it left off,
+            # which is why they never blend: a flash both starts and ends dark.
             self.current = None
+            if self.pending:
+                kind, color = self.pending.pop(0)
+                self._start(kind, color, now)
+        if self.current is None:
             return None
 
         red, green, blue = self.current.color

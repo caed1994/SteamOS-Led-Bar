@@ -372,10 +372,37 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `NOTIFY_ACHIEVEMENTS` | `1` | watch for achievement unlocks |
 | `NOTIFY_MESSAGES` | `1` | watch for friend messages |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
+| `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | shape of the flash: `bloom` (out of the middle) or `pulse` (whole bar swells three times) |
 | `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
 | `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
+
+### When several arrive at once
+
+Flashes **queue** rather than interrupt each other. The watcher checks
+achievements and messages on the same poll, so both landing in the same tick
+is ordinary — and the second one used to replace the first, leaving the bar
+saying "message" and never mentioning the achievement at all. Now it shows
+gold, then purple.
+
+A repeat is not queued behind itself. While a trigger is being shown, and for
+`NOTIFY_REPEAT_GAP` seconds afterwards, the same one is ignored: three
+achievements in one poll are one flash, because gold three times in a row says
+nothing gold once does not. The gap is per trigger, so an achievement during a
+chat storm still gets through immediately.
+
+That gap is what stops a fast conversation from holding the bar lit. Measured
+over a message a second for half a minute:
+
+| | flashes | bar lit |
+| --- | --- | --- |
+| `NOTIFY_REPEAT_GAP=10` | 3 | 26% of the time |
+| `NOTIFY_REPEAT_GAP=0` | 8 | 70% of the time |
+
+Set it to `0` to switch the quiet time off entirely; the queue stays either
+way. Four flashes may wait at most — past that the bar has stopped reporting
+and started reciting.
 
 The two colours take any `#rrggbb` or `r,g,b`. The trigger word stays the same
 either way — everything that flashes the bar asks for `achievement`, so which

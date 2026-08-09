@@ -76,6 +76,7 @@ class Runner:
             led_count=config["LED_COUNT"],
             style=config["NOTIFY_STYLE"],
             colors=notification_colors(config),
+            repeat_gap=config["NOTIFY_REPEAT_GAP"],
         )
         self.trigger = None
         self.source = None
