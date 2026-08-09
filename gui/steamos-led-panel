@@ -778,27 +778,42 @@ class Panel:
         belongs to: on Status & repair it sat right below the firmware box
         and read like "apply the firmware".
 
-        Greyed out on the tabs that have no settings rather than hidden: it
-        says the same thing, and hiding it moved everything below by its own
-        height every time you changed tab, which is a whole window shifting
-        under the pointer to say something a grey button says quietly.
+        The buttons go away on the tabs that have none; the row they stand in
+        stays and keeps its height. Taking the row itself out of the layout
+        moved everything below it by that height on every tab change, which
+        is a whole window shifting under the pointer.
         """
-        row = ttk.Frame(parent)
-        row.pack(fill="x", padx=16, pady=(12, 0))
+        self.apply_row = ttk.Frame(parent)
+        self.apply_row.pack(fill="x", padx=16, pady=(12, 0))
         self._apply_buttons = [
-            ttk.Button(row, text="Apply and restart service",
+            ttk.Button(self.apply_row, text="Apply and restart service",
                        style="Accent.TButton", command=self.apply_settings),
-            ttk.Button(row, text="Reload from file",
+            ttk.Button(self.apply_row, text="Reload from file",
                        command=self.reload_settings),
         ]
-        for index, button in enumerate(self._apply_buttons):
-            button.pack(side="left", padx=(6, 0) if index else 0)
+        self._show_apply(True)
+
+    def _show_apply(self, show):
+        self._apply_shown = show
+        if show:
+            self.apply_row.pack_propagate(True)
+            for index, button in enumerate(self._apply_buttons):
+                button.pack(side="left", padx=(6, 0) if index else 0)
+            return
+        # Hold the height the buttons had, then take them out: with the row
+        # free to shrink, the rest of the window slides up to meet it.
+        height = self.apply_row.winfo_height()
+        if height > 1:
+            self.apply_row.configure(height=height)
+            self.apply_row.pack_propagate(False)
+        for button in self._apply_buttons:
+            button.pack_forget()
 
     def _tab_changed(self, _event=None):
-        """Only offer Apply where there is something to apply."""
-        on = self.notebook.select() in self._settings_tabs
-        for button in self._apply_buttons:
-            button.state(["!disabled"] if on else ["disabled"])
+        """Only show Apply where there is something to apply."""
+        show = self.notebook.select() in self._settings_tabs
+        if show != self._apply_shown:
+            self._show_apply(show)
 
     def _menu(self, grid, row, key, variable, choices, current, width):
         """A drop-down of (label, value) pairs, showing labels."""
