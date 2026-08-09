@@ -176,6 +176,56 @@ class CommandTest(unittest.TestCase):
         self.assertIn("/tmp/staged.conf", command)
 
 
+class FirmwareMenuTest(unittest.TestCase):
+    """Three places name the firmware builds; they have to name the same ones.
+
+    The environments are defined in platformio.ini, offered by the installer's
+    prompt and by the panel's menu. A build renamed in one place and not the
+    others is a menu entry that fails at the end of a flash rather than at the
+    start of one.
+    """
+
+    def _ini_environments(self):
+        path = os.path.join(HERE, "..", "firmware", "led-client",
+                            "platformio.ini")
+        with open(path) as handle:
+            found = set(re.findall(r"^\[env:([^\]]+)\]", handle.read(),
+                                   re.MULTILINE))
+        self.assertTrue(found, "no environments found in platformio.ini")
+        return found
+
+    def _installer_environments(self):
+        path = os.path.join(HERE, "..", "install.sh")
+        with open(path) as handle:
+            block = re.search(r"FIRMWARE_ENVS=\((.*?)\n\)", handle.read(),
+                              re.DOTALL)
+        self.assertIsNotNone(block, "FIRMWARE_ENVS not found in install.sh")
+        return set(re.findall(r'"([^":]+):', block.group(1)))
+
+    def test_the_panel_offers_what_the_firmware_actually_builds(self):
+        offered = {env for _label, env in ledpanel.FIRMWARE_ENVS}
+        self.assertEqual(offered, self._ini_environments())
+
+    def test_the_panel_and_the_installer_offer_the_same(self):
+        offered = {env for _label, env in ledpanel.FIRMWARE_ENVS}
+        self.assertEqual(offered, self._installer_environments())
+
+    def test_the_entries_are_distinct(self):
+        labels = [label for label, _env in ledpanel.FIRMWARE_ENVS]
+        self.assertEqual(len(set(labels)), len(labels))
+
+    def test_every_label_maps_back_to_its_environment(self):
+        for label, env in ledpanel.FIRMWARE_ENVS:
+            self.assertEqual(ledpanel.menu_value(ledpanel.FIRMWARE_ENVS,
+                                                 label), env)
+
+    def test_flashing_asks_for_rights_and_names_the_build(self):
+        command = ledpanel.flash_firmware_command("/repo", "esp32dev")
+        self.assertEqual(command[0], "pkexec")
+        self.assertIn("/repo/scripts/flash-firmware.sh", command)
+        self.assertIn("esp32dev", command)
+
+
 class DesktopEntryTest(unittest.TestCase):
     """The menu entry is written by install.sh from a template."""
 

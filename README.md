@@ -90,6 +90,12 @@ flash overwrites the previous one:
 > The two ESP8266 builds drive **different pins**. If your strip is on D5 and
 > you flash the first one, it stays dark — that is the wrong pin, not a fault.
 
+Once the service is installed, the [control panel](#the-control-panel) can do
+this too: *Status & repair* → *ESP firmware*. Same builds, same result — it
+stops the service so the port is free, flashes as you (PlatformIO's toolchains
+live in your home), and starts the service again, including when the flash
+fails.
+
 ### 4. Install the service
 
 ```bash
@@ -545,8 +551,8 @@ has four tabs:
   probe and the sensor list behind the
   [temperature gauge](#temperature-gauge).
 - **Status & repair** — what is installed, what is running, one button that
-  puts it back, and [updating](#updating) to the newest version of whichever
-  branch you pick.
+  puts it back, [updating](#updating) to the newest version of whichever
+  branch you pick, and flashing the ESP firmware.
 
 **After a SteamOS update, use the repair button.** A system update brings a new
 kernel, and the LED module was built for the old one - so it is gone, and with

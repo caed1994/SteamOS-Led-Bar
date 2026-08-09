@@ -288,6 +288,32 @@ def module_changed(source_dir, since):
 MODULE_SOURCE_DIR = "leds-valve-shim"
 
 
+# -- the ESP firmware ------------------------------------------------------
+#
+# (label, environment) pairs, in the order install.sh's menu lists them. The
+# environments themselves live in firmware/led-client/platformio.ini; a test
+# keeps all three lists naming the same set.
+
+FIRMWARE_ENVS = (
+    ("ESP8266 (NodeMCU, D1 mini), strip on GPIO2 - recommended", "nodemcuv2"),
+    ("ESP8266, strip on GPIO14 / D5 - keeps older wiring", "esp8266_gpio14"),
+    ("ESP32, strip on GPIO16", "esp32dev"),
+    ("ESP32-S3, strip on GPIO16", "esp32s3"),
+    ("ESP8266 with the D1 mini board profile, strip on GPIO2", "d1_mini"),
+)
+
+
+def flash_firmware_command(source_dir, environment):
+    """Flash the ESP with one of the shipped firmware builds.
+
+    Privileged for one reason only: the service holds the serial port and has
+    to let go of it. PlatformIO itself runs back as the caller, since the
+    toolchains live in their home - see the script.
+    """
+    return ["pkexec", os.path.join(source_dir, "scripts", "flash-firmware.sh"),
+            environment]
+
+
 def restart_watcher_command():
     """Restart the achievement watcher so it re-reads the configuration.
 
