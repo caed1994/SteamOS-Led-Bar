@@ -871,10 +871,13 @@ class FriendOnlineDecodingTest(unittest.TestCase):
         self.assertEqual(self._online(listener), [self.FRIEND])
 
     def test_other_changes_are_not_a_friend_coming_online(self):
-        # 0x0001 is a name change, 0x0400 someone starting a game. Both arrive
-        # constantly while a friend list is loaded, and neither is an arrival.
+        # From EPersonaChange: 0x0001 a name change, 0x0010 someone starting a
+        # game, 0x0002 a status change - away back to online, which is not the
+        # same as arriving. All three come constantly while a friend list is
+        # loaded, and none of them is someone coming online.
         listener = self._listener([(304, self._payload(self.FRIEND, 0x0001)),
-                                   (304, self._payload(self.FRIEND, 0x0400))])
+                                   (304, self._payload(self.FRIEND, 0x0010)),
+                                   (304, self._payload(self.FRIEND, 0x0002))])
         self.assertEqual(self._online(listener), [])
 
     def test_a_stranger_coming_online_is_ignored(self):

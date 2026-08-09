@@ -67,6 +67,12 @@ CHAT_ENTRY_TYPING = 2
 # The int is a bitfield of EPersonaChange; one bit says "came online", and it
 # is the only one worth a flash: the others are avatars, nicknames, rich
 # presence and a dozen more, all of which arrive constantly.
+#
+# k_EPersonaChangeComeOnline means offline -> online, and nothing else. Not
+# k_EPersonaChangeStatus (0x0002), which is away or busy turning back to
+# online, and not k_EPersonaChangeGamePlayed (0x0010), which is a friend
+# starting a game. Someone logging in straight into a game sets both bits in
+# one callback and rightly counts once.
 PERSONA_STATE_CHANGE = 304
 PERSONA_STATE_CHANGE_BYTES = 12
 PERSONA_CHANGE_CAME_ONLINE = 0x0004

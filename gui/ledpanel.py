@@ -371,10 +371,7 @@ ACHIEVEMENT_COLOURS = (
 
 MESSAGE_COLOURS = (
     ("Purple", "#8000ff"),
-    # Both primaries at full: one LED channel on and nothing else, which is
-    # the most saturated a WS2812 can be.
-    ("Green", "#00ff00"),
-    ("Blue", "#0000ff"),
+    ("Hot Pink", "#ff36c9"),
 )
 
 FRIEND_COLOURS = (
