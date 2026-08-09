@@ -204,7 +204,7 @@ sudo systemctl start steamos-led-serial
 | `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `85.0` | degrees at which the gauge is empty / full |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
-| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` | `#ffd700` / `#8000ff` | what the two automatic [notifications](#notifications) flash |
+| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` | `#ffd700` / `#8000ff` / `#00c850` | what the three automatic [notifications](#notifications) flash |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
 | `BAUD` | `230400` | preferred baud rate; corrected on connect if needed |
 | `BAUD_AUTODETECT` | `1` | if there is no reply, also try the other firmware baud rates |
@@ -377,12 +377,14 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `NOTIFY` | `1` | enable the overlay at all — with this off nothing flashes, `--notify` included |
 | `NOTIFY_ACHIEVEMENTS` | `1` | watch for achievement unlocks |
 | `NOTIFY_MESSAGES` | `1` | watch for friend messages |
+| `NOTIFY_FRIEND_ONLINE` | `1` | watch for friends coming online |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | shape of the flash: `bloom` (out of the middle) or `pulse` (whole bar swells three times) |
 | `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
 | `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
+| `FRIEND_COLOR` | `#00c850` | what `friend` flashes |
 
 ### When several arrive at once
 
@@ -484,12 +486,33 @@ the bar would flash twice per message. Reading it means reading the message
 text, which is then discarded: what a friend wrote does not belong in a
 system log.
 
-Set `NOTIFY_MESSAGES=0` in the config to turn it off, and
-`NOTIFY_ACHIEVEMENTS=0` for the other half. They are independent: both are
-found through the same Steamworks session, so switching one off leaves the
-other working. With both off the watcher attaches to nothing at all. If no
-suitable library is found for messages, the watcher says so in the log once
-and carries on flashing gold.
+Set `NOTIFY_MESSAGES=0` in the config to turn it off. If no suitable library
+is found for messages, the watcher says so in the log once and carries on with
+whatever else is switched on.
+
+### Friends coming online
+
+The bar flashes **green** when one of your friends logs in — again only while a
+game is running, and switched off with `NOTIFY_FRIEND_ONLINE=0`.
+
+This rides on the same callbacks as chat, but asks Steam for less: messages
+need `SetListenForFriendsMessages`, which the client is allowed to decline,
+while a friend's state change arrives whether you asked for it or not. So on a
+machine where `--probe-messages` says chat will not work, this one still can.
+
+Steam sends that same callback for every change to anyone it knows about — a
+new nickname, a new avatar, someone starting a game — so only the "came
+online" flag counts, and `GetFriendRelationship` throws out the strangers you
+share a group chat with. Two more things are ignored on purpose:
+
+* the first 20 seconds after attaching, because Steam replays who is *already*
+  online as soon as the friend list loads, and that is not anyone arriving;
+* more than three at once, for the same reason as the achievement flood guard —
+  that is Steam catching up, not four people logging in together.
+
+The three switches are independent: all of them are found through the same
+Steamworks session, so switching one off leaves the others working. With all
+three off the watcher attaches to nothing at all.
 
 **Why only while a game runs?** Steamworks has to be initialised *as* an app,
 so there is nothing to attach to otherwise - and a process registered with

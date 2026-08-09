@@ -6,6 +6,7 @@ and turning polled state into "this one just unlocked".
 """
 
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -340,6 +341,7 @@ class WatcherSessionLifetimeTest(unittest.TestCase):
 
     messages_enabled = False
     achievements_enabled = True
+    friends_enabled = False
 
     def setUp(self):
         self.opened, self.closed, self.flashes = [], [], []
@@ -378,7 +380,8 @@ class WatcherSessionLifetimeTest(unittest.TestCase):
         settings.update({"NOTIFY_FIFO": "/dev/null", "STEAM_ROUTE": "auto",
                          "STEAM_LIBRARY": "auto",
                          "NOTIFY_ACHIEVEMENTS": self.achievements_enabled,
-                         "NOTIFY_MESSAGES": self.messages_enabled})
+                         "NOTIFY_MESSAGES": self.messages_enabled,
+                         "NOTIFY_FRIEND_ONLINE": self.friends_enabled})
         return service.run_watch_achievements(settings, interval=0)
 
     def test_it_exits_once_the_game_is_gone(self):
@@ -730,6 +733,22 @@ class DispatchModeTest(unittest.TestCase):
 
 
 
+def _bare_listener(session):
+    """A listener over `session` without opening anything against Steam.
+
+    __init__ would go looking for a real library, so the few fields poll()
+    reads are filled in by hand: no relationship lookup, and past the settling
+    window so a friend coming online counts straight away.
+    """
+    listener = steamworks.FriendListener.__new__(steamworks.FriendListener)
+    listener.stats = session
+    listener._friends = None
+    listener._get_message = None
+    listener._relationship = None
+    listener._settled_at = 0.0
+    return listener
+
+
 class FriendMessageDecodingTest(unittest.TestCase):
     """Turning raw callbacks into "someone wrote to you".
 
@@ -747,9 +766,7 @@ class FriendMessageDecodingTest(unittest.TestCase):
         entry_types maps a message id to what GetFriendMessage would report;
         None for the whole map stands for a library that cannot tell us.
         """
-        listener = steamworks.FriendMessageListener.__new__(
-            steamworks.FriendMessageListener)
-        listener.stats = self
+        listener = _bare_listener(self)
         if entry_types is None:
             listener.entry_type = lambda _sender, _message: None
         else:
@@ -757,6 +774,10 @@ class FriendMessageDecodingTest(unittest.TestCase):
                 message, steamworks.CHAT_ENTRY_CHAT_MSG)
         self._callbacks = list(callbacks)
         return listener
+
+    def _messages(self, listener):
+        messages, _online = listener.poll()
+        return messages
 
     # stands in for the session the listener reads from
     def run_callbacks(self):
@@ -768,13 +789,13 @@ class FriendMessageDecodingTest(unittest.TestCase):
 
     def test_a_chat_callback_is_decoded(self):
         listener = self._listener([(343, self.PAYLOAD)])
-        self.assertEqual(listener.messages(), [(self.SENDER, 2)])
+        self.assertEqual(self._messages(listener), [(self.SENDER, 2)])
 
     def test_the_message_id_steps_with_each_message(self):
         payloads = [(343, self.PAYLOAD[:8] + bytes([n, 0, 0, 0]))
                     for n in (2, 3, 4)]
         listener = self._listener(payloads)
-        self.assertEqual([msg for _sender, msg in listener.messages()],
+        self.assertEqual([msg for _sender, msg in self._messages(listener)],
                          [2, 3, 4])
 
     def test_persona_state_changes_are_not_messages(self):
@@ -782,19 +803,149 @@ class FriendMessageDecodingTest(unittest.TestCase):
         # arrives when a friend comes online or starts typing. Filtering by
         # size instead of by number would flash the bar for both.
         listener = self._listener([(304, self.PAYLOAD)])
-        self.assertEqual(listener.messages(), [])
+        self.assertEqual(self._messages(listener), [])
 
     def test_other_callbacks_are_ignored(self):
         listener = self._listener([(1040044, b"x" * 784), (348, b"\xd7"),
                                    (343, self.PAYLOAD)])
-        self.assertEqual(listener.messages(), [(self.SENDER, 2)])
+        self.assertEqual(self._messages(listener), [(self.SENDER, 2)])
 
     def test_a_truncated_payload_is_skipped_not_unpacked(self):
         listener = self._listener([(343, b"\x01\x02\x03")])
-        self.assertEqual(listener.messages(), [])
+        self.assertEqual(self._messages(listener), [])
 
     def test_nothing_waiting_is_no_messages(self):
-        self.assertEqual(self._listener([]).messages(), [])
+        self.assertEqual(self._messages(self._listener([])), [])
+
+
+class FriendOnlineDecodingTest(unittest.TestCase):
+    """Turning PersonaStateChange_t into "a friend just came online".
+
+    Steam sends 304 for every change to anyone it knows about - a new avatar,
+    a nickname, someone starting a game - so the flag is what carries the
+    meaning, and the same callback arrives for strangers in a group chat.
+    """
+
+    FRIEND = 76561198008351377
+    STRANGER = 76561198000000042
+
+    def _payload(self, steam_id, flags):
+        return struct.pack("<QI", steam_id, flags)
+
+    def _listener(self, callbacks, friends=None, settled_at=0.0):
+        test = self
+
+        class Session:
+            def run_callbacks(self):
+                pass
+
+            def take_callbacks(self):
+                pending, test._pending = test._pending, []
+                return pending
+
+        self._pending = list(callbacks)
+        listener = _bare_listener(Session())
+        listener._settled_at = settled_at
+        if friends is not None:
+            listener._relationship = lambda _iface, steam_id: (
+                steamworks.FRIEND_RELATIONSHIP_FRIEND
+                if steam_id.value in friends else 0)
+        return listener
+
+    def _online(self, listener, now=100.0):
+        _messages, online = listener.poll(now=now)
+        return online
+
+    def test_coming_online_is_reported(self):
+        listener = self._listener([
+            (304, self._payload(self.FRIEND,
+                                steamworks.PERSONA_CHANGE_CAME_ONLINE))])
+        self.assertEqual(self._online(listener), [self.FRIEND])
+
+    def test_the_flag_may_arrive_alongside_others(self):
+        # A friend logging in usually brings the name and avatar along with it.
+        listener = self._listener([
+            (304, self._payload(self.FRIEND,
+                                steamworks.PERSONA_CHANGE_CAME_ONLINE | 0x0001))
+        ])
+        self.assertEqual(self._online(listener), [self.FRIEND])
+
+    def test_other_changes_are_not_a_friend_coming_online(self):
+        # 0x0001 is a name change, 0x0400 someone starting a game. Both arrive
+        # constantly while a friend list is loaded, and neither is an arrival.
+        listener = self._listener([(304, self._payload(self.FRIEND, 0x0001)),
+                                   (304, self._payload(self.FRIEND, 0x0400))])
+        self.assertEqual(self._online(listener), [])
+
+    def test_a_stranger_coming_online_is_ignored(self):
+        listener = self._listener(
+            [(304, self._payload(self.STRANGER,
+                                 steamworks.PERSONA_CHANGE_CAME_ONLINE))],
+            friends={self.FRIEND})
+        self.assertEqual(self._online(listener), [])
+
+    def test_a_friend_still_passes_the_relationship_check(self):
+        listener = self._listener(
+            [(304, self._payload(self.FRIEND,
+                                 steamworks.PERSONA_CHANGE_CAME_ONLINE))],
+            friends={self.FRIEND})
+        self.assertEqual(self._online(listener), [self.FRIEND])
+
+    def test_a_library_that_cannot_tell_us_lets_everyone_through(self):
+        # Degrading to a flash too many beats degrading to no flashes at all.
+        listener = self._listener(
+            [(304, self._payload(self.STRANGER,
+                                 steamworks.PERSONA_CHANGE_CAME_ONLINE))])
+        self.assertEqual(self._online(listener), [self.STRANGER])
+
+    def test_a_truncated_payload_is_skipped_not_unpacked(self):
+        listener = self._listener([(304, b"\x01\x02\x03")])
+        self.assertEqual(self._online(listener), [])
+
+    def test_chat_callbacks_are_not_arrivals(self):
+        listener = self._listener([(343, self._payload(self.FRIEND, 2))])
+        self.assertEqual(self._online(listener), [])
+
+    def test_the_first_seconds_after_attaching_are_dropped(self):
+        # Steam replays who is already online as soon as the friend list
+        # loads, which is not the same as anyone arriving.
+        listener = self._listener(
+            [(304, self._payload(self.FRIEND,
+                                 steamworks.PERSONA_CHANGE_CAME_ONLINE))],
+            settled_at=50.0)
+        self.assertEqual(self._online(listener, now=10.0), [])
+
+    def test_after_settling_the_same_arrival_counts(self):
+        listener = self._listener(
+            [(304, self._payload(self.FRIEND,
+                                 steamworks.PERSONA_CHANGE_CAME_ONLINE))],
+            settled_at=50.0)
+        self.assertEqual(self._online(listener, now=60.0), [self.FRIEND])
+
+    def test_a_crowd_arriving_at_once_is_taken_as_steam_catching_up(self):
+        flag = steamworks.PERSONA_CHANGE_CAME_ONLINE
+        listener = self._listener(
+            [(304, self._payload(self.FRIEND + n, flag))
+             for n in range(steamworks.FRIEND_ONLINE_FLOOD + 1)])
+        self.assertEqual(self._online(listener), [])
+
+    def test_a_believable_pair_still_counts(self):
+        flag = steamworks.PERSONA_CHANGE_CAME_ONLINE
+        listener = self._listener([(304, self._payload(self.FRIEND, flag)),
+                                   (304, self._payload(self.FRIEND + 1, flag))])
+        self.assertEqual(len(self._online(listener)), 2)
+
+    def test_both_kinds_come_out_of_one_pass(self):
+        # Whoever drains the callbacks gets them all, so poll() has to hand
+        # back both or one of the two would silently never fire.
+        listener = self._listener([
+            (343, bytes.fromhex("91badd020100100102000000")),
+            (304, self._payload(self.FRIEND,
+                                steamworks.PERSONA_CHANGE_CAME_ONLINE))])
+        listener.entry_type = lambda _sender, _message: None
+        messages, online = listener.poll(now=100.0)
+        self.assertEqual(messages, [(self.FRIEND, 2)])
+        self.assertEqual(online, [self.FRIEND])
 
 
 class MessageFlashTest(WatcherSessionLifetimeTest):
@@ -805,15 +956,18 @@ class MessageFlashTest(WatcherSessionLifetimeTest):
     def setUp(self):
         super().setUp()
         self.pending_messages = []
+        self.pending_online = []
         self._patch(steamworks, "message_support", lambda _path: {})
         self._patch(steamworks, "usable_for_messages", lambda _support: True)
-        self._patch(service, "_open_message_listener",
-                    lambda _stats: self)
+        self._patch(steamworks, "usable_for_friends", lambda _support: True)
+        self._patch(service, "_open_friend_listener",
+                    lambda _stats, _chat: self)
 
     # stands in for the listener
-    def messages(self):
-        pending, self.pending_messages = self.pending_messages, []
-        return pending
+    def poll(self):
+        messages, self.pending_messages = self.pending_messages, []
+        online, self.pending_online = self.pending_online, []
+        return messages, online
 
     def close(self):
         pass
@@ -864,6 +1018,70 @@ class AchievementsSwitchedOffTest(MessageFlashTest):
         self.assertEqual(self.flashes, ["message"])
 
 
+class FriendOnlineFlashTest(MessageFlashTest):
+    """The watcher's side of a friend coming online.
+
+    Chat is off throughout: this notification rides on the same listener but
+    must not need SetListenForFriendsMessages, which is the one call the Steam
+    client can refuse.
+    """
+
+    messages_enabled = False
+    friends_enabled = True
+
+    def setUp(self):
+        super().setUp()
+        self.listened = []
+        self._patch(service, "_open_friend_listener",
+                    lambda _stats, chat: self.listened.append(chat) or self)
+
+    # The inherited message tests, with the switch off: whatever the listener
+    # hands back, chat must stay silent - the two share one poll().
+    def test_a_message_flashes_the_bar(self):
+        self.pending_messages = [(1, 2)]
+        self._run([1942280, 1942280, None])
+        self.assertNotIn("message", self.flashes)
+
+    def test_a_burst_is_one_flash_not_five(self):
+        self.pending_messages = [(1, n) for n in range(5)]
+        self.pending_online = [76561198008351377]
+        self._run([1942280, 1942280, None])
+        self.assertEqual(self.flashes.count("message"), 0)
+        self.assertEqual(self.flashes.count("friend"), 1)
+
+    def test_a_friend_coming_online_flashes_the_bar(self):
+        self.pending_online = [76561198008351377]
+        self._run([1942280, 1942280, None])
+        self.assertIn("friend", self.flashes)
+
+    def test_several_arrivals_are_one_flash(self):
+        self.pending_online = [76561198008351377, 76561198008351378]
+        self._run([1942280, 1942280, None])
+        self.assertEqual(self.flashes.count("friend"), 1)
+
+    def test_nobody_arriving_means_no_flash(self):
+        self._run([1942280, 1942280, None])
+        self.assertNotIn("friend", self.flashes)
+
+    def test_chat_is_not_asked_for(self):
+        # Listening for messages registers this app with the Steam client and
+        # can be declined; wanting arrivals alone must not risk that.
+        self._run([1942280, 1942280, None])
+        self.assertEqual(self.listened, [False])
+
+    def test_a_library_that_cannot_do_chat_still_watches_for_arrivals(self):
+        self._patch(steamworks, "usable_for_messages", lambda _support: False)
+        self.pending_online = [76561198008351377]
+        self._run([1942280, 1942280, None])
+        self.assertIn("friend", self.flashes)
+
+    def test_arrivals_switched_off_do_not_flash(self):
+        self.friends_enabled = False
+        self.pending_online = [76561198008351377]
+        self._run([1942280, 1942280, None])
+        self.assertNotIn("friend", self.flashes)
+
+
 class NothingLeftToWatchForTest(MessageFlashTest):
     """Messages wanted, achievements off - and messages turn out impossible.
 
@@ -880,8 +1098,8 @@ class NothingLeftToWatchForTest(MessageFlashTest):
         self.achievements_enabled = achievements
         self._patch(steamworks, "usable_for_messages",
                     lambda _support: usable)
-        self._patch(service, "_open_message_listener",
-                    lambda _stats: self if listener_opens else None)
+        self._patch(service, "_open_friend_listener",
+                    lambda _stats, _chat: self if listener_opens else None)
         return self._run([1942280, 1942280, None])
 
     def test_an_old_library_with_achievements_off_never_attaches(self):
@@ -919,6 +1137,7 @@ class NothingToWatchForTest(unittest.TestCase):
         settings = dict(config_module.DEFAULTS)
         settings.update({"NOTIFY_ACHIEVEMENTS": False,
                          "NOTIFY_MESSAGES": False,
+                         "NOTIFY_FRIEND_ONLINE": False,
                          "NOTIFY_FIFO": "/dev/null"})
 
         def refuse(scan_processes=True):
@@ -975,21 +1194,23 @@ class TypingNoticeTest(unittest.TestCase):
                 pending, test._pending = test._pending, []
                 return pending
 
-        listener = steamworks.FriendMessageListener.__new__(
-            steamworks.FriendMessageListener)
-        listener.stats = Session()
+        listener = _bare_listener(Session())
         listener.entry_type = lambda _sender, message: entry_types.get(message)
         return listener
+
+    def _messages(self, listener):
+        messages, _online = listener.poll()
+        return messages
 
     def test_typing_does_not_count_as_a_message(self):
         self._pending = [(343, self._payload(2))]
         listener = self._listener({2: steamworks.CHAT_ENTRY_TYPING})
-        self.assertEqual(listener.messages(), [])
+        self.assertEqual(self._messages(listener), [])
 
     def test_the_message_itself_still_counts(self):
         self._pending = [(343, self._payload(3))]
         listener = self._listener({3: steamworks.CHAT_ENTRY_CHAT_MSG})
-        self.assertEqual(listener.messages(), [(self.SENDER, 3)])
+        self.assertEqual(self._messages(listener), [(self.SENDER, 3)])
 
     def test_typing_then_sending_flashes_once(self):
         # The sequence a real message produces: a typing notice, then the
@@ -997,20 +1218,20 @@ class TypingNoticeTest(unittest.TestCase):
         self._pending = [(343, self._payload(4)), (343, self._payload(5))]
         listener = self._listener({4: steamworks.CHAT_ENTRY_TYPING,
                                    5: steamworks.CHAT_ENTRY_CHAT_MSG})
-        self.assertEqual(listener.messages(), [(self.SENDER, 5)])
+        self.assertEqual(self._messages(listener), [(self.SENDER, 5)])
 
     def test_other_entry_kinds_are_ignored_too(self):
         # Left the conversation, was kicked, historical chat replayed on
         # connect - none of those is someone writing to you now.
         self._pending = [(343, self._payload(6))]
         listener = self._listener({6: 11})       # k_EChatEntryTypeHistoricalChat
-        self.assertEqual(listener.messages(), [])
+        self.assertEqual(self._messages(listener), [])
 
     def test_a_library_that_cannot_tell_us_still_flashes(self):
         # Degrading to a flash too many beats degrading to no flashes at all.
         self._pending = [(343, self._payload(7))]
         listener = self._listener({})            # entry_type returns None
-        self.assertEqual(listener.messages(), [(self.SENDER, 7)])
+        self.assertEqual(self._messages(listener), [(self.SENDER, 7)])
 
 
 if __name__ == "__main__":

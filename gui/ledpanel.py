@@ -377,6 +377,14 @@ MESSAGE_COLOURS = (
     ("Blue", "#0000ff"),
 )
 
+FRIEND_COLOURS = (
+    # Softer than the message green on purpose: someone appearing is worth
+    # less of your attention than someone writing to you.
+    ("Green", "#00c850"),
+    ("Cyan", "#00ffff"),
+    ("Orange", "#ff8000"),
+)
+
 
 # -- menus whose entries are not what gets written -------------------------
 #

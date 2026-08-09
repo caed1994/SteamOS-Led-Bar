@@ -62,9 +62,24 @@ FRIEND_CHAT_MESSAGE_BYTES = 12
 CHAT_ENTRY_CHAT_MSG = 1
 CHAT_ENTRY_TYPING = 2
 
+# PersonaStateChange_t: k_iSteamFriendsCallbacks (300) + 4. Same shape as a
+# chat message - a SteamID and an int - which is why the number decides.
+# The int is a bitfield of EPersonaChange; one bit says "came online", and it
+# is the only one worth a flash: the others are avatars, nicknames, rich
+# presence and a dozen more, all of which arrive constantly.
+PERSONA_STATE_CHANGE = 304
+PERSONA_STATE_CHANGE_BYTES = 12
+PERSONA_CHANGE_CAME_ONLINE = 0x0004
+
+# EFriendRelationship. Steam sends persona updates for everyone the client
+# knows about, players in the current game included, so being an actual friend
+# has to be asked about.
+FRIEND_RELATIONSHIP_FRIEND = 3
+
 MANUAL_DISPATCH_INIT = "SteamAPI_ManualDispatch_Init"
 LISTEN_FOR_MESSAGES = "SteamAPI_ISteamFriends_SetListenForFriendsMessages"
 GET_FRIEND_MESSAGE = "SteamAPI_ISteamFriends_GetFriendMessage"
+GET_RELATIONSHIP = "SteamAPI_ISteamFriends_GetFriendRelationship"
 
 
 class CallbackMsg(ctypes.Structure):
@@ -86,6 +101,7 @@ def message_support(library):
         "manual_dispatch": MANUAL_DISPATCH_INIT in symbols,
         "listen": LISTEN_FOR_MESSAGES in symbols,
         "read_message": GET_FRIEND_MESSAGE in symbols,
+        "relationship": GET_RELATIONSHIP in symbols,
         "accessors": versioned_accessors(symbols, "Friends"),
         "find_or_create": "SteamInternal_FindOrCreateUserInterface" in symbols,
         "via_client": "SteamAPI_ISteamClient_GetISteamFriends" in symbols,
@@ -94,11 +110,21 @@ def message_support(library):
 
 def usable_for_messages(support):
     """Whether these findings add up to a library we could listen with."""
+    return bool(usable_for_friends(support) and support["listen"])
+
+
+def usable_for_friends(support):
+    """The lesser half: enough to hear that a friend came online.
+
+    Persona changes arrive on their own, without the app asking Steam to
+    forward anything - so this needs neither SetListenForFriendsMessages nor
+    the reader for chat entries, and works on a library that has neither.
+    """
     if support.get("error"):
         return False
     reachable = bool(support["accessors"] or support["find_or_create"]
                      or support["via_client"])
-    return bool(support["manual_dispatch"] and support["listen"] and reachable)
+    return bool(support["manual_dispatch"] and reachable)
 
 
 _ACCESSOR_RE = re.compile(r"^SteamAPI_Steam(\w+)_v(\d+)$")
@@ -639,20 +665,33 @@ class UserStats:
         self.close()
 
 
-class FriendMessageListener:
-    """Receives Steam friend chat messages while a game is running.
+# A game start makes Steam deliver the persona state of everyone it knows,
+# and an online friend arrives with the "came online" bit set - so without
+# these the bar would announce the whole friends list every time a game
+# launched. Anything past the threshold in one go is that sync rather than
+# people, and the settling time covers it arriving in dribs and drabs.
+FRIEND_ONLINE_SETTLE = 20.0     # seconds after attaching
+FRIEND_ONLINE_FLOOD = 3         # friends in one poll
+
+
+class FriendListener:
+    """Receives friend activity while a game is running: chat and comings.
 
     Borrows an already-open UserStats session - same client connection, same
     app - so there is nothing extra to register with Steam. That session must
     have been opened with manual_dispatch=True.
     """
 
-    def __init__(self, stats):
+    def __init__(self, stats, want_messages=True, now=None):
         self.stats = stats
         self.lib = stats.library
+        self.want_messages = want_messages
         self.route = None
         self._friends = None
         self._get_message = None
+        self._relationship = None
+        self._settled_at = (time.monotonic() if now is None else now) \
+            + FRIEND_ONLINE_SETTLE
 
     def open(self):
         if self.stats._pipe is None:
@@ -668,7 +707,7 @@ class FriendMessageListener:
             raise SteamworksError("cannot read symbols from %s: %s"
                                   % (self.stats.library_path, exc))
 
-        if LISTEN_FOR_MESSAGES not in symbols:
+        if self.want_messages and LISTEN_FOR_MESSAGES not in symbols:
             raise SteamworksError("%s exports no %s"
                                   % (self.stats.library_path,
                                      LISTEN_FOR_MESSAGES))
@@ -678,16 +717,38 @@ class FriendMessageListener:
             raise SteamworksError("%s offers no way to reach ISteamFriends"
                                   % self.stats.library_path)
 
-        listen = getattr(self.lib, LISTEN_FOR_MESSAGES)
-        listen.restype = ctypes.c_bool
-        listen.argtypes = [ctypes.c_void_p, ctypes.c_bool]
-        if not listen(self._friends, True):
-            raise SteamworksError(
-                "SetListenForFriendsMessages was refused - the Steam client "
-                "declined to forward chat to this app")
+        if self.want_messages:
+            listen = getattr(self.lib, LISTEN_FOR_MESSAGES)
+            listen.restype = ctypes.c_bool
+            listen.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+            if not listen(self._friends, True):
+                raise SteamworksError(
+                    "SetListenForFriendsMessages was refused - the Steam "
+                    "client declined to forward chat to this app")
+            self._bind_reader(symbols)
 
-        self._bind_reader(symbols)
-        LOG.info("listening for friend messages via %s", self.route)
+        self._bind_relationship(symbols)
+        LOG.info("listening for friend activity via %s", self.route)
+
+    def _bind_relationship(self, symbols):
+        """Bind GetFriendRelationship, which says who counts as a friend."""
+        if GET_RELATIONSHIP not in symbols:
+            LOG.warning("%s cannot tell friends from strangers, so anyone "
+                        "coming online may flash the bar",
+                        self.stats.library_path)
+            return
+        reader = getattr(self.lib, GET_RELATIONSHIP)
+        reader.restype = ctypes.c_int32
+        reader.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+        self._relationship = reader
+
+    def is_friend(self, steam_id):
+        """Whether Steam calls this one a friend. True when it will not say."""
+        if self._relationship is None:
+            return True
+        return self._relationship(self._friends,
+                                  ctypes.c_uint64(steam_id)) == \
+            FRIEND_RELATIONSHIP_FRIEND
 
     def _bind_reader(self, symbols):
         """Bind GetFriendMessage, which is how a typing notice is told apart."""
@@ -747,29 +808,59 @@ class FriendMessageListener:
                     return _as_pointer(iface)
         return None
 
-    def messages(self):
-        """Friend chat messages received since the last call.
+    def poll(self, now=None):
+        """What has happened since the last call: (messages, came online).
 
-        Returns (steam id, message id) pairs. Only *received* messages produce
-        this callback, so the bar does not flash while you type - but a friend
-        typing does, which is why the entry type is checked.
+        Both in one pass, because the callbacks are drained by whoever asks
+        first - two readers would each get half of them.
+
+        Messages are (steam id, message id) pairs. Only *received* ones
+        produce that callback, so the bar does not flash while you type - but
+        a friend typing does, which is why the entry type is checked.
         """
-        found = []
-        for number, payload in self.callbacks():
-            if number != FRIEND_CHAT_MESSAGE:
-                continue
-            if len(payload) < FRIEND_CHAT_MESSAGE_BYTES:
-                LOG.debug("short chat callback: %d bytes", len(payload))
-                continue
-            steam_id, message_id = struct.unpack(
-                "<QI", payload[:FRIEND_CHAT_MESSAGE_BYTES])
+        now = time.monotonic() if now is None else now
+        messages, online = [], []
 
-            entry = self.entry_type(steam_id, message_id)
-            if entry is not None and entry != CHAT_ENTRY_CHAT_MSG:
-                LOG.debug("chat entry type %d is not a message", entry)
-                continue
-            found.append((steam_id, message_id))
-        return found
+        for number, payload in self.callbacks():
+            if number == FRIEND_CHAT_MESSAGE:
+                if len(payload) < FRIEND_CHAT_MESSAGE_BYTES:
+                    LOG.debug("short chat callback: %d bytes", len(payload))
+                    continue
+                steam_id, message_id = struct.unpack(
+                    "<QI", payload[:FRIEND_CHAT_MESSAGE_BYTES])
+                entry = self.entry_type(steam_id, message_id)
+                if entry is not None and entry != CHAT_ENTRY_CHAT_MSG:
+                    LOG.debug("chat entry type %d is not a message", entry)
+                    continue
+                messages.append((steam_id, message_id))
+
+            elif number == PERSONA_STATE_CHANGE:
+                if len(payload) < PERSONA_STATE_CHANGE_BYTES:
+                    LOG.debug("short persona callback: %d bytes", len(payload))
+                    continue
+                steam_id, flags = struct.unpack(
+                    "<QI", payload[:PERSONA_STATE_CHANGE_BYTES])
+                if not flags & PERSONA_CHANGE_CAME_ONLINE:
+                    continue
+                if not self.is_friend(steam_id):
+                    continue
+                online.append(steam_id)
+
+        return messages, self._settled(online, now)
+
+    def _settled(self, online, now):
+        """Drop the burst Steam sends when it first tells us who is around."""
+        if not online:
+            return online
+        if now < self._settled_at:
+            LOG.debug("ignoring %d friend(s) online while still settling",
+                      len(online))
+            return []
+        if len(online) > FRIEND_ONLINE_FLOOD:
+            LOG.info("%d friends appeared at once - taking that as Steam "
+                     "catching up rather than people arriving", len(online))
+            return []
+        return online
 
     def callbacks(self):
         """Every callback dispatched since the last call, as (id, payload).

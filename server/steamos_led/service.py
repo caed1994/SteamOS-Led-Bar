@@ -51,7 +51,8 @@ def build_renderer(config):
 def notification_colors(config):
     """The named triggers whose colour the configuration can change."""
     return {"achievement": notify.parse_color(config["ACHIEVEMENT_COLOR"]),
-            "message": notify.parse_color(config["MESSAGE_COLOR"])}
+            "message": notify.parse_color(config["MESSAGE_COLOR"]),
+            "friend": notify.parse_color(config["FRIEND_COLOR"])}
 
 
 def build_link(config):
@@ -450,8 +451,9 @@ def run_probe_messages(config, seconds=None):
     if explicit and explicit != "auto" and explicit not in candidates:
         candidates.insert(0, explicit)
 
-    print("Libraries, and what each one offers for friend messages:")
+    print("Libraries, and what each one offers for friend activity:")
     usable = []
+    arrivals = []
     for path in candidates:
         support = steamworks.message_support(path)
         if support.get("error"):
@@ -460,10 +462,15 @@ def run_probe_messages(config, seconds=None):
         ok = steamworks.usable_for_messages(support)
         if ok:
             usable.append(path)
+        if steamworks.usable_for_friends(support):
+            arrivals.append(path)
         print("  [%s] %s" % ("use " if ok else "skip", path))
         print("         manual dispatch: %-5s  listen: %-5s  read: %s"
               % (support["manual_dispatch"], support["listen"],
                  support["read_message"]))
+        print("         friends coming online: %-5s  relationship: %s"
+              % (steamworks.usable_for_friends(support),
+                 support["relationship"]))
         print("         ISteamFriends via: %s"
               % (", ".join(support["accessors"]
                            + (["FindOrCreateUserInterface"]
@@ -472,6 +479,15 @@ def run_probe_messages(config, seconds=None):
                               else [])) or "nothing found"))
     print()
     if not usable:
+        if arrivals:
+            # The two are not the same test: chat needs the client's
+            # permission on top, and this is exactly the machine where the
+            # difference decides whether anything flashes at all.
+            print("No library here can be told to forward chat, but %d can"
+                  % len(arrivals))
+            print("still report friends coming online. Leave")
+            print("NOTIFY_FRIEND_ONLINE on and NOTIFY_MESSAGES off.")
+            return 1
         print("No library here can deliver callbacks to us. Friend messages")
         print("cannot be read this way on this machine - which is worth")
         print("knowing before anything is built on top of it.")
@@ -509,7 +525,7 @@ def run_probe_messages(config, seconds=None):
     listener = None
     try:
         stats.open()
-        listener = steamworks.FriendMessageListener(stats)
+        listener = steamworks.FriendListener(stats)
         listener.open()
     except steamworks.SteamworksError as exc:
         print("Cannot listen: %s" % exc)
@@ -577,20 +593,20 @@ def _flash(fifo, kind):
         LOG.warning("could not flash the bar: %s", exc)
 
 
-def _open_message_listener(stats):
-    """Start listening for friend chat, or None if Steam will not have it."""
+def _open_friend_listener(stats, want_messages):
+    """Start listening for friend activity, or None if Steam will not have it."""
     try:
-        listener = steamworks.FriendMessageListener(stats)
+        listener = steamworks.FriendListener(stats, want_messages=want_messages)
         listener.open()
         return listener
     except steamworks.SteamworksError as exc:
         # Not fatal: achievements are the main event and still work.
-        LOG.warning("friend messages unavailable: %s", exc)
+        LOG.warning("friend activity unavailable: %s", exc)
         return None
 
 
 def run_watch_achievements(config, interval=1.0):
-    """Flash the bar on achievements and friend messages in the running game.
+    """Flash the bar on achievements and friend activity in the running game.
 
     Runs as your normal user next to Steam, not as the sandboxed service, and
     only writes trigger words into the notification pipe.
@@ -598,11 +614,13 @@ def run_watch_achievements(config, interval=1.0):
     _interrupt_on_sigterm()
 
     achievements_on = config["NOTIFY_ACHIEVEMENTS"]
-    if not achievements_on and not config["NOTIFY_MESSAGES"]:
+    messages_on = config["NOTIFY_MESSAGES"]
+    friends_on = config["NOTIFY_FRIEND_ONLINE"]
+    if not (achievements_on or messages_on or friends_on):
         # Attaching would open a Steamworks session as the running game for
         # nothing - and that registration is what keeps Steam on "Stopping".
-        print("Both NOTIFY_ACHIEVEMENTS and NOTIFY_MESSAGES are off, so there "
-              "is nothing to watch for.", flush=True)
+        print("NOTIFY_ACHIEVEMENTS, NOTIFY_MESSAGES and NOTIFY_FRIEND_ONLINE "
+              "are all off, so there is nothing to watch for.", flush=True)
         return NOTHING_TO_WATCH_EXIT
 
     fifo = config["NOTIFY_FIFO"]
@@ -617,7 +635,8 @@ def run_watch_achievements(config, interval=1.0):
     print("Watching for %s; flashes go to %s"
           % (" and ".join(filter(None, [
               "achievements" if achievements_on else "",
-              "friend messages" if config["NOTIFY_MESSAGES"] else ""])), fifo),
+              "friend messages" if messages_on else "",
+              "friends coming online" if friends_on else ""])), fifo),
           flush=True)
     print("Press Ctrl-C to stop.", flush=True)
 
@@ -645,14 +664,22 @@ def run_watch_achievements(config, interval=1.0):
                     try:
                         library = steamworks.find_library(
                             config["STEAM_LIBRARY"])
-                        # Friend messages need a manual-dispatch session, and
-                        # only a new enough library can open one.
-                        manual = (config["NOTIFY_MESSAGES"]
-                                  and steamworks.usable_for_messages(
-                                      steamworks.message_support(library)))
-                        if config["NOTIFY_MESSAGES"] and not manual:
-                            LOG.info("%s is too old to deliver friend "
-                                     "messages; achievements only", library)
+                        # Friend activity needs a manual-dispatch session, and
+                        # only a new enough library can open one. Chat needs
+                        # more of it than "who came online" does: that one
+                        # arrives without asking Steam to forward anything.
+                        support = steamworks.message_support(library)
+                        chat = messages_on and steamworks.usable_for_messages(
+                            support)
+                        comings = friends_on and steamworks.usable_for_friends(
+                            support)
+                        manual = chat or comings
+                        if messages_on and not chat:
+                            LOG.info("%s cannot deliver friend messages",
+                                     library)
+                        if friends_on and not comings:
+                            LOG.info("%s cannot deliver friend state changes",
+                                     library)
                         if not achievements_on and not manual:
                             # Decided before opening anything, because a
                             # session is not free: it registers this process
@@ -660,7 +687,7 @@ def run_watch_achievements(config, interval=1.0):
                             # that. Attaching to poll nothing would hold the
                             # game on "Stopping" for no flash at all.
                             print("Achievements are switched off and %s cannot "
-                                  "deliver friend messages, so there is "
+                                  "deliver friend activity, so there is "
                                   "nothing to watch for." % library, flush=True)
                             return NOTHING_TO_WATCH_EXIT
 
@@ -680,15 +707,15 @@ def run_watch_achievements(config, interval=1.0):
                         stats.open()
                         watcher = (steamworks.AchievementWatcher(stats)
                                    if achievements_on else None)
-                        listener = _open_message_listener(stats) if manual \
-                            else None
+                        listener = (_open_friend_listener(stats, chat)
+                                    if manual else None)
                         if watcher is None and listener is None:
                             # The library could have done it, but Steam
-                            # declined to forward chat - and achievements are
-                            # off, so this session has nothing left to report.
-                            # Ending the process is also what releases the
-                            # registration it just took out.
-                            print("Steam will not forward friend messages to "
+                            # declined - and achievements are off, so this
+                            # session has nothing left to report. Ending the
+                            # process is also what releases the registration
+                            # it just took out.
+                            print("Steam will not forward friend activity to "
                                   "this app and achievements are switched "
                                   "off, so there is nothing to watch for.",
                                   flush=True)
@@ -709,12 +736,18 @@ def run_watch_achievements(config, interval=1.0):
                                      stats.display_name(name))
                             _flash(fifo, "achievement")
                     if listener is not None:
-                        # One flash however many arrived: a retrigger restarts
-                        # the animation, so a burst would hold the bar lit.
-                        messages = listener.messages()
-                        if messages:
+                        # One flash however many arrived, per kind: the queue
+                        # drops a repeat of what it is already showing, so a
+                        # burst would only be told once anyway.
+                        messages, online = listener.poll()
+                        if messages and messages_on:
                             LOG.info("%d friend message(s)", len(messages))
                             _flash(fifo, "message")
+                        if online and friends_on:
+                            # No names in the log: who you play with is
+                            # nobody's business but yours.
+                            LOG.info("%d friend(s) came online", len(online))
+                            _flash(fifo, "friend")
                 except OSError as exc:
                     LOG.warning("lost the Steamworks connection: %s", exc)
                     if listener is not None:

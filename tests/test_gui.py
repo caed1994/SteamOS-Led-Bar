@@ -290,7 +290,8 @@ class NotificationColourTest(unittest.TestCase):
     """The panel offers a few colours; the config file takes any."""
 
     PALETTES = (("ACHIEVEMENT_COLOR", ledpanel.ACHIEVEMENT_COLOURS),
-                ("MESSAGE_COLOR", ledpanel.MESSAGE_COLOURS))
+                ("MESSAGE_COLOR", ledpanel.MESSAGE_COLOURS),
+                ("FRIEND_COLOR", ledpanel.FRIEND_COLOURS))
 
     def test_every_offered_colour_is_one_the_service_accepts(self):
         from steamos_led import notify

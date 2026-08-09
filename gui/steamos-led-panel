@@ -93,6 +93,10 @@ NOTIFICATIONS = [
          None, None, None),
         ("MESSAGE_COLOR", "Friend message colour", "named",
          ledpanel.MESSAGE_COLOURS, None, None),
+        ("NOTIFY_FRIEND_ONLINE", "Flash when a friend comes online", "bool",
+         None, None, None),
+        ("FRIEND_COLOR", "Friend online colour", "named",
+         ledpanel.FRIEND_COLOURS, None, None),
     ]),
     ("How it looks", [
         # From half a second: the validator allows a tenth, but the flash
@@ -142,11 +146,13 @@ DEPENDS_ON = {
     "TEMPERATURE_SENSOR": ("TEMPERATURE_GAUGE",),
     "NOTIFY_ACHIEVEMENTS": ("NOTIFY",),
     "NOTIFY_MESSAGES": ("NOTIFY",),
+    "NOTIFY_FRIEND_ONLINE": ("NOTIFY",),
     "NOTIFY_DURATION": ("NOTIFY",),
     "NOTIFY_STYLE": ("NOTIFY",),
     "NOTIFY_REPEAT_GAP": ("NOTIFY",),
     "ACHIEVEMENT_COLOR": ("NOTIFY", "NOTIFY_ACHIEVEMENTS"),
     "MESSAGE_COLOR": ("NOTIFY", "NOTIFY_MESSAGES"),
+    "FRIEND_COLOR": ("NOTIFY", "NOTIFY_FRIEND_ONLINE"),
 }
 
 
@@ -968,11 +974,12 @@ class Panel:
 
         row = ttk.Frame(flashes)
         row.pack(fill="x", padx=8, pady=(0, 8))
-        # No colour in the labels: two of the three are a setting now, so
+        # No colour in the labels: three of the four are a setting now, so
         # naming one here would be a promise the button cannot keep. It
         # flashes whatever the trigger is set to, which is the point.
         for kind, label in (("achievement", "Achievement"),
                             ("message", "Friend message"),
+                            ("friend", "Friend online"),
                             ("warning", "Warning")):
             ttk.Button(row, text=label,
                        command=lambda k=kind: self.runner.start(
