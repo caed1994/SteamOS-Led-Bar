@@ -92,7 +92,7 @@ SETTINGS = [
 # firmware, and each of these is a knob you turn because something specific is
 # wrong. Same format, so both tabs are built and validated by the same code.
 ADVANCED = [
-    ("MAPPING", "Mapping of the 17 logical LEDs", "choice",
+    ("MAPPING", "Mapping of the logical LEDs", "choice",
      config_module.MAPPINGS, None, None),
     ("GAMMA", "Gamma", "float", 0.1, 4.0, 0.1),
     ("SPEED", "Effect speed", "float", 0.1, 4.0, 0.1),
