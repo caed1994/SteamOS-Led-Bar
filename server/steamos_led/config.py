@@ -37,6 +37,9 @@ DEFAULTS = {
     "ACHIEVEMENT_COLOR": "#ffd700",
     "MESSAGE_COLOR": "#8000ff",
     "FRIEND_COLOR": "#00c850",
+    "ACHIEVEMENT_STYLE": notify.STYLE_INHERIT,
+    "MESSAGE_STYLE": notify.STYLE_INHERIT,
+    "FRIEND_STYLE": notify.STYLE_INHERIT,
     "TEMPERATURE_GAUGE": False,
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 85.0,
@@ -164,6 +167,8 @@ def load(path=DEFAULT_CONFIG_PATH, overrides=None):
 MAPPINGS = ("stretch", "repeat", "crop")
 # Taken from the module that implements them, so the validator cannot drift.
 NOTIFY_STYLES = notify.STYLES
+# One notification's own style may also say "whichever NOTIFY_STYLE says".
+PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 
 # Where the gauge's two marks may sit. Wide, because people watch different
 # sensors, but not unbounded: outside this is a unit mix-up, not an intention.
@@ -205,6 +210,10 @@ def validate(config):
     if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
         raise ConfigError("NOTIFY_STYLE must be one of: %s"
                           % ", ".join(NOTIFY_STYLES))
+    for key in ("ACHIEVEMENT_STYLE", "MESSAGE_STYLE", "FRIEND_STYLE"):
+        if config[key] not in PER_KIND_STYLES:
+            raise ConfigError("%s must be one of: %s"
+                              % (key, ", ".join(PER_KIND_STYLES)))
     for key in ("ACHIEVEMENT_COLOR", "MESSAGE_COLOR", "FRIEND_COLOR"):
         try:
             notify.parse_color(config[key])

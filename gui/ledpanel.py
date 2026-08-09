@@ -374,6 +374,7 @@ MESSAGE_COLOURS = (
     ("Hot Pink", "#ff36c9"),
 )
 
+
 FRIEND_COLOURS = (
     # Softer than the message green on purpose: someone appearing is worth
     # less of your attention than someone writing to you.
@@ -381,6 +382,24 @@ FRIEND_COLOURS = (
     ("Cyan", "#00ffff"),
     ("Orange", "#ff8000"),
 )
+
+
+# -- the flash shapes ------------------------------------------------------
+#
+# Not a list of its own: the service registers them, and a shape the panel
+# does not offer would be one nobody ever finds.
+
+def style_choices(styles, inherit=None):
+    """Menu entries for the flash shapes, in the order the service has them.
+
+    `inherit` is the value that means "whatever the general setting says";
+    passing it adds that entry at the top, which is what the per-notification
+    menus need and the general one must not have.
+    """
+    entries = [(name.replace("_", " ").capitalize(), name) for name in styles]
+    if inherit is None:
+        return tuple(entries)
+    return tuple([("Same as default", inherit)] + entries)
 
 
 # -- menus whose entries are not what gets written -------------------------

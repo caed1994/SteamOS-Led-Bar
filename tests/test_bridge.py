@@ -375,7 +375,11 @@ class TestConfig(unittest.TestCase):
                          # A colour the service cannot parse would be found
                          # out at flash time, which is no time to find out.
                          {"ACHIEVEMENT_COLOR": "goldish"},
-                         {"MESSAGE_COLOR": "#12345"}):
+                         {"MESSAGE_COLOR": "#12345"},
+                         # Same for a shape: a name nothing implements would
+                         # silently become the default one at flash time.
+                         {"ACHIEVEMENT_STYLE": "sparkle"},
+                         {"FRIEND_STYLE": ""}):
             with self.assertRaises(config.ConfigError):
                 config.load(path=None, overrides=override)
 
@@ -387,6 +391,25 @@ class TestConfig(unittest.TestCase):
                           ("MESSAGE_COLOR", "message")):
             self.assertEqual(notify.parse_color(config.DEFAULTS[key]),
                              notify.KINDS[kind], key)
+
+    def test_every_notification_starts_out_following_the_general_shape(self):
+        # Otherwise NOTIFY_STYLE would stop being the one setting for "all of
+        # them look like this", which is what most people want it to be.
+        from steamos_led import notify
+        for key in ("ACHIEVEMENT_STYLE", "MESSAGE_STYLE", "FRIEND_STYLE"):
+            self.assertEqual(config.DEFAULTS[key], notify.STYLE_INHERIT, key)
+
+    def test_following_the_general_shape_is_not_itself_a_shape(self):
+        # "default" is stored in the same field as a shape name, so a shape
+        # called that would be unreachable - and nobody would know why.
+        from steamos_led import notify
+        self.assertNotIn(notify.STYLE_INHERIT, notify.STYLES)
+
+    def test_a_shape_of_its_own_is_accepted(self):
+        from steamos_led import notify
+        loaded = config.load(path=None,
+                             overrides={"ACHIEVEMENT_STYLE": notify.STYLE_PULSE})
+        self.assertEqual(loaded["ACHIEVEMENT_STYLE"], notify.STYLE_PULSE)
 
     def test_a_configured_colour_survives_the_round_trip(self):
         path = self._write("ACHIEVEMENT_COLOR=#CD7F32\n")

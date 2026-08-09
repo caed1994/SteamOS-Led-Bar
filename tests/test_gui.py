@@ -316,6 +316,36 @@ class NotificationColourTest(unittest.TestCase):
             self.assertEqual(len(set(values)), len(values), key)
 
 
+class StyleMenuTest(unittest.TestCase):
+    """The flash shapes in the panel come from the service, not from a list."""
+
+    def setUp(self):
+        from steamos_led import notify
+        self.notify = notify
+        self.choices = ledpanel.style_choices(notify.STYLES)
+        self.per_kind = ledpanel.style_choices(notify.STYLES,
+                                               inherit=notify.STYLE_INHERIT)
+
+    def test_every_shape_the_service_has_is_offered(self):
+        # A shape registered in notify but missing here is one nobody finds.
+        self.assertEqual([value for _label, value in self.choices],
+                         list(self.notify.STYLES))
+
+    def test_the_labels_are_not_the_values(self):
+        self.assertEqual(ledpanel.menu_label(self.choices, "bloom"), "Bloom")
+        self.assertEqual(ledpanel.menu_value(self.choices, "Bloom"), "bloom")
+
+    def test_following_the_default_comes_first_and_only_per_kind(self):
+        # First because it is what all three start at, and absent from the
+        # general menu because "same as itself" means nothing there.
+        self.assertEqual(self.per_kind[0][1], self.notify.STYLE_INHERIT)
+        self.assertNotIn(self.notify.STYLE_INHERIT,
+                         [value for _label, value in self.choices])
+
+    def test_the_per_kind_menu_is_the_general_one_plus_that(self):
+        self.assertEqual(self.per_kind[1:], self.choices)
+
+
 class MenuTranslationTest(unittest.TestCase):
     """Both drop-downs show one thing and write another."""
 

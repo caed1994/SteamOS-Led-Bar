@@ -48,11 +48,30 @@ def build_renderer(config):
     )
 
 
+# The triggers the watcher produces, and the option prefix each one is
+# configured under. --notify warning and a bare colour are not in here: they
+# keep the built-in colour and the general style.
+CONFIGURABLE_KINDS = (("achievement", "ACHIEVEMENT"),
+                      ("message", "MESSAGE"),
+                      ("friend", "FRIEND"))
+
+
 def notification_colors(config):
     """The named triggers whose colour the configuration can change."""
-    return {"achievement": notify.parse_color(config["ACHIEVEMENT_COLOR"]),
-            "message": notify.parse_color(config["MESSAGE_COLOR"]),
-            "friend": notify.parse_color(config["FRIEND_COLOR"])}
+    return {kind: notify.parse_color(config[prefix + "_COLOR"])
+            for kind, prefix in CONFIGURABLE_KINDS}
+
+
+def notification_styles(config):
+    """The triggers that flash in a shape of their own.
+
+    Anything left out follows NOTIFY_STYLE, which is what the default means -
+    so the general setting stays the one knob for "all of them look like
+    this", and a kind only leaves it when someone says so.
+    """
+    return {kind: config[prefix + "_STYLE"]
+            for kind, prefix in CONFIGURABLE_KINDS
+            if config[prefix + "_STYLE"] != notify.STYLE_INHERIT}
 
 
 def build_link(config):
@@ -77,6 +96,7 @@ class Runner:
             led_count=config["LED_COUNT"],
             style=config["NOTIFY_STYLE"],
             colors=notification_colors(config),
+            styles=notification_styles(config),
             repeat_gap=config["NOTIFY_REPEAT_GAP"],
         )
         self.trigger = None

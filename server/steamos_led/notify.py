@@ -34,6 +34,10 @@ FADE_TAIL = 0.25    # fraction of the duration spent fading back out
 STYLE_BLOOM = "bloom"
 STYLE_PULSE = "pulse"
 
+# What a per-kind style is set to when it should simply follow the general one.
+# Not a style itself: it never reaches _STYLES, it only means "not set here".
+STYLE_INHERIT = "default"
+
 # The bloom, as fractions of the duration: grow out of the middle, breathe once
 # while fully out, then shrink back in.
 BLOOM_EXPANDED = 0.28
@@ -186,7 +190,7 @@ class NotificationOverlay:
 
     def __init__(self, enabled=True, duration=3.5, led_count=17,
                  style=STYLE_BLOOM, colors=None,
-                 repeat_gap=DEFAULT_REPEAT_GAP):
+                 repeat_gap=DEFAULT_REPEAT_GAP, styles=None):
         self.enabled = enabled
         self.duration = duration
         self.led_count = led_count
@@ -195,6 +199,10 @@ class NotificationOverlay:
         # A trigger word stays the interface - callers ask for "achievement",
         # not for a colour - so which gold that is stays a local decision.
         self.colors = dict(KINDS, **(colors or {}))
+        # Same again for the shape. Only kinds that want their own are in
+        # here; everything else, an arbitrary colour included, uses `style`.
+        self.styles = {kind: shape for kind, shape
+                       in (styles or {}).items() if shape in STYLES}
         self.current = None
         self.pending = []           # (kind, colour), in the order they arrived
         self._quiet_until = {}      # kind -> when it may be shown again
@@ -241,8 +249,8 @@ class NotificationOverlay:
 
     def _start(self, kind, color, now):
         LOG.info("notification: %s", kind)
-        self.current = Notification(color, self.duration, now, self.style,
-                                    kind)
+        self.current = Notification(color, self.duration, now,
+                                    self.styles.get(kind, self.style), kind)
         # Measured from the start, so one window covers the flash and the gap
         # after it. Expired entries are dropped here, or an arbitrary colour
         # per flash would grow this map without end.

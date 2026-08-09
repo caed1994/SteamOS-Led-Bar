@@ -38,6 +38,7 @@ import kdetheme                                             # noqa: E402
 import roundrect                                            # noqa: E402
 import ledpanel                                             # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
+from steamos_led import notify                              # noqa: E402
 
 
 # Which settings to show, in order: key, label, kind, and for numeric ones the
@@ -78,33 +79,47 @@ STRIP = [
     ]),
 ]
 
+# The shapes, straight from the service. The per-notification menus also
+# offer "Same as default", which is not a shape but the absence of a choice.
+STYLE_CHOICES = ledpanel.style_choices(config_module.NOTIFY_STYLES)
+KIND_STYLE_CHOICES = ledpanel.style_choices(config_module.NOTIFY_STYLES,
+                                            inherit=notify.STYLE_INHERIT)
+
 NOTIFICATIONS = [
     ("What flashes", [
         # The master switch: with this off nothing flashes at all, not even
         # --notify, because the trigger pipe is never opened.
         ("NOTIFY", "Flash on notifications", "bool", None, None, None),
-        # Then one switch per thing worth watching for, each with the colour
-        # it flashes underneath it, so the pair reads as one setting.
+        # Then one block per thing worth watching for - switch, colour, shape -
+        # so everything that makes up one notification stands together.
         ("NOTIFY_ACHIEVEMENTS", "Flash on achievements", "bool",
          None, None, None),
         ("ACHIEVEMENT_COLOR", "Achievement colour", "named",
          ledpanel.ACHIEVEMENT_COLOURS, None, None),
+        ("ACHIEVEMENT_STYLE", "Achievement shape", "named",
+         KIND_STYLE_CHOICES, None, None),
         ("NOTIFY_MESSAGES", "Flash on friend messages", "bool",
          None, None, None),
         ("MESSAGE_COLOR", "Friend message colour", "named",
          ledpanel.MESSAGE_COLOURS, None, None),
+        ("MESSAGE_STYLE", "Friend message shape", "named",
+         KIND_STYLE_CHOICES, None, None),
         ("NOTIFY_FRIEND_ONLINE", "Flash when a friend comes online", "bool",
          None, None, None),
         ("FRIEND_COLOR", "Friend online colour", "named",
          ledpanel.FRIEND_COLOURS, None, None),
+        ("FRIEND_STYLE", "Friend online shape", "named",
+         KIND_STYLE_CHOICES, None, None),
     ]),
     ("How it looks", [
         # From half a second: the validator allows a tenth, but the flash
         # grows, breathes and retracts, none of which is visible in that.
         ("NOTIFY_DURATION", "Flash duration (seconds)", "float",
          0.5, 60.0, 0.5),
-        ("NOTIFY_STYLE", "Flash shape", "choice", config_module.NOTIFY_STYLES,
-         None, None),
+        # The shape everything uses unless it was given one of its own -
+        # including --notify with a colour, which is nobody's kind.
+        ("NOTIFY_STYLE", "Default flash shape", "named",
+         STYLE_CHOICES, None, None),
     ]),
 ]
 
@@ -153,6 +168,9 @@ DEPENDS_ON = {
     "ACHIEVEMENT_COLOR": ("NOTIFY", "NOTIFY_ACHIEVEMENTS"),
     "MESSAGE_COLOR": ("NOTIFY", "NOTIFY_MESSAGES"),
     "FRIEND_COLOR": ("NOTIFY", "NOTIFY_FRIEND_ONLINE"),
+    "ACHIEVEMENT_STYLE": ("NOTIFY", "NOTIFY_ACHIEVEMENTS"),
+    "MESSAGE_STYLE": ("NOTIFY", "NOTIFY_MESSAGES"),
+    "FRIEND_STYLE": ("NOTIFY", "NOTIFY_FRIEND_ONLINE"),
 }
 
 

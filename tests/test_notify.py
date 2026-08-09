@@ -278,6 +278,116 @@ class ConfiguredColourTest(unittest.TestCase):
         self.assertEqual(self._middle(overlay)[:2], (0, 0))
 
 
+class ConfiguredStyleTest(unittest.TestCase):
+    """Each kind may flash in a shape of its own; the rest follow the general.
+
+    Colour alone runs out when two notifications are the same colour, or when
+    an achievement should feel like more of an event than a friend logging in.
+    """
+
+    def _overlay(self, **kwargs):
+        return notify.NotificationOverlay(
+            led_count=5, duration=1.0, style=notify.STYLE_BLOOM, **kwargs)
+
+    def test_a_kind_with_its_own_shape_uses_it(self):
+        overlay = self._overlay(styles={"achievement": notify.STYLE_PULSE})
+        overlay.trigger("achievement", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_PULSE)
+
+    def test_the_kinds_nobody_configured_follow_the_general_one(self):
+        overlay = self._overlay(styles={"achievement": notify.STYLE_PULSE})
+        overlay.trigger("message", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
+
+    def test_an_arbitrary_colour_follows_the_general_one(self):
+        # A colour is nobody's kind, so there is nothing to look up - it must
+        # not fall through to whatever the last configured shape was.
+        overlay = self._overlay(styles={"achievement": notify.STYLE_PULSE})
+        overlay.trigger("#00ff88", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
+
+    def test_a_shape_nothing_implements_is_dropped_at_the_door(self):
+        overlay = self._overlay(styles={"achievement": "sparkle"})
+        overlay.trigger("achievement", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
+        self.assertNotIn("achievement", overlay.styles)
+
+    def test_a_queued_flash_keeps_its_own_shape(self):
+        # The queue holds the kind, not the shape, so the lookup has to happen
+        # when it finally starts - not when it was put in line.
+        overlay = self._overlay(styles={"message": notify.STYLE_PULSE})
+        overlay.trigger("achievement", 0.0)
+        overlay.trigger("message", 0.0)
+        overlay.frame(1.5)              # the first one is over by now
+        self.assertEqual(overlay.current.kind, "message")
+        self.assertEqual(overlay.current.style, notify.STYLE_PULSE)
+
+    def test_the_shape_reaches_the_pixels(self):
+        # Early in a bloom the ends are still dark while the middle is lit; a
+        # pulse lights the whole bar at once. Same colour, same moment.
+        blooming = self._overlay()
+        pulsing = self._overlay(styles={"achievement": notify.STYLE_PULSE})
+        for overlay in (blooming, pulsing):
+            overlay.trigger("achievement", 0.0)
+        bloom, pulse = blooming.frame(0.1), pulsing.frame(0.1)
+        self.assertNotEqual(bloom, pulse)
+        self.assertEqual(bloom[:3], b"\x00\x00\x00", "a bloom starts inside")
+        self.assertNotEqual(pulse[:3], b"\x00\x00\x00")
+
+    def test_every_shape_lasts_as_long_as_the_others(self):
+        # The duration is deliberately shared: one setting, not three.
+        overlay = self._overlay(styles={"achievement": notify.STYLE_PULSE})
+        overlay.trigger("achievement", 0.0)
+        self.assertIsNotNone(overlay.frame(0.9))
+        self.assertIsNone(overlay.frame(1.1))
+
+    def test_nothing_configured_leaves_every_kind_on_the_general_one(self):
+        overlay = self._overlay()
+        self.assertEqual(overlay.styles, {})
+        now = 0.0
+        for kind in ("achievement", "message", "friend", "warning"):
+            overlay.trigger(kind, now)
+            self.assertEqual(overlay.current.style, notify.STYLE_BLOOM, kind)
+            now += 2.0
+            overlay.frame(now)          # let it finish before the next
+
+
+class ConfiguredOverlayTest(unittest.TestCase):
+    """What the service hands the overlay, straight from a configuration."""
+
+    def _config(self, **overrides):
+        from steamos_led import config as config_module
+        settings = dict(config_module.DEFAULTS)
+        settings.update(overrides)
+        return settings
+
+    def test_a_shape_left_at_the_default_is_not_passed_on(self):
+        # "default" is the absence of a choice, so it must not arrive at the
+        # overlay as a shape name - there is none by that name to draw.
+        from steamos_led import service
+        self.assertEqual(service.notification_styles(self._config()), {})
+
+    def test_a_shape_of_its_own_is_passed_on(self):
+        from steamos_led import service
+        styles = service.notification_styles(
+            self._config(MESSAGE_STYLE=notify.STYLE_PULSE))
+        self.assertEqual(styles, {"message": notify.STYLE_PULSE})
+
+    def test_the_colours_come_from_the_same_table(self):
+        from steamos_led import service
+        colors = service.notification_colors(self._config())
+        self.assertEqual(sorted(colors),
+                         sorted(kind for kind, _prefix
+                                in service.CONFIGURABLE_KINDS))
+
+    def test_every_configurable_kind_is_one_the_overlay_knows(self):
+        # A prefix with no matching trigger word would be a setting that
+        # changes nothing at all, and nothing would say so.
+        from steamos_led import service
+        for kind, _prefix in service.CONFIGURABLE_KINDS:
+            self.assertIn(kind, notify.KINDS)
+
+
 class FifoTriggerTest(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

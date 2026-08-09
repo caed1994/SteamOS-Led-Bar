@@ -385,6 +385,21 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
 | `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
 | `FRIEND_COLOR` | `#00c850` | what `friend` flashes |
+| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` | `default` | shape for that one kind — a shape name, or `default` to follow `NOTIFY_STYLE` |
+
+### Telling them apart
+
+Each of the three has a colour and a shape of its own. The colour is the fast
+one — gold, purple, green, recognisable from across the room — and the shape is
+there for when two of them are the same colour, or when you want an achievement
+to feel like more of an event than a friend logging in.
+
+The shape settings start at `default`, which means "whatever `NOTIFY_STYLE`
+says". So `NOTIFY_STYLE` stays the one knob for *everything looks like this*,
+and a kind only leaves it once you say so. Triggers that are nobody's kind —
+`--notify warning`, `--notify '#00ff88'` — always follow it.
+
+The duration is shared: whatever the shape, a flash lasts `NOTIFY_DURATION`.
 
 ### When several arrive at once
 
