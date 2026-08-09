@@ -750,9 +750,16 @@ class Panel:
     def _rewrap(self, event):
         """Follow the window's width - only when it actually changed.
 
-        Setting wraplength changes what the label asks for, which can bring
-        another Configure straight back; comparing first ends that.
+        The first line is not a nicety: a toplevel is in the bindtags of every
+        widget under it, so this runs for each child's own Configure too, and
+        event.width is then that child's. Measured, it saw 14 px from a
+        scrollbar, wrapped every explanation into a column, changed the layout,
+        and got called again - a window flickering between two sizes until it
+        was killed. Setting wraplength can also bring a Configure straight
+        back, which is what comparing the width first ends.
         """
+        if event.widget is not self.root:
+            return
         width = max(320, event.width - 90)
         if width == self._wrap_width:
             return
