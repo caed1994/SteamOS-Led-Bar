@@ -198,6 +198,15 @@ def round_the_corners(style, palette, shade):
     window, view = palette["window"], palette["view"]
     accent = palette["selection"]
 
+    def faded(colour):
+        """Halfway to the background: what "you cannot use this" looks like.
+
+        Every drawn part needs its own picture for it. A widget that is
+        disabled but still drawn in full colour is worse than one that was
+        never greyed out at all - it looks usable and does nothing.
+        """
+        return kdetheme.mix(colour, window, 0.55)
+
     def tab(fill, background):
         # Square at the bottom, no border along it - see roundrect's
         # open_bottom for why.
@@ -243,14 +252,16 @@ def round_the_corners(style, palette, shade):
 
     def buttons():
         def button_element(name, fill, hover, pressed):
+            def picture(colour):
+                return _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS,
+                                colour, window, border=shade["border"])
             style.element_create(
-                name, "image",
-                _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS, fill,
-                         window, border=shade["border"]),
-                ("pressed", _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS,
-                                     pressed, window, border=shade["border"])),
-                ("active", _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS,
-                                    hover, window, border=shade["border"])),
+                name, "image", picture(fill),
+                # Disabled first: it has to win over hover, or a button you
+                # cannot press lights up under the pointer as if you could.
+                ("disabled", picture(faded(fill))),
+                ("pressed", picture(pressed)),
+                ("active", picture(hover)),
                 border=BUTTON_RADIUS, sticky="nsew", padding=(14, 7))
 
         button_element("Rounded.Button", palette["button"], shade["hover"],
@@ -281,6 +292,13 @@ def round_the_corners(style, palette, shade):
         style.element_create(
             "Rounded.Indicator", "image",
             indicator(view, shade["border"]),
+            # A greyed-out switch still has to say whether it is on: the
+            # setting it governs is off, which is not the same as this one
+            # being off.
+            ("disabled", "selected",
+             indicator(faded(accent), faded(accent),
+                       faded(palette["selection_text"]))),
+            ("disabled", indicator(faded(view), faded(shade["border"]))),
             ("selected", indicator(accent, accent,
                                    palette["selection_text"])),
             ("active", indicator(shade["hover"], accent)),
@@ -315,7 +333,11 @@ def round_the_corners(style, palette, shade):
         style.element_create("Pill.trough", "image", track,
                              border=(int(radius), 0, int(radius), 0),
                              sticky="ew", padding=0)
+        knob_off = _photo(roundrect.pill(
+            KNOB_DIAMETER, KNOB_DIAMETER, faded(accent), window,
+            border=shade["border"], border_width=1))
         style.element_create("Pill.slider", "image", knob,
+                             ("disabled", knob_off),
                              ("active", knob_hot), sticky="")
         style.layout("Horizontal.TScale", [
             ("Pill.trough", {"sticky": "ew", "children": [
@@ -378,16 +400,20 @@ def apply_theme(root):
     style.configure("TButton", background=palette["button"],
                     foreground=palette["button_text"],
                     bordercolor=shade["border"], padding=(12, 6))
+    # The disabled entries matter: setting a map replaces clam's own, so
+    # without them the label of a disabled button keeps its full colour.
     style.map("TButton",
               background=[("pressed", palette["selection"]),
                           ("active", shade["hover"])],
-              foreground=[("pressed", palette["selection_text"])])
+              foreground=[("disabled", shade["muted"]),
+                          ("pressed", palette["selection_text"])])
 
     style.configure("Accent.TButton", background=palette["selection"],
                     foreground=palette["selection_text"])
     style.map("Accent.TButton",
               background=[("active", kdetheme.mix(palette["selection"],
-                                                  "#ffffff", 0.15))])
+                                                  "#ffffff", 0.15))],
+              foreground=[("disabled", shade["muted"])])
 
     style.configure("TNotebook", background=palette["window"],
                     bordercolor=shade["border"], tabmargins=(2, 6, 2, 0))
@@ -736,25 +762,27 @@ class Panel:
         belongs to: on Status & repair it sat right below the firmware box
         and read like "apply the firmware".
 
-        The slot stays packed and the buttons come and go inside it, so
-        showing them again puts them back where they were rather than at the
-        bottom of the window.
+        Greyed out on the tabs that have no settings rather than hidden: it
+        says the same thing, and hiding it moved everything below by its own
+        height every time you changed tab, which is a whole window shifting
+        under the pointer to say something a grey button says quietly.
         """
-        self.apply_slot = ttk.Frame(parent)
-        self.apply_slot.pack(fill="x")
-        self.apply_row = ttk.Frame(self.apply_slot)
-        ttk.Button(self.apply_row, text="Apply and restart service",
-                   style="Accent.TButton",
-                   command=self.apply_settings).pack(side="left")
-        ttk.Button(self.apply_row, text="Reload from file",
-                   command=self.reload_settings).pack(side="left", padx=6)
+        row = ttk.Frame(parent)
+        row.pack(fill="x", padx=16, pady=(12, 0))
+        self._apply_buttons = [
+            ttk.Button(row, text="Apply and restart service",
+                       style="Accent.TButton", command=self.apply_settings),
+            ttk.Button(row, text="Reload from file",
+                       command=self.reload_settings),
+        ]
+        for index, button in enumerate(self._apply_buttons):
+            button.pack(side="left", padx=(6, 0) if index else 0)
 
     def _tab_changed(self, _event=None):
-        """Show the Apply row only where there is something to apply."""
-        if self.notebook.select() in self._settings_tabs:
-            self.apply_row.pack(fill="x", padx=16, pady=(12, 0))
-        else:
-            self.apply_row.pack_forget()
+        """Only offer Apply where there is something to apply."""
+        on = self.notebook.select() in self._settings_tabs
+        for button in self._apply_buttons:
+            button.state(["!disabled"] if on else ["disabled"])
 
     def _menu(self, grid, row, key, variable, choices, current, width):
         """A drop-down of (label, value) pairs, showing labels."""
@@ -995,6 +1023,24 @@ class Panel:
             self.checklist.pack_forget()
         self.details.configure(text="Details \u25b4" if show
                                else "Details \u25be")
+        self._fit_window()
+
+    def _fit_window(self):
+        """Let the window follow its content again, in both directions.
+
+        Tk grows a toplevel when its content asks for more room, but once the
+        window manager has resized it, the window keeps that size - so folding
+        the list away left the height it had needed and a hole where it was.
+        Clearing the geometry hands the size back to the content. after_idle,
+        because the new size is only known once the layout has been redone.
+        """
+        self.root.after_idle(self._refit)
+
+    def _refit(self):
+        try:
+            self.root.geometry("")
+        except tk.TclError:                                 # pragma: no cover
+            pass
 
     def _build_firmware(self, parent):
         """The last thing that still needed a terminal after installing."""
