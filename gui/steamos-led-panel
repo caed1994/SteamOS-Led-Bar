@@ -49,18 +49,20 @@ from steamos_led import notify                              # noqa: E402
 # it. Every range starts on a multiple of its step, so both ends are reachable.
 STRIP = [
     ("The strip", [
-        # 120, not the 1024 the service accepts. Two limits meet there: the
-        # GPIO14 firmware is built with MAX_LEDS=120 and rejects longer
-        # frames, and 230400 baud carries about 125 LEDs at 60 fps. Past that
-        # the slider would offer lengths that go dark or stutter. Longer
-        # strips are still a config file away.
-        ("LED_COUNT", "LEDs on the strip", "int", 1, 120, 1),
+        # 60, not the 1024 the service accepts: a metre of strip is 30 or 60
+        # LEDs, and past that the slider spends most of its travel on lengths
+        # nobody is fitting to a Steam Machine. The firmware and the link
+        # would carry about twice this - a longer strip is a config file away,
+        # and the panel keeps whatever it finds there.
+        ("LED_COUNT", "LEDs on the strip", "int", 1, 60, 1),
         ("REVERSE", "Flip the strip direction", "bool", None, None, None),
         ("MAX_BRIGHTNESS", "Maximum brightness", "int", 0, 255, 1),
         ("MIN_BRIGHTNESS", "Minimum brightness", "int", 0, 255, 1),
     ]),
     ("Effects", [
-        ("PATROL_DOTS", "Patrol dots", "int", 1, 8, 1),
+        # Three at most. On 17 LEDs a fourth dot leaves no dark between them,
+        # and the effect stops reading as dots chasing each other.
+        ("PATROL_DOTS", "Patrol dots", "int", 1, 3, 1),
         ("SPEED", "Effect speed", "float", 0.1, 4.0, 0.1),
         ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow",
          "bool", None, None, None),
