@@ -55,7 +55,7 @@ BLOOM_FEATHER = 0.18
 # down as the notification is made longer until it was merely blinking.
 FLASH_LIT = 0.08            # one blink
 FLASH_GAP = 0.08            # the dark between the pair, and what pairs them
-FLASH_PERIOD = 0.7          # from one pair to the next
+FLASH_PERIOD = 1.0          # from one pair to the next
 FLASH_PATTERN = FLASH_LIT * 2 + FLASH_GAP
 # At most this much of a period may be pair; the rest is the dark that
 # separates one pair from the next, and the last flash from whatever follows.

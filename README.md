@@ -397,7 +397,7 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `comet` | a bright head with a fading tail, once across the bar |
 
 `double_flash` is timed in **seconds**, not in fractions of the flash: a pair
-is two 80 ms blinks 80 ms apart, roughly every 0.7 s. Make the notification
+is two 80 ms blinks 80 ms apart, roughly once a second. Make the notification
 longer and you get more pairs rather than slower ones — a strobe that slows
 down is no longer a strobe. Every duration gets a whole number of pairs, so it
 never ends mid-pair.
