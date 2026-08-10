@@ -27,7 +27,11 @@ DEVICE_RETRY_DELAY = 5.0
 # Here rather than in the firmware all the same: the ESP has to draw it,
 # because during a suspend there is no host to render anything, but changing
 # how it looks should not mean reflashing every board.
-STANDBY_COLOR = (100, 100, 100)     # white, at a level that suits a dark room
+#
+# Barely there on purpose: a dark room at night, not a night light. With the
+# breath's 5% floor this sweeps roughly 2..30 of 255. Not lower - a WS2812
+# quantises badly in the bottom few steps, and white starts to tint.
+STANDBY_COLOR = (30, 30, 30)
 STANDBY_PERIOD_MS = 6000            # one slow breath, calmer than the waiting one
 
 # Words on the trigger pipe that are not flashes. The pipe is already read in
