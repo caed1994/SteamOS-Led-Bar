@@ -13,6 +13,7 @@ INSTALL_DIR="/var/lib/steamos-led-serial"
 CONFIG_PATH="/etc/steamos-led-serial.conf"
 UNIT_PATH="/etc/systemd/system/steamos-led-serial.service"
 UDEV_PATH="/etc/udev/rules.d/99-steamos-led-serial.rules"
+SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/steamos-led-serial"
 SHIM_DEVICE="/dev/valve-leds-shim"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -170,6 +171,17 @@ say "Installing udev rule to $UDEV_PATH"
 install -m 0644 "$SOURCE_DIR/udev/99-steamos-led-serial.rules" "$UDEV_PATH"
 udevadm control --reload >/dev/null 2>&1 || warn "could not reload udev rules"
 udevadm trigger --subsystem-match=tty >/dev/null 2>&1 || true
+
+say "Installing the suspend hook to $SLEEP_HOOK_PATH"
+# What tells the strip the machine is going to sleep. Without it the strip
+# simply goes dark during a suspend, as it did before - so a system without
+# /usr/lib/systemd/system-sleep is a missing feature, not a failed install.
+if [ -d "$(dirname "$SLEEP_HOOK_PATH")" ]; then
+    install -m 0755 "$SOURCE_DIR/systemd-sleep/steamos-led-serial" \
+        "$SLEEP_HOOK_PATH"
+else
+    warn "no $(dirname "$SLEEP_HOOK_PATH") - the strip will go dark in standby"
+fi
 
 say "Installing systemd unit to $UNIT_PATH"
 sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \

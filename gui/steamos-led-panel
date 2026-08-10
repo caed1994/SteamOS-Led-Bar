@@ -64,6 +64,10 @@ STRIP = [
         # and the effect stops reading as dots chasing each other.
         ("PATROL_DOTS", "Patrol dots", "int", 1, 3, 1),
         ("SPEED", "Effect speed", "float", 0.1, 4.0, 0.1),
+        # Drawn by the ESP, not by us: during a suspend this service is
+        # frozen, so the strip has to carry on alone.
+        ("STANDBY_PULSE", "Pulse white while the machine sleeps", "bool",
+         None, None, None),
         ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow",
          "bool", None, None, None),
         # The two marks are coupled - the bar fills over a span, not at a

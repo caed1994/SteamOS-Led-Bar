@@ -141,6 +141,7 @@ static const uint8_t MSG_INFO = 0x02;
 static const uint8_t MSG_FRAME = 0x10;
 static const uint8_t MSG_FILL = 0x11;
 static const uint8_t MSG_BLANK = 0x20;
+static const uint8_t MSG_STANDBY = 0x21;
 static const uint8_t MSG_STATS = 0x30;
 static const uint8_t MSG_LOG = 0x31;
 static const uint8_t MSG_PING = 0x40;
@@ -234,6 +235,16 @@ static bool waitingForHost = true;
 static uint32_t waitStartMs = 0;
 static uint32_t lastWaitFrameMs = 0;
 
+// Standby: the host said the machine is going to sleep, so nothing more will
+// arrive until it wakes. The strip breathes on its own until it does.
+static bool standby = false;
+static uint8_t standbyRed = 0;
+static uint8_t standbyGreen = 0;
+static uint8_t standbyBlue = 0;
+static uint32_t standbyPeriodMs = 1;
+static uint32_t standbyStartMs = 0;
+static uint32_t lastStandbyFrameMs = 0;
+
 static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length) {
   if (waitingForHost) {
     // Any valid message means the service is there. Hand the strip over dark
@@ -241,10 +252,34 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
     waitingForHost = false;
     blankStrip();
   }
+  // Anything that paints the strip means the host is back and driving it
+  // again, so standby is over. Listed rather than assumed: a PING during
+  // standby is the host checking the link, not waking the strip up.
+  if (standby && (type == MSG_FRAME || type == MSG_FILL || type == MSG_BLANK)) {
+    standby = false;
+  }
+
   switch (type) {
     case MSG_HELLO:
       sendInfo();
       break;
+    case MSG_STANDBY: {
+      if (length < 5) {
+        return;
+      }
+      standbyRed = payload[0];
+      standbyGreen = payload[1];
+      standbyBlue = payload[2];
+      const uint32_t period =
+          (uint32_t)payload[3] | ((uint32_t)payload[4] << 8);
+      standbyPeriodMs = period > 0 ? period : 1;
+      standbyStartMs = millis();
+      standby = true;
+      // The strip is meant to stay lit through the silence that follows, so
+      // the idle rule below has to be told this silence is expected.
+      linkIdle = false;
+      break;
+    }
     case MSG_FRAME: {
       if (length < 2) {
         return;
@@ -368,11 +403,20 @@ static void feed(uint8_t byte) {
 // service turns up.
 // How dark the breath gets, and how often it is redrawn. 20 ms is 50 fps,
 // which is smooth and still leaves the loop free for the serial port.
-static const float WAIT_BREATH_FLOOR = 0.05f;
-static const uint32_t WAIT_FRAME_MS = 20;
+static const float BREATH_FLOOR = 0.05f;
+static const uint32_t BREATH_FRAME_MS = 20;
+
+// Raised cosine over one breath, lifted off zero so it never quite goes out -
+// the same shape the host uses for its own breath effect. Shared by the two
+// animations this firmware draws on its own.
+static float breathLevel(uint32_t elapsed, uint32_t periodMs) {
+  const float phase = (float)(elapsed % periodMs) / (float)periodMs;
+  const float swell = (1.0f - cosf(6.2831853f * phase)) * 0.5f;
+  return BREATH_FLOOR + (1.0f - BREATH_FLOOR) * swell;
+}
 
 static void waitingAnimation(uint32_t now) {
-  if ((uint32_t)(now - lastWaitFrameMs) < WAIT_FRAME_MS) {
+  if ((uint32_t)(now - lastWaitFrameMs) < BREATH_FRAME_MS) {
     return;
   }
   lastWaitFrameMs = now;
@@ -382,16 +426,33 @@ static void waitingAnimation(uint32_t now) {
     return;
   }
 
-  // Raised cosine over one breath, lifted off zero so it never quite goes
-  // out - the same shape the host uses for its own breath effect.
-  const float phase =
-      (float)((now - waitStartMs) % WAIT_BREATH_MS) / (float)WAIT_BREATH_MS;
-  const float swell = (1.0f - cosf(6.2831853f * phase)) * 0.5f;
-  const float level = WAIT_BREATH_FLOOR + (1.0f - WAIT_BREATH_FLOOR) * swell;
-
+  const float level = breathLevel(now - waitStartMs, WAIT_BREATH_MS);
   strip->ClearTo(RgbColor(clampBrightness((uint8_t)(WAIT_RED * level + 0.5f)),
                           clampBrightness((uint8_t)(WAIT_GREEN * level + 0.5f)),
                           0));
+  strip->Show();
+}
+
+// The same breath, in the colour the host asked for, while the machine is
+// asleep. The colour and the period travel in the message rather than living
+// here: the host decides what things look like everywhere else, and a change
+// of mind should not mean reflashing every ESP. The waiting breath above
+// cannot work that way - it runs precisely when there is no host to ask.
+static void standbyAnimation(uint32_t now) {
+  if ((uint32_t)(now - lastStandbyFrameMs) < BREATH_FRAME_MS) {
+    return;
+  }
+  lastStandbyFrameMs = now;
+
+  ensureStrip(LED_COUNT);
+  if (strip == nullptr) {
+    return;
+  }
+
+  const float level = breathLevel(now - standbyStartMs, standbyPeriodMs);
+  strip->ClearTo(RgbColor(clampBrightness((uint8_t)(standbyRed * level + 0.5f)),
+                          clampBrightness((uint8_t)(standbyGreen * level + 0.5f)),
+                          clampBrightness((uint8_t)(standbyBlue * level + 0.5f))));
   strip->Show();
 }
 
@@ -417,12 +478,15 @@ void loop() {
 
   // The host sends an idle heartbeat even for static scenes, so silence means
   // the cable was pulled or the service stopped - do not leave the strip lit.
-  if (!linkIdle && (uint32_t)(now - lastFrameMs) > LINK_TIMEOUT_MS) {
+  if (!standby && !linkIdle
+      && (uint32_t)(now - lastFrameMs) > LINK_TIMEOUT_MS) {
     blankStrip();
     linkIdle = true;
   }
 
-  if (waitingForHost) {
+  if (standby) {
+    standbyAnimation(now);
+  } else if (waitingForHost) {
     waitingAnimation(now);
   }
 

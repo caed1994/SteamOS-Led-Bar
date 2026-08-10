@@ -50,6 +50,7 @@ DEFAULTS = {
     "NOTIFY_MESSAGES": True,
     "NOTIFY_FRIEND_ONLINE": True,
     "NOTIFY_WARNING": True,
+    "STANDBY_PULSE": True,
     "ACHIEVEMENT_COLOR": "#ffd700",
     "MESSAGE_COLOR": "#8000ff",
     "FRIEND_COLOR": "#00c850",

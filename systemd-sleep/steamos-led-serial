@@ -1,0 +1,35 @@
+#!/bin/sh
+# Hand the LED strip over to the ESP while the machine sleeps, and take it
+# back on the way out.
+#
+# Installed to /usr/lib/systemd/system-sleep/. systemd runs everything here
+# with "pre <action>" before suspending and "post <action>" after waking, and
+# waits for it to finish - which is what makes this the right place: the strip
+# has to be told *before* the service is frozen, and nothing else in the
+# system knows that moment.
+#
+# It writes a word into the service's trigger pipe rather than talking to the
+# serial port, because the service holds that port exclusively. The pipe is
+# world-writable and already read in the service's main loop.
+
+FIFO="${STEAMOS_LED_NOTIFY_FIFO:-/run/steamos-led-serial/notify}"
+
+# Nobody listening is not a failure: the service may be stopped, or
+# notifications switched off. Either way there is nothing to hand over.
+[ -p "$FIFO" ] || exit 0
+
+case "$1" in
+  pre)
+    printf 'standby\n' > "$FIFO" 2>/dev/null || exit 0
+    # systemd suspends as soon as this script returns, so give the service a
+    # moment to read the word and get the message out of the serial port.
+    # Without this the machine can be asleep before the ESP has been told, and
+    # the strip just goes dark.
+    sleep 0.5
+    ;;
+  post)
+    printf 'resume\n' > "$FIFO" 2>/dev/null || exit 0
+    ;;
+esac
+
+exit 0

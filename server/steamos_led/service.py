@@ -20,6 +20,29 @@ LOG = logging.getLogger("steamos-led")
 PROGRAM = "steamos-led-serial"
 DEVICE_RETRY_DELAY = 5.0
 
+# What the strip does while the machine is asleep. Fixed on purpose - it is
+# not a notification and not an effect, it is what "the machine is off but
+# alive" looks like, and it should look the same on every machine.
+#
+# Here rather than in the firmware all the same: the ESP has to draw it,
+# because during a suspend there is no host to render anything, but changing
+# how it looks should not mean reflashing every board.
+STANDBY_COLOR = (100, 100, 100)     # white, at a level that suits a dark room
+STANDBY_PERIOD_MS = 6000            # one slow breath, calmer than the waiting one
+
+# Words on the trigger pipe that are not flashes. The pipe is already read in
+# the main loop and is world-writable, so the sleep hook has somewhere to say
+# this without a second channel to keep alive.
+STANDBY_WORD = "standby"
+RESUME_WORD = "resume"
+
+# How long standby may last while the process is actually running. The point
+# is the clock: time.monotonic() does not advance across a suspend, so this
+# only counts seconds the machine spent awake. If the resume hook never fires
+# the bar puts itself right within half a minute; a machine asleep for three
+# days still comes back to a breathing strip.
+STANDBY_MAX_AWAKE = 30.0
+
 
 class _Stopped(Exception):
     """Raised internally when a signal asks us to shut down."""
@@ -106,6 +129,10 @@ class Runner:
         self.overheat = build_overheat_watch(config)
         self.trigger = None
         self.source = None
+        # Set while the machine is going to sleep: the ESP is breathing on its
+        # own and the loop must stay quiet, or the next rendered frame would
+        # end the standby a millisecond after it started.
+        self.standby_since = None
 
     def stop(self, *_args):
         self.running = False
@@ -217,7 +244,30 @@ class Runner:
             self.trigger = None
             return
         for word in words:
-            self.overlay.trigger(word, now)
+            if word.lower() == STANDBY_WORD:
+                self._enter_standby()
+            elif word.lower() == RESUME_WORD:
+                self._leave_standby("asked to")
+            else:
+                self.overlay.trigger(word, now)
+
+    def _enter_standby(self):
+        if not self.config["STANDBY_PULSE"]:
+            LOG.info("standby pulse is switched off, leaving the strip dark")
+            return
+        colour = tuple(int(channel * self.config["MAX_BRIGHTNESS"] / 255)
+                       for channel in STANDBY_COLOR)
+        if self.link.send_standby(colour, STANDBY_PERIOD_MS):
+            self.standby_since = time.monotonic()
+            LOG.info("standby: the ESP has the strip until we are back")
+        else:
+            LOG.warning("could not hand the strip over for standby")
+
+    def _leave_standby(self, why):
+        if self.standby_since is None:
+            return
+        self.standby_since = None
+        LOG.info("standby over (%s)", why)
 
     def _loop(self):
         started = time.monotonic()
@@ -281,6 +331,18 @@ class Runner:
                 continue
 
             now = time.monotonic()
+            if self.standby_since is not None:
+                # Silence is the point: the ESP is breathing on its own, and
+                # one frame from here would end it. The machine is about to
+                # suspend, so this loop is about to stop turning anyway.
+                if now - self.standby_since > STANDBY_MAX_AWAKE:
+                    # Half a minute of running time means we never went to
+                    # sleep, or came back without being told. Take the strip
+                    # back rather than leave it breathing at an awake machine.
+                    self._leave_standby("still awake")
+                else:
+                    continue
+
             # A flash covers the whole bar; nothing underneath is worth drawing.
             payload = self.overlay.frame(now)
             if payload is None:

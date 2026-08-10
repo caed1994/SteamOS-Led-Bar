@@ -30,6 +30,7 @@ MSG_HELLO = 0x01
 MSG_FRAME = 0x10
 MSG_FILL = 0x11
 MSG_BLANK = 0x20
+MSG_STANDBY = 0x21
 MSG_PING = 0x40
 # esp -> host
 MSG_INFO = 0x02
@@ -43,7 +44,8 @@ FALLBACK_BAUD_RATES = (230400, 460800, 921600, 115200)
 
 MSG_NAMES = {
     MSG_HELLO: "HELLO", MSG_FRAME: "FRAME", MSG_FILL: "FILL",
-    MSG_BLANK: "BLANK", MSG_PING: "PING", MSG_INFO: "INFO",
+    MSG_BLANK: "BLANK", MSG_STANDBY: "STANDBY", MSG_PING: "PING",
+    MSG_INFO: "INFO",
     MSG_STATS: "STATS", MSG_LOG: "LOG", MSG_PONG: "PONG",
 }
 
@@ -356,6 +358,18 @@ class EspLink:
 
     def send_blank(self):
         return self._send(build(MSG_BLANK))
+
+    def send_standby(self, colour, period_ms):
+        """Hand the strip to the ESP to breathe on its own until we return.
+
+        The one thing the firmware animates on the host's behalf, because
+        during a suspend there is no host: the service is frozen and nothing
+        can be rendered. So the colour and the period are sent once and the
+        ESP keeps going alone. A firmware too old to know this message ignores
+        it and the strip simply goes dark, as it did before.
+        """
+        payload = bytes(colour) + int(period_ms).to_bytes(2, "little")
+        return self._send(build(MSG_STANDBY, payload))
 
     def disconnect(self):
         if self.serial is not None:

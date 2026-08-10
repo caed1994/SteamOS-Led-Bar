@@ -4,7 +4,9 @@ Everything here is stdlib-only, so it runs on a stock SteamOS image.
 """
 
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -645,3 +647,194 @@ class ConfigRewritingTest(unittest.TestCase):
         self.assertEqual(text.count("#"), result.count("#"),
                          "comments were lost")
         self.assertIn("LED_COUNT=60\n", result)
+
+
+class StandbyTest(unittest.TestCase):
+    """Handing the strip to the ESP while the machine sleeps.
+
+    During a suspend the service is frozen, so nothing here can render: the
+    ESP has to breathe on its own, and the only job on this side is to tell it
+    so, and then to stay quiet.
+    """
+
+    class FakeLink:
+        """Enough of EspLink for the real loop to run against."""
+
+        def __init__(self):
+            self.standby = []
+            self.frames = 0
+            self.answer = True
+
+        def connect(self):
+            return True
+
+        def poll(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+        def send_standby(self, colour, period_ms):
+            self.standby.append((tuple(colour), period_ms))
+            return self.answer
+
+        def send_frame(self, payload, led_count):
+            self.frames += 1
+            return True
+
+    def _runner(self, **overrides):
+        conf = dict(config.DEFAULTS)
+        conf.update(SERIAL_PORT="/dev/does-not-exist", NOTIFY=False)
+        conf.update(overrides)
+        runner = service.Runner(conf)
+        runner.link = self.FakeLink()
+        return runner
+
+    def test_going_to_sleep_hands_the_strip_over(self):
+        runner = self._runner()
+        runner._enter_standby()
+        self.assertEqual(len(runner.link.standby), 1)
+        colour, period = runner.link.standby[0]
+        self.assertEqual(colour, service.STANDBY_COLOR)
+        self.assertEqual(period, service.STANDBY_PERIOD_MS)
+        self.assertIsNotNone(runner.standby_since)
+
+    def test_the_brightness_ceiling_applies_to_it_too(self):
+        # Someone who capped the strip because it runs off the USB rail must
+        # not get a full-brightness white breath all night.
+        runner = self._runner(MAX_BRIGHTNESS=51)       # a fifth
+        runner._enter_standby()
+        colour, _period = runner.link.standby[0]
+        self.assertEqual(colour, tuple(channel // 5
+                                       for channel in service.STANDBY_COLOR))
+
+    def test_it_can_be_switched_off(self):
+        runner = self._runner(STANDBY_PULSE=False)
+        runner._enter_standby()
+        self.assertEqual(runner.link.standby, [])
+        self.assertIsNone(runner.standby_since)
+
+    def test_a_link_that_will_not_take_it_leaves_no_standby_behind(self):
+        # Otherwise the loop would go quiet for a strip that never heard.
+        runner = self._runner()
+        runner.link.answer = False
+        runner._enter_standby()
+        self.assertIsNone(runner.standby_since)
+
+    def test_resuming_ends_it(self):
+        runner = self._runner()
+        runner._enter_standby()
+        runner._leave_standby("test")
+        self.assertIsNone(runner.standby_since)
+
+    def test_resuming_without_standby_is_harmless(self):
+        runner = self._runner()
+        runner._leave_standby("test")
+        self.assertIsNone(runner.standby_since)
+
+    def test_the_words_are_not_flashes(self):
+        # They travel on the notification pipe, which is otherwise a colour or
+        # a kind - so they have to be taken off it before the overlay sees
+        # them, or "standby" would be logged as an unparseable colour.
+        runner = self._runner()
+        flashed = []
+        runner.overlay.trigger = lambda word, now: flashed.append(word)
+        runner.trigger = type("Pipe", (), {
+            "read": lambda self: [service.STANDBY_WORD, "achievement",
+                                  service.RESUME_WORD]})()
+        runner._poll_trigger(0.0)
+        self.assertEqual(flashed, ["achievement"])
+        self.assertEqual(len(runner.link.standby), 1)
+        self.assertIsNone(runner.standby_since, "resume followed")
+
+
+class StandbyQuietTest(unittest.TestCase):
+    """The part that is easy to get wrong: the loop has to stop sending.
+
+    The firmware ends standby on the next frame it is given, and the service
+    keeps sending an idle heartbeat even for a static scene. So without this
+    the standby would last exactly one frame interval and the strip would go
+    dark a moment later, when the machine actually suspended.
+    """
+
+    def _runner(self):
+        conf = dict(config.DEFAULTS)
+        conf.update(SERIAL_PORT="/dev/does-not-exist", NOTIFY=False)
+        runner = service.Runner(conf)
+        runner.link = StandbyTest.FakeLink()
+        return runner
+
+    def _drive(self, runner, seconds=0.3):
+        """Run the real loop against a FIFO fed with snapshots."""
+        from steamos_led import shim as shim_module
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        path = os.path.join(directory, "shim")
+        os.mkfifo(path)
+        runner.config["DEVICE"] = path
+
+        stop = threading.Event()
+
+        def feed():
+            try:
+                fd = os.open(path, os.O_WRONLY)
+            except OSError:
+                return
+            snapshot = shim_module.make_snapshot(shim_module.EFFECT_MANUAL,
+                                                 (10, 200, 30))
+            seq = 0
+            try:
+                while not stop.is_set():
+                    seq += 1
+                    try:
+                        os.write(fd, shim_module.encode(snapshot, seq))
+                    except OSError:
+                        return
+                    time.sleep(0.02)
+            finally:
+                os.close(fd)
+
+        writer = threading.Thread(target=feed, daemon=True)
+        writer.start()
+        runner.source = runner._open_source()
+        self.addCleanup(runner.source.close)
+
+        def drive():
+            try:
+                runner._loop()
+            except service._Stopped:
+                pass
+
+        thread = threading.Thread(target=drive, daemon=True)
+        thread.start()
+        time.sleep(seconds)
+        runner.running = False
+        stop.set()
+        thread.join(timeout=10)
+
+    def test_frames_flow_when_the_machine_is_awake(self):
+        # The control: without this the next test would pass on a loop that
+        # never sent anything for some other reason.
+        runner = self._runner()
+        self._drive(runner)
+        self.assertGreater(runner.link.frames, 0)
+
+    def test_no_frames_go_out_while_the_machine_is_asleep(self):
+        runner = self._runner()
+        runner._enter_standby()
+        self._drive(runner)
+        self.assertEqual(runner.link.frames, 0,
+                         "one frame is all it takes to end the standby")
+
+    def test_it_lets_go_after_half_a_minute_of_being_awake(self):
+        # If the resume hook never runs - removed, or an earlier hook failed -
+        # the bar must not breathe at a machine that is plainly in use.
+        # monotonic() does not advance across a suspend, so this cannot fire
+        # during a real one however long it lasts.
+        runner = self._runner()
+        runner._enter_standby()
+        runner.standby_since -= service.STANDBY_MAX_AWAKE + 1
+        self._drive(runner)
+        self.assertIsNone(runner.standby_since)
+        self.assertGreater(runner.link.frames, 0, "and it takes the bar back")

@@ -10,6 +10,7 @@ INSTALL_DIR="/var/lib/steamos-led-serial"
 CONFIG_PATH="/etc/steamos-led-serial.conf"
 UNIT_PATH="/etc/systemd/system/steamos-led-serial.service"
 UDEV_PATH="/etc/udev/rules.d/99-steamos-led-serial.rules"
+SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/steamos-led-serial"
 
 MODULE_NAME="leds-valve-shim"
 RELEASE="$(uname -r)"
@@ -54,6 +55,7 @@ rm -f "$UNIT_PATH"
 systemctl daemon-reload
 
 rm -f "$UDEV_PATH"
+rm -f "$SLEEP_HOOK_PATH"
 udevadm control --reload >/dev/null 2>&1 || true
 
 rm -rf "${INSTALL_DIR:?}"

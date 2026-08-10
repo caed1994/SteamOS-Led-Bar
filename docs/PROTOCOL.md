@@ -29,6 +29,7 @@ half-open ports and boards that print boot messages on the same UART.
 | `0x10` | FRAME   | `count` (u16) + `count * 3` bytes RGB      |
 | `0x11` | FILL    | `count` (u16) + 3 bytes RGB for all LEDs   |
 | `0x20` | BLANK   | empty; clears the strip                    |
+| `0x21` | STANDBY | 3 bytes RGB + `period` (u16, ms)           |
 | `0x40` | PING    | empty                                      |
 
 `FRAME` carries finished pixels: the host renders every effect, applies
@@ -39,6 +40,19 @@ the firmware's `MAX_LEDS`.
 
 Colour order is applied by the firmware (`COLOR_ORDER_*` build flag); the wire
 is always plain RGB.
+
+`STANDBY` is the one message that asks the firmware to animate rather than to
+display: it breathes the given colour, one full breath per `period`, and it
+suspends the idle timeout below for as long as it lasts. It exists because a
+suspended machine has no host — the service is frozen, so nothing can be
+rendered — and the strip should still show that the machine is only asleep.
+The colour and the period travel in the message rather than living in the
+firmware, so changing how it looks does not mean reflashing.
+
+Standby ends on the next `FRAME`, `FILL` or `BLANK`. A `PING` does not end it:
+that is the host checking the link, not driving the strip. A firmware that
+does not know the message ignores it, and the strip goes dark as it did
+before.
 
 ## ESP -> Host
 

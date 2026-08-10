@@ -17,14 +17,15 @@ different transport — no Wi-Fi, no IP configuration, no access point.
 3. [Changing settings](#changing-settings)
 4. [All options](#all-options)
 5. [Effects](#effects)
-6. [Temperature gauge](#temperature-gauge)
-7. [Notifications](#notifications)
-8. [Testing and diagnostics](#testing-and-diagnostics)
-9. [When something does not work](#when-something-does-not-work)
-10. [Updating](#updating)
-11. [Uninstalling](#uninstalling)
-12. [How it works](#how-it-works)
-13. [Development](#development)
+6. [While the machine sleeps](#while-the-machine-sleeps)
+7. [Temperature gauge](#temperature-gauge)
+8. [Notifications](#notifications)
+9. [Testing and diagnostics](#testing-and-diagnostics)
+10. [When something does not work](#when-something-does-not-work)
+11. [Updating](#updating)
+12. [Uninstalling](#uninstalling)
+13. [How it works](#how-it-works)
+14. [Development](#development)
 
 ## What you need
 
@@ -201,6 +202,7 @@ sudo systemctl start steamos-led-serial
 | `GAMMA` | `1.0` | `2.2` looks smoother when dimmed |
 | `SPEED` | `1.0` | animation speed (`0.5` = half as fast) |
 | `PATROL_DOTS` | `1` | number of dots in the patrol effect |
+| `STANDBY_PULSE` | `1` | breathe white while the machine is [suspended](#while-the-machine-sleeps) |
 | `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `85.0` | degrees at which the gauge is empty / full |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
@@ -258,6 +260,42 @@ a default of **3**, stored and passed through untouched — so it is a *setting*
 not live animation state. "Number of scanners" is therefore plausible; the
 default of 3 simply did not look like what one expects from "patrol". To take
 the module at its word, set `PATROL_DOTS=3`.
+
+## While the machine sleeps
+
+Suspend the machine and the strip keeps a slow white breath going instead of
+falling dark. Wake it and the normal effect comes straight back.
+
+**The ESP draws this one itself**, and it is the only thing it draws on the
+host's behalf. During a suspend the service is frozen — no process runs, so no
+frame can be rendered. A systemd sleep hook tells the service just before the
+machine goes down, the service hands the ESP a colour and a breath length, and
+the ESP carries on alone until the first frame arrives again.
+
+Three consequences worth knowing:
+
+* **The ESP has to stay powered.** It runs off USB, and whether the ports stay
+  live in S3 is a BIOS setting — often called *ErP*, *Wake on USB* or *USB
+  power in S3*. If yours cuts power, the strip goes dark and nothing on this
+  side can help. Shutdown and hibernate usually cut it either way.
+* **It needs the firmware from this version.** An older one does not know the
+  message, ignores it, and leaves the strip dark exactly as before.
+* **What it looks like is not configurable.** "The machine is off but alive"
+  should not be something you have to learn to recognise. `STANDBY_PULSE=0`
+  switches it off; that is the whole setting.
+
+To try it without suspending anything:
+
+```bash
+echo standby > /run/steamos-led-serial/notify   # the strip takes over
+echo resume  > /run/steamos-led-serial/notify   # and hands it back
+```
+
+If the resume never arrives — the hook was removed, an earlier sleep hook
+failed — the service takes the strip back by itself after half a minute of
+*running* time. That measurement uses the monotonic clock, which does not
+advance across a suspend, so a machine asleep for three days still wakes to a
+breathing strip.
 
 ## Temperature gauge
 
