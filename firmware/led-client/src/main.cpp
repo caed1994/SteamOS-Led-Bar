@@ -241,6 +241,11 @@ static bool waitingForHost = true;
 static uint32_t waitStartMs = 0;
 static uint32_t lastWaitFrameMs = 0;
 static bool bootExternal = false;
+// Said at boot and again on every HELLO. The host flushes the port after
+// waiting for the board to come up, so anything sent at boot is thrown away
+// before it can be read - and this line is the only way to tell from the
+// outside whether the standby survived the reset.
+static char bootSummary[80] = "ready";
 
 // Standby: the host said the machine is going to sleep, so nothing more will
 // arrive until it wakes. The strip breathes on its own until it does.
@@ -352,6 +357,9 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
   switch (type) {
     case MSG_HELLO:
       sendInfo();
+      // Again, because the greeting is the first thing that survives: what
+      // this board did at boot is otherwise unobservable from the host.
+      sendLog(bootSummary);
       break;
     case MSG_STANDBY: {
       if (length < 5) {
@@ -578,11 +586,11 @@ void setup() {
   // Says what this boot was and what it found, because whether RTC memory
   // survives the reset a host causes is a per-board question that cannot be
   // answered by reading the datasheet. It reaches the journal as "esp: ...".
-  char ready[80];
-  snprintf(ready, sizeof(ready), "ready (reset %s, standby memory %s)",
+  snprintf(bootSummary, sizeof(bootSummary),
+           "ready (reset %s, standby memory %s)",
            bootExternal ? "external" : "power-on",
            recalled ? "found" : (saved.magic == 0 ? "empty" : "not ours"));
-  sendLog(ready);
+  sendLog(bootSummary);
 }
 
 void loop() {

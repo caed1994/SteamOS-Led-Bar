@@ -838,3 +838,23 @@ class StandbyQuietTest(unittest.TestCase):
         self._drive(runner)
         self.assertIsNone(runner.standby_since)
         self.assertGreater(runner.link.frames, 0, "and it takes the bar back")
+
+
+class HandshakeTimingTest(unittest.TestCase):
+    """How long the board waits to hear from us is what the strip shows.
+
+    Opening the port resets these boards, and the firmware breathes amber
+    while no host has spoken to it. So the wait before the first HELLO *is*
+    the amber flash people see when the service restarts or the machine wakes
+    - it was 1.8 s, and it was visible.
+    """
+
+    def test_the_board_is_greeted_promptly(self):
+        self.assertLessEqual(link.EspLink.BOOT_DELAY, 0.5)
+
+    def test_a_slow_board_is_still_carried(self):
+        # The other half of the trade: a HELLO that arrives before the board
+        # is up is simply lost, so the retries have to cover the boot time
+        # that the long wait used to guarantee on its own.
+        budget = link.EspLink.HELLO_ATTEMPTS * link.EspLink.HELLO_TIMEOUT
+        self.assertGreaterEqual(link.EspLink.BOOT_DELAY + budget, 1.8)

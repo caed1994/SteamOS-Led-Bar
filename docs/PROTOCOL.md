@@ -96,9 +96,13 @@ pixels over UART1 instead of bit-banging with interrupts disabled.
    amber at all; see below. The boot log line says which reset this was and
    whether a standby was found, because whether RTC memory survives is a
    per-board question.
-1. The host opens the port, drops DTR/RTS and waits ~1.8 s for the board to
-   boot (opening a tty resets most ESP dev boards).
-2. It sends `HELLO` up to five times and waits for `INFO`. Without a reply it
+1. The host opens the port, drops DTR/RTS and waits `BOOT_DELAY` (0.35 s) for
+   the board to boot (opening a tty resets most ESP dev boards). Deliberately
+   shorter than a board needs: step 0 breathes amber until it is greeted, so
+   this wait is what a restart looks like on the strip. A `HELLO` that arrives
+   too early is lost and asked again - the attempts in step 2 carry a slower
+   board.
+2. It sends `HELLO` up to ten times and waits for `INFO`. Without a reply it
    logs a warning and streams frames anyway.
 3. It streams `FRAME` at `FPS` while an effect animates, and at `IDLE_FPS` for
    static scenes. The idle frames are the keepalive.
