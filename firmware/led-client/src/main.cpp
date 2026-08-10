@@ -6,6 +6,11 @@
 
 #include <Arduino.h>
 #include <NeoPixelBus.h>
+#if defined(ESP32)
+// esp_reset_reason() and RTC_NOINIT_ATTR. Arduino.h pulls this in on most
+// cores, but the standby memory below depends on both, so say it outright.
+#include <esp_system.h>
+#endif
 #include <math.h>
 #include <string.h>
 
@@ -33,12 +38,11 @@
 
 // The waiting animation: one amber breath while no host has spoken yet.
 // WAIT_BREATH_MS is the length of a full breath, so a larger value is calmer.
-// How long the strip stays dark before the waiting breath starts. Opening the
-// serial port resets these boards through DTR, so a service restart - and a
-// wake from suspend, which reopens the port - comes back through setup() and
-// lands here for about a second. Breathing amber in the middle of that reads
-// as a fault where there is none, while a host that really is missing still
-// says so, only a moment later.
+// How long to hold off the waiting breath after a *host-caused* reset.
+// Opening the serial port drops DTR, which reboots these boards, so a service
+// restart lands in setup() with a host that is two seconds from saying hello;
+// announcing "nobody is driving me" in the middle of that is noise. A cold
+// start does not wait at all - there the news is real.
 #ifndef WAIT_QUIET_MS
 #define WAIT_QUIET_MS 3000
 #endif
@@ -243,9 +247,28 @@ static bool linkIdle = true;
 static bool waitingForHost = true;
 static uint32_t waitStartMs = 0;
 static uint32_t lastWaitFrameMs = 0;
+static bool bootExternal = false;
 
 // Standby: the host said the machine is going to sleep, so nothing more will
 // arrive until it wakes. The strip breathes on its own until it does.
+//
+// It has to survive a reset, because waking the machine causes one: the host
+// reopens the serial port, DTR drops, and this firmware starts again in the
+// middle of the breath. RTC memory is exactly the right place for that - it
+// survives an external reset and does not survive a power cut, which is the
+// distinction wanted. A machine that was unplugged has no standby to return
+// to; one that was merely asleep does.
+struct StandbyMemory {
+  uint32_t magic;
+  uint32_t colour;              // 0x00RRGGBB
+  uint32_t periodMs;
+};
+static const uint32_t STANDBY_MAGIC = 0x5EEB1E5A;
+
+#if defined(ESP32)
+RTC_NOINIT_ATTR static StandbyMemory standbyMemory;
+#endif
+
 static bool standby = false;
 static uint8_t standbyRed = 0;
 static uint8_t standbyGreen = 0;
@@ -253,6 +276,64 @@ static uint8_t standbyBlue = 0;
 static uint32_t standbyPeriodMs = 1;
 static uint32_t standbyStartMs = 0;
 static uint32_t lastStandbyFrameMs = 0;
+
+static void writeStandbyMemory(const StandbyMemory &mem) {
+#if defined(ESP8266)
+  // Word-addressed, so the struct is three uint32_t and nothing else.
+  ESP.rtcUserMemoryWrite(0, (uint32_t *)&mem, sizeof(mem));
+#elif defined(ESP32)
+  standbyMemory = mem;
+#else
+  (void)mem;
+#endif
+}
+
+static void rememberStandby(uint8_t red, uint8_t green, uint8_t blue,
+                            uint32_t periodMs) {
+  StandbyMemory mem;
+  mem.magic = STANDBY_MAGIC;
+  mem.colour = ((uint32_t)red << 16) | ((uint32_t)green << 8) | blue;
+  mem.periodMs = periodMs;
+  writeStandbyMemory(mem);
+}
+
+static void forgetStandby() {
+  StandbyMemory mem;
+  mem.magic = 0;
+  mem.colour = 0;
+  mem.periodMs = 0;
+  writeStandbyMemory(mem);
+}
+
+// Whether we were breathing when something reset us. The magic word is the
+// whole check: after a power cut this memory holds whatever it holds, and one
+// pattern in four billion matching is not worth a checksum.
+static bool recallStandby(StandbyMemory *out) {
+#if defined(ESP8266)
+  if (!ESP.rtcUserMemoryRead(0, (uint32_t *)out, sizeof(*out))) {
+    return false;
+  }
+#elif defined(ESP32)
+  *out = standbyMemory;
+#else
+  (void)out;
+  return false;
+#endif
+  return out->magic == STANDBY_MAGIC && out->periodMs > 0;
+}
+
+// A reset the host caused by opening the port, as opposed to being switched
+// on. Only the first deserves the benefit of the doubt about a missing host.
+static bool bootFromExternalReset() {
+#if defined(ESP8266)
+  const rst_info *info = ESP.getResetInfoPtr();
+  return info != nullptr && info->reason == REASON_EXT_SYS_RST;
+#elif defined(ESP32)
+  return esp_reset_reason() == ESP_RST_EXT;
+#else
+  return false;
+#endif
+}
 
 static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length) {
   if (waitingForHost) {
@@ -266,6 +347,7 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
   // standby is the host checking the link, not waking the strip up.
   if (standby && (type == MSG_FRAME || type == MSG_FILL || type == MSG_BLANK)) {
     standby = false;
+    forgetStandby();
   }
 
   switch (type) {
@@ -284,6 +366,7 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
       standbyPeriodMs = period > 0 ? period : 1;
       standbyStartMs = millis();
       standby = true;
+      rememberStandby(standbyRed, standbyGreen, standbyBlue, standbyPeriodMs);
       // The strip is meant to stay lit through the silence that follows, so
       // the idle rule below has to be told this silence is expected.
       linkIdle = false;
@@ -425,9 +508,16 @@ static float breathLevel(uint32_t elapsed, uint32_t periodMs) {
 }
 
 static void waitingAnimation(uint32_t now) {
-  const uint32_t waited = (uint32_t)(now - waitStartMs);
-  if (waited < WAIT_QUIET_MS) {
-    return;             // still within a plausible reconnect - stay dark
+  uint32_t waited = (uint32_t)(now - waitStartMs);
+  if (bootExternal) {
+    // A host reset us, so one is almost certainly on its way back. Leave the
+    // strip showing whatever it last held - WS2812s latch, so that is the
+    // frame it was given, not darkness - rather than announce an absence
+    // that is about to end.
+    if (waited < WAIT_QUIET_MS) {
+      return;
+    }
+    waited -= WAIT_QUIET_MS;
   }
   if ((uint32_t)(now - lastWaitFrameMs) < BREATH_FRAME_MS) {
     return;
@@ -441,7 +531,7 @@ static void waitingAnimation(uint32_t now) {
 
   // Measured from where the breath starts, not from boot, so the first one
   // begins at the bottom whatever the quiet time is set to.
-  const float level = breathLevel(waited - WAIT_QUIET_MS, WAIT_BREATH_MS);
+  const float level = breathLevel(waited, WAIT_BREATH_MS);
   strip->ClearTo(RgbColor(clampBrightness((uint8_t)(WAIT_RED * level + 0.5f)),
                           clampBrightness((uint8_t)(WAIT_GREEN * level + 0.5f)),
                           0));
@@ -480,8 +570,24 @@ void setup() {
 
   waitStartMs = millis();
   lastFrameMs = waitStartMs;
+  bootExternal = bootFromExternalReset();
+
+  // Pick the breath back up if that reset interrupted one. The host is asleep
+  // and will not say anything until it wakes, so nothing else would.
+  StandbyMemory saved;
+  if (recallStandby(&saved)) {
+    standbyRed = (uint8_t)((saved.colour >> 16) & 0xFF);
+    standbyGreen = (uint8_t)((saved.colour >> 8) & 0xFF);
+    standbyBlue = (uint8_t)(saved.colour & 0xFF);
+    standbyPeriodMs = saved.periodMs;
+    standbyStartMs = millis();
+    standby = true;
+    // There is a host; it just reset us on its way back in.
+    waitingForHost = false;
+  }
+
   sendInfo();
-  sendLog("ready");
+  sendLog(standby ? "ready, resuming standby" : "ready");
 }
 
 void loop() {

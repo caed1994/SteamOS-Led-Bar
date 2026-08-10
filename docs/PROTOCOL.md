@@ -54,6 +54,13 @@ that is the host checking the link, not driving the strip. A firmware that
 does not know the message ignores it, and the strip goes dark as it did
 before.
 
+It also **survives a reset**, which it has to: waking the machine is what
+causes one. The colour and the period are kept in RTC memory behind a magic
+word, and that memory is exactly right for the job - it lives through an
+external reset and not through a power cut. A machine that was merely asleep
+comes back to the same unbroken breath; one that was unplugged has no standby
+to return to and starts from nothing.
+
 ## ESP -> Host
 
 | Type   | Name  | Payload                                                       |
@@ -77,16 +84,22 @@ pixels over UART1 instead of bit-banging with interrupts disabled.
 ## Connection lifecycle
 
 0. From power-up until the host says anything, the firmware breathes the strip
-   in dim amber - but not for the first `WAIT_QUIET_MS` (3 s), which it spends
-   dark. Step 1 resets the board, so every service restart and every wake from
-   suspend passes through here for about two seconds; breathing amber in the
-   middle of that would report a fault where there is none. A host that really
-   is missing still says so, a moment later.
+   in dim amber. It is driven from the main loop rather than blocking in
+   `setup()`, so it can wait indefinitely and still answer the greeting the
+   moment it arrives - the host gives up on the handshake after about four
+   seconds, which a blocking animation would eat. The first valid message ends
+   it and blanks the strip.
 
-   It is driven from the main loop rather than blocking in `setup()`, so it can
-   wait indefinitely and still answer the greeting the moment it arrives - the
-   host gives up on the handshake after about four seconds, which a blocking
-   animation would eat. The first valid message ends it and blanks the strip.
+   Two things temper it, because step 1 *resets the board*, so every service
+   restart and every wake from suspend passes back through here:
+
+   - After an **external reset** - the DTR pulse from a host opening the port,
+     told apart from a power-up by `ESP.getResetInfoPtr()` / `esp_reset_reason()`
+     - the breath waits `WAIT_QUIET_MS` (3 s) before starting. A host is
+     almost certainly two seconds away, and the strip meanwhile holds whatever
+     it last latched. A cold start does not wait: there the news is real.
+   - If the board was in **standby** when it was reset, it goes straight back
+     to breathing standby and never reaches the amber at all. See below.
 1. The host opens the port, drops DTR/RTS and waits ~1.8 s for the board to
    boot (opening a tty resets most ESP dev boards).
 2. It sends `HELLO` up to five times and waits for `INFO`. Without a reply it
