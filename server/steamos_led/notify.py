@@ -239,6 +239,22 @@ STYLES = tuple(_STYLES)
 FIXED_KINDS = {"warning": STYLE_ALTERNATE}
 
 
+# A trigger may name the shape to use for that one flash: "comet:#1a9fff".
+# Nothing is stored - it is how you compare the shapes without first writing
+# one into the config and restarting, which is the wrong way round for
+# choosing. Only a known shape counts as a prefix, so a colour that happens to
+# contain a colon still fails as the nonsense it is.
+SHAPE_SEPARATOR = ":"
+
+
+def split_shape(text):
+    """(shape or None, the rest) - the shape asked for by this trigger."""
+    shape, separator, rest = str(text).strip().partition(SHAPE_SEPARATOR)
+    if separator and shape.strip().lower() in STYLES:
+        return shape.strip().lower(), rest
+    return None, text
+
+
 def parse_color(text, kinds=None):
     """Accept a kind name, '#rrggbb', 'rrggbb' or 'r,g,b'.
 
@@ -346,7 +362,8 @@ class NotificationOverlay:
         self.styles = {kind: shape for kind, shape
                        in (styles or {}).items() if shape in STYLES}
         self.current = None
-        self.pending = []           # (kind, colour), in the order they arrived
+        # (kind, colour, shape), in the order they arrived
+        self.pending = []
         self._quiet_until = {}      # kind -> when it may be shown again
 
     @property
@@ -362,8 +379,9 @@ class NotificationOverlay:
         """
         if not self.enabled:
             return False
+        shape, wanted = split_shape(kind)
         try:
-            color = parse_color(kind, self.colors)
+            color = parse_color(wanted, self.colors)
         except ValueError as exc:
             LOG.warning("ignoring notification %r: %s", kind, exc)
             return False
@@ -374,24 +392,29 @@ class NotificationOverlay:
             # regrows it - which is what a burst used to look like.
             LOG.debug("skipping %r, the bar just said that", kind)
             return False
-        if any(waiting == kind for waiting, _color in self.pending):
+        if any(waiting == kind for waiting, _color, _shape in self.pending):
             return False
         if self.current is None:
-            self._start(kind, color, now)
+            self._start(kind, color, now, shape)
             return True
         if len(self.pending) >= MAX_PENDING:
             LOG.info("dropping %r, %d flashes are already waiting",
                      kind, len(self.pending))
             return False
 
-        self.pending.append((kind, color))
+        self.pending.append((kind, color, shape))
         LOG.info("notification queued: %s (%d waiting)", kind,
                  len(self.pending))
         return True
 
-    def _start(self, kind, color, now):
+    def _start(self, kind, color, now, shape=None):
         LOG.info("notification: %s", kind)
-        style = FIXED_KINDS.get(kind) or self.styles.get(kind, self.style)
+        # An explicit shape wins, including over a fixed kind: it can only
+        # come from someone who wrote it into the pipe by hand. Nothing that
+        # detects a warning ever names one, so the automatic warning still
+        # looks the same everywhere - which is the property that matters.
+        style = shape or FIXED_KINDS.get(kind) or self.styles.get(kind,
+                                                                 self.style)
         self.current = Notification(color, self.duration, now, style, kind)
         # Measured from the start, so one window covers the flash and the gap
         # after it. Expired entries are dropped here, or an arbitrary colour
@@ -415,8 +438,8 @@ class NotificationOverlay:
             # which is why they never blend: a flash both starts and ends dark.
             self.current = None
             if self.pending:
-                kind, color = self.pending.pop(0)
-                self._start(kind, color, now)
+                kind, color, shape = self.pending.pop(0)
+                self._start(kind, color, now, shape)
         if self.current is None:
             return None
 

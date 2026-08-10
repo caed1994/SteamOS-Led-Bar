@@ -1014,6 +1014,25 @@ class Panel:
         ttk.Button(row, text="Pick a colour...",
                    command=self.flash_colour).pack(side="left")
 
+        # The shapes, all in one colour, so what differs between the buttons
+        # is only the thing you are choosing between. Nothing is saved: this
+        # asks the service for one flash in that shape, which is what makes it
+        # useful for choosing at all.
+        shapes = ttk.LabelFrame(outer, text="Try a flash shape")
+        shapes.pack(fill="x", padx=10, pady=(0, 10))
+        ttk.Label(
+            shapes,
+            text="Shown in Steam blue and not saved anywhere - pick one here, "
+                 "then set it on the Notifications tab.",
+        ).pack(anchor="w", padx=8, pady=(6, 2))
+        row = ttk.Frame(shapes)
+        row.pack(fill="x", padx=8, pady=(0, 8))
+        for label, shape in STYLE_CHOICES:
+            ttk.Button(row, text=label,
+                       command=lambda s=shape: self.runner.start(
+                           ledpanel.shape_test_command(s))).pack(
+                               side="left", padx=(0, 6))
+
         strip = ttk.LabelFrame(outer, text="Strip and Steam")
         strip.pack(fill="x", padx=10, pady=(0, 10))
         row = ttk.Frame(strip)

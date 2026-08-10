@@ -1003,7 +1003,9 @@ def build_parser():
                        help="run test patterns without Steam or the kernel module")
     modes.add_argument("--notify", metavar="KIND",
                        help="flash the bar on a running service: achievement, "
-                            "message, friend, warning or a colour like '#00ff88'")
+                            "message, friend, warning or a colour like "
+                            "'#00ff88'. Prefix a shape to try one out without "
+                            "configuring it: 'comet:#1a9fff'")
     modes.add_argument("--watch-achievements", action="store_true",
                        dest="watch_achievements",
                        help="flash on every achievement unlocked in the running "

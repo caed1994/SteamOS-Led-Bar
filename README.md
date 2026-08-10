@@ -372,6 +372,18 @@ So a game launch script, a `.desktop` action or your own tool can drive it.
 Known words are `achievement`, `message`, `friend` and `warning`; anything else
 is read as a colour (`#rrggbb` or `r,g,b`).
 
+Either can be prefixed with a **shape**, for that one flash only:
+
+```bash
+steamos-led-serial --notify comet:#1a9fff
+echo alternate:achievement > /run/steamos-led-serial/notify
+```
+
+Nothing is stored. It is there because choosing between five shapes by writing
+each one into the config and restarting is the wrong way round — the control
+panel's *Test* tab is a row of these, one per shape, all in Steam blue so the
+only difference between the buttons is the thing you are choosing.
+
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `NOTIFY` | `1` | enable the overlay at all — with this off nothing flashes, `--notify` included |

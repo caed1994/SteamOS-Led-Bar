@@ -316,6 +316,36 @@ class NotificationColourTest(unittest.TestCase):
             self.assertEqual(len(set(values)), len(values), key)
 
 
+class ShapeTestButtonTest(unittest.TestCase):
+    """The Test tab asks the service for one flash in a given shape."""
+
+    def test_the_command_names_the_shape_and_the_colour(self):
+        from steamos_led import notify
+        command = ledpanel.shape_test_command(notify.STYLE_COMET)
+        self.assertEqual(command[-1],
+                         "comet:%s" % ledpanel.SHAPE_TEST_COLOUR)
+        self.assertIn("--notify", command)
+
+    def test_the_service_understands_what_the_button_sends(self):
+        # The two sides of one string, which is the sort of thing that drifts.
+        from steamos_led import notify
+        for style in notify.STYLES:
+            argument = ledpanel.shape_test_command(style)[-1]
+            shape, colour = notify.split_shape(argument)
+            self.assertEqual(shape, style)
+            self.assertEqual(notify.parse_color(colour), (26, 159, 255))
+
+    def test_the_test_colour_is_nobody_else_s(self):
+        # The row is for comparing shapes; a colour that also means something
+        # would have you comparing two things at once.
+        from steamos_led import notify
+        self.assertNotIn(notify.parse_color(ledpanel.SHAPE_TEST_COLOUR),
+                         set(notify.KINDS.values()))
+
+    def test_it_needs_no_privileges(self):
+        self.assertNotIn("pkexec", ledpanel.shape_test_command("bloom"))
+
+
 class StyleMenuTest(unittest.TestCase):
     """The flash shapes in the panel come from the service, not from a list."""
 

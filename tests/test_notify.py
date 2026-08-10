@@ -352,6 +352,85 @@ class ConfiguredStyleTest(unittest.TestCase):
             overlay.frame(now)          # let it finish before the next
 
 
+class ShapeInTheTriggerTest(unittest.TestCase):
+    """"comet:#1a9fff" - one flash in that shape, without configuring it.
+
+    Choosing between five shapes by writing each into the config and
+    restarting the service is the wrong way round, so a trigger may name the
+    shape it wants for itself.
+    """
+
+    def _overlay(self, **kwargs):
+        return notify.NotificationOverlay(duration=2.0, led_count=17,
+                                          style=notify.STYLE_BLOOM, **kwargs)
+
+    def test_the_named_shape_is_used(self):
+        overlay = self._overlay()
+        overlay.trigger("comet:#1a9fff", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_COMET)
+        self.assertEqual(overlay.current.color, (26, 159, 255))
+
+    def test_a_kind_may_be_named_instead_of_a_colour(self):
+        overlay = self._overlay()
+        overlay.trigger("pulse:achievement", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_PULSE)
+        self.assertEqual(overlay.current.color, notify.KINDS["achievement"])
+
+    def test_without_a_prefix_nothing_changes(self):
+        overlay = self._overlay()
+        overlay.trigger("achievement", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
+
+    def test_an_unknown_prefix_is_not_a_prefix(self):
+        # It stays part of the colour, which then fails to parse - so nonsense
+        # is refused rather than silently flashed in the default shape.
+        overlay = self._overlay()
+        self.assertFalse(overlay.trigger("sparkle:#1a9fff", 0.0))
+        self.assertIsNone(overlay.current)
+
+    def test_a_shape_with_no_colour_is_refused(self):
+        overlay = self._overlay()
+        self.assertFalse(overlay.trigger("comet:", 0.0))
+
+    def test_two_shapes_of_one_colour_are_two_triggers(self):
+        # Same colour, so without this the second would be read as a repeat of
+        # the first and dropped by the quiet time - which would make the
+        # buttons on the Test tab look broken.
+        overlay = self._overlay()
+        self.assertTrue(overlay.trigger("comet:#1a9fff", 0.0))
+        self.assertTrue(overlay.trigger("pulse:#1a9fff", 0.0))
+        self.assertEqual(len(overlay.pending), 1)
+
+    def test_a_queued_one_keeps_the_shape_it_asked_for(self):
+        overlay = self._overlay()
+        overlay.trigger("comet:#1a9fff", 0.0)
+        overlay.trigger("alternate:#1a9fff", 0.0)
+        overlay.frame(2.5)              # the first is over, the queue moves on
+        self.assertEqual(overlay.current.style, notify.STYLE_ALTERNATE)
+
+    def test_it_overrides_even_a_fixed_kind(self):
+        # Only someone writing into the pipe by hand can ask for this, and
+        # ignoring what they typed would be the more surprising answer.
+        overlay = self._overlay()
+        overlay.trigger("bloom:warning", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
+
+    def test_a_warning_on_its_own_is_still_fixed(self):
+        # Which is the property that matters: nothing that detects a warning
+        # names a shape, so the automatic one looks the same everywhere.
+        overlay = self._overlay()
+        overlay.trigger("warning", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_ALTERNATE)
+
+    def test_splitting_knows_the_shapes_from_the_colours(self):
+        self.assertEqual(notify.split_shape("comet:#1a9fff"),
+                         ("comet", "#1a9fff"))
+        self.assertEqual(notify.split_shape("#1a9fff"), (None, "#1a9fff"))
+        self.assertEqual(notify.split_shape("10,20,30"), (None, "10,20,30"))
+        self.assertEqual(notify.split_shape("nope:#1a9fff"),
+                         (None, "nope:#1a9fff"))
+
+
 class FixedWarningTest(unittest.TestCase):
     """A warning looks the same everywhere, and nothing can change that.
 

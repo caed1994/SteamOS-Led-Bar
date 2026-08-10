@@ -333,6 +333,22 @@ def notify_command(kind):
     return [BINARY, "--notify", kind]
 
 
+# What the shape buttons flash. Steam's own blue: the point of that row is the
+# shape, so the colour should be the same for all of them and belong to none
+# of the notifications - otherwise you are comparing two things at once.
+SHAPE_TEST_COLOUR = "#1a9fff"
+
+
+def shape_test_command(shape, colour=SHAPE_TEST_COLOUR):
+    """Flash one shape without configuring it first.
+
+    The service takes "shape:colour" for exactly this: choosing between five
+    shapes by editing the config and restarting for each one is the wrong way
+    round.
+    """
+    return notify_command("%s:%s" % (shape, colour))
+
+
 def self_test_command(source_dir, seconds=12):
     """Drive test patterns on the strip.
 
