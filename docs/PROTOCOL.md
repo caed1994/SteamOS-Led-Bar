@@ -77,11 +77,16 @@ pixels over UART1 instead of bit-banging with interrupts disabled.
 ## Connection lifecycle
 
 0. From power-up until the host says anything, the firmware breathes the strip
-   in dim amber. It is driven from the main loop rather than blocking in
-   `setup()`, so it can wait indefinitely and still answer the greeting the
-   moment it arrives - the host gives up on the handshake after about four
-   seconds, which a blocking animation would eat. The first valid message ends
-   it and blanks the strip.
+   in dim amber - but not for the first `WAIT_QUIET_MS` (3 s), which it spends
+   dark. Step 1 resets the board, so every service restart and every wake from
+   suspend passes through here for about two seconds; breathing amber in the
+   middle of that would report a fault where there is none. A host that really
+   is missing still says so, a moment later.
+
+   It is driven from the main loop rather than blocking in `setup()`, so it can
+   wait indefinitely and still answer the greeting the moment it arrives - the
+   host gives up on the handshake after about four seconds, which a blocking
+   animation would eat. The first valid message ends it and blanks the strip.
 1. The host opens the port, drops DTR/RTS and waits ~1.8 s for the board to
    boot (opening a tty resets most ESP dev boards).
 2. It sends `HELLO` up to five times and waits for `INFO`. Without a reply it

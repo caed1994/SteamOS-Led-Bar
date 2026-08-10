@@ -33,6 +33,15 @@
 
 // The waiting animation: one amber breath while no host has spoken yet.
 // WAIT_BREATH_MS is the length of a full breath, so a larger value is calmer.
+// How long the strip stays dark before the waiting breath starts. Opening the
+// serial port resets these boards through DTR, so a service restart - and a
+// wake from suspend, which reopens the port - comes back through setup() and
+// lands here for about a second. Breathing amber in the middle of that reads
+// as a fault where there is none, while a host that really is missing still
+// says so, only a moment later.
+#ifndef WAIT_QUIET_MS
+#define WAIT_QUIET_MS 3000
+#endif
 #ifndef WAIT_BREATH_MS
 #define WAIT_BREATH_MS 3000
 #endif
@@ -416,6 +425,10 @@ static float breathLevel(uint32_t elapsed, uint32_t periodMs) {
 }
 
 static void waitingAnimation(uint32_t now) {
+  const uint32_t waited = (uint32_t)(now - waitStartMs);
+  if (waited < WAIT_QUIET_MS) {
+    return;             // still within a plausible reconnect - stay dark
+  }
   if ((uint32_t)(now - lastWaitFrameMs) < BREATH_FRAME_MS) {
     return;
   }
@@ -426,7 +439,9 @@ static void waitingAnimation(uint32_t now) {
     return;
   }
 
-  const float level = breathLevel(now - waitStartMs, WAIT_BREATH_MS);
+  // Measured from where the breath starts, not from boot, so the first one
+  // begins at the bottom whatever the quiet time is set to.
+  const float level = breathLevel(waited - WAIT_QUIET_MS, WAIT_BREATH_MS);
   strip->ClearTo(RgbColor(clampBrightness((uint8_t)(WAIT_RED * level + 0.5f)),
                           clampBrightness((uint8_t)(WAIT_GREEN * level + 0.5f)),
                           0));
