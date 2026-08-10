@@ -381,11 +381,32 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
-| `NOTIFY_STYLE` | `bloom` | shape of the flash: `bloom` (out of the middle) or `pulse` (whole bar swells three times) |
+| `NOTIFY_STYLE` | `bloom` | shape of the flash — see [the shapes](#the-shapes) |
 | `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
 | `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
 | `FRIEND_COLOR` | `#00c850` | what `friend` flashes |
 | `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` | `default` | shape for that one kind — a shape name, or `default` to follow `NOTIFY_STYLE` |
+
+### The shapes
+
+| Shape | What it looks like |
+| ----- | ------------------ |
+| `bloom` | grows out of the middle, breathes once, retracts — the default |
+| `pulse` | the whole bar swells three times and fades |
+| `double_flash` | two short blinks, a pause, and again |
+| `comet` | a bright head with a fading tail, once across the bar |
+
+`double_flash` is timed in **seconds**, not in fractions of the flash: a pair
+is two 80 ms blinks 80 ms apart, roughly every 0.7 s. Make the notification
+longer and you get more pairs rather than slower ones — a strobe that slows
+down is no longer a strobe. Every duration gets a whole number of pairs, so it
+never ends mid-pair.
+
+`comet` is the only shape with a **direction**, and the only one `REVERSE`
+means anything to. A flash goes to the strip without passing the renderer, so
+the setting is applied to the flash separately — otherwise the comet would run
+against every other effect on the bar. It starts before the first LED and ends
+past the last, so it neither appears out of nothing nor dies on the edge.
 
 ### Telling them apart
 

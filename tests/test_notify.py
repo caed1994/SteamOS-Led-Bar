@@ -550,5 +550,206 @@ class BloomShapeTest(unittest.TestCase):
         self.assertEqual(len(levels), 1, "the pulse lights the bar evenly")
 
 
+class ShapeTestCase(unittest.TestCase):
+    """Shared scaffolding: one overlay, sampled at a point in the flash."""
+
+    LEDS = 17
+    DURATION = 3.5
+    STYLE = None
+
+    def _overlay(self, duration=None, led_count=None, **kwargs):
+        overlay = notify.NotificationOverlay(
+            duration=self.DURATION if duration is None else duration,
+            led_count=self.LEDS if led_count is None else led_count,
+            style=self.STYLE, **kwargs)
+        overlay.trigger("achievement", 0.0)
+        return overlay
+
+    def _levels(self, overlay, when):
+        """Per-LED brightness, 0..255, `when` seconds into the flash."""
+        frame = overlay.frame(when)
+        self.assertIsNotNone(frame, "the flash was already over at %.3fs" % when)
+        return [frame[led * 3] for led in range(len(frame) // 3)]
+
+
+class DoubleFlashShapeTest(ShapeTestCase):
+    """Blink, blink, wait - and again, at the same speed however long it runs."""
+
+    STYLE = notify.STYLE_DOUBLE_FLASH
+
+    def _lit_spans(self, overlay, duration, fps=60):
+        """(start, end) in seconds of each stretch the bar is lit, as rendered.
+
+        Sampled at the frame rate the service actually runs while a flash is
+        on - anything shorter than a frame is not a blink, it is a rumour.
+        """
+        spans, start = [], None
+        for step in range(int(duration * fps)):
+            now = step / fps
+            on = max(self._levels(overlay, now)) > 0
+            if on and start is None:
+                start = now
+            elif not on and start is not None:
+                spans.append((start, now))
+                start = None
+        if start is not None:
+            spans.append((start, duration))
+        return spans
+
+    def test_it_blinks_in_pairs(self):
+        overlay = self._overlay()
+        spans = self._lit_spans(overlay, self.DURATION)
+        self.assertEqual(len(spans), 2 * round(self.DURATION
+                                               / notify.FLASH_PERIOD))
+
+    def test_the_two_of_a_pair_are_closer_than_the_pairs_are(self):
+        # That is the whole shape: what makes it read as *double* is that the
+        # gap inside a pair is much shorter than the gap to the next one.
+        overlay = self._overlay()
+        spans = self._lit_spans(overlay, self.DURATION)
+        within = spans[1][0] - spans[0][1]
+        between = spans[2][0] - spans[1][1]
+        self.assertLess(within * 3, between)
+
+    def test_a_blink_is_short_but_lasts_more_than_one_frame(self):
+        overlay = self._overlay()
+        for start, end in self._lit_spans(overlay, self.DURATION):
+            self.assertGreater(end - start, 2.0 / 60,
+                               "a blink nobody can see is not a blink")
+            self.assertLess(end - start, 0.2, "that is a pulse, not a blink")
+
+    def test_a_longer_flash_means_more_pairs_not_slower_ones(self):
+        # The point of measuring in seconds: a strobe that slows down when the
+        # notification is made longer has stopped being a strobe.
+        short = self._lit_spans(self._overlay(duration=3.5), 3.5)
+        long = self._lit_spans(self._overlay(duration=10.0), 10.0)
+        self.assertGreater(len(long), len(short))
+        self.assertAlmostEqual(short[0][1] - short[0][0],
+                               long[0][1] - long[0][0], places=2)
+
+    def test_the_bar_lights_as_one(self):
+        overlay = self._overlay()
+        levels = self._levels(overlay, notify.FLASH_LIT / 2)
+        self.assertEqual(len(set(levels)), 1)
+        self.assertEqual(levels[0], 255)
+
+    def test_it_ends_dark(self):
+        # A pair that ran off the end would leave the bar lit until the next
+        # flash blanked it, and two in a row would run together.
+        overlay = self._overlay()
+        self.assertEqual(max(self._levels(overlay, self.DURATION - 0.01)), 0)
+
+    def test_a_whole_number_of_pairs_fits_in_any_duration(self):
+        for duration in (1.0, 1.5, 2.0, 3.5, 7.0, 10.0, 60.0):
+            overlay = self._overlay(duration=duration)
+            spans = self._lit_spans(overlay, duration)
+            self.assertEqual(len(spans) % 2, 0,
+                             "half a pair at %.1fs" % duration)
+
+    def test_a_duration_too_short_for_a_pair_gets_a_compressed_one(self):
+        # Below what the panel offers, so only a hand-edited config gets here -
+        # but a truncated pair would be a single blink, which is a different
+        # shape saying a different thing.
+        overlay = self._overlay(duration=0.2)
+        spans = self._lit_spans(overlay, 0.2, fps=1000)
+        self.assertEqual(len(spans), 2)
+
+    def test_works_on_other_strip_lengths(self):
+        for count in (1, 2, 5, 30, 144):
+            overlay = self._overlay(led_count=count)
+            levels = self._levels(overlay, notify.FLASH_LIT / 2)
+            self.assertEqual(len(levels), count)
+            self.assertEqual(min(levels), 255)
+
+
+class CometShapeTest(ShapeTestCase):
+    """One head with a tail, travelling the bar once."""
+
+    STYLE = notify.STYLE_COMET
+
+    def _head(self, levels):
+        return levels.index(max(levels))
+
+    def test_it_starts_and_ends_dark(self):
+        overlay = self._overlay()
+        self.assertEqual(max(self._levels(overlay, 0.0)), 0)
+        self.assertEqual(max(self._levels(overlay, self.DURATION - 0.001)), 0)
+
+    def test_the_head_moves_forward(self):
+        overlay = self._overlay()
+        seen = [self._head(self._levels(overlay, self.DURATION * fraction))
+                for fraction in (0.2, 0.4, 0.6, 0.8)]
+        self.assertEqual(seen, sorted(seen))
+        self.assertLess(seen[0], seen[-1])
+
+    def test_it_crosses_the_whole_bar(self):
+        # Both ends have to be the brightest LED at some point, or the comet
+        # appears out of nothing or dies before it arrives.
+        overlay = self._overlay()
+        heads = {self._head(self._levels(overlay, step / 200.0 * self.DURATION))
+                 for step in range(200)}
+        self.assertIn(0, heads)
+        self.assertIn(self.LEDS - 1, heads)
+
+    def test_the_tail_is_behind_the_head_and_fades(self):
+        overlay = self._overlay()
+        levels = self._levels(overlay, self.DURATION * 0.5)
+        head = self._head(levels)
+        self.assertGreater(head, 1)
+        self.assertGreater(levels[head - 1], 0, "there should be a tail")
+        self.assertLess(levels[head - 1], levels[head])
+        self.assertGreater(levels[head - 1], levels[head - 2],
+                           "and it has to fade away from the head")
+
+    def test_nothing_is_lit_ahead_of_the_head(self):
+        # Bar the front edge itself, which is deliberately soft: a hard step
+        # looks blocky on a short strip, so the LED the head is arriving at is
+        # already partly lit. Beyond that it must be dark.
+        width = max(notify.COMET_MIN_HEAD, notify.COMET_HEAD * self.LEDS)
+        overlay = self._overlay()
+        levels = self._levels(overlay, self.DURATION * 0.5)
+        ahead = self._head(levels) + 1 + int(width)
+        self.assertEqual(levels[ahead:], [0] * (self.LEDS - ahead))
+
+    def test_the_tail_covers_a_useful_part_of_the_bar(self):
+        overlay = self._overlay()
+        levels = self._levels(overlay, self.DURATION * 0.7)
+        self.assertGreater(sum(1 for level in levels if level > 0), 3)
+
+    def test_it_is_not_symmetric(self):
+        # What tells it apart from the bloom at a glance.
+        overlay = self._overlay()
+        levels = self._levels(overlay, self.DURATION * 0.5)
+        self.assertNotEqual(levels, levels[::-1])
+
+    def test_reverse_turns_it_round(self):
+        # A flash never passes the renderer, so REVERSE has to be applied here
+        # or the comet runs against every other effect on the strip.
+        forward = self._levels(self._overlay(), self.DURATION * 0.4)
+        backward = self._levels(self._overlay(reverse=True),
+                                self.DURATION * 0.4)
+        self.assertEqual(backward, forward[::-1])
+
+    def test_reverse_leaves_a_symmetric_shape_alone(self):
+        for style in (notify.STYLE_BLOOM, notify.STYLE_PULSE,
+                      notify.STYLE_DOUBLE_FLASH):
+            plain = notify.NotificationOverlay(duration=2.0, led_count=self.LEDS,
+                                               style=style)
+            flipped = notify.NotificationOverlay(duration=2.0,
+                                                 led_count=self.LEDS,
+                                                 style=style, reverse=True)
+            for overlay in (plain, flipped):
+                overlay.trigger("achievement", 0.0)
+            self.assertEqual(plain.frame(0.5), flipped.frame(0.5), style)
+
+    def test_works_on_other_strip_lengths(self):
+        for count in (1, 2, 5, 30, 144):
+            overlay = self._overlay(led_count=count)
+            lit = [max(self._levels(overlay, step / 50.0 * self.DURATION))
+                   for step in range(1, 50)]
+            self.assertEqual(len(self._levels(overlay, 1.0)), count)
+            self.assertGreater(max(lit), 0, "%d LEDs stayed dark" % count)
+
+
 if __name__ == "__main__":
     unittest.main()

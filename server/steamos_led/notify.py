@@ -33,6 +33,8 @@ FADE_TAIL = 0.25    # fraction of the duration spent fading back out
 
 STYLE_BLOOM = "bloom"
 STYLE_PULSE = "pulse"
+STYLE_DOUBLE_FLASH = "double_flash"
+STYLE_COMET = "comet"
 
 # What a per-kind style is set to when it should simply follow the general one.
 # Not a style itself: it never reaches _STYLES, it only means "not set here".
@@ -48,6 +50,25 @@ BLOOM_BREATH_FLOOR = 0.08
 # front is a hard step, which looks blocky on a short bar.
 BLOOM_FEATHER = 0.18
 
+# The double flash, in seconds rather than in fractions: what makes it read as
+# a flash is that it is *short*, and a shape measured in fractions would slow
+# down as the notification is made longer until it was merely blinking.
+FLASH_LIT = 0.08            # one blink
+FLASH_GAP = 0.08            # the dark between the pair, and what pairs them
+FLASH_PERIOD = 0.7          # from one pair to the next
+FLASH_PATTERN = FLASH_LIT * 2 + FLASH_GAP
+# At most this much of a period may be pair; the rest is the dark that
+# separates one pair from the next, and the last flash from whatever follows.
+FLASH_FILL = 0.8
+
+# The comet, in fractions of the strip so it looks the same on 17 LEDs as on
+# 144. The head is the rising edge, the tail what it drags behind it.
+COMET_HEAD = 0.06
+COMET_TAIL = 0.33
+# Floors in LEDs, for strips too short for the fractions to mean anything.
+COMET_MIN_HEAD = 0.8
+COMET_MIN_TAIL = 1.0
+
 
 def _breath(progress):
     """One smooth inhale and exhale across the middle phase, 0..1."""
@@ -58,7 +79,7 @@ def _breath(progress):
     return breath_envelope(position + 0.5, BLOOM_BREATH_FLOOR)
 
 
-def bloom_levels(progress, led_count):
+def bloom_levels(progress, led_count, duration):
     """Per-LED brightness for the bloom, 0..1, at a point in the flash."""
     if led_count < 1:
         return []
@@ -90,7 +111,7 @@ def bloom_levels(progress, led_count):
     return levels
 
 
-def pulse_levels(progress, led_count):
+def pulse_levels(progress, led_count, duration):
     """Per-LED brightness for the pulse: swell a few times, then fade out."""
     pulse = (1.0 - math.cos(2.0 * math.pi * PULSES * progress)) * 0.5
     if progress > 1.0 - FADE_TAIL:
@@ -98,11 +119,69 @@ def pulse_levels(progress, led_count):
     return [pulse] * led_count
 
 
+def double_flash_levels(progress, led_count, duration):
+    """Per-LED brightness for the double flash: blink, blink, wait, again.
+
+    The whole bar at once and with hard edges, which is the opposite of what
+    the bloom wants - here the sharpness is the message. Timed in seconds, so
+    a longer notification means more pairs rather than slower ones.
+    """
+    # Whole periods only: a pair cut off halfway would read as a single blink
+    # and, at the end, as a flash that forgot to stop.
+    periods = max(1, round(duration / FLASH_PERIOD))
+    period = duration / periods
+
+    # A period too short for a pair at full speed gets a compressed one rather
+    # than a truncated one. Only reachable by hand-editing NOTIFY_DURATION
+    # below a second, which the panel no longer offers.
+    scale = min(1.0, period * FLASH_FILL / FLASH_PATTERN)
+    lit, gap = FLASH_LIT * scale, FLASH_GAP * scale
+
+    elapsed = (progress * duration) % period
+    on = elapsed < lit or lit + gap <= elapsed < lit + gap + lit
+    return [1.0 if on else 0.0] * led_count
+
+
+def comet_levels(progress, led_count, duration):
+    """Per-LED brightness for the comet: a head with a tail, once across.
+
+    The only shape with a *place*: the others differ in time, this one in
+    space, which is what the eye catches without looking straight at it. It
+    starts before the first LED and ends past the last, so neither end of the
+    bar gets a comet appearing out of nothing or dying on the edge.
+    """
+    if led_count < 1:
+        return []
+
+    head = max(COMET_MIN_HEAD, COMET_HEAD * led_count)
+    tail = max(COMET_MIN_TAIL, COMET_TAIL * led_count)
+    travel = (led_count - 1) + tail + head
+    position = progress * travel - head
+
+    levels = []
+    for index in range(led_count):
+        behind = position - index
+        if behind < -head or behind > tail:
+            levels.append(0.0)          # not reached yet, or already passed
+        elif behind <= 0.0:
+            levels.append((behind + head) / head)       # the rising front
+        else:
+            # Squared, so the brightness sits near the head and the far end of
+            # the tail is a glow rather than half a lit bar.
+            levels.append((1.0 - behind / tail) ** 2)
+    return levels
+
+
 # The shapes a notification can take; config validates NOTIFY_STYLE against
-# STYLES, so a new one only has to be registered here.
+# STYLES, so a new one only has to be registered here. Each takes the position
+# within the flash, the strip length and how long the whole flash lasts - the
+# last one because a shape may want a tempo of its own rather than one that
+# stretches with the setting.
 _STYLES = {
     STYLE_BLOOM: bloom_levels,
     STYLE_PULSE: pulse_levels,
+    STYLE_DOUBLE_FLASH: double_flash_levels,
+    STYLE_COMET: comet_levels,
 }
 STYLES = tuple(_STYLES)
 
@@ -164,7 +243,7 @@ class Notification:
         progress = self.progress(now)
         if progress is None:
             return None
-        return _STYLES[self.style](progress, led_count)
+        return _STYLES[self.style](progress, led_count, self.duration)
 
 
 # How many flashes may wait their turn. Repeats never queue, so reaching this
@@ -190,10 +269,15 @@ class NotificationOverlay:
 
     def __init__(self, enabled=True, duration=3.5, led_count=17,
                  style=STYLE_BLOOM, colors=None,
-                 repeat_gap=DEFAULT_REPEAT_GAP, styles=None):
+                 repeat_gap=DEFAULT_REPEAT_GAP, styles=None, reverse=False):
         self.enabled = enabled
         self.duration = duration
         self.led_count = led_count
+        # A flash goes to the strip without passing the renderer, so REVERSE
+        # has to be honoured here too. It made no difference while every shape
+        # was symmetric; a comet running against every other effect is exactly
+        # the complaint the temperature gauge earned.
+        self.reverse = reverse
         self.style = style if style in STYLES else STYLE_BLOOM
         self.repeat_gap = max(0.0, float(repeat_gap))
         # A trigger word stays the interface - callers ask for "achievement",
@@ -279,6 +363,8 @@ class NotificationOverlay:
             return None
 
         red, green, blue = self.current.color
+        if self.reverse:
+            levels = levels[::-1]
         frame = bytearray()
         for level in levels:
             frame.append(int(red * level + 0.5))

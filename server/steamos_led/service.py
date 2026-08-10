@@ -97,6 +97,7 @@ class Runner:
             style=config["NOTIFY_STYLE"],
             colors=notification_colors(config),
             styles=notification_styles(config),
+            reverse=config["REVERSE"],
             repeat_gap=config["NOTIFY_REPEAT_GAP"],
         )
         self.trigger = None
