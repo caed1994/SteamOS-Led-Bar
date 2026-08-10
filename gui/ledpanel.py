@@ -376,10 +376,9 @@ MESSAGE_COLOURS = (
 
 
 FRIEND_COLOURS = (
-    # Softer than the message green on purpose: someone appearing is worth
-    # less of your attention than someone writing to you.
-    ("Green", "#00c850"),
-    ("Cyan", "#00ffff"),
+    # Muted on purpose: someone appearing is worth less of your attention
+    # than someone writing to you.
+    ("Teal", "#00c850"),
     ("Orange", "#ff8000"),
 )
 
