@@ -316,13 +316,35 @@ def run_temperature(config):
 
     chosen = temperature.pick_sensor(sensors)
     print("Temperature sensors on this machine:")
+    # Nine spaces, which is what "  [use ] " takes on the rows below.
+    print("         %-12s %-12s %6s  %-24s %s"
+          % ("chip", "label", "now", "limits it publishes", "path"))
+    published = 0
     for sensor in sorted(sensors, key=lambda entry: entry["rank"]):
         celsius = temperature.read_celsius(sensor["path"])
-        print("  [%s] %-12s %-12s %6s  %s"
+        limits = temperature.read_limits(sensor["path"])
+        alarms = temperature.read_alarms(sensor["path"])
+        if limits:
+            published += 1
+        print("  [%s] %-12s %-12s %6s  %-24s %s"
               % ("use " if sensor is chosen else "    ",
                  sensor["chip"], sensor["label"] or "-",
                  "%.1f C" % celsius if celsius is not None else "-",
+                 ", ".join("%s %g" % (name, limits[name])
+                           for name in temperature.LIMIT_FILES
+                           if name in limits) or "-",
                  sensor["path"]))
+        if alarms:
+            # The driver saying so itself, which outranks any threshold we
+            # would pick. Rare enough that it deserves its own line.
+            print("        ^ the driver reports %s raised" % ", ".join(alarms))
+
+    print()
+    print("%d of %d sensors publish a limit of their own. Those numbers are "
+          "the part's" % (published, len(sensors)))
+    print("own, so they say what is hot for that part - an APU at 95 C is "
+          "working as")
+    print("designed, an NVMe drive at 95 C is long past its critical point.")
 
     print()
     source = build_temperature_source(config)

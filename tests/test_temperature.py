@@ -23,8 +23,13 @@ class FakeHwmon:
         self.root = root
         self.count = 0
 
-    def chip(self, name, inputs):
-        """inputs: [(label or None, millidegrees or None)]"""
+    def chip(self, name, inputs, limits=None, alarms=None):
+        """inputs: [(label or None, millidegrees or None)]
+
+        limits and alarms are keyed by sensor number: {1: {"crit": 100000}}
+        and {1: {"crit_alarm": 1}}, spelled in the same millidegrees and flags
+        that hwmon uses.
+        """
         while os.path.exists(os.path.join(self.root, "hwmon%d" % self.count)):
             self.count += 1        # a second builder on the same tree
         directory = os.path.join(self.root, "hwmon%d" % self.count)
@@ -41,6 +46,16 @@ class FakeHwmon:
                 with open(os.path.join(directory, "temp%d_input" % number),
                           "w") as handle:
                     handle.write("%d\n" % value)
+            for name, reading in (limits or {}).get(number, {}).items():
+                with open(os.path.join(directory,
+                                       "temp%d_%s" % (number, name)),
+                          "w") as handle:
+                    handle.write("%d\n" % reading)
+            for name, flag in (alarms or {}).get(number, {}).items():
+                with open(os.path.join(directory,
+                                       "temp%d_%s" % (number, name)),
+                          "w") as handle:
+                    handle.write("%d\n" % flag)
         return directory
 
 
@@ -118,6 +133,85 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(source.celsius(), 52.0)
         os.unlink(path)
         self.assertIsNone(source.celsius())
+
+
+class PublishedLimitsTest(unittest.TestCase):
+    """What a sensor says about itself.
+
+    "Hot" is not one number across a machine: an APU at 95 C is doing what it
+    was designed to do, an NVMe drive at 95 C is long past its critical point.
+    The parts publish their own limits, so a threshold does not have to be
+    guessed - where they publish anything, which is not everywhere.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.hwmon = FakeHwmon(self.root)
+
+    def _input(self, directory, number=1):
+        return os.path.join(directory, "temp%d_input" % number)
+
+    def test_limits_are_read_in_degrees(self):
+        directory = self.hwmon.chip(
+            "k10temp", [("Tctl", 52000)],
+            limits={1: {"crit": 100000, "max": 95000}})
+        self.assertEqual(temperature.read_limits(self._input(directory)),
+                         {"crit": 100.0, "max": 95.0})
+
+    def test_a_sensor_that_publishes_nothing_reports_nothing(self):
+        directory = self.hwmon.chip("iwlwifi_1", [(None, 35000)])
+        self.assertEqual(temperature.read_limits(self._input(directory)), {})
+
+    def test_only_the_files_that_exist_come_back(self):
+        # hwmon is optional throughout - a driver exposes what the hardware
+        # tells it, so a missing file is the normal case, not a fault.
+        directory = self.hwmon.chip("nvme", [("Composite", 41000)],
+                                    limits={1: {"crit": 84850}})
+        self.assertEqual(temperature.read_limits(self._input(directory)),
+                         {"crit": 84.85})
+
+    def test_each_sensor_of_a_chip_has_its_own(self):
+        directory = self.hwmon.chip(
+            "k10temp", [("Tctl", 52000), ("Tccd1", 49000)],
+            limits={1: {"crit": 100000}, 2: {"crit": 90000}})
+        self.assertEqual(temperature.read_limits(self._input(directory, 1)),
+                         {"crit": 100.0})
+        self.assertEqual(temperature.read_limits(self._input(directory, 2)),
+                         {"crit": 90.0})
+
+    def test_rubbish_is_skipped_rather_than_reported(self):
+        directory = self.hwmon.chip("mystery", [(None, 44000)])
+        with open(os.path.join(directory, "temp1_crit"), "w") as handle:
+            handle.write("n/a\n")
+        self.assertEqual(temperature.read_limits(self._input(directory)), {})
+
+    def test_a_raised_alarm_is_reported(self):
+        # The kernel's own opinion that a limit has been passed, which beats
+        # any threshold we would pick.
+        directory = self.hwmon.chip("amdgpu", [("edge", 97000)],
+                                    alarms={1: {"crit_alarm": 1}})
+        self.assertEqual(temperature.read_alarms(self._input(directory)),
+                         ["crit_alarm"])
+
+    def test_a_quiet_alarm_is_not(self):
+        directory = self.hwmon.chip("amdgpu", [("edge", 47000)],
+                                    alarms={1: {"crit_alarm": 0}})
+        self.assertEqual(temperature.read_alarms(self._input(directory)), [])
+
+    def test_no_alarm_files_at_all_is_quiet_too(self):
+        directory = self.hwmon.chip("k10temp", [("Tctl", 52000)])
+        self.assertEqual(temperature.read_alarms(self._input(directory)), [])
+
+    def test_reading_limits_does_not_disturb_the_sensor_list(self):
+        # find_sensors() feeds the gauge and the panel's drop-down; the limits
+        # are a separate question and must not change what those two see.
+        self.hwmon.chip("k10temp", [("Tctl", 52000)],
+                        limits={1: {"crit": 100000}})
+        sensors = temperature.find_sensors(self.root)
+        self.assertEqual(len(sensors), 1)
+        self.assertEqual(sorted(sensors[0]),
+                         ["chip", "label", "path", "rank"])
 
 
 class CachingTest(unittest.TestCase):

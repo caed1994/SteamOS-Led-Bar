@@ -51,6 +51,48 @@ def read_celsius(path):
         return None
 
 
+# What a sensor may publish next to its reading, best answer first. hwmon's
+# interface is optional throughout: a driver exposes what the hardware tells
+# it and nothing more, so any of these may be missing on any sensor.
+#
+#   emergency - throw the switch now (amdgpu publishes it)
+#   crit      - the manufacturer's critical point
+#   max       - where the part expects to be throttled
+#
+# Worth reading because "hot" is not one number: an APU sitting at 95 C is
+# doing what it was designed to do, while an NVMe drive is long past its own
+# limit there. The part knows its own numbers; we do not.
+LIMIT_FILES = ("emergency", "crit", "max")
+
+# Set by the kernel, not by us: the driver's own opinion that a limit has been
+# passed. Where it exists it beats any threshold of ours.
+ALARM_FILES = ("crit_alarm", "emergency_alarm", "max_alarm")
+
+
+def read_limits(path):
+    """The limits a sensor publishes, in degrees, keyed as in LIMIT_FILES.
+
+    Missing files are simply absent from the result - most sensors publish
+    some of these and none publish all.
+    """
+    limits = {}
+    for name in LIMIT_FILES:
+        value = read_celsius(path.replace("_input", "_" + name))
+        if value is not None:
+            limits[name] = value
+    return limits
+
+
+def read_alarms(path):
+    """Which of the sensor's own alarm flags are currently raised."""
+    raised = []
+    for name in ALARM_FILES:
+        text = _read_text(path.replace("_input", "_" + name))
+        if text and text.strip() not in ("0", ""):
+            raised.append(name)
+    return raised
+
+
 def find_sensors(root=HWMON_ROOT):
     """Every temperature input on the machine, as dicts.
 
