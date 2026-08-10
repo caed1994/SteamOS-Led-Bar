@@ -20,6 +20,11 @@ LOG = logging.getLogger("steamos-led")
 PROGRAM = "steamos-led-serial"
 DEVICE_RETRY_DELAY = 5.0
 
+# A configuration the service will not accept. Restarting cannot rewrite a
+# file, so the unit names this code in RestartPreventExitStatus rather than
+# retrying every RestartSec and burying the one line that says what is wrong.
+CONFIG_REFUSED_EXIT = 2
+
 
 class _Stopped(Exception):
     """Raised internally when a signal asks us to shut down."""
@@ -959,7 +964,7 @@ def main(argv=None):
         config = config_module.load(args.config, overrides)
     except (config_module.ConfigError, OSError) as exc:
         print("%s: %s" % (PROGRAM, exc), file=sys.stderr)
-        return 2
+        return CONFIG_REFUSED_EXIT
 
     configure_logging(config["LOG_LEVEL"])
     LOG.debug("configuration: %s", config)
