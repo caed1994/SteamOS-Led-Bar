@@ -90,16 +90,12 @@ pixels over UART1 instead of bit-banging with interrupts disabled.
    seconds, which a blocking animation would eat. The first valid message ends
    it and blanks the strip.
 
-   Two things temper it, because step 1 *resets the board*, so every service
-   restart and every wake from suspend passes back through here:
-
-   - After an **external reset** - the DTR pulse from a host opening the port,
-     told apart from a power-up by `ESP.getResetInfoPtr()` / `esp_reset_reason()`
-     - the breath waits `WAIT_QUIET_MS` (3 s) before starting. A host is
-     almost certainly two seconds away, and the strip meanwhile holds whatever
-     it last latched. A cold start does not wait: there the news is real.
-   - If the board was in **standby** when it was reset, it goes straight back
-     to breathing standby and never reaches the amber at all. See below.
+   Step 1 *resets the board*, so every service restart and every wake from
+   suspend passes back through here. If the board was in **standby** when that
+   happened it goes straight back to breathing standby and never reaches the
+   amber at all; see below. The boot log line says which reset this was and
+   whether a standby was found, because whether RTC memory survives is a
+   per-board question.
 1. The host opens the port, drops DTR/RTS and waits ~1.8 s for the board to
    boot (opening a tty resets most ESP dev boards).
 2. It sends `HELLO` up to five times and waits for `INFO`. Without a reply it

@@ -12,6 +12,7 @@
 #include <esp_system.h>
 #endif
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifndef LED_PIN
@@ -38,14 +39,6 @@
 
 // The waiting animation: one amber breath while no host has spoken yet.
 // WAIT_BREATH_MS is the length of a full breath, so a larger value is calmer.
-// How long to hold off the waiting breath after a *host-caused* reset.
-// Opening the serial port drops DTR, which reboots these boards, so a service
-// restart lands in setup() with a host that is two seconds from saying hello;
-// announcing "nobody is driving me" in the middle of that is noise. A cold
-// start does not wait at all - there the news is real.
-#ifndef WAIT_QUIET_MS
-#define WAIT_QUIET_MS 3000
-#endif
 #ifndef WAIT_BREATH_MS
 #define WAIT_BREATH_MS 3000
 #endif
@@ -277,10 +270,16 @@ static uint32_t standbyPeriodMs = 1;
 static uint32_t standbyStartMs = 0;
 static uint32_t lastStandbyFrameMs = 0;
 
+// Where in RTC user memory to keep it, in 32 bit words. Not 0: the ESP8266
+// bootloader keeps its own OTA command structure in the first 128 bytes and
+// rewrites it on every boot, which would wipe this before setup() ever read
+// it. Anything past word 32 is ours.
+static const uint32_t STANDBY_SLOT = 32;
+
 static void writeStandbyMemory(const StandbyMemory &mem) {
 #if defined(ESP8266)
   // Word-addressed, so the struct is three uint32_t and nothing else.
-  ESP.rtcUserMemoryWrite(0, (uint32_t *)&mem, sizeof(mem));
+  ESP.rtcUserMemoryWrite(STANDBY_SLOT, (uint32_t *)&mem, sizeof(mem));
 #elif defined(ESP32)
   standbyMemory = mem;
 #else
@@ -310,7 +309,7 @@ static void forgetStandby() {
 // pattern in four billion matching is not worth a checksum.
 static bool recallStandby(StandbyMemory *out) {
 #if defined(ESP8266)
-  if (!ESP.rtcUserMemoryRead(0, (uint32_t *)out, sizeof(*out))) {
+  if (!ESP.rtcUserMemoryRead(STANDBY_SLOT, (uint32_t *)out, sizeof(*out))) {
     return false;
   }
 #elif defined(ESP32)
@@ -508,17 +507,7 @@ static float breathLevel(uint32_t elapsed, uint32_t periodMs) {
 }
 
 static void waitingAnimation(uint32_t now) {
-  uint32_t waited = (uint32_t)(now - waitStartMs);
-  if (bootExternal) {
-    // A host reset us, so one is almost certainly on its way back. Leave the
-    // strip showing whatever it last held - WS2812s latch, so that is the
-    // frame it was given, not darkness - rather than announce an absence
-    // that is about to end.
-    if (waited < WAIT_QUIET_MS) {
-      return;
-    }
-    waited -= WAIT_QUIET_MS;
-  }
+  const uint32_t waited = (uint32_t)(now - waitStartMs);
   if ((uint32_t)(now - lastWaitFrameMs) < BREATH_FRAME_MS) {
     return;
   }
@@ -529,8 +518,6 @@ static void waitingAnimation(uint32_t now) {
     return;
   }
 
-  // Measured from where the breath starts, not from boot, so the first one
-  // begins at the bottom whatever the quiet time is set to.
   const float level = breathLevel(waited, WAIT_BREATH_MS);
   strip->ClearTo(RgbColor(clampBrightness((uint8_t)(WAIT_RED * level + 0.5f)),
                           clampBrightness((uint8_t)(WAIT_GREEN * level + 0.5f)),
@@ -574,8 +561,9 @@ void setup() {
 
   // Pick the breath back up if that reset interrupted one. The host is asleep
   // and will not say anything until it wakes, so nothing else would.
-  StandbyMemory saved;
-  if (recallStandby(&saved)) {
+  StandbyMemory saved = {0, 0, 0};
+  const bool recalled = recallStandby(&saved);
+  if (recalled) {
     standbyRed = (uint8_t)((saved.colour >> 16) & 0xFF);
     standbyGreen = (uint8_t)((saved.colour >> 8) & 0xFF);
     standbyBlue = (uint8_t)(saved.colour & 0xFF);
@@ -587,7 +575,14 @@ void setup() {
   }
 
   sendInfo();
-  sendLog(standby ? "ready, resuming standby" : "ready");
+  // Says what this boot was and what it found, because whether RTC memory
+  // survives the reset a host causes is a per-board question that cannot be
+  // answered by reading the datasheet. It reaches the journal as "esp: ...".
+  char ready[80];
+  snprintf(ready, sizeof(ready), "ready (reset %s, standby memory %s)",
+           bootExternal ? "external" : "power-on",
+           recalled ? "found" : (saved.magic == 0 ? "empty" : "not ours"));
+  sendLog(ready);
 }
 
 void loop() {
