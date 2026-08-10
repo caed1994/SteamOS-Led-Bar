@@ -365,6 +365,38 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(config.ConfigError):
             config.load(path)
 
+    def test_a_setting_we_withdrew_does_not_stop_the_service(self):
+        # This one was learned the hard way: WARNING_COLOR existed for two
+        # commits, the panel wrote it into a real config, and removing the
+        # option turned that line into a service that would not start at all.
+        # A key the reader mistyped is their problem; a key we withdrew is not.
+        path = self._write("LED_COUNT=60\nWARNING_COLOR=#ff3c00\n"
+                           "WARNING_STYLE=default\n")
+        loaded = config.load(path)
+        self.assertEqual(loaded["LED_COUNT"], 60)
+        self.assertNotIn("WARNING_COLOR", loaded)
+
+    def test_a_typo_is_still_a_typo(self):
+        # The reason unknown keys are fatal in the first place: LED_COUTN=60
+        # that quietly does nothing is worse than a service that says so.
+        path = self._write("LED_COUTN=60\n")
+        with self.assertRaises(config.ConfigError):
+            config.load(path)
+
+    def test_a_withdrawn_setting_is_removed_when_the_panel_saves(self):
+        # Otherwise it sits there forever, and every start logs about it.
+        text = "LED_COUNT=17\nWARNING_COLOR=#ff3c00\n# a comment\n"
+        updated = config.update_text(text, {"LED_COUNT": 60})
+        self.assertNotIn("WARNING_COLOR", updated)
+        self.assertIn("LED_COUNT=60", updated)
+        self.assertIn("# a comment", updated)
+
+    def test_every_withdrawn_setting_really_is_gone(self):
+        # A name in both tables would be read as retired and never reach the
+        # code that wants it - a setting that silently stopped working.
+        for key in config.RETIRED:
+            self.assertNotIn(key, config.DEFAULTS, key)
+
     def test_invalid_values_rejected(self):
         for override in ({"LED_COUNT": 0}, {"FPS": 999}, {"MAPPING": "spiral"},
                          {"GAMMA": 0}, {"MAX_BRIGHTNESS": 300},

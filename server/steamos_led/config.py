@@ -6,12 +6,27 @@ the same file.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from . import notify
 from .serialport import BAUD_CONSTANTS
 
+LOG = logging.getLogger(__name__)
+
 DEFAULT_CONFIG_PATH = "/etc/steamos-led-serial.conf"
+
+# Options that existed once and no longer do, with what became of them.
+#
+# An unknown key is fatal on purpose - LED_COUTN=60 would otherwise do nothing
+# and say nothing. But a key that *we* withdrew is not the reader's mistake,
+# and refusing to start over one turns a stale line into a service that will
+# not come up. So these are read, ignored, mentioned once, and dropped from
+# the file the next time the panel writes it.
+RETIRED = {
+    "WARNING_COLOR": "a warning is always red now",
+    "WARNING_STYLE": "a warning always uses the alternate shape now",
+}
 
 DEFAULTS = {
     "DEVICE": "/dev/valve-leds-shim",
@@ -97,6 +112,12 @@ def parse_file(path):
                 raise ConfigError("%s:%d: expected KEY=value" % (path, lineno))
             key, _, value = line.partition("=")
             key = key.strip().upper()
+            if key in RETIRED:
+                LOG.warning("%s:%d: %s is no longer a setting - %s. The line "
+                            "is ignored, and the control panel removes it the "
+                            "next time it saves.",
+                            path, lineno, key, RETIRED[key])
+                continue
             if key not in DEFAULTS:
                 raise ConfigError("%s:%d: unknown option %r" % (path, lineno, key))
             values[key] = _coerce(key, _strip_quotes(value), DEFAULTS[key])
@@ -119,12 +140,17 @@ def update_text(text, values):
     """
     lines = text.splitlines(keepends=True)
     written = set()
+    retired = []
 
     for index, raw in enumerate(lines):
         stripped = raw.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key = stripped.partition("=")[0].strip().upper()
+        if key in RETIRED:
+            # Out with it, or every start logs the same complaint forever.
+            retired.append(index)
+            continue
         if key not in values:
             continue
         # Every occurrence, not only the first. A hand-edited file can name an
@@ -133,6 +159,9 @@ def update_text(text, values):
         written.add(key)
         ending = "\n" if raw.endswith("\n") else ""
         lines[index] = "%s=%s%s" % (key, format_value(values[key]), ending)
+
+    for index in reversed(retired):      # from the back, or the rest shift
+        del lines[index]
 
     missing = [key for key in sorted(values) if key not in written]
     if missing:
