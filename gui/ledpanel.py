@@ -379,7 +379,7 @@ FRIEND_COLOURS = (
     # Muted on purpose: someone appearing is worth less of your attention
     # than someone writing to you.
     ("Teal", "#00c850"),
-    ("Orange", "#ff8000"),
+    ("Orange", "#ff3200"),
 )
 
 
