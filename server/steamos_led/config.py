@@ -37,9 +37,11 @@ DEFAULTS = {
     "ACHIEVEMENT_COLOR": "#ffd700",
     "MESSAGE_COLOR": "#8000ff",
     "FRIEND_COLOR": "#00c850",
+    "WARNING_COLOR": "#ff3c00",
     "ACHIEVEMENT_STYLE": notify.STYLE_INHERIT,
     "MESSAGE_STYLE": notify.STYLE_INHERIT,
     "FRIEND_STYLE": notify.STYLE_INHERIT,
+    "WARNING_STYLE": notify.STYLE_INHERIT,
     "TEMPERATURE_GAUGE": False,
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 85.0,
@@ -170,6 +172,17 @@ NOTIFY_STYLES = notify.STYLES
 # One notification's own style may also say "whichever NOTIFY_STYLE says".
 PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 
+# Every named trigger the configuration can change, with the prefix its options
+# are spelled under. One table for the defaults, the validator and the service,
+# because a kind listed in one and missed in another is a setting that quietly
+# does nothing and says so nowhere.
+CONFIGURABLE_KINDS = (("achievement", "ACHIEVEMENT"),
+                      ("message", "MESSAGE"),
+                      ("friend", "FRIEND"),
+                      # Nothing produces this one on its own; it is what a
+                      # script of your own flashes with --notify warning.
+                      ("warning", "WARNING"))
+
 # Where the gauge's two marks may sit. Wide, because people watch different
 # sensors, but not unbounded: outside this is a unit mix-up, not an intention.
 TEMPERATURE_FLOOR = 0.0
@@ -210,11 +223,12 @@ def validate(config):
     if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
         raise ConfigError("NOTIFY_STYLE must be one of: %s"
                           % ", ".join(NOTIFY_STYLES))
-    for key in ("ACHIEVEMENT_STYLE", "MESSAGE_STYLE", "FRIEND_STYLE"):
+    for _kind, prefix in CONFIGURABLE_KINDS:
+        key = prefix + "_STYLE"
         if config[key] not in PER_KIND_STYLES:
             raise ConfigError("%s must be one of: %s"
                               % (key, ", ".join(PER_KIND_STYLES)))
-    for key in ("ACHIEVEMENT_COLOR", "MESSAGE_COLOR", "FRIEND_COLOR"):
+        key = prefix + "_COLOR"
         try:
             notify.parse_color(config[key])
         except ValueError as exc:

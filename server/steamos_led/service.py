@@ -48,18 +48,10 @@ def build_renderer(config):
     )
 
 
-# The triggers the watcher produces, and the option prefix each one is
-# configured under. --notify warning and a bare colour are not in here: they
-# keep the built-in colour and the general style.
-CONFIGURABLE_KINDS = (("achievement", "ACHIEVEMENT"),
-                      ("message", "MESSAGE"),
-                      ("friend", "FRIEND"))
-
-
 def notification_colors(config):
     """The named triggers whose colour the configuration can change."""
     return {kind: notify.parse_color(config[prefix + "_COLOR"])
-            for kind, prefix in CONFIGURABLE_KINDS}
+            for kind, prefix in config_module.CONFIGURABLE_KINDS}
 
 
 def notification_styles(config):
@@ -70,7 +62,7 @@ def notification_styles(config):
     this", and a kind only leaves it when someone says so.
     """
     return {kind: config[prefix + "_STYLE"]
-            for kind, prefix in CONFIGURABLE_KINDS
+            for kind, prefix in config_module.CONFIGURABLE_KINDS
             if config[prefix + "_STYLE"] != notify.STYLE_INHERIT}
 
 

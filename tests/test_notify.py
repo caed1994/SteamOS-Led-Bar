@@ -374,18 +374,27 @@ class ConfiguredOverlayTest(unittest.TestCase):
         self.assertEqual(styles, {"message": notify.STYLE_PULSE})
 
     def test_the_colours_come_from_the_same_table(self):
+        from steamos_led import config as config_module
         from steamos_led import service
         colors = service.notification_colors(self._config())
         self.assertEqual(sorted(colors),
                          sorted(kind for kind, _prefix
-                                in service.CONFIGURABLE_KINDS))
+                                in config_module.CONFIGURABLE_KINDS))
 
     def test_every_configurable_kind_is_one_the_overlay_knows(self):
         # A prefix with no matching trigger word would be a setting that
         # changes nothing at all, and nothing would say so.
-        from steamos_led import service
-        for kind, _prefix in service.CONFIGURABLE_KINDS:
+        from steamos_led import config as config_module
+        for kind, _prefix in config_module.CONFIGURABLE_KINDS:
             self.assertIn(kind, notify.KINDS)
+
+    def test_every_kind_the_overlay_knows_can_be_configured(self):
+        # And the other way round: a trigger word with no options is the one
+        # of the four you cannot change, which is how warning started out.
+        from steamos_led import config as config_module
+        configurable = {kind for kind, _prefix
+                        in config_module.CONFIGURABLE_KINDS}
+        self.assertEqual(configurable, set(notify.KINDS))
 
 
 class FifoTriggerTest(unittest.TestCase):

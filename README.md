@@ -385,7 +385,8 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
 | `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
 | `FRIEND_COLOR` | `#00c850` | what `friend` flashes |
-| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` | `default` | shape for that one kind — a shape name, or `default` to follow `NOTIFY_STYLE` |
+| `WARNING_COLOR` | `#ff3c00` | what `warning` flashes |
+| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` / `WARNING_STYLE` | `default` | shape for that one kind — a shape name, or `default` to follow `NOTIFY_STYLE` |
 
 ### The shapes
 
@@ -410,15 +411,20 @@ past the last, so it neither appears out of nothing nor dies on the edge.
 
 ### Telling them apart
 
-Each of the three has a colour and a shape of its own. The colour is the fast
+Each of the four named triggers has a colour and a shape of its own. The colour is the fast
 one — gold, purple, green, recognisable from across the room — and the shape is
 there for when two of them are the same colour, or when you want an achievement
 to feel like more of an event than a friend logging in.
 
 The shape settings start at `default`, which means "whatever `NOTIFY_STYLE`
 says". So `NOTIFY_STYLE` stays the one knob for *everything looks like this*,
-and a kind only leaves it once you say so. Triggers that are nobody's kind —
-`--notify warning`, `--notify '#00ff88'` — always follow it.
+and a kind only leaves it once you say so. A colour asked for directly —
+`--notify '#00ff88'` — is nobody's kind and always follows it.
+
+Three of the four are produced automatically while a game runs. Nothing
+produces `warning`: it is there for **your** scripts, and it is configurable
+for the same reason — a monitoring script of your own should get to decide
+what it looks like.
 
 The duration is shared: whatever the shape, a flash lasts `NOTIFY_DURATION`.
 

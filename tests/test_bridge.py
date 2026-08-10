@@ -379,7 +379,9 @@ class TestConfig(unittest.TestCase):
                          # Same for a shape: a name nothing implements would
                          # silently become the default one at flash time.
                          {"ACHIEVEMENT_STYLE": "sparkle"},
-                         {"FRIEND_STYLE": ""}):
+                         {"FRIEND_STYLE": ""},
+                         {"WARNING_COLOR": "orangeish"},
+                         {"WARNING_STYLE": "sparkle"}):
             with self.assertRaises(config.ConfigError):
                 config.load(path=None, overrides=override)
 
@@ -387,8 +389,8 @@ class TestConfig(unittest.TestCase):
         # The config file states them so they can be changed; if the two ever
         # disagree, a fresh install changes colour for no stated reason.
         from steamos_led import notify
-        for key, kind in (("ACHIEVEMENT_COLOR", "achievement"),
-                          ("MESSAGE_COLOR", "message")):
+        for kind, prefix in config.CONFIGURABLE_KINDS:
+            key = prefix + "_COLOR"
             self.assertEqual(notify.parse_color(config.DEFAULTS[key]),
                              notify.KINDS[kind], key)
 
@@ -396,7 +398,8 @@ class TestConfig(unittest.TestCase):
         # Otherwise NOTIFY_STYLE would stop being the one setting for "all of
         # them look like this", which is what most people want it to be.
         from steamos_led import notify
-        for key in ("ACHIEVEMENT_STYLE", "MESSAGE_STYLE", "FRIEND_STYLE"):
+        for _kind, prefix in config.CONFIGURABLE_KINDS:
+            key = prefix + "_STYLE"
             self.assertEqual(config.DEFAULTS[key], notify.STYLE_INHERIT, key)
 
     def test_following_the_general_shape_is_not_itself_a_shape(self):
