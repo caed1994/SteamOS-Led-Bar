@@ -214,6 +214,195 @@ class PublishedLimitsTest(unittest.TestCase):
                          ["chip", "label", "path", "rank"])
 
 
+class OverheatWatchTest(unittest.TestCase):
+    """Watching every sensor for one that stays close to its own limit.
+
+    The thresholds are never written here: they come from what each part
+    publishes about itself, which is the only way one rule can be right on an
+    APU, an NVMe drive and a DDR5 module at the same time.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.hwmon = FakeHwmon(self.root)
+
+    def _watch(self, **kwargs):
+        return temperature.OverheatWatch(root=self.root, **kwargs)
+
+    def _set(self, directory, millidegrees, number=1):
+        with open(os.path.join(directory,
+                               "temp%d_input" % number), "w") as handle:
+            handle.write("%d\n" % millidegrees)
+
+    # -- what gets watched, and at what temperature -----------------------
+
+    def test_the_threshold_comes_from_the_part(self):
+        self.hwmon.chip("amdgpu", [("edge", 40000)],
+                        limits={1: {"crit": 110000}})
+        watched = self._watch(margin=5.0).resolve()
+        self.assertEqual(len(watched), 1)
+        self.assertAlmostEqual(watched[0][1], 105.0)
+
+    def test_two_parts_get_two_thresholds(self):
+        # The point of the whole design: one number cannot serve both.
+        self.hwmon.chip("amdgpu", [("edge", 40000)],
+                        limits={1: {"crit": 110000}})
+        self.hwmon.chip("nvme", [("Composite", 40000)],
+                        limits={1: {"crit": 84850}})
+        thresholds = sorted(round(threshold, 2)
+                            for _sensor, threshold in self._watch().resolve())
+        self.assertEqual(thresholds, [79.85, 105.0])
+
+    def test_a_sensor_with_no_limit_is_not_watched(self):
+        # k10temp publishes nothing on a real machine, and an APU at its
+        # limit is working as designed - so guessing one would warn all day.
+        self.hwmon.chip("k10temp", [("Tctl", 95000)])
+        self.assertEqual(self._watch().resolve(), [])
+
+    def test_max_is_not_a_threshold(self):
+        # A DDR5 module reports max 55 with crit 85; thresholding on max would
+        # warn about a warm room. An Ethernet chip reports max 120 and no crit.
+        self.hwmon.chip("r8169", [(None, 44000)], limits={1: {"max": 120000}})
+        self.assertEqual(self._watch().resolve(), [])
+
+    def test_crit_is_preferred_to_emergency(self):
+        self.hwmon.chip("amdgpu", [("edge", 40000)],
+                        limits={1: {"crit": 110000, "emergency": 115000}})
+        self.assertAlmostEqual(self._watch(margin=5.0).resolve()[0][1], 105.0)
+
+    def test_emergency_serves_when_there_is_no_crit(self):
+        self.hwmon.chip("amdgpu", [("edge", 40000)],
+                        limits={1: {"emergency": 115000}})
+        self.assertAlmostEqual(self._watch(margin=5.0).resolve()[0][1], 110.0)
+
+    def test_a_disabled_threshold_is_not_a_limit(self):
+        # 0xFFFF Kelvin is how NVMe spells "not implemented", and it reaches
+        # sysfs as 65261.85 C. Watching for that would watch for nothing.
+        self.hwmon.chip("nvme", [("Sensor 1", 63900)],
+                        limits={1: {"max": 65261850, "crit": 65261850}})
+        self.assertEqual(self._watch().resolve(), [])
+
+    # -- when it warns ----------------------------------------------------
+
+    def _hot_chip(self):
+        return self.hwmon.chip("amdgpu", [("edge", 40000)],
+                               limits={1: {"crit": 110000}})
+
+    def test_below_the_threshold_is_silence(self):
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, interval=0)
+        self._set(directory, 104000)
+        for step in range(10):
+            self.assertIsNone(watch.poll(step * 30.0))
+
+    def test_a_spike_is_not_a_warning(self):
+        # A chip touches its limit whenever it boosts. That is not a fault,
+        # and warning about it is how the bar stops meaning anything.
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, interval=0)
+        self._set(directory, 106000)
+        self.assertIsNone(watch.poll(0.0))
+        self._set(directory, 80000)
+        self.assertIsNone(watch.poll(5.0))
+        self._set(directory, 106000)
+        self.assertIsNone(watch.poll(10.0), "the minute starts again")
+        self.assertIsNone(watch.poll(65.0))
+
+    def test_staying_there_is(self):
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, interval=0)
+        self._set(directory, 106000)
+        self.assertIsNone(watch.poll(0.0))
+        self.assertIsNone(watch.poll(59.0))
+        self.assertIsNotNone(watch.poll(61.0))
+
+    def test_the_warning_says_what_and_how_hot(self):
+        # The bar can only say "something is too hot"; the answer to "what"
+        # has to be in the log or the warning is not actionable.
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, interval=0)
+        self._set(directory, 106500)
+        watch.poll(0.0)
+        reason = watch.poll(61.0)
+        self.assertIn("amdgpu", reason)
+        self.assertIn("edge", reason)
+        self.assertIn("106.5", reason)
+
+    def test_it_does_not_warn_twice_for_the_same_heat(self):
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, interval=0, quiet=0.0)
+        self._set(directory, 106000)
+        watch.poll(0.0)
+        self.assertIsNotNone(watch.poll(61.0))
+        self.assertIsNone(watch.poll(200.0), "still hot is not news again")
+
+    def test_it_warns_again_after_cooling_down_properly(self):
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, release=5.0, interval=0, quiet=0.0)
+        self._set(directory, 106000)
+        watch.poll(0.0)
+        self.assertIsNotNone(watch.poll(61.0))
+        self._set(directory, 99000)             # below 105 - 5
+        watch.poll(100.0)
+        self._set(directory, 106000)
+        watch.poll(120.0)
+        self.assertIsNotNone(watch.poll(181.0))
+
+    def test_wobbling_on_the_line_does_not_re_arm_it(self):
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, release=5.0, interval=0, quiet=0.0)
+        self._set(directory, 106000)
+        watch.poll(0.0)
+        self.assertIsNotNone(watch.poll(61.0))
+        self._set(directory, 104000)            # under the line, but only just
+        watch.poll(100.0)
+        self._set(directory, 106000)
+        watch.poll(120.0)
+        self.assertIsNone(watch.poll(181.0))
+
+    def test_a_second_sensor_still_has_to_wait_its_turn(self):
+        # The bar cannot say more than "something is too hot", so two hot
+        # parts are not two warnings a minute apart.
+        first = self._hot_chip()
+        second = self.hwmon.chip("nvme", [("Composite", 40000)],
+                                 limits={1: {"crit": 90000}})
+        watch = self._watch(dwell=60.0, interval=0, quiet=300.0)
+        self._set(first, 106000)
+        self._set(second, 86000)
+        watch.poll(0.0)
+        self.assertIsNotNone(watch.poll(61.0))
+        self.assertIsNone(watch.poll(120.0), "one warning is the message")
+        self.assertIsNotNone(watch.poll(400.0), "and later it may say so again")
+
+    def test_a_sensor_that_stops_answering_starts_over(self):
+        directory = self._hot_chip()
+        watch = self._watch(dwell=60.0, interval=0)
+        self._set(directory, 106000)
+        watch.poll(0.0)
+        os.unlink(os.path.join(directory, "temp1_input"))
+        watch.poll(30.0)
+        self._set(directory, 106000)
+        watch.poll(40.0)
+        self.assertIsNone(watch.poll(95.0), "the minute restarts on its return")
+        self.assertIsNotNone(watch.poll(101.0))
+
+    def test_nothing_to_watch_is_never_a_warning(self):
+        self.hwmon.chip("k10temp", [("Tctl", 99000)])
+        watch = self._watch(dwell=0.0, interval=0)
+        self.assertIsNone(watch.poll(0.0))
+        self.assertIsNone(watch.poll(1000.0))
+
+    def test_it_reads_no_more_often_than_its_interval(self):
+        # It sits in the render loop, which runs at up to 60 frames a second.
+        directory = self._hot_chip()
+        watch = self._watch(dwell=0.0, interval=5.0)
+        self._set(directory, 106000)
+        self.assertIsNotNone(watch.poll(0.0))
+        os.unlink(os.path.join(directory, "temp1_input"))
+        self.assertIsNone(watch.poll(1.0), "it must not have looked again")
+
+
 class CachingTest(unittest.TestCase):
     """The render loop runs at 60 fps; a CPU warms up over seconds."""
 

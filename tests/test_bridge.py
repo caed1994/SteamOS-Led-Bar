@@ -379,9 +379,7 @@ class TestConfig(unittest.TestCase):
                          # Same for a shape: a name nothing implements would
                          # silently become the default one at flash time.
                          {"ACHIEVEMENT_STYLE": "sparkle"},
-                         {"FRIEND_STYLE": ""},
-                         {"WARNING_COLOR": "orangeish"},
-                         {"WARNING_STYLE": "sparkle"}):
+                         {"FRIEND_STYLE": ""}):
             with self.assertRaises(config.ConfigError):
                 config.load(path=None, overrides=override)
 

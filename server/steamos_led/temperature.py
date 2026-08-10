@@ -69,16 +69,23 @@ LIMIT_FILES = ("emergency", "crit", "max")
 ALARM_FILES = ("crit_alarm", "emergency_alarm", "max_alarm")
 
 
+# Above this a "limit" is not one. NVMe stores its thresholds as 16 bit Kelvin
+# and spells "not implemented" as 0xFFFF, which the driver passes through
+# verbatim: 65535 K is 65261.85 C, and it turns up on real drives.
+SANE_LIMIT = 200.0
+
+
 def read_limits(path):
     """The limits a sensor publishes, in degrees, keyed as in LIMIT_FILES.
 
     Missing files are simply absent from the result - most sensors publish
-    some of these and none publish all.
+    some of these and none publish all. So are implausible ones, which are a
+    disabled threshold rather than a hot part.
     """
     limits = {}
     for name in LIMIT_FILES:
         value = read_celsius(path.replace("_input", "_" + name))
-        if value is not None:
+        if value is not None and value <= SANE_LIMIT:
             limits[name] = value
     return limits
 
@@ -218,3 +225,128 @@ class TemperatureSource:
             return sample
         weight = elapsed / (elapsed + self.smoothing)
         return self._value + (sample - self._value) * weight
+
+
+# -- watching every sensor for one that stays too hot ----------------------
+#
+# A different question from the gauge's, and deliberately a separate object:
+# the gauge shows one sensor you chose, smoothed hard so the leading LED does
+# not flicker. This reads all of them, unsmoothed, and cares about how long
+# one has been high. Sharing a reader would have meant one of the two getting
+# data shaped for the other.
+
+# Warn this far below the part's own critical point, so there is time to
+# notice before the hardware acts on it.
+OVERHEAT_MARGIN = 5.0
+# How long a sensor has to stay there. A CPU touches its limit for a fraction
+# of a second whenever it boosts; a minute of it is a cooling problem.
+OVERHEAT_DWELL = 60.0
+# How far it has to fall before that sensor may warn again, so one sitting
+# exactly on the threshold does not warn every time it wobbles.
+OVERHEAT_RELEASE = 5.0
+# And a floor between two warnings whatever tripped them. The bar cannot say
+# more than "something is too hot"; saying it every minute adds nothing.
+OVERHEAT_QUIET = 300.0
+# All the sensors, this often. They move on the scale of seconds and the
+# dwell is a minute, so this is frequent enough to be exact and rare enough
+# to be free.
+OVERHEAT_INTERVAL = 5.0
+
+# Which published limit to measure against, best first. "max" is deliberately
+# not here: it means whatever a driver wants it to. A DDR5 module reports
+# max 55 with crit 85, an Ethernet controller reports max 120 and no crit -
+# thresholding on that would warn about a warm DIMM in a warm room.
+LIMIT_SOURCES = ("crit", "emergency")
+
+
+class OverheatWatch:
+    """Reports a sensor that has stayed close to its own limit for a while.
+
+    Every threshold comes from the part, not from a number written here: what
+    is hot depends entirely on what is being measured. An APU sitting at 95 C
+    is doing what it was designed to do; an NVMe drive at 95 C is past its
+    critical point. Sensors that publish no limit are not watched at all,
+    because guessing one for an unknown part is how false alarms are made.
+    """
+
+    def __init__(self, root=HWMON_ROOT, margin=OVERHEAT_MARGIN,
+                 dwell=OVERHEAT_DWELL, release=OVERHEAT_RELEASE,
+                 quiet=OVERHEAT_QUIET, interval=OVERHEAT_INTERVAL):
+        self.root = root
+        self.margin = margin
+        self.dwell = dwell
+        self.release = release
+        self.quiet = quiet
+        self.interval = interval
+        self.watched = None         # [(sensor, threshold)], resolved once
+        self._hot_since = {}        # path -> when it first went over
+        self._armed = {}            # path -> may warn again
+        self._next_read = None
+        self._quiet_until = 0.0
+
+    def resolve(self):
+        """Settle on what to watch and at which temperature, once."""
+        if self.watched is not None:
+            return self.watched
+
+        self.watched = []
+        sensors = find_sensors(self.root)
+        for sensor in sensors:
+            limits = read_limits(sensor["path"])
+            for name in LIMIT_SOURCES:
+                if name in limits:
+                    threshold = limits[name] - self.margin
+                    self.watched.append((sensor, threshold))
+                    self._armed[sensor["path"]] = True
+                    LOG.debug("watching %s (%s%s) above %.1f C, its %s is %g",
+                              sensor["path"], sensor["chip"],
+                              ", " + sensor["label"] if sensor["label"] else "",
+                              threshold, name, limits[name])
+                    break
+
+        if not self.watched:
+            LOG.warning("no sensor on this machine publishes a limit of its "
+                        "own, so there is nothing to compare against and "
+                        "overheat warnings stay off")
+        else:
+            LOG.info("watching %d of %d sensors for overheating",
+                     len(self.watched), len(sensors))
+        return self.watched
+
+    def poll(self, now):
+        """A sentence describing what is too hot, or None.
+
+        Cheap to call every frame: it reads nothing until `interval` has
+        passed, so the render loop can ask without thinking about it.
+        """
+        if self._next_read is not None and now < self._next_read:
+            return None
+        self._next_read = now + self.interval
+
+        reason = None
+        for sensor, threshold in self.resolve():
+            path = sensor["path"]
+            celsius = read_celsius(path)
+            if celsius is None:
+                # A sensor that stopped answering has not been hot for a
+                # minute; it has been absent. Start it over if it returns.
+                self._hot_since.pop(path, None)
+                continue
+
+            if celsius < threshold - self.release:
+                self._armed[path] = True
+            if celsius < threshold:
+                self._hot_since.pop(path, None)
+                continue
+
+            since = self._hot_since.setdefault(path, now)
+            if reason is None and self._armed.get(path) \
+                    and now - since >= self.dwell and now >= self._quiet_until:
+                reason = ("%s%s has been at %.1f C for %d s, and warns above "
+                          "%.1f C" % (sensor["chip"],
+                                      " " + sensor["label"]
+                                      if sensor["label"] else "",
+                                      celsius, int(now - since), threshold))
+                self._armed[path] = False
+                self._quiet_until = now + self.quiet
+        return reason

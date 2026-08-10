@@ -32,6 +32,17 @@ def build_temperature_source(config):
     return temperature.TemperatureSource(path=config["TEMPERATURE_SENSOR"])
 
 
+def build_overheat_watch(config):
+    """A watch over every sensor, or None when warnings are switched off.
+
+    Nothing to do with the gauge: that shows one sensor you picked, this looks
+    at all of them, and either works with the other switched off.
+    """
+    if not (config["NOTIFY"] and config["NOTIFY_WARNING"]):
+        return None
+    return temperature.OverheatWatch()
+
+
 def build_renderer(config):
     return render.Renderer(
         led_count=config["LED_COUNT"],
@@ -92,6 +103,7 @@ class Runner:
             reverse=config["REVERSE"],
             repeat_gap=config["NOTIFY_REPEAT_GAP"],
         )
+        self.overheat = build_overheat_watch(config)
         self.trigger = None
         self.source = None
 
@@ -234,6 +246,14 @@ class Runner:
             if triggered:
                 self._poll_trigger(time.monotonic())
 
+            if self.overheat is not None:
+                # Cheap on most turns - it reads nothing until its own
+                # interval is up - so it can sit in the loop unguarded.
+                reason = self.overheat.poll(time.monotonic())
+                if reason is not None:
+                    LOG.warning("overheating: %s", reason)
+                    self.overlay.trigger("warning", time.monotonic())
+
             if changed or snapshot is None:
                 try:
                     new_snapshot = self.source.read()
@@ -315,36 +335,55 @@ def run_temperature(config):
         return 1
 
     chosen = temperature.pick_sensor(sensors)
+    # What the overheat warning would do here, whether or not it is on: the
+    # thresholds come from the machine, so this is the only place anyone can
+    # see them before switching it on.
+    watch = temperature.OverheatWatch()
+    watched = {sensor["path"]: threshold for sensor, threshold in watch.resolve()}
+
     print("Temperature sensors on this machine:")
     # Nine spaces, which is what "  [use ] " takes on the rows below.
-    print("         %-12s %-12s %6s  %-24s %s"
-          % ("chip", "label", "now", "limits it publishes", "path"))
-    published = 0
+    print("         %-12s %-12s %6s  %-24s %-10s %s"
+          % ("chip", "label", "now", "limits it publishes", "warns at",
+             "path"))
     for sensor in sorted(sensors, key=lambda entry: entry["rank"]):
         celsius = temperature.read_celsius(sensor["path"])
         limits = temperature.read_limits(sensor["path"])
         alarms = temperature.read_alarms(sensor["path"])
-        if limits:
-            published += 1
-        print("  [%s] %-12s %-12s %6s  %-24s %s"
+        threshold = watched.get(sensor["path"])
+        print("  [%s] %-12s %-12s %6s  %-24s %-10s %s"
               % ("use " if sensor is chosen else "    ",
                  sensor["chip"], sensor["label"] or "-",
                  "%.1f C" % celsius if celsius is not None else "-",
                  ", ".join("%s %g" % (name, limits[name])
                            for name in temperature.LIMIT_FILES
                            if name in limits) or "-",
+                 "%.1f C" % threshold if threshold is not None else "-",
                  sensor["path"]))
         if alarms:
-            # The driver saying so itself, which outranks any threshold we
-            # would pick. Rare enough that it deserves its own line.
+            # The driver's own opinion. Not what the warning acts on - a
+            # latched flag would then warn about weather from an hour ago -
+            # but worth seeing when you are looking for trouble.
             print("        ^ the driver reports %s raised" % ", ".join(alarms))
 
     print()
-    print("%d of %d sensors publish a limit of their own. Those numbers are "
-          "the part's" % (published, len(sensors)))
-    print("own, so they say what is hot for that part - an APU at 95 C is "
-          "working as")
-    print("designed, an NVMe drive at 95 C is long past its critical point.")
+    if watched:
+        print("%d of %d sensors are watched for overheating, each against the "
+              "limit it" % (len(watched), len(sensors)))
+        print("publishes itself, less %g degrees. One warning needs %d seconds "
+              "above that" % (watch.margin, int(watch.dwell)))
+        print("line - a chip touches its limit whenever it boosts, and that is "
+              "not a fault.")
+    else:
+        print("No sensor here publishes a limit of its own, so there is "
+              "nothing to compare")
+        print("against and overheat warnings stay off whatever "
+              "NOTIFY_WARNING says.")
+    print("Sensors without a limit are left alone on purpose: what is hot "
+          "depends on")
+    print("what is being measured, and guessing for an unknown part is how "
+          "false alarms")
+    print("are made.")
 
     print()
     source = build_temperature_source(config)

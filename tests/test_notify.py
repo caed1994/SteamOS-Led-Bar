@@ -345,11 +345,50 @@ class ConfiguredStyleTest(unittest.TestCase):
         overlay = self._overlay()
         self.assertEqual(overlay.styles, {})
         now = 0.0
-        for kind in ("achievement", "message", "friend", "warning"):
+        for kind in ("achievement", "message", "friend"):
             overlay.trigger(kind, now)
             self.assertEqual(overlay.current.style, notify.STYLE_BLOOM, kind)
             now += 2.0
             overlay.frame(now)          # let it finish before the next
+
+
+class FixedWarningTest(unittest.TestCase):
+    """A warning looks the same everywhere, and nothing can change that.
+
+    The other three are yours to arrange - which is fine, you know what your
+    own bar means. A warning is the one you must not have to recognise, so it
+    is red and the alarm shape on every machine, whatever the settings say.
+    """
+
+    def _overlay(self, **kwargs):
+        overlay = notify.NotificationOverlay(duration=2.0, led_count=17,
+                                             **kwargs)
+        overlay.trigger("warning", 0.0)
+        return overlay
+
+    def test_it_is_red(self):
+        self.assertEqual(notify.KINDS["warning"], (255, 0, 0))
+
+    def test_the_general_shape_does_not_apply_to_it(self):
+        overlay = self._overlay(style=notify.STYLE_BLOOM)
+        self.assertEqual(overlay.current.style, notify.STYLE_ALTERNATE)
+
+    def test_a_shape_handed_in_for_it_is_ignored(self):
+        overlay = self._overlay(styles={"warning": notify.STYLE_COMET})
+        self.assertEqual(overlay.current.style, notify.STYLE_ALTERNATE)
+
+    def test_a_colour_handed_in_for_it_is_ignored(self):
+        overlay = self._overlay(colors={"warning": (0, 255, 0)})
+        self.assertEqual(overlay.current.color, (255, 0, 0))
+        self.assertEqual(overlay.colors["warning"], (255, 0, 0))
+
+    def test_the_other_kinds_are_still_free(self):
+        overlay = notify.NotificationOverlay(
+            duration=2.0, led_count=17, style=notify.STYLE_PULSE,
+            colors={"achievement": (1, 2, 3)})
+        overlay.trigger("achievement", 0.0)
+        self.assertEqual(overlay.current.style, notify.STYLE_PULSE)
+        self.assertEqual(overlay.current.color, (1, 2, 3))
 
 
 class ConfiguredOverlayTest(unittest.TestCase):
@@ -388,13 +427,17 @@ class ConfiguredOverlayTest(unittest.TestCase):
         for kind, _prefix in config_module.CONFIGURABLE_KINDS:
             self.assertIn(kind, notify.KINDS)
 
-    def test_every_kind_the_overlay_knows_can_be_configured(self):
-        # And the other way round: a trigger word with no options is the one
-        # of the four you cannot change, which is how warning started out.
+    def test_every_kind_is_either_configurable_or_deliberately_fixed(self):
+        # And the other way round: a trigger word that is in neither table is
+        # one nobody decided about, which is how warning started out - it had
+        # no options because it had been forgotten, not because it was fixed.
         from steamos_led import config as config_module
         configurable = {kind for kind, _prefix
                         in config_module.CONFIGURABLE_KINDS}
-        self.assertEqual(configurable, set(notify.KINDS))
+        self.assertEqual(configurable | set(notify.FIXED_KINDS),
+                         set(notify.KINDS))
+        self.assertFalse(configurable & set(notify.FIXED_KINDS),
+                         "a kind cannot be both")
 
 
 class FifoTriggerTest(unittest.TestCase):
@@ -757,6 +800,82 @@ class CometShapeTest(ShapeTestCase):
             lit = [max(self._levels(overlay, step / 50.0 * self.DURATION))
                    for step in range(1, 50)]
             self.assertEqual(len(self._levels(overlay, 1.0)), count)
+            self.assertGreater(max(lit), 0, "%d LEDs stayed dark" % count)
+
+
+class AlternateShapeTest(ShapeTestCase):
+    """Two halves in antiphase - the shape that says something is wrong."""
+
+    STYLE = notify.STYLE_ALTERNATE
+
+    def _sides(self, levels):
+        """(left lit, right lit), counting either half separately."""
+        half = len(levels) // 2
+        gap = 1 if len(levels) % 2 and len(levels) >= 5 else 0
+        return (sum(1 for level in levels[:half] if level > 0),
+                sum(1 for level in levels[half + gap:] if level > 0))
+
+    def _phase(self, when):
+        return self._sides(self._levels(self._overlay(), when))
+
+    def test_one_side_at_a_time(self):
+        # Whichever moment you look at, the bar is never lit on both sides -
+        # that is the whole shape, and a bar lit throughout is a pulse.
+        overlay = self._overlay()
+        for step in range(200):
+            left, right = self._sides(
+                self._levels(overlay, step / 200.0 * self.DURATION))
+            self.assertFalse(left and right, "both sides at step %d" % step)
+
+    def test_both_sides_get_their_turn(self):
+        seen = {self._phase(step / 100.0 * self.DURATION)
+                for step in range(100)}
+        self.assertIn((8, 0), seen, "the left half alone")
+        self.assertIn((0, 8), seen, "the right half alone")
+
+    def test_a_lit_side_is_lit_whole(self):
+        overlay = self._overlay()
+        levels = self._levels(overlay, notify.ALTERNATE_PERIOD * 0.2)
+        self.assertEqual(levels[:self.LEDS // 2], [255] * (self.LEDS // 2))
+
+    def test_the_middle_led_stays_dark_on_an_odd_strip(self):
+        # It belongs to neither side, and the gap is what makes two halves
+        # read as two rather than as a bar with a moving edge.
+        overlay = self._overlay()
+        for step in range(50):
+            levels = self._levels(overlay, step / 50.0 * self.DURATION)
+            self.assertEqual(levels[self.LEDS // 2], 0, "step %d" % step)
+
+    def test_it_switches_at_its_own_rate(self):
+        # Seconds, not fractions: an alarm that slows down when the flash is
+        # made longer stops looking like an alarm.
+        overlay = self._overlay(duration=10.0)
+        changes = 0
+        previous = None
+        for step in range(2000):
+            phase = self._sides(self._levels(overlay, step / 200.0))
+            if previous is not None and phase != previous:
+                changes += 1
+            previous = phase
+        self.assertGreater(changes, 30, "10 s should hold about 20 periods")
+
+    def test_it_ends_dark(self):
+        overlay = self._overlay()
+        self.assertEqual(max(self._levels(overlay, self.DURATION - 0.01)), 0)
+
+    def test_it_is_the_shape_a_warning_gets(self):
+        overlay = notify.NotificationOverlay(duration=self.DURATION,
+                                             led_count=self.LEDS)
+        overlay.trigger("warning", 0.0)
+        left, right = self._sides(self._levels(overlay, 0.05))
+        self.assertTrue(left and not right)
+
+    def test_works_on_other_strip_lengths(self):
+        for count in (1, 2, 3, 5, 30, 144):
+            overlay = self._overlay(led_count=count)
+            lit = [max(self._levels(overlay, step / 40.0 * self.DURATION))
+                   for step in range(40)]
+            self.assertEqual(len(self._levels(overlay, 0.05)), count)
             self.assertGreater(max(lit), 0, "%d LEDs stayed dark" % count)
 
 

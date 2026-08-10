@@ -110,15 +110,10 @@ NOTIFICATIONS = [
          ledpanel.FRIEND_COLOURS, None, None),
         ("FRIEND_STYLE", "Friend online shape", "named",
          KIND_STYLE_CHOICES, None, None),
-    ]),
-    # Its own box because it has no switch: nothing in the service produces a
-    # warning, it is what --notify warning flashes - from a script of yours,
-    # from the Test tab. The group title is what says so.
-    ("Warnings you trigger yourself", [
-        ("WARNING_COLOR", "Warning colour", "named",
-         ledpanel.WARNING_COLOURS, None, None),
-        ("WARNING_STYLE", "Warning shape", "named",
-         KIND_STYLE_CHOICES, None, None),
+        # A switch and nothing else. A warning has to mean the same thing on
+        # every machine, so it is always red and always the alarm shape -
+        # there is nothing here to arrange, only whether it fires.
+        ("NOTIFY_WARNING", "Flash on overheating", "bool", None, None, None),
     ]),
     ("How it looks", [
         # From a second: the validator allows a tenth, but every shape has
@@ -181,10 +176,7 @@ DEPENDS_ON = {
     "ACHIEVEMENT_STYLE": ("NOTIFY", "NOTIFY_ACHIEVEMENTS"),
     "MESSAGE_STYLE": ("NOTIFY", "NOTIFY_MESSAGES"),
     "FRIEND_STYLE": ("NOTIFY", "NOTIFY_FRIEND_ONLINE"),
-    # No switch of their own to hang off - a warning is never watched for,
-    # only asked for - so the master switch is the only thing that silences it.
-    "WARNING_COLOR": ("NOTIFY",),
-    "WARNING_STYLE": ("NOTIFY",),
+    "NOTIFY_WARNING": ("NOTIFY",),
 }
 
 

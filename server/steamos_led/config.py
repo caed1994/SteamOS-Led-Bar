@@ -34,14 +34,13 @@ DEFAULTS = {
     "NOTIFY_ACHIEVEMENTS": True,
     "NOTIFY_MESSAGES": True,
     "NOTIFY_FRIEND_ONLINE": True,
+    "NOTIFY_WARNING": True,
     "ACHIEVEMENT_COLOR": "#ffd700",
     "MESSAGE_COLOR": "#8000ff",
     "FRIEND_COLOR": "#00c850",
-    "WARNING_COLOR": "#ff3c00",
     "ACHIEVEMENT_STYLE": notify.STYLE_INHERIT,
     "MESSAGE_STYLE": notify.STYLE_INHERIT,
     "FRIEND_STYLE": notify.STYLE_INHERIT,
-    "WARNING_STYLE": notify.STYLE_INHERIT,
     "TEMPERATURE_GAUGE": False,
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 85.0,
@@ -172,16 +171,18 @@ NOTIFY_STYLES = notify.STYLES
 # One notification's own style may also say "whichever NOTIFY_STYLE says".
 PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 
-# Every named trigger the configuration can change, with the prefix its options
-# are spelled under. One table for the defaults, the validator and the service,
-# because a kind listed in one and missed in another is a setting that quietly
-# does nothing and says so nowhere.
+# The named triggers the configuration can change, with the prefix their
+# options are spelled under. One table for the defaults, the validator and the
+# service, because a kind listed in one and missed in another is a setting that
+# quietly does nothing and says so nowhere.
+#
+# "warning" is deliberately absent: it is the one notification you must not
+# have to recognise, so it is always red and always the alarm shape - see
+# notify.FIXED_KINDS. NOTIFY_WARNING says whether it fires at all, nothing
+# more.
 CONFIGURABLE_KINDS = (("achievement", "ACHIEVEMENT"),
                       ("message", "MESSAGE"),
-                      ("friend", "FRIEND"),
-                      # Nothing produces this one on its own; it is what a
-                      # script of your own flashes with --notify warning.
-                      ("warning", "WARNING"))
+                      ("friend", "FRIEND"))
 
 # Where the gauge's two marks may sit. Wide, because people watch different
 # sensors, but not unbounded: outside this is a unit mix-up, not an intention.

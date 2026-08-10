@@ -378,6 +378,7 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `NOTIFY_ACHIEVEMENTS` | `1` | watch for achievement unlocks |
 | `NOTIFY_MESSAGES` | `1` | watch for friend messages |
 | `NOTIFY_FRIEND_ONLINE` | `1` | watch for friends coming online |
+| `NOTIFY_WARNING` | `1` | watch every sensor for [overheating](#overheating) |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
@@ -385,8 +386,7 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
 | `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
 | `FRIEND_COLOR` | `#00c850` | what `friend` flashes |
-| `WARNING_COLOR` | `#ff3c00` | what `warning` flashes |
-| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` / `WARNING_STYLE` | `default` | shape for that one kind — a shape name, or `default` to follow `NOTIFY_STYLE` |
+| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` | `default` | shape for that one kind — a shape name, or `default` to follow `NOTIFY_STYLE` |
 
 ### The shapes
 
@@ -396,6 +396,7 @@ is read as a colour (`#rrggbb` or `r,g,b`).
 | `pulse` | the whole bar swells three times and fades |
 | `double_flash` | two short blinks, a pause, and again |
 | `comet` | a bright head with a fading tail, once across the bar |
+| `alternate` | the two halves of the bar flash in turn |
 
 `double_flash` is timed in **seconds**, not in fractions of the flash: a pair
 is two 80 ms blinks 80 ms apart, roughly once a second. Make the notification
@@ -411,7 +412,8 @@ past the last, so it neither appears out of nothing nor dies on the edge.
 
 ### Telling them apart
 
-Each of the four named triggers has a colour and a shape of its own. The colour is the fast
+Achievements, friend messages and friends coming online each have a colour and
+a shape of their own. The colour is the fast
 one — gold, purple, green, recognisable from across the room — and the shape is
 there for when two of them are the same colour, or when you want an achievement
 to feel like more of an event than a friend logging in.
@@ -421,12 +423,52 @@ says". So `NOTIFY_STYLE` stays the one knob for *everything looks like this*,
 and a kind only leaves it once you say so. A colour asked for directly —
 `--notify '#00ff88'` — is nobody's kind and always follows it.
 
-Three of the four are produced automatically while a game runs. Nothing
-produces `warning`: it is there for **your** scripts, and it is configurable
-for the same reason — a monitoring script of your own should get to decide
-what it looks like.
+`warning` is the exception, deliberately: it is always **red** and always
+`alternate`, and neither can be changed. It is the one notification you must
+not have to recognise — it has to mean the same thing on this machine as on
+anyone else's. `NOTIFY_WARNING` says whether it fires; that is the whole
+setting.
 
 The duration is shared: whatever the shape, a flash lasts `NOTIFY_DURATION`.
+
+### Overheating
+
+The one notification the **service** produces on its own — no game, no Steam,
+no watcher. It reads every sensor the machine has and flashes red when one has
+stayed within a few degrees of **its own** critical point for a minute.
+
+Nothing about it is configurable except whether it runs, and that is on
+purpose:
+
+* **The thresholds come from the parts.** hwmon publishes the manufacturer's
+  own limits next to each reading, so there is no number here to get wrong. An
+  APU sitting at 95 °C is doing exactly what it was designed to do; an NVMe
+  drive at 95 °C is ten degrees past its critical point. One figure cannot
+  serve both, and two drives in the same machine often disagree.
+* **A sensor that publishes no limit is not watched at all.** `k10temp` — the
+  CPU — publishes nothing on current AMD hardware, and that is the right
+  outcome rather than a gap: Zen boosts until it reaches its limit and stays
+  there, so CPU temperature is a poor alarm by design. Cooling trouble shows
+  up on the GPU, the DIMMs and the SSDs, and those do publish limits.
+* **`max` is ignored**, only `crit` (or `emergency`) counts. A DDR5 module
+  reports `max 55` with `crit 85`; an Ethernet controller reports `max 120`
+  and no `crit`. That file means whatever a driver wants it to.
+* **A minute of it**, because a chip touches its limit whenever it boosts.
+  After a warning that sensor stays quiet until it has cooled several degrees,
+  and no second warning follows within five minutes whatever trips it.
+
+To see what it would do on your machine, before switching it on:
+
+```bash
+steamos-led-serial --temperature
+```
+
+Every sensor is listed with the limits it publishes and the temperature it is
+watched at — or a dash, if it is not watched.
+
+It is **not** connected to the [temperature gauge](#temperature-gauge). The
+gauge displays one sensor you picked; this watches all of them, and either
+works with the other switched off.
 
 ### When several arrive at once
 

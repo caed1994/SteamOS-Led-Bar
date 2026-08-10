@@ -382,11 +382,6 @@ FRIEND_COLOURS = (
     ("Orange", "#ff3200"),
 )
 
-WARNING_COLOURS = (
-    ("Orange red", "#ff3c00"),
-    ("Red", "#ff0000"),
-    ("Amber", "#ffbf00"),
-)
 
 
 # -- the flash shapes ------------------------------------------------------

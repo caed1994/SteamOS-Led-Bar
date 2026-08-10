@@ -25,7 +25,7 @@ KINDS = {
     "achievement": (255, 215, 0),    # gold
     "message": (128, 0, 255),        # purple
     "friend": (0, 200, 80),          # green
-    "warning": (255, 60, 0),         # orange-red
+    "warning": (255, 0, 0),          # red
 }
 
 PULSES = 3          # how often the bar swells during one notification
@@ -35,6 +35,7 @@ STYLE_BLOOM = "bloom"
 STYLE_PULSE = "pulse"
 STYLE_DOUBLE_FLASH = "double_flash"
 STYLE_COMET = "comet"
+STYLE_ALTERNATE = "alternate"
 
 # What a per-kind style is set to when it should simply follow the general one.
 # Not a style itself: it never reaches _STYLES, it only means "not set here".
@@ -68,6 +69,15 @@ COMET_TAIL = 0.33
 # Floors in LEDs, for strips too short for the fractions to mean anything.
 COMET_MIN_HEAD = 0.8
 COMET_MIN_TAIL = 1.0
+
+# The alternating halves, in seconds for the same reason as the double flash.
+# One period is both sides once, so half a second is two switches a second -
+# about the rate an emergency vehicle's wig-wag runs at, and no accident.
+ALTERNATE_PERIOD = 0.5
+# How much of a period each side is lit. The remainder is a hairline of dark
+# between the two, which sharpens the "two sides" read and, at the end of the
+# last period, is what leaves the bar dark for whatever comes next.
+ALTERNATE_DUTY = 0.45
 
 
 def _breath(progress):
@@ -172,6 +182,42 @@ def comet_levels(progress, led_count, duration):
     return levels
 
 
+def alternate_levels(progress, led_count, duration):
+    """Per-LED brightness for the alternating halves: left, right, left.
+
+    The one shape that says "something is wrong" rather than "something
+    happened" - two sides in antiphase is what an emergency vehicle does, and
+    nothing else on this bar looks remotely like it. On an odd strip the
+    middle LED stays dark, which makes the two sides read as two.
+    """
+    if led_count < 1:
+        return []
+
+    periods = max(1, round(duration / ALTERNATE_PERIOD))
+    period = duration / periods
+    elapsed = (progress * duration) % period
+
+    if elapsed < period * ALTERNATE_DUTY:
+        side = 0
+    elif period * 0.5 <= elapsed < period * (0.5 + ALTERNATE_DUTY):
+        side = 1
+    else:
+        return [0.0] * led_count        # the hairline between the two
+
+    half = led_count // 2
+    # Too short to spare one for the gap: three LEDs would leave one a side.
+    gap = 1 if led_count % 2 and led_count >= 5 else 0
+    levels = []
+    for index in range(led_count):
+        if gap and index == half:
+            levels.append(0.0)
+        elif (index < half) == (side == 0):
+            levels.append(1.0)
+        else:
+            levels.append(0.0)
+    return levels
+
+
 # The shapes a notification can take; config validates NOTIFY_STYLE against
 # STYLES, so a new one only has to be registered here. Each takes the position
 # within the flash, the strip length and how long the whole flash lasts - the
@@ -182,8 +228,15 @@ _STYLES = {
     STYLE_PULSE: pulse_levels,
     STYLE_DOUBLE_FLASH: double_flash_levels,
     STYLE_COMET: comet_levels,
+    STYLE_ALTERNATE: alternate_levels,
 }
 STYLES = tuple(_STYLES)
+
+# Kinds that always look the same, whatever the configuration says. A warning
+# is the one notification you must not have to recognise - it has to mean the
+# same thing on every machine, so red and the alarm shape are not offered as a
+# choice. Everything else is yours to arrange.
+FIXED_KINDS = {"warning": STYLE_ALTERNATE}
 
 
 def parse_color(text, kinds=None):
@@ -283,6 +336,11 @@ class NotificationOverlay:
         # A trigger word stays the interface - callers ask for "achievement",
         # not for a colour - so which gold that is stays a local decision.
         self.colors = dict(KINDS, **(colors or {}))
+        for kind in FIXED_KINDS:
+            # Fixed means fixed: a colour handed in for one of these is
+            # dropped rather than honoured, so nothing downstream can quietly
+            # make a warning look like anything but a warning.
+            self.colors[kind] = KINDS[kind]
         # Same again for the shape. Only kinds that want their own are in
         # here; everything else, an arbitrary colour included, uses `style`.
         self.styles = {kind: shape for kind, shape
@@ -333,8 +391,8 @@ class NotificationOverlay:
 
     def _start(self, kind, color, now):
         LOG.info("notification: %s", kind)
-        self.current = Notification(color, self.duration, now,
-                                    self.styles.get(kind, self.style), kind)
+        style = FIXED_KINDS.get(kind) or self.styles.get(kind, self.style)
+        self.current = Notification(color, self.duration, now, style, kind)
         # Measured from the start, so one window covers the flash and the gap
         # after it. Expired entries are dropped here, or an arbitrary colour
         # per flash would grow this map without end.
