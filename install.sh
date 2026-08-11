@@ -500,10 +500,29 @@ systemctl enable steamos-led-serial.service
 # lands on what was just installed.
 systemctl restart steamos-led-serial.service
 
-if systemctl is-active --quiet steamos-led-serial.service; then
+# systemctl restart returns once the process has been launched, so a service
+# that dies on its own configuration is genuinely "active" for the moment in
+# between - and a crash loop cycles through active, failed and activating, so
+# one glance can land anywhere. Look again once it has had time to fail, and
+# count the restarts.
+sleep 4
+restarts="$(systemctl show -p NRestarts --value steamos-led-serial.service \
+            2>/dev/null || true)"
+if systemctl is-active --quiet steamos-led-serial.service \
+   && [[ "${restarts:-0}" == "0" ]]; then
     say "Service is running."
 else
-    warn "Service is not active. Check: journalctl -u steamos-led-serial -n 40"
+    if [[ "${restarts:-0}" != "0" ]]; then
+        warn "Service started and then died ${restarts}x - it is not staying up."
+    else
+        warn "Service is not active."
+    fi
+    # Print the reason here rather than leaving it to be dug out of the
+    # journal: a bad line in the configuration says so plainly, and that is
+    # exactly the message worth seeing at the end of an install.
+    warn "The last thing it said:"
+    journalctl -u steamos-led-serial.service -n 5 --no-pager -o cat 2>/dev/null \
+        | sed 's/^/    /' >&2 || true
 fi
 
 # The service creates the notification pipe at startup and carries on without

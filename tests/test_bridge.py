@@ -539,6 +539,63 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class RefusedConfigurationTest(unittest.TestCase):
+    """A file the service will not accept must stop it, not spin it.
+
+    Found on hardware: one hand-written line naming an option that does not
+    exist (WARNING_COLOR, by analogy with the two colours that are settings)
+    put the unit in a restart loop. Every three seconds it started, refused
+    the file and died, which buried the one line saying which option was
+    wrong under forty lines of systemd noise - and the installer, glancing
+    once at is-active, called it running.
+    """
+
+    def _run_with(self, text):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".conf",
+                                         delete=False) as handle:
+            handle.write(text)
+            path = handle.name
+        self.addCleanup(os.unlink, path)
+        # --check-config loads the file and reports, which is the shortest
+        # path through main() that the configuration has to survive.
+        return service.main(["--config", path, "--check-config"])
+
+    def test_an_unknown_option_is_refused_with_the_documented_code(self):
+        # A typo, not WARNING_COLOR: that one is in config.RETIRED, which is
+        # the other half of the same incident. An option we withdrew is read
+        # and ignored on purpose - the loop it caused is worth preventing at
+        # both ends, but only one of them is the reader's mistake.
+        code = self._run_with("LED_COUNT=17\nLED_COUTN=60\n")
+        self.assertEqual(code, service.CONFIG_REFUSED_EXIT)
+
+    def test_an_option_we_withdrew_is_not_treated_as_a_typo(self):
+        self.assertEqual(self._run_with("LED_COUNT=17\nWARNING_COLOR=#ff3c00\n"),
+                         0)
+
+    def test_a_line_that_is_not_an_option_at_all_is_refused_too(self):
+        self.assertEqual(self._run_with("this is not a setting\n"),
+                         service.CONFIG_REFUSED_EXIT)
+
+    def test_systemd_is_told_not_to_retry_that(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(here, "..", "server", "steamos-led-serial.service")
+        with open(path) as handle:
+            unit = handle.read()
+        self.assertIn("RestartPreventExitStatus=%d"
+                      % service.CONFIG_REFUSED_EXIT, unit)
+        self.assertIn("Restart=always", unit,
+                      "everything else still has to come back")
+
+    def test_the_code_is_not_the_one_a_healthy_exit_uses(self):
+        # 0 is a clean shutdown, which must keep being restarted.
+        self.assertNotEqual(service.CONFIG_REFUSED_EXIT, 0)
+
+    def test_a_good_file_is_not_refused(self):
+        self.assertNotEqual(self._run_with("LED_COUNT=17\n"),
+                            service.CONFIG_REFUSED_EXIT)
+
+
 class ConfigRewritingTest(unittest.TestCase):
     """Changing settings must not shred the file explaining them.
 
