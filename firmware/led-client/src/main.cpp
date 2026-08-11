@@ -6,13 +6,7 @@
 
 #include <Arduino.h>
 #include <NeoPixelBus.h>
-#if defined(ESP32)
-// esp_reset_reason() and RTC_NOINIT_ATTR. Arduino.h pulls this in on most
-// cores, but the standby memory below depends on both, so say it outright.
-#include <esp_system.h>
-#endif
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 
 #ifndef LED_PIN
@@ -240,33 +234,9 @@ static bool linkIdle = true;
 static bool waitingForHost = true;
 static uint32_t waitStartMs = 0;
 static uint32_t lastWaitFrameMs = 0;
-static bool bootExternal = false;
-// Said at boot and again on every HELLO. The host flushes the port after
-// waiting for the board to come up, so anything sent at boot is thrown away
-// before it can be read - and this line is the only way to tell from the
-// outside whether the standby survived the reset.
-static char bootSummary[80] = "ready";
 
 // Standby: the host said the machine is going to sleep, so nothing more will
 // arrive until it wakes. The strip breathes on its own until it does.
-//
-// It has to survive a reset, because waking the machine causes one: the host
-// reopens the serial port, DTR drops, and this firmware starts again in the
-// middle of the breath. RTC memory is exactly the right place for that - it
-// survives an external reset and does not survive a power cut, which is the
-// distinction wanted. A machine that was unplugged has no standby to return
-// to; one that was merely asleep does.
-struct StandbyMemory {
-  uint32_t magic;
-  uint32_t colour;              // 0x00RRGGBB
-  uint32_t periodMs;
-};
-static const uint32_t STANDBY_MAGIC = 0x5EEB1E5A;
-
-#if defined(ESP32)
-RTC_NOINIT_ATTR static StandbyMemory standbyMemory;
-#endif
-
 static bool standby = false;
 static uint8_t standbyRed = 0;
 static uint8_t standbyGreen = 0;
@@ -274,70 +244,6 @@ static uint8_t standbyBlue = 0;
 static uint32_t standbyPeriodMs = 1;
 static uint32_t standbyStartMs = 0;
 static uint32_t lastStandbyFrameMs = 0;
-
-// Where in RTC user memory to keep it, in 32 bit words. Not 0: the ESP8266
-// bootloader keeps its own OTA command structure in the first 128 bytes and
-// rewrites it on every boot, which would wipe this before setup() ever read
-// it. Anything past word 32 is ours.
-static const uint32_t STANDBY_SLOT = 32;
-
-static void writeStandbyMemory(const StandbyMemory &mem) {
-#if defined(ESP8266)
-  // Word-addressed, so the struct is three uint32_t and nothing else.
-  ESP.rtcUserMemoryWrite(STANDBY_SLOT, (uint32_t *)&mem, sizeof(mem));
-#elif defined(ESP32)
-  standbyMemory = mem;
-#else
-  (void)mem;
-#endif
-}
-
-static void rememberStandby(uint8_t red, uint8_t green, uint8_t blue,
-                            uint32_t periodMs) {
-  StandbyMemory mem;
-  mem.magic = STANDBY_MAGIC;
-  mem.colour = ((uint32_t)red << 16) | ((uint32_t)green << 8) | blue;
-  mem.periodMs = periodMs;
-  writeStandbyMemory(mem);
-}
-
-static void forgetStandby() {
-  StandbyMemory mem;
-  mem.magic = 0;
-  mem.colour = 0;
-  mem.periodMs = 0;
-  writeStandbyMemory(mem);
-}
-
-// Whether we were breathing when something reset us. The magic word is the
-// whole check: after a power cut this memory holds whatever it holds, and one
-// pattern in four billion matching is not worth a checksum.
-static bool recallStandby(StandbyMemory *out) {
-#if defined(ESP8266)
-  if (!ESP.rtcUserMemoryRead(STANDBY_SLOT, (uint32_t *)out, sizeof(*out))) {
-    return false;
-  }
-#elif defined(ESP32)
-  *out = standbyMemory;
-#else
-  (void)out;
-  return false;
-#endif
-  return out->magic == STANDBY_MAGIC && out->periodMs > 0;
-}
-
-// A reset the host caused by opening the port, as opposed to being switched
-// on. Only the first deserves the benefit of the doubt about a missing host.
-static bool bootFromExternalReset() {
-#if defined(ESP8266)
-  const rst_info *info = ESP.getResetInfoPtr();
-  return info != nullptr && info->reason == REASON_EXT_SYS_RST;
-#elif defined(ESP32)
-  return esp_reset_reason() == ESP_RST_EXT;
-#else
-  return false;
-#endif
-}
 
 static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length) {
   if (waitingForHost) {
@@ -351,15 +257,11 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
   // standby is the host checking the link, not waking the strip up.
   if (standby && (type == MSG_FRAME || type == MSG_FILL || type == MSG_BLANK)) {
     standby = false;
-    forgetStandby();
   }
 
   switch (type) {
     case MSG_HELLO:
       sendInfo();
-      // Again, because the greeting is the first thing that survives: what
-      // this board did at boot is otherwise unobservable from the host.
-      sendLog(bootSummary);
       break;
     case MSG_STANDBY: {
       if (length < 5) {
@@ -373,7 +275,6 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
       standbyPeriodMs = period > 0 ? period : 1;
       standbyStartMs = millis();
       standby = true;
-      rememberStandby(standbyRed, standbyGreen, standbyBlue, standbyPeriodMs);
       // The strip is meant to stay lit through the silence that follows, so
       // the idle rule below has to be told this silence is expected.
       linkIdle = false;
@@ -515,7 +416,6 @@ static float breathLevel(uint32_t elapsed, uint32_t periodMs) {
 }
 
 static void waitingAnimation(uint32_t now) {
-  const uint32_t waited = (uint32_t)(now - waitStartMs);
   if ((uint32_t)(now - lastWaitFrameMs) < BREATH_FRAME_MS) {
     return;
   }
@@ -526,7 +426,7 @@ static void waitingAnimation(uint32_t now) {
     return;
   }
 
-  const float level = breathLevel(waited, WAIT_BREATH_MS);
+  const float level = breathLevel(now - waitStartMs, WAIT_BREATH_MS);
   strip->ClearTo(RgbColor(clampBrightness((uint8_t)(WAIT_RED * level + 0.5f)),
                           clampBrightness((uint8_t)(WAIT_GREEN * level + 0.5f)),
                           0));
@@ -565,32 +465,8 @@ void setup() {
 
   waitStartMs = millis();
   lastFrameMs = waitStartMs;
-  bootExternal = bootFromExternalReset();
-
-  // Pick the breath back up if that reset interrupted one. The host is asleep
-  // and will not say anything until it wakes, so nothing else would.
-  StandbyMemory saved = {0, 0, 0};
-  const bool recalled = recallStandby(&saved);
-  if (recalled) {
-    standbyRed = (uint8_t)((saved.colour >> 16) & 0xFF);
-    standbyGreen = (uint8_t)((saved.colour >> 8) & 0xFF);
-    standbyBlue = (uint8_t)(saved.colour & 0xFF);
-    standbyPeriodMs = saved.periodMs;
-    standbyStartMs = millis();
-    standby = true;
-    // There is a host; it just reset us on its way back in.
-    waitingForHost = false;
-  }
-
   sendInfo();
-  // Says what this boot was and what it found, because whether RTC memory
-  // survives the reset a host causes is a per-board question that cannot be
-  // answered by reading the datasheet. It reaches the journal as "esp: ...".
-  snprintf(bootSummary, sizeof(bootSummary),
-           "ready (reset %s, standby memory %s)",
-           bootExternal ? "external" : "power-on",
-           recalled ? "found" : (saved.magic == 0 ? "empty" : "not ours"));
-  sendLog(bootSummary);
+  sendLog("ready");
 }
 
 void loop() {

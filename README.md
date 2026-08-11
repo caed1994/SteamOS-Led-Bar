@@ -274,12 +274,6 @@ the ESP carries on alone until the first frame arrives again.
 
 Three consequences worth knowing:
 
-* **Waking the machine resets the ESP** — opening the serial port pulses DTR,
-  which reboots these boards. The firmware keeps the standby colour in RTC
-  memory, which survives that reset but not a power cut, so the breath simply
-  carries on where it left off and the normal effect follows when the service
-  is back. Without that it would interrupt itself to report a missing host,
-  which is true for those two seconds and useless.
 * **The ESP has to stay powered.** It runs off USB, and whether the ports stay
   live in S3 is a BIOS setting — often called *ErP*, *Wake on USB* or *USB
   power in S3*. If yours cuts power, the strip goes dark and nothing on this

@@ -144,15 +144,8 @@ class DeviceInfo:
 class EspLink:
     """Owns the serial port, the handshake and reconnect behaviour."""
 
-    # Opening the port resets the board, and this is how long we wait before
-    # saying anything. It used to be 1.8 s, long enough for any board to come
-    # up - but the firmware breathes amber while no host has spoken to it, so
-    # that wait *is* the amber flash people see when the service restarts or
-    # the machine wakes. Short enough that it is barely visible, with the
-    # attempts above carrying a slower board: a HELLO that arrives too early
-    # is simply lost and asked again.
-    BOOT_DELAY = 0.35
-    HELLO_ATTEMPTS = 10
+    BOOT_DELAY = 1.8       # ESP boot time after the port asserts DTR
+    HELLO_ATTEMPTS = 5
     HELLO_TIMEOUT = 0.4
 
     def __init__(self, port="auto", baudrate=230400, led_count=17,
