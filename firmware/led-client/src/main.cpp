@@ -8,9 +8,6 @@
 #include <NeoPixelBus.h>
 #include <math.h>
 #include <string.h>
-#if defined(ESP32)
-#include <esp_system.h>         // esp_reset_reason()
-#endif
 
 #ifndef LED_PIN
 #define LED_PIN 2
@@ -459,21 +456,6 @@ static void standbyAnimation(uint32_t now) {
   strip->Show();
 }
 
-// Whether a host reset us by opening the serial port, as opposed to our being
-// switched on. These boards wire the adapter's DTR line to the reset circuit,
-// so every service restart and every wake from suspend arrives here - see
-// PROTOCOL.md step 1, where the host waits for exactly this boot.
-static bool bootFromExternalReset() {
-#if defined(ESP8266)
-  const rst_info *info = ESP.getResetInfoPtr();
-  return info != nullptr && info->reason == REASON_EXT_SYS_RST;
-#elif defined(ESP32)
-  return esp_reset_reason() == ESP_RST_EXT;
-#else
-  return false;
-#endif
-}
-
 void setup() {
 #if defined(ESP8266)
   Serial.setRxBufferSize(1024);
@@ -483,17 +465,6 @@ void setup() {
 
   waitStartMs = millis();
   lastFrameMs = waitStartMs;
-
-  if (bootFromExternalReset()) {
-    // The waiting breath says "nobody has ever spoken to me". After a reset
-    // from outside that is simply untrue - the reset *is* a host opening the
-    // port, and its first frame is a second or two away. So say nothing and
-    // leave the strip holding whatever it last latched: dark after a service
-    // stop, which clears the strip on its way out, or the last standby breath
-    // after a wake. A power-up still breathes, because there the news is real.
-    waitingForHost = false;
-  }
-
   sendInfo();
   sendLog("ready");
 }
