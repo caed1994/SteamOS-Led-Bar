@@ -261,6 +261,22 @@ not live animation state. "Number of scanners" is therefore plausible; the
 default of 3 simply did not look like what one expects from "patrol". To take
 the module at its word, set `PATROL_DOTS=3`.
 
+### Before Steam has started
+
+The strip keeps its startup breath through the whole boot, and the effect
+takes over the moment Steam sets the LEDs.
+
+Worth knowing because it looks like a bug otherwise: the kernel module comes
+up reporting **off**, and only counts its sequence number up when something
+writes to it. So from the service connecting until Game Mode is up, the
+truthful frame is black. The service leaves the strip to the ESP for that
+stretch rather than sending it — a dark bar during boot is a gap, not
+information.
+
+On a machine that boots to the desktop and never starts Game Mode, the bar
+therefore keeps breathing rather than going dark. That is the same statement:
+Steam has not said anything yet.
+
 ## While the machine sleeps
 
 Suspend the machine and the strip keeps a slow white breath going instead of

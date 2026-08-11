@@ -34,6 +34,20 @@ DEVICE_RETRY_DELAY = 5.0
 STANDBY_COLOR = (30, 30, 30)
 STANDBY_PERIOD_MS = 6000            # one slow breath, calmer than the waiting one
 
+# The kernel module starts its counter here and steps it on every write, so a
+# snapshot still carrying it means Steam has not touched the LEDs since the
+# module loaded - which is most of a boot, and the module reports "off" all
+# the while. Rendering that faithfully is a black strip, and the ESP's own
+# startup breath dies at the handshake to make way for it.
+UNTOUCHED_SEQ = 1
+
+# So the bar keeps breathing instead, in the firmware's own startup amber and
+# at its rhythm. Sent from here rather than left to the firmware because the
+# link is already up by then: connecting later would reset the board at
+# exactly the moment Steam takes over.
+STARTUP_COLOR = (40, 16, 0)
+STARTUP_PERIOD_MS = 3000
+
 # Words on the trigger pipe that are not flashes. The pipe is already read in
 # the main loop and is world-writable, so the sleep hook has somewhere to say
 # this without a second channel to keep alive.
@@ -137,6 +151,8 @@ class Runner:
         # own and the loop must stay quiet, or the next rendered frame would
         # end the standby a millisecond after it started.
         self.standby_since = None
+        # Whether the ESP has been told to keep breathing until Steam turns up.
+        self._breathing_for_steam = False
 
     def stop(self, *_args):
         self.running = False
@@ -267,6 +283,23 @@ class Runner:
         else:
             LOG.warning("could not hand the strip over for standby")
 
+    def _hold_for_steam(self):
+        """Leave the strip to the ESP while Steam has still said nothing.
+
+        Once told, it keeps breathing on its own until the next frame - so
+        this only has to speak up again after something interrupted it, which
+        a notification flash does.
+        """
+        if not self.link.connected:
+            self._breathing_for_steam = False
+            return
+        if self._breathing_for_steam:
+            return
+        if self.link.send_standby(STARTUP_COLOR, STARTUP_PERIOD_MS):
+            self._breathing_for_steam = True
+            LOG.info("Steam has not set the LEDs yet - leaving the startup "
+                     "breath to the ESP until it does")
+
     def _leave_standby(self, why):
         if self.standby_since is None:
             return
@@ -349,8 +382,18 @@ class Runner:
 
             # A flash covers the whole bar; nothing underneath is worth drawing.
             payload = self.overlay.frame(now)
+            if payload is None and snapshot.seq <= UNTOUCHED_SEQ:
+                # Nothing to show yet, and black is not an improvement on the
+                # breath the ESP is already running. A flash still gets
+                # through - it is the branch above - and lands us back here
+                # afterwards, which is when the breath is asked for again.
+                self._hold_for_steam()
+                continue
             if payload is None:
                 payload = self.renderer.render(snapshot, now - started)
+            if self._breathing_for_steam:
+                LOG.info("Steam set the LEDs; taking the strip back")
+                self._breathing_for_steam = False
             # Idle heartbeat too: the firmware blanks the strip if we go quiet.
             self.link.send_frame(payload, self.config["LED_COUNT"])
 

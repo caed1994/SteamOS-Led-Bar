@@ -49,6 +49,14 @@ rendered — and the strip should still show that the machine is only asleep.
 The colour and the period travel in the message rather than living in the
 firmware, so changing how it looks does not mean reflashing.
 
+The host also uses it at startup, for the same reason in miniature: the
+kernel module comes up reporting "off" and only steps its sequence number
+when something writes, so between the service connecting and Steam setting
+the LEDs the honest frame is black - and sending it would kill the startup
+breath the ESP is already running. So the host asks for that breath to
+continue instead, in the firmware's own amber, until the first thing Steam
+writes takes the strip back.
+
 Standby ends on the next `FRAME`, `FILL` or `BLANK`. A `PING` does not end it:
 that is the host checking the link, not driving the strip. A firmware that
 does not know the message ignores it, and the strip goes dark as it did

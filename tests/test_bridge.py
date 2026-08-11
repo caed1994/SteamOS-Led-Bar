@@ -665,6 +665,8 @@ class StandbyTest(unittest.TestCase):
             self.frames = 0
             self.answer = True
 
+        connected = True
+
         def connect(self):
             return True
 
@@ -764,8 +766,14 @@ class StandbyQuietTest(unittest.TestCase):
         runner.link = StandbyTest.FakeLink()
         return runner
 
-    def _drive(self, runner, seconds=0.3):
-        """Run the real loop against a FIFO fed with snapshots."""
+    def _drive(self, runner, seconds=0.3, seq=None):
+        """Run the real loop against a FIFO fed with snapshots.
+
+        `seq` pins the sequence number, which is how the module says whether
+        anything has written to it: pinned at UNTOUCHED_SEQ it never has, and
+        that is a boot before Steam starts. Left out, the number climbs from
+        just above it, which is an ordinary session.
+        """
         from steamos_led import shim as shim_module
 
         directory = tempfile.mkdtemp()
@@ -783,12 +791,13 @@ class StandbyQuietTest(unittest.TestCase):
                 return
             snapshot = shim_module.make_snapshot(shim_module.EFFECT_MANUAL,
                                                  (10, 200, 30))
-            seq = 0
+            counter = service.UNTOUCHED_SEQ
             try:
                 while not stop.is_set():
-                    seq += 1
+                    counter += 1
                     try:
-                        os.write(fd, shim_module.encode(snapshot, seq))
+                        os.write(fd, shim_module.encode(
+                            snapshot, counter if seq is None else seq))
                     except OSError:
                         return
                     time.sleep(0.02)
@@ -838,3 +847,54 @@ class StandbyQuietTest(unittest.TestCase):
         self._drive(runner)
         self.assertIsNone(runner.standby_since)
         self.assertGreater(runner.link.frames, 0, "and it takes the bar back")
+
+
+class StartupBreathTest(StandbyQuietTest):
+    """What the bar does between the service starting and Steam saying anything.
+
+    The kernel module comes up reporting "off" and only counts its sequence up
+    when something writes, so for most of a boot the honest frame is black -
+    and sending it kills the breath the ESP is already running. Nobody is
+    served by that: it is not information, it is a gap.
+    """
+
+    def _runner(self):
+        # Notifications on, unlike the standby tests above: one of these is
+        # about a flash arriving before Steam has said anything.
+        conf = dict(config.DEFAULTS)
+        conf.update(SERIAL_PORT="/dev/does-not-exist", NOTIFY=True,
+                    NOTIFY_WARNING=False, NOTIFY_DURATION=0.2)
+        runner = service.Runner(conf)
+        runner.link = StandbyTest.FakeLink()
+        return runner
+
+    def test_nothing_is_sent_while_steam_has_said_nothing(self):
+        runner = self._runner()
+        self._drive(runner, seq=service.UNTOUCHED_SEQ)
+        self.assertEqual(runner.link.frames, 0)
+
+    def test_the_esp_is_asked_to_keep_breathing(self):
+        runner = self._runner()
+        self._drive(runner, seq=service.UNTOUCHED_SEQ)
+        self.assertEqual(len(runner.link.standby), 1, "asked once, not per frame")
+        colour, period = runner.link.standby[0]
+        self.assertEqual(colour, service.STARTUP_COLOR)
+        self.assertEqual(period, service.STARTUP_PERIOD_MS)
+
+    def test_the_first_thing_steam_writes_takes_the_bar_back(self):
+        # The sequence number is what says so: the module steps it on every
+        # write, so anything above the initial value means Steam is there.
+        runner = self._runner()
+        self._drive(runner, seq=service.UNTOUCHED_SEQ + 1)
+        self.assertGreater(runner.link.frames, 0)
+        self.assertEqual(runner.link.standby, [])
+
+    def test_a_flash_still_gets_through(self):
+        # A notification before Steam turns up has to be shown - and since
+        # frames end the ESP's breath, it has to be asked for again after.
+        runner = self._runner()
+        runner.overlay.trigger("achievement", time.monotonic())
+        self._drive(runner, seconds=0.6, seq=service.UNTOUCHED_SEQ)
+        self.assertGreater(runner.link.frames, 0, "the flash was not shown")
+        self.assertGreaterEqual(len(runner.link.standby), 1,
+                                "and the breath was not asked for again")
