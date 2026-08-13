@@ -59,9 +59,14 @@ different transport — no Wi-Fi, no IP configuration, no access point.
 ### On a fresh SteamOS
 
 A Deck that has never had a package installed needs three things first, and
-the installer does all of them for you — it asks before touching anything, and
-puts the read-only rootfs back afterwards. You only need this if you would
-rather do it yourself, or if you are not on SteamOS:
+the installer does all of them for you. It **unlocks the read-only rootfs
+straight away**, before it asks anything — it has to write the suspend hook
+and the kernel module there — and locks it again at the end, unless you had
+already unlocked it yourself. Installing packages is the one step it asks
+about first.
+
+You only need the commands below if you would rather do it by hand, or if you
+are not on SteamOS:
 
 ```bash
 passwd                              # sudo needs a password; a fresh Deck has none

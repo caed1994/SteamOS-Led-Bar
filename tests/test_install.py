@@ -143,6 +143,30 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertIn("pacman-key --init", self.text)
         self.assertIn("pacman-key --populate", self.text)
 
+    def test_the_rootfs_is_unlocked_before_anything_is_written(self):
+        """Order, not presence - that is what went wrong.
+
+        Unlocking around each write in turn left the suspend hook being
+        installed into /usr/lib while the rootfs had been locked again, and
+        set -e turns that into an aborted install. It is unlocked once, before
+        the first question is even asked.
+        """
+        unlock = self.text.index("\nunlock_rootfs || true")
+        for path, what in (('SLEEP_HOOK_PATH"', "the suspend hook"),
+                           ("pacman -S --needed", "installing packages"),
+                           ('"$dir/install.sh"', "the kernel module")):
+            self.assertLess(unlock, self.text.index(path),
+                            "%s runs before the rootfs is unlocked" % what)
+
+    def test_the_rootfs_is_only_locked_again_if_we_unlocked_it(self):
+        # Somebody who ran steamos-readonly disable themselves should find it
+        # the way they left it.
+        self.assertIn("ROOTFS_RELOCK=1", self.text)
+        self.assertIn("[[ $ROOTFS_RELOCK -eq 1 ]] || return 0", self.text)
+
+    def test_an_abandoned_run_still_locks_it_again(self):
+        self.assertIn("trap relock_rootfs EXIT", self.text)
+
     def test_a_partial_upgrade_is_used_on_purpose(self):
         # -Syu would pull a newer kernel than the one now running, and the
         # headers would then match nothing.

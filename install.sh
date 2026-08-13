@@ -87,6 +87,45 @@ command -v python3 >/dev/null || die "python3 not found"
 [[ -f "$SOURCE_DIR/server/steamos-led-serial" ]] \
     || die "run this script from inside the cloned repository"
 
+# --- the read-only rootfs ---------------------------------------------------
+#
+# SteamOS mounts / read-only, and this installer writes to it in three places:
+# the suspend hook under /usr/lib/systemd, the kernel module under
+# /usr/lib/modules, and whatever pacman has to fetch to build that module.
+# Unlock once, here, before anything is asked or written - doing it around
+# each write in turn is how the suspend hook ended up being installed while
+# the rootfs was locked again, which aborts the whole run.
+#
+# The module's own installer does the same dance; finding it already unlocked,
+# it leaves it alone.
+
+ROOTFS_RELOCK=0
+
+relock_rootfs() {
+    [[ $ROOTFS_RELOCK -eq 1 ]] || return 0
+    ROOTFS_RELOCK=0                     # so the exit trap does not repeat it
+    say "Locking the read-only rootfs again"
+    steamos-readonly enable \
+        || warn "could not lock it again: sudo steamos-readonly enable"
+}
+
+unlock_rootfs() {
+    command -v steamos-readonly >/dev/null 2>&1 || return 0
+    steamos-readonly status 2>/dev/null | grep -qi enabled || return 0
+    say "Unlocking the read-only rootfs"
+    if ! steamos-readonly disable; then
+        warn "could not unlock the rootfs. The suspend hook and the kernel"
+        warn "module cannot be installed while / stays read-only."
+        return 1
+    fi
+    ROOTFS_RELOCK=1
+    # Put it back however this ends, including the die() paths.
+    trap relock_rootfs EXIT
+    return 0
+}
+
+unlock_rootfs || true
+
 # --- gather settings -------------------------------------------------------
 
 ask() {  # ask <prompt> <default>
@@ -302,30 +341,16 @@ install_build_prerequisites() {  # install_build_prerequisites <missing...>
         [[ "$answer" =~ ^[YyJj] ]] || { say "Leaving that to you."; return 1; }
     fi
 
-    # pacman writes to the rootfs, which SteamOS keeps read-only. Put it back
-    # afterwards: the module installer further down does its own unlocking,
-    # and leaving the system as it was found is the polite half of that.
-    local was_readonly=0
+    # pacman writes to the rootfs, which was unlocked at the top of this run
+    # and stays that way until the end - see unlock_rootfs.
     if rootfs_is_readonly; then
-        say "Unlocking the read-only rootfs"
-        steamos-readonly disable || { warn "could not unlock the rootfs"; return 1; }
-        was_readonly=1
+        warn "the rootfs is read-only, so pacman cannot install anything"
+        return 1
     fi
 
-    local installed=1
-    if prepare_pacman; then
-        say "Installing ${packages[*]}"
-        pacman -S --needed --noconfirm "${packages[@]}" || installed=0
-    else
-        installed=0
-    fi
-
-    if [[ $was_readonly -eq 1 ]]; then
-        say "Locking the rootfs again"
-        steamos-readonly enable || warn "could not lock the rootfs again"
-    fi
-
-    [[ $installed -eq 1 ]] || return 1
+    prepare_pacman || return 1
+    say "Installing ${packages[*]}"
+    pacman -S --needed --noconfirm "${packages[@]}" || return 1
     return 0
 }
 
@@ -739,6 +764,11 @@ if [[ "$(notify_setting NOTIFY 1)" =~ ^(1|true|yes|on)$ ]]; then
 fi
 
 install_achievement_watcher || true
+
+# Everything that needed a writable / has been written by now. Do it here
+# rather than leaving it to the exit trap, so the last thing on screen is the
+# summary and not a line about filesystems.
+relock_rootfs
 
 cat <<EOF
 
