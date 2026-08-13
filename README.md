@@ -45,7 +45,9 @@ SteamOS update.
   initialising pacman's keyring first if it has never been used
 * builds and loads the kernel module
 * installs the service, config file, udev rule and suspend hook
-* offers to flash the ESP firmware, and to fetch PlatformIO if you say yes
+* offers to install PlatformIO and put it on your PATH, whether or not you
+  flash anything today
+* offers to flash the ESP firmware
 * installs the control panel in the application menu
 * installs the achievement watcher as a user service
 * starts everything
@@ -121,8 +123,10 @@ so you never have to guess it.
 * **Python 3.9+**, preinstalled. No extra packages, not even pyserial.
 * **make, gcc and kernel headers**, to build the kernel module. The installer
   works out which headers package you need and offers to install it.
-* **PlatformIO**, only to flash the ESP firmware. The installer offers to fetch
-  it. By hand:
+* **PlatformIO**, only to flash the ESP firmware. The installer offers it on
+  every run, whatever you answered about firmware, and adds it to your PATH in
+  `~/.bashrc` so `pio` works in a new shell. Say no and nothing is downloaded.
+  By hand:
   ```bash
   curl -fsSL -o get-platformio.py \
     https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py

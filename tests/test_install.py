@@ -167,6 +167,30 @@ class InstallerShapeTest(unittest.TestCase):
     def test_an_abandoned_run_still_locks_it_again(self):
         self.assertIn("trap relock_rootfs EXIT", self.text)
 
+    def test_platformio_is_offered_whatever_the_firmware_answer_was(self):
+        """It used to be reached only from inside the flashing step.
+
+        The firmware question defaults to "no", so pressing Enter through the
+        installer meant PlatformIO was never mentioned - and the first time you
+        did want to flash, it was a download away.
+        """
+        offer = self.text.index("\nensure_platformio || true")
+        guard = self.text.index('[[ -n "$FLASH_ENV" ]] || return 0')
+        self.assertLess(offer, self.text.index('if [[ -n "$FLASH_ENV" ]]; then'),
+                        "the offer has to come before the flashing step")
+        self.assertNotIn("install_platformio", self.text[guard:guard + 2000],
+                         "flash_firmware should not ask a second time")
+
+    def test_the_path_line_reaches_the_profile_unexpanded(self):
+        # Written into .bashrc, so it has to survive as $HOME rather than as
+        # whatever $HOME was on the machine that ran the installer.
+        self.assertIn(
+            """PLATFORMIO_PATH_LINE='export PATH="$HOME/.platformio/penv/bin:$PATH"'""",
+            self.text)
+
+    def test_the_path_line_is_not_stacked_on_every_run(self):
+        self.assertIn("grep -qF '.platformio/penv/bin' \"$profile\"", self.text)
+
     def test_a_partial_upgrade_is_used_on_purpose(self):
         # -Syu would pull a newer kernel than the one now running, and the
         # headers would then match nothing.

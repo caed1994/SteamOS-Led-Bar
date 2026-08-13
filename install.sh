@@ -529,16 +529,31 @@ find_pio() {
 # tell you to use.
 PLATFORMIO_INSTALLER_URL="https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py"
 
-install_platformio() {
-    say "PlatformIO is not installed for $WATCHER_USER, and flashing needs it."
-    if [[ $ASSUME_YES -eq 0 ]]; then
-        local answer
-        answer="$(ask 'Install it now (downloads from github.com)?' 'y')"
-        [[ "$answer" =~ ^[YyJj] ]] || { say "Leaving that to you."; return 1; }
-    fi
+# The line that puts pio on the PATH of a normal shell. Single-quoted so $HOME
+# reaches the profile unexpanded and keeps working if the home directory moves.
+PLATFORMIO_PATH_LINE='export PATH="$HOME/.platformio/penv/bin:$PATH"'
 
+add_platformio_to_path() {
+    local profile="$WATCHER_HOME/.bashrc"
+    # The standalone installer leaves the PATH to you, so without this "pio"
+    # is only found by things that know where to look - this installer does,
+    # your shell does not.
+    if grep -qF '.platformio/penv/bin' "$profile" 2>/dev/null; then
+        return 0                        # already there; do not stack copies
+    fi
+    say "Adding PlatformIO to the PATH in $profile"
+    if ! runuser -u "$WATCHER_USER" -- bash -c '
+            printf "\n# PlatformIO, added by the SteamOS LED bar installer.\n%s\n" \
+                "$1" >> "$2"
+        ' _ "$PLATFORMIO_PATH_LINE" "$profile"; then
+        warn "could not write $profile - add this line yourself:"
+        warn "    $PLATFORMIO_PATH_LINE"
+    fi
+}
+
+install_platformio() {
     # As the user, not as root: the toolchains land in ~/.platformio, and a
-    # root-owned one breaks every later run they make themselves.
+    # root-owned copy of that breaks every later run they make themselves.
     say "Fetching $PLATFORMIO_INSTALLER_URL"
     runuser -u "$WATCHER_USER" -- env "HOME=$WATCHER_HOME" bash -c '
         set -euo pipefail
@@ -550,9 +565,29 @@ install_platformio() {
         warn "the PlatformIO installer did not finish - see above"
         return 1
     }
-    say "PlatformIO installed. To use 'pio' in your own shell, add:"
-    say "    echo 'export PATH=\"\$HOME/.platformio/penv/bin:\$PATH\"' >> ~/.bashrc"
+    add_platformio_to_path
+    say "PlatformIO installed. Open a new shell, or run: source ~/.bashrc"
     return 0
+}
+
+# Offered on every run, not only when flashing was asked for. It is what the
+# firmware is built with, and discovering it is missing the first time you want
+# to flash is one download too late.
+ensure_platformio() {
+    watcher_user_dirs || return 1       # no user to install for
+    find_pio >/dev/null && return 0     # already there, nothing to ask
+
+    say "PlatformIO is not installed for $WATCHER_USER. It builds and flashes"
+    say "the ESP firmware, here or later with ./flash-esp.sh."
+    if [[ $ASSUME_YES -eq 0 ]]; then
+        local answer
+        answer="$(ask 'Install it now (downloads from github.com)?' 'y')"
+        [[ "$answer" =~ ^[YyJj] ]] || {
+            say "Leaving that to you - see 'What you need' in the README."
+            return 1
+        }
+    fi
+    install_platformio
 }
 
 flash_firmware() {
@@ -580,11 +615,10 @@ flash_firmware() {
         return 1
     fi
 
+    # ensure_platformio ran further up and has already asked, so a miss here
+    # means the answer was no, or the install did not finish.
     local pio_path=""
     pio_path="$(find_pio || true)"
-    if [[ -z "$pio_path" ]] && install_platformio; then
-        pio_path="$(find_pio || true)"
-    fi
     if [[ -z "$pio_path" ]]; then
         warn "PlatformIO (pio) not found for $WATCHER_USER. Install it with:"
         warn "    curl -fsSL -o get-platformio.py $PLATFORMIO_INSTALLER_URL"
@@ -600,6 +634,8 @@ flash_firmware() {
         "PATH=$(dirname "$pio_path"):$PATH" \
         bash "$SOURCE_DIR/flash-esp.sh" "$FLASH_ENV"
 }
+
+ensure_platformio || true
 
 FIRMWARE_STATUS="not flashed (say so at the prompt, or --flash, to change that)"
 if [[ -n "$FLASH_ENV" ]]; then
