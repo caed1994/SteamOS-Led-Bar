@@ -115,7 +115,7 @@ flash overwrites the previous one:
 
 | Your hardware and wiring | Command |
 | ------------------------ | ------- |
-| ESP8266, data line on **GPIO2 (D4)** — recommended | `./flash-esp.sh` |
+| ESP8266, data line on **GPIO2 (D4)** | `./flash-esp.sh` |
 | ESP8266, existing **D5/GPIO14** wiring | `./flash-esp.sh esp8266_gpio14` |
 | ESP32, data line on **GPIO16** | `./flash-esp.sh esp32dev` |
 

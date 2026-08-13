@@ -34,9 +34,11 @@ FLASH_ENV=""
 
 # The firmware builds, in the order the menu offers them. Descriptions say
 # which pin the strip goes on, because that is the part that has to match the
-# wiring - see docs/WIRING.md.
+# wiring - see docs/WIRING.md. None of them is recommended over another: the
+# soldering has already decided, and a hint here only sends people looking for
+# a difference that is not there.
 FIRMWARE_ENVS=(
-    "nodemcuv2:ESP8266 (NodeMCU, D1 mini), strip on GPIO2 - recommended"
+    "nodemcuv2:ESP8266 (NodeMCU, D1 mini), strip on GPIO2"
     "esp8266_gpio14:ESP8266, strip on GPIO14 / D5 - keeps older wiring"
     "esp32dev:ESP32, strip on GPIO16"
     "esp32s3:ESP32-S3, strip on GPIO16"

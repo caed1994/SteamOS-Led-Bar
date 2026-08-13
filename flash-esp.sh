@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds and flashes the LED client firmware with PlatformIO.
 #
-#   ./flash-esp.sh                       # ESP8266 on GPIO2 (recommended)
+#   ./flash-esp.sh                       # ESP8266 on GPIO2, the default
 #   ./flash-esp.sh esp32dev              # ESP32
 #   ./flash-esp.sh esp8266_gpio14        # ESP8266 keeping D5 wiring
 #   ./flash-esp.sh nodemcuv2 /dev/ttyUSB0
