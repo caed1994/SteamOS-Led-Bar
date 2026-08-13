@@ -299,8 +299,11 @@ MODULE_SOURCE_DIR = "leds-valve-shim"
 
 # Short enough to read at a glance, because the pin is the whole decision -
 # the installer's prompt has room for the longer wording, a drop-down has not.
+# Nothing is marked as recommended: which one is right is decided by where the
+# strip's data line is soldered, so a hint here reads as a judgement on the
+# board and sends people looking for a difference that is not there.
 FIRMWARE_ENVS = (
-    ("ESP8266 - GPIO2 (recommended)", "nodemcuv2"),
+    ("ESP8266 - GPIO2", "nodemcuv2"),
     ("ESP8266 - GPIO14 / D5", "esp8266_gpio14"),
     ("ESP32 - GPIO16", "esp32dev"),
     ("ESP32-S3 - GPIO16", "esp32s3"),

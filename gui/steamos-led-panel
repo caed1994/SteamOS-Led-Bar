@@ -122,11 +122,13 @@ NOTIFICATIONS = [
         ("NOTIFY_WARNING", "Flash on overheating", "bool", None, None, None),
     ]),
     ("How it looks", [
-        # From a second: the validator allows a tenth, but every shape has
-        # something to do in that time - grow and retract, swell three times,
-        # blink twice, cross the bar - and none of it is visible in half of it.
+        # One to ten seconds. Below that every shape has something to do -
+        # grow and retract, swell three times, blink twice, cross the bar -
+        # and none of it is visible in half a second. Above it a flash stops
+        # being a notification and starts being the bar's normal state; the
+        # validator still takes up to a minute for anyone who means it.
         ("NOTIFY_DURATION", "Flash duration (seconds)", "float",
-         1.0, 60.0, 0.5),
+         1.0, 10.0, 0.5),
         # The shape everything uses unless it was given one of its own -
         # including --notify with a colour, which is nobody's kind.
         ("NOTIFY_STYLE", "Default flash shape", "named",
