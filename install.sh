@@ -188,18 +188,162 @@ sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     "$SOURCE_DIR/server/steamos-led-serial.service" > "$UNIT_PATH"
 chmod 0644 "$UNIT_PATH"
 
+# --- build prerequisites ----------------------------------------------------
+#
+# On a machine that has never built anything, getting the module compiled is
+# three problems deep and none of them is the module: the rootfs is read-only,
+# pacman's keyring has never been initialised so every install fails on
+# signatures rather than on the package, and the headers are named after the
+# exact kernel rather than after "linux". Finding that name by hand is where a
+# first install stalls, so work it out here.
+
+# Both places a distribution keeps its module trees. Named once so the header
+# lookup and the "is it there" check cannot start disagreeing, and so the
+# tests can point them somewhere harmless.
+MODULES_ROOTS=("/usr/lib/modules" "/lib/modules")
+
+kernel_headers_package() {  # kernel_headers_package [release]
+    local release="${1:-$(uname -r)}"
+    local root name
+    # Arch records the package a kernel came from beside its modules, and the
+    # headers are that name with -headers on the end. SteamOS follows it:
+    # linux-neptune-616 -> linux-neptune-616-headers.
+    for root in "${MODULES_ROOTS[@]}"; do
+        if [[ -r "$root/$release/pkgbase" ]]; then
+            name="$(tr -d '[:space:]' < "$root/$release/pkgbase")"
+            if [[ -n "$name" ]]; then
+                printf '%s-headers' "$name"
+                return 0
+            fi
+        fi
+    done
+    # No pkgbase to read - derive it from the release instead. Everything a
+    # SteamOS kernel is called ends in neptune-NNN, which is the package.
+    if [[ "$release" =~ (neptune(-[0-9]+)?) ]]; then
+        printf 'linux-%s-headers' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+kernel_build_dir() {  # kernel_build_dir [release] - where the headers landed
+    local release="${1:-$(uname -r)}"
+    local root
+    for root in "${MODULES_ROOTS[@]}"; do
+        if [[ -d "$root/$release/build" ]]; then
+            printf '%s/%s/build' "$root" "$release"
+            return 0
+        fi
+    done
+    return 1
+}
+
+missing_build_tools() {  # one word per line, empty when nothing is missing
+    command -v make >/dev/null 2>&1 || printf 'make\n'
+    command -v gcc  >/dev/null 2>&1 || printf 'gcc\n'
+    kernel_build_dir >/dev/null || printf 'headers\n'
+}
+
+rootfs_is_readonly() {
+    command -v steamos-readonly >/dev/null 2>&1 \
+        && steamos-readonly status 2>/dev/null | grep -qi enabled
+}
+
+pacman_keyring_ready() {
+    [[ -d /etc/pacman.d/gnupg ]] || return 1
+    pacman-key --list-keys 2>/dev/null | grep -q .
+}
+
+prepare_pacman() {
+    if ! pacman_keyring_ready; then
+        say "Initialising pacman's keyring - it has never been used here"
+        pacman-key --init >/dev/null 2>&1 || { warn "pacman-key --init failed"; return 1; }
+        pacman-key --populate >/dev/null 2>&1 \
+            || { warn "pacman-key --populate failed"; return 1; }
+    fi
+    # -Sy and not -Syu, deliberately. A full upgrade would pull a newer kernel
+    # while the old one is still running, and headers for a kernel you are not
+    # running build a module that will not load.
+    say "Refreshing package lists"
+    pacman -Sy --noconfirm >/dev/null || { warn "pacman -Sy failed"; return 1; }
+    # Best effort: on a fresh image the shipped keys can already be too old to
+    # verify current packages. Neither name exists everywhere, so a miss here
+    # is not a failure.
+    local keyring
+    for keyring in archlinux-keyring holo-keyring; do
+        pacman -S --needed --noconfirm "$keyring" >/dev/null 2>&1 || true
+    done
+    return 0
+}
+
+install_build_prerequisites() {  # install_build_prerequisites <missing...>
+    local missing=("$@")
+    local packages=() headers=""
+
+    command -v pacman >/dev/null 2>&1 || return 1
+
+    if [[ " ${missing[*]} " == *" make "* || " ${missing[*]} " == *" gcc "* ]]; then
+        packages+=("base-devel")
+    fi
+    if [[ " ${missing[*]} " == *" headers "* ]]; then
+        headers="$(kernel_headers_package || true)"
+        [[ -n "$headers" ]] || return 1      # nothing specific to ask for
+        packages+=("$headers")
+    fi
+    (( ${#packages[@]} > 0 )) || return 1
+
+    say "The kernel module has to be built, and this machine is missing:"
+    printf '       %s\n' "${packages[@]}"
+    if [[ $ASSUME_YES -eq 0 ]]; then
+        local answer
+        answer="$(ask 'Install them with pacman now?' 'y')"
+        [[ "$answer" =~ ^[YyJj] ]] || { say "Leaving that to you."; return 1; }
+    fi
+
+    # pacman writes to the rootfs, which SteamOS keeps read-only. Put it back
+    # afterwards: the module installer further down does its own unlocking,
+    # and leaving the system as it was found is the polite half of that.
+    local was_readonly=0
+    if rootfs_is_readonly; then
+        say "Unlocking the read-only rootfs"
+        steamos-readonly disable || { warn "could not unlock the rootfs"; return 1; }
+        was_readonly=1
+    fi
+
+    local installed=1
+    if prepare_pacman; then
+        say "Installing ${packages[*]}"
+        pacman -S --needed --noconfirm "${packages[@]}" || installed=0
+    else
+        installed=0
+    fi
+
+    if [[ $was_readonly -eq 1 ]]; then
+        say "Locking the rootfs again"
+        steamos-readonly enable || warn "could not lock the rootfs again"
+    fi
+
+    [[ $installed -eq 1 ]] || return 1
+    return 0
+}
+
 # --- kernel shim -----------------------------------------------------------
 
 module_build_hint() {
+    local release headers packages
+    release="$(uname -r)"
+    headers="$(kernel_headers_package "$release" 2>/dev/null || true)"
+    packages="base-devel${headers:+ $headers}"
     cat >&2 <<EOF
 
-The module needs make, gcc and the kernel headers for $(uname -r):
+The module needs make, gcc and the kernel headers for $release.
 
   SteamOS / Arch:  sudo steamos-readonly disable
-                   sudo pacman -S base-devel
-                   pacman -Ss headers | grep "\$(uname -r | cut -d- -f3-)"
-  Debian/Ubuntu:   sudo apt install build-essential "linux-headers-\$(uname -r)"
-  Fedora:          sudo dnf install kernel-devel-\$(uname -r) gcc make
+                   sudo pacman-key --init
+                   sudo pacman-key --populate
+                   sudo pacman -Sy $packages
+  Debian/Ubuntu:   sudo apt install build-essential "linux-headers-$release"
+  Fedora:          sudo dnf install "kernel-devel-$release" gcc make
 
 Re-run this installer afterwards, or: sudo ./install.sh --rebuild-module
 
@@ -236,9 +380,11 @@ install_shim_module() {
 
     if [[ ! -f "$module" ]]; then
         local missing=()
-        command -v make >/dev/null 2>&1 || missing+=("make")
-        command -v gcc >/dev/null 2>&1 || missing+=("gcc")
-        [[ -d "/lib/modules/$release/build" ]] || missing+=("kernel headers")
+        mapfile -t missing < <(missing_build_tools)
+        if (( ${#missing[@]} > 0 )) \
+           && install_build_prerequisites "${missing[@]}"; then
+            mapfile -t missing < <(missing_build_tools)
+        fi
         if (( ${#missing[@]} > 0 )); then
             warn "cannot build the kernel module, missing: ${missing[*]}"
             module_build_hint
@@ -349,6 +495,39 @@ find_pio() {
     return 1
 }
 
+# The standalone installer, not pip. SteamOS keeps the rootfs read-only, so a
+# system-wide pip install cannot write at all, and "pip install --user" lands
+# in a directory the next system update resets. This one puts the whole thing
+# under ~/.platformio, which survives - and it is what PlatformIO themselves
+# tell you to use.
+PLATFORMIO_INSTALLER_URL="https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py"
+
+install_platformio() {
+    say "PlatformIO is not installed for $WATCHER_USER, and flashing needs it."
+    if [[ $ASSUME_YES -eq 0 ]]; then
+        local answer
+        answer="$(ask 'Install it now (downloads from github.com)?' 'y')"
+        [[ "$answer" =~ ^[YyJj] ]] || { say "Leaving that to you."; return 1; }
+    fi
+
+    # As the user, not as root: the toolchains land in ~/.platformio, and a
+    # root-owned one breaks every later run they make themselves.
+    say "Fetching $PLATFORMIO_INSTALLER_URL"
+    runuser -u "$WATCHER_USER" -- env "HOME=$WATCHER_HOME" bash -c '
+        set -euo pipefail
+        script="$(mktemp -t get-platformio-XXXXXX.py)"
+        trap "rm -f \"$script\"" EXIT
+        curl -fsSL -o "$script" "$1"
+        python3 "$script"
+    ' _ "$PLATFORMIO_INSTALLER_URL" || {
+        warn "the PlatformIO installer did not finish - see above"
+        return 1
+    }
+    say "PlatformIO installed. To use 'pio' in your own shell, add:"
+    say "    echo 'export PATH=\"\$HOME/.platformio/penv/bin:\$PATH\"' >> ~/.bashrc"
+    return 0
+}
+
 flash_firmware() {
     [[ -n "$FLASH_ENV" ]] || return 0
 
@@ -374,10 +553,15 @@ flash_firmware() {
         return 1
     fi
 
-    local pio_path
-    if ! pio_path="$(find_pio)"; then
+    local pio_path=""
+    pio_path="$(find_pio || true)"
+    if [[ -z "$pio_path" ]] && install_platformio; then
+        pio_path="$(find_pio || true)"
+    fi
+    if [[ -z "$pio_path" ]]; then
         warn "PlatformIO (pio) not found for $WATCHER_USER. Install it with:"
-        warn "    python3 -m pip install --user platformio"
+        warn "    curl -fsSL -o get-platformio.py $PLATFORMIO_INSTALLER_URL"
+        warn "    python3 get-platformio.py"
         warn "The service is installed either way; flash later with"
         warn "    ./flash-esp.sh $FLASH_ENV"
         return 1

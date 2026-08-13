@@ -17,13 +17,28 @@ PORT="${2:-}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/firmware/led-client"
 
 if ! command -v pio >/dev/null 2>&1; then
+    # Look where the installers put it before giving up: the standalone one
+    # leaves the PATH to your profile, which a non-login shell has not read.
+    for candidate in "$HOME/.platformio/penv/bin" "$HOME/.local/bin"; do
+        if [[ -x "$candidate/pio" ]]; then
+            PATH="$candidate:$PATH"
+            break
+        fi
+    done
+fi
+
+if ! command -v pio >/dev/null 2>&1; then
     cat >&2 <<'EOF'
-PlatformIO (pio) not found. Install it with:
+PlatformIO (pio) not found. On SteamOS it has to live in your home directory:
+the rootfs is read-only, so pip cannot write to it, and "pip install --user"
+lands somewhere the next system update resets.
 
-    python3 -m pip install --user platformio
-    export PATH="$HOME/.local/bin:$PATH"
+    curl -fsSL -o get-platformio.py \
+      https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py
+    python3 get-platformio.py
+    echo 'export PATH="$HOME/.platformio/penv/bin:$PATH"' >> ~/.bashrc
 
-On SteamOS, install it in your home directory - the rootfs is read-only.
+Or let the installer do it: sudo ./install.sh --flash nodemcuv2
 EOF
     exit 1
 fi

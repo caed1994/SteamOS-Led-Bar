@@ -41,13 +41,44 @@ different transport — no Wi-Fi, no IP configuration, no access point.
 
 * **Python 3.9+** — preinstalled. **No** extra packages are needed, not even
   pyserial.
-* **PlatformIO** — only once, to flash the ESP firmware:
+* **make, gcc and kernel headers** — to build the kernel module. The installer
+  works out which headers package matches your running kernel and offers to
+  install it; see [On a fresh SteamOS](#on-a-fresh-steamos) below.
+* **PlatformIO** — only once, and only to flash the ESP firmware. The
+  installer offers to fetch it when you ask it to flash. By hand:
   ```bash
-  python3 -m pip install --user platformio
-  export PATH="$HOME/.local/bin:$PATH"
+  curl -fsSL -o get-platformio.py \
+    https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py
+  python3 get-platformio.py
+  echo 'export PATH="$HOME/.platformio/penv/bin:$PATH"' >> ~/.bashrc
   ```
-* **make, gcc and kernel headers** — to build the kernel module. If something
-  is missing the installer names the packages and installs the rest anyway.
+  Not `pip`: the SteamOS rootfs is read-only, so a system-wide install cannot
+  write, and `pip install --user` lands somewhere the next system update
+  resets.
+
+### On a fresh SteamOS
+
+A Deck that has never had a package installed needs three things first, and
+the installer does all of them for you — it asks before touching anything, and
+puts the read-only rootfs back afterwards. You only need this if you would
+rather do it yourself, or if you are not on SteamOS:
+
+```bash
+passwd                              # sudo needs a password; a fresh Deck has none
+sudo steamos-readonly disable       # the rootfs is read-only by default
+sudo pacman-key --init              # the keyring has never been used, so every
+sudo pacman-key --populate          #   install would fail on signatures
+sudo pacman -S base-devel
+sudo pacman -S "$(cat /usr/lib/modules/$(uname -r)/pkgbase)-headers"
+```
+
+That last line is the one worth knowing. The headers are named after your
+exact kernel, not after `linux` — on a Steam Machine that is something like
+`linux-neptune-616-headers`, and Arch writes the right name next to the
+modules so you never have to guess it.
+
+> **Setting a password** is the one step nothing can do for you. `sudo` on a
+> fresh SteamOS has no password to check against, so `passwd` comes first.
 
 ## Quick start
 
@@ -107,6 +138,21 @@ The installer asks for LED count, port, baud rate and whether to flash the
 firmware, builds and loads the kernel module, puts the service in
 `/var/lib/steamos-led-serial/`, writes `/etc/steamos-led-serial.conf` and
 starts everything.
+
+On a machine that has never built a kernel module it stops to ask first:
+
+```
+==> The kernel module has to be built, and this machine is missing:
+       base-devel
+       linux-neptune-616-headers
+Install them with pacman now? [y]:
+```
+
+Saying yes unlocks the read-only rootfs, initialises pacman's keyring if it
+has never been used, installs those two packages and locks the rootfs again.
+Saying no prints the commands and carries on — the service installs either
+way and waits for the module to turn up. Same for PlatformIO, if you asked it
+to flash the firmware.
 
 The firmware question defaults to **0, meaning no** — flashing is the one step
 that touches the hardware, and re-running the installer to change a setting
@@ -825,6 +871,10 @@ If it does not, the problem is hardware or firmware.
 | ------- | ------------- |
 | `/dev/valve-leds-shim not found` | module not loaded: `sudo modprobe leds-valve-shim`, otherwise `sudo ./install.sh --rebuild-module` |
 | Bar dead after a SteamOS update | kernel module gone, or no longer matching the kernel: `sudo ./install.sh --rebuild-module` |
+| `cannot build the kernel module, missing: headers` | say yes when the installer offers to install them, or do it by hand — see [On a fresh SteamOS](#on-a-fresh-steamos). The package is named after your kernel: `linux-neptune-616-headers`, not `linux-headers` |
+| `pacman` refuses everything with a signature error | the keyring has never been initialised on this machine: `sudo pacman-key --init && sudo pacman-key --populate` |
+| `pacman` cannot write anything | the SteamOS rootfs is read-only: `sudo steamos-readonly disable` |
+| `sudo` rejects your password on a fresh Deck | there is no password yet — run `passwd` once as the `deck` user |
 | `no ESP serial device found` | check `--list-ports`; if it stays empty, try another USB cable (charging cables often have no data wires) |
 | Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0 → `MIN_BRIGHTNESS=40` |
 | Red and green swapped | colour order of the firmware, see [docs/WIRING.md](docs/WIRING.md#colour-order) |
