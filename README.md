@@ -1,150 +1,61 @@
-# SteamOS LED Bar — USB serial bridge
+# SteamOS LED Bar: USB serial bridge
 
 Mirrors the Steam Machine's LED bar onto a WS2812 strip driven by an **ESP
-connected over USB**. The strip behaves like the built-in bar: colour,
-brightness and effects come straight from the Personalization menu in SteamOS
-Game Mode, download progress included.
+connected over USB**. Colour, brightness and effects come straight from the
+Personalization menu in SteamOS Game Mode, download progress included.
 
 This is the USB variant of
 [rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release),
-which connects the ESP over Wi-Fi/TCP. Same source (the kernel module),
-different transport — no Wi-Fi, no IP configuration, no access point.
+which connects the ESP over Wi-Fi. Same kernel module, different transport: no
+Wi-Fi, no IP configuration, no access point.
 
 ## Contents
 
-1. [What you need](#what-you-need)
-2. [Quick start](#quick-start)
+1. [Quick start](#quick-start)
+2. [What you need](#what-you-need)
 3. [Changing settings](#changing-settings)
 4. [All options](#all-options)
 5. [Effects](#effects)
 6. [While the machine sleeps](#while-the-machine-sleeps)
 7. [Temperature gauge](#temperature-gauge)
 8. [Notifications](#notifications)
-9. [Testing and diagnostics](#testing-and-diagnostics)
-10. [When something does not work](#when-something-does-not-work)
-11. [Updating](#updating)
-12. [Uninstalling](#uninstalling)
-13. [How it works](#how-it-works)
-14. [Development](#development)
-
-## What you need
-
-**Hardware**
-
-* An **ESP8266** (NodeMCU, D1 mini) or **ESP32**, connected to the PC by USB.
-* A **WS2812/WS2812B strip** (NeoPixel), any length.
-* Wiring and power: [docs/WIRING.md](docs/WIRING.md). Short version: data line
-  on GPIO2 (D4), shared ground, and a separate 5 V supply from roughly
-  20 LEDs upwards.
-
-**Software** — on SteamOS almost everything is already there:
-
-* **Python 3.9+** — preinstalled. **No** extra packages are needed, not even
-  pyserial.
-* **make, gcc and kernel headers** — to build the kernel module. The installer
-  works out which headers package matches your running kernel and offers to
-  install it; see [On a fresh SteamOS](#on-a-fresh-steamos) below.
-* **PlatformIO** — only once, and only to flash the ESP firmware. The
-  installer offers to fetch it when you ask it to flash. By hand:
-  ```bash
-  curl -fsSL -o get-platformio.py \
-    https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py
-  python3 get-platformio.py
-  echo 'export PATH="$HOME/.platformio/penv/bin:$PATH"' >> ~/.bashrc
-  ```
-  Not `pip`: the SteamOS rootfs is read-only, so a system-wide install cannot
-  write, and `pip install --user` lands somewhere the next system update
-  resets.
-
-### On a fresh SteamOS
-
-A Deck that has never had a package installed needs three things first, and
-the installer does all of them for you. It **unlocks the read-only rootfs
-straight away**, before it asks anything — it has to write the suspend hook
-and the kernel module there — and locks it again at the end, unless you had
-already unlocked it yourself. Installing packages is the one step it asks
-about first.
-
-You only need the commands below if you would rather do it by hand, or if you
-are not on SteamOS:
-
-```bash
-passwd                              # sudo needs a password; a fresh Deck has none
-sudo steamos-readonly disable       # the rootfs is read-only by default
-sudo pacman-key --init              # the keyring has never been used, so every
-sudo pacman-key --populate          #   install would fail on signatures
-sudo pacman -S base-devel
-sudo pacman -S "$(cat /usr/lib/modules/$(uname -r)/pkgbase)-headers"
-```
-
-That last line is the one worth knowing. The headers are named after your
-exact kernel, not after `linux` — on a Steam Machine that is something like
-`linux-neptune-616-headers`, and Arch writes the right name next to the
-modules so you never have to guess it.
-
-> **Setting a password** is the one step nothing can do for you. `sudo` on a
-> fresh SteamOS has no password to check against, so `passwd` comes first.
+9. [The control panel](#the-control-panel)
+10. [Testing and diagnostics](#testing-and-diagnostics)
+11. [When something does not work](#when-something-does-not-work)
+12. [Updating](#updating)
+13. [Uninstalling](#uninstalling)
+14. [How it works](#how-it-works)
+15. [Development](#development)
 
 ## Quick start
 
-### 1. Clone the repository
-
-Pick a place where the folder can stay — you will need it again after every
-SteamOS update:
-
 ```bash
-cd ~
-git clone https://github.com/caed1994/SteamOS-Led-Bar.git
-cd SteamOS-Led-Bar
-```
-
-### 2. Connect the strip
-
-Wire it up following [docs/WIRING.md](docs/WIRING.md) and plug the ESP into a
-USB port. To check that the PC sees it:
-
-```bash
-./server/steamos-led-serial --list-ports
-```
-
-If nothing shows up, try a different USB cable — many charging cables have no
-data wires.
-
-### 3. Flash the firmware onto the ESP
-
-**The installer in step 4 can do this for you** — it offers a numbered list and
-defaults to *not* flashing, so if you would rather do it there, skip ahead.
-
-To do it separately, run **only one** of these, matching your hardware. Each
-flash overwrites the previous one:
-
-| Your hardware and wiring | Command |
-| ------------------------ | ------- |
-| ESP8266, data line on **GPIO2 (D4)** | `./flash-esp.sh` |
-| ESP8266, existing **D5/GPIO14** wiring | `./flash-esp.sh esp8266_gpio14` |
-| ESP32, data line on **GPIO16** | `./flash-esp.sh esp32dev` |
-
-> The two ESP8266 builds drive **different pins**. If your strip is on D5 and
-> you flash the first one, it stays dark — that is the wrong pin, not a fault.
-
-Once the service is installed, the [control panel](#the-control-panel) can do
-this too: *Status & repair* → *ESP firmware*. Same builds, same result — it
-stops the service so the port is free, flashes as you (PlatformIO's toolchains
-live in your home), and starts the service again, including when the flash
-fails.
-
-### 4. Install the service
-
-```bash
+git clone https://github.com/caed1994/SteamOS-Led-Bar.git ~/SteamOS-Led-Bar
+cd ~/SteamOS-Led-Bar
 sudo ./install.sh
 ```
 
-The installer asks for LED count, port, baud rate and whether to flash the
-firmware, builds and loads the kernel module, puts the service in
-`/var/lib/steamos-led-serial/`, writes `/etc/steamos-led-serial.conf` and
-starts everything.
+That is the whole install. Keep the folder, you need it again after every
+SteamOS update.
 
-On a machine that has never built a kernel module it stops to ask first:
+`install.sh` handles the rest by itself:
+
+* unlocks the read-only rootfs, and locks it again when it is finished
+* installs `base-devel` and the kernel headers matching your exact kernel,
+  initialising pacman's keyring first if it has never been used
+* builds and loads the kernel module
+* installs the service, config file, udev rule and suspend hook
+* offers to flash the ESP firmware, and to fetch PlatformIO if you say yes
+* installs the control panel in the application menu
+* installs the achievement watcher as a user service
+* starts everything
+
+It asks four questions: LED count, serial port, baud rate, firmware. All have
+defaults, so pressing Enter four times is a complete install. Firmware defaults
+to *no*, since flashing is the one step that touches the hardware.
+
+Anything it wants to install on your system it asks about first, and says
+exactly what it will do:
 
 ```
 ==> The kernel module has to be built, and this machine is missing:
@@ -153,91 +64,123 @@ On a machine that has never built a kernel module it stops to ask first:
 Install them with pacman now? [y]:
 ```
 
-Saying yes unlocks the read-only rootfs, initialises pacman's keyring if it
-has never been used, installs those two packages and locks the rootfs again.
-Saying no prints the commands and carries on — the service installs either
-way and waits for the module to turn up. Same for PlatformIO, if you asked it
-to flash the firmware.
+Say no and it prints the commands and carries on. The service installs either
+way and waits for the module to appear.
 
-The firmware question defaults to **0, meaning no** — flashing is the one step
-that touches the hardware, and re-running the installer to change a setting
-should not reflash the board. Pick the number matching your wiring to have it
-done here instead of in step 3.
-
-To skip the questions entirely:
+To skip the questions:
 
 ```bash
-sudo ./install.sh --leds 60 --yes            # never flashes
-sudo ./install.sh --leds 60 --yes --flash 1  # ...unless you ask
+sudo ./install.sh --leds 60 --yes             # never flashes
+sudo ./install.sh --leds 60 --yes --flash 1   # unless you ask
 ```
 
-PlatformIO runs as *your* user, not as root: its toolchains live in
-`~/.platformio`, and a root-owned copy of that would break every later run.
+### Then
 
-### 5. Try it
+Wire the strip up ([docs/WIRING.md](docs/WIRING.md)) and plug the ESP in. In
+Game Mode, open **Settings > Personalization** and pick a colour or an effect.
+The strip follows immediately.
 
-In Game Mode, go to **Settings → Personalization** and pick a colour or an
-effect — the strip should follow immediately. If it does not:
+If it does not, the log says why:
 
 ```bash
 journalctl -u steamos-led-serial -f
 ```
 
+### On a completely fresh SteamOS
+
+One thing no script can do for you: `sudo` needs a password, and a fresh Deck
+has none. Run `passwd` once before anything else.
+
+Everything after that the installer does. These are the same steps by hand, if
+you would rather, or if you are not on SteamOS:
+
+```bash
+sudo steamos-readonly disable
+sudo pacman-key --init
+sudo pacman-key --populate
+sudo pacman -S base-devel
+sudo pacman -S "$(cat /usr/lib/modules/$(uname -r)/pkgbase)-headers"
+```
+
+That last line is worth knowing. The headers are named after your exact
+kernel, not after `linux`. On a Steam Machine that is something like
+`linux-neptune-616-headers`, and Arch writes the right name next to the modules
+so you never have to guess it.
+
+## What you need
+
+**Hardware**
+
+* An **ESP8266** (NodeMCU, D1 mini) or **ESP32**, connected by USB.
+* A **WS2812/WS2812B strip** (NeoPixel), any length.
+* Wiring and power: [docs/WIRING.md](docs/WIRING.md). Short version: data line
+  on GPIO2 (D4), shared ground, separate 5 V supply from roughly 20 LEDs up.
+
+**Software**, almost all of it already on SteamOS:
+
+* **Python 3.9+**, preinstalled. No extra packages, not even pyserial.
+* **make, gcc and kernel headers**, to build the kernel module. The installer
+  works out which headers package you need and offers to install it.
+* **PlatformIO**, only to flash the ESP firmware. The installer offers to fetch
+  it. By hand:
+  ```bash
+  curl -fsSL -o get-platformio.py \
+    https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py
+  python3 get-platformio.py
+  echo 'export PATH="$HOME/.platformio/penv/bin:$PATH"' >> ~/.bashrc
+  ```
+  Not `pip`: the SteamOS rootfs is read-only, and `pip install --user` lands
+  somewhere the next system update resets.
+
+### Flashing the firmware separately
+
+The installer and the control panel both do this. To do it yourself, run
+**one** of these, matching your wiring. Each flash overwrites the last:
+
+| Your hardware and wiring | Command |
+| ------------------------ | ------- |
+| ESP8266, data on **GPIO2 (D4)** | `./flash-esp.sh` |
+| ESP8266, existing **D5/GPIO14** wiring | `./flash-esp.sh esp8266_gpio14` |
+| ESP32, data on **GPIO16** | `./flash-esp.sh esp32dev` |
+
+> The two ESP8266 builds drive **different pins**. If your strip is on D5 and
+> you flash the first one it stays dark. That is the wrong pin, not a fault.
+
 ## Changing settings
 
-Every setting lives in **one file**: `/etc/steamos-led-serial.conf`. It is a
-plain list of `NAME=value` lines. After each change the service has to be
-restarted, otherwise nothing happens.
-
-**Option 1 — open the file and edit it:**
+Two ways, and they edit the same file. The **[control panel](#the-control-panel)**
+is the easy one. By hand, everything lives in `/etc/steamos-led-serial.conf` as
+`NAME=value` lines:
 
 ```bash
-sudo nano /etc/steamos-led-serial.conf     # edit, then Ctrl-O, Enter, Ctrl-X
+sudo nano /etc/steamos-led-serial.conf
 sudo systemctl restart steamos-led-serial
 ```
 
-**Option 2 — set a single line from the command line.** The pattern is always
-the same, only `NAME` and `VALUE` change:
-
-```bash
-sudo sed -i 's/^NAME=.*/NAME=VALUE/' /etc/steamos-led-serial.conf
-sudo systemctl restart steamos-led-serial
-```
+The restart is required, nothing happens without it.
 
 ### Common wishes
 
-| What you want | Setting | Command to copy |
-| ------------- | ------- | --------------- |
-| The bar fills from the **wrong end** | `REVERSE=1` | `sudo sed -i 's/^REVERSE=.*/REVERSE=1/' /etc/steamos-led-serial.conf` |
-| Your strip does **not have 17 LEDs** | `LED_COUNT=60` | `sudo sed -i 's/^LED_COUNT=.*/LED_COUNT=60/' /etc/steamos-led-serial.conf` |
-| **Too bright**, or the strip runs off USB power | `MAX_BRIGHTNESS=80` | `sudo sed -i 's/^MAX_BRIGHTNESS=.*/MAX_BRIGHTNESS=80/' /etc/steamos-led-serial.conf` |
-| Effects run **too fast** | `SPEED=0.5` | `sudo sed -i 's/^SPEED=.*/SPEED=0.5/' /etc/steamos-led-serial.conf` |
-| Patrol with **three dots** instead of one | `PATROL_DOTS=3` | `sudo sed -i 's/^PATROL_DOTS=.*/PATROL_DOTS=3/' /etc/steamos-led-serial.conf` |
-| The bar shows the **temperature** instead of the rainbow | `TEMPERATURE_GAUGE=1` | `sudo sed -i 's/^TEMPERATURE_GAUGE=.*/TEMPERATURE_GAUGE=1/' /etc/steamos-led-serial.conf` |
-| Strip stays **dark** although an effect is on | `MIN_BRIGHTNESS=40` | `sudo sed -i 's/^MIN_BRIGHTNESS=.*/MIN_BRIGHTNESS=40/' /etc/steamos-led-serial.conf` |
-| Dimmed colours look **blotchy** | `GAMMA=2.2` | `sudo sed -i 's/^GAMMA=.*/GAMMA=2.2/' /etc/steamos-led-serial.conf` |
-| A **fixed port** instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` | `sudo sed -i 's#^SERIAL_PORT=.*#SERIAL_PORT=/dev/steamos-led-esp#' /etc/steamos-led-serial.conf` |
+| What you want | Setting |
+| ------------- | ------- |
+| The bar fills from the wrong end | `REVERSE=1` |
+| Your strip does not have 17 LEDs | `LED_COUNT=60` |
+| Too bright, or the strip runs off USB power | `MAX_BRIGHTNESS=80` |
+| Effects run too fast | `SPEED=0.5` |
+| Patrol with three dots | `PATROL_DOTS=3` |
+| Show the temperature instead of the rainbow | `TEMPERATURE_GAUGE=1` |
+| Strip stays dark although an effect is on | `MIN_BRIGHTNESS=40` |
+| Dimmed colours look blotchy | `GAMMA=2.2` |
+| A fixed port instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` |
 
-And afterwards, in each case:
+### Try a value before writing it down
 
-```bash
-sudo systemctl restart steamos-led-serial
-```
-
-### Try first, write it down later
-
-Every option is also a command line switch, so you can test a value without
-touching the file. Stop the service first — it holds the USB port exclusively:
+Every option is also a command line switch. Stop the service first, it holds
+the USB port exclusively:
 
 ```bash
 sudo systemctl stop steamos-led-serial
 sudo /var/lib/steamos-led-serial/steamos-led-serial --leds 60 --reverse -v
-```
-
-Stop it with **Ctrl-C**. If you like the result, write it into the config as
-above and start the service again:
-
-```bash
 sudo systemctl start steamos-led-serial
 ```
 
@@ -247,128 +190,109 @@ sudo systemctl start steamos-led-serial
 | ------ | ------- | ------- |
 | `LED_COUNT` | `17` | LEDs on the strip |
 | `REVERSE` | `0` | flip the direction |
-| `MAPPING` | `stretch` | how the 17 logical LEDs spread out: `stretch` (smooth interpolation), `repeat` (tile the pattern), `crop` (1:1, the rest stays dark) |
+| `MAPPING` | `stretch` | how the 17 logical LEDs spread out: `stretch` (interpolated), `repeat` (tiled), `crop` (1:1, rest dark) |
 | `MAX_BRIGHTNESS` | `255` | brightness ceiling |
 | `MIN_BRIGHTNESS` | `0` | brightness floor, for when Steam reports 0 |
 | `GAMMA` | `1.0` | `2.2` looks smoother when dimmed |
-| `SPEED` | `1.0` | animation speed (`0.5` = half as fast) |
-| `PATROL_DOTS` | `1` | number of dots in the patrol effect |
-| `STANDBY_PULSE` | `1` | breathe white while the machine is [suspended](#while-the-machine-sleeps) |
+| `SPEED` | `1.0` | animation speed (`0.5` is half as fast) |
+| `PATROL_DOTS` | `1` | dots in the patrol effect |
+| `STANDBY_PULSE` | `1` | breathe white while [suspended](#while-the-machine-sleeps) |
 | `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `85.0` | degrees at which the gauge is empty / full |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
 | `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` | `#ffd700` / `#8000ff` / `#00c850` | what the three automatic [notifications](#notifications) flash |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
-| `BAUD` | `230400` | preferred baud rate; corrected on connect if needed |
-| `BAUD_AUTODETECT` | `1` | if there is no reply, also try the other firmware baud rates |
+| `BAUD` | `230400` | preferred baud rate, corrected on connect if needed |
+| `BAUD_AUTODETECT` | `1` | if there is no reply, try the other firmware baud rates |
 | `DEVICE` | `/dev/valve-leds-shim` | character device of the kernel module |
-| `FPS` / `IDLE_FPS` | `60` / `4` | frame rate while animating / while idle |
+| `FPS` / `IDLE_FPS` | `60` / `4` | frame rate while animating / idle |
 | `LOG_LEVEL` | `info` | `debug` logs every state change |
 
-All of them also exist as switches (`--leds`, `--reverse`, `--gamma` …) and as
+All of them also exist as switches (`--leds`, `--reverse`, `--gamma`) and as
 environment variables (`STEAMOS_LED_LED_COUNT=60`).
 
 ## Effects
 
-Steam writes an effect number and its parameters; the animation runs on the PC,
+Steam writes an effect number and its parameters. The animation runs on the PC,
 exactly as it runs on the microcontroller of a real Steam Machine.
 
-| No. | Effect | Implementation |
-| --- | ------ | -------------- |
+| No. | Effect | What it does |
+| --- | ------ | ------------ |
 | 0 | off | strip off |
-| 1 | manual | pixel colours exactly as Steam set them (this includes the download bar) |
+| 1 | manual | pixel colours exactly as Steam set them, download bar included |
 | 2 | normal | static colour |
-| 3 | rainbow | travelling hue gradient; starting hue from `color_shift` |
-| 4 | breath | breathing, base colour from the snapshot, phase from `breath_offset` |
-| 5 | patrol | one dot sweeping back and forth (count via `PATROL_DOTS`) |
-| 6 | factory | red/green/blue/white in turn |
+| 3 | rainbow | travelling hue gradient |
+| 4 | breath | breathing, base colour from the snapshot |
+| 5 | patrol | one dot sweeping back and forth (`PATROL_DOTS`) |
+| 6 | factory | red, green, blue, white in turn |
 | 7 | demo | rainbow with a breathing envelope |
 
 ### Effect speed
 
-`delay` is **not a duration**, it is a slider: the kernel module advertises the
-range `0-20` (`delay_range`) and starts at `8`. The cycle times below are
-stated for that default and scale linearly — `delay=0` is fastest, `delay=20`
-is 2.5x slower:
+`delay` is not a duration but a slider: the kernel module advertises `0-20` and
+starts at `8`. Cycle times scale linearly from that default, so `delay=0` is
+fastest and `delay=20` is 2.5x slower.
 
-| Effect | one cycle at `delay=8` | at `delay=20` |
-| ------ | ---------------------- | ------------- |
-| rainbow | 3.5 s (once around the hue circle) | 8.75 s |
-| breath | 1.6 s (one inhale and exhale) | 4.0 s |
-| patrol | 2.5 s (there and back) | 6.25 s |
-| demo | 3.2 s (breathing envelope over the rainbow) | 8.0 s |
+| Effect | one cycle at `delay=8` |
+| ------ | ---------------------- |
+| rainbow | 3.5 s |
+| breath | 1.6 s |
+| patrol | 2.5 s |
+| demo | 3.2 s |
 
-Too fast or too slow? `SPEED` scales all of them together. To change just
-*one* effect, the constants are at the top of `server/steamos_led/render.py`.
-A cycle never gets shorter than 0.8 s, so a small `delay` cannot turn an effect
-into a strobe light. `--dump` shows which `delay` your system reports.
-
-### Why patrol has one dot
-
-`patrol_num` is **not** used; `PATROL_DOTS` sets the count. What the field
-means is still open: the module source shows it is a plain sysfs attribute with
-a default of **3**, stored and passed through untouched — so it is a *setting*,
-not live animation state. "Number of scanners" is therefore plausible; the
-default of 3 simply did not look like what one expects from "patrol". To take
-the module at its word, set `PATROL_DOTS=3`.
+`SPEED` scales all of them together. A cycle never drops below 0.8 s, so a
+small `delay` cannot turn an effect into a strobe. `--dump` shows the `delay`
+your system reports.
 
 ### Before Steam has started
 
-The strip keeps its startup breath through the whole boot, and the effect
-takes over the moment Steam sets the LEDs.
-
-Worth knowing because it looks like a bug otherwise: the kernel module comes
-up reporting **off**, and only counts its sequence number up when something
-writes to it. So from the service connecting until Game Mode is up, the
+The strip keeps its startup breath through the whole boot and hands over the
+moment Steam sets the LEDs. The kernel module comes up reporting *off* and only
+counts up when something writes to it, so until Game Mode is running the
 truthful frame is black. The service leaves the strip to the ESP for that
-stretch rather than sending it — a dark bar during boot is a gap, not
-information.
+stretch rather than sending darkness.
 
 On a machine that boots to the desktop and never starts Game Mode, the bar
-therefore keeps breathing rather than going dark. That is the same statement:
-Steam has not said anything yet.
+therefore keeps breathing. That is the same statement: Steam has not said
+anything yet.
 
 ## While the machine sleeps
 
 Suspend the machine and the strip keeps a slow white breath going instead of
-falling dark. Wake it and the normal effect comes straight back.
+falling dark. Wake it and the normal effect comes back.
 
-**The ESP draws this one itself**, and it is the only thing it draws on the
-host's behalf. During a suspend the service is frozen — no process runs, so no
+**The ESP draws this one itself.** During a suspend no process runs, so no
 frame can be rendered. A systemd sleep hook tells the service just before the
 machine goes down, the service hands the ESP a colour and a breath length, and
 the ESP carries on alone until the first frame arrives again.
 
-Three consequences worth knowing:
+Three things follow from that:
 
-* **The ESP has to stay powered.** It runs off USB, and whether the ports stay
-  live in S3 is a BIOS setting — often called *ErP*, *Wake on USB* or *USB
-  power in S3*. If yours cuts power, the strip goes dark and nothing on this
-  side can help. Shutdown and hibernate usually cut it either way.
-* **It needs the firmware from this version.** An older one does not know the
-  message, ignores it, and leaves the strip dark exactly as before.
-* **What it looks like is not configurable.** "The machine is off but alive"
-  should not be something you have to learn to recognise. `STANDBY_PULSE=0`
-  switches it off; that is the whole setting.
+* **The ESP has to stay powered.** Whether USB stays live in S3 is a BIOS
+  setting, often called *ErP*, *Wake on USB* or *USB power in S3*. If yours
+  cuts power the strip goes dark and nothing here can help.
+* **It needs the firmware from this version.** An older one ignores the
+  message and leaves the strip dark, exactly as before.
+* **What it looks like is fixed.** "The machine is off but alive" should not be
+  something you have to learn to recognise. `STANDBY_PULSE=0` switches it off.
 
 To try it without suspending anything:
 
 ```bash
-echo standby > /run/steamos-led-serial/notify   # the strip takes over
-echo resume  > /run/steamos-led-serial/notify   # and hands it back
+echo standby > /run/steamos-led-serial/notify
+echo resume  > /run/steamos-led-serial/notify
 ```
 
-If the resume never arrives — the hook was removed, an earlier sleep hook
-failed — the service takes the strip back by itself after half a minute of
-*running* time. That measurement uses the monotonic clock, which does not
-advance across a suspend, so a machine asleep for three days still wakes to a
-breathing strip.
+If the resume never arrives, the service takes the strip back after half a
+minute of *running* time. That uses the monotonic clock, which does not advance
+across a suspend, so a machine asleep for three days still wakes to a breathing
+strip.
 
 ## Temperature gauge
 
-The bar can show how hot the machine is instead of running the rainbow: it
-fills up as the temperature rises, and its colour walks from green through
-yellow and orange to red as it fills.
+The bar can show how hot the machine is instead of running the rainbow. It
+fills as the temperature rises and walks from green through yellow and orange
+to red:
 
 ```
  35 C |·················|   below the lower mark: dark
@@ -378,22 +302,18 @@ yellow and orange to red as it fills.
  85 C |#################|   red
 ```
 
-It grows from the same end the other effects run from, and `REVERSE` flips it
-along with everything else.
-
-Switch it on and then pick **Rainbow** in Steam's LED menu:
+Switch it on, then pick **Rainbow** in Steam's LED menu:
 
 ```bash
 sudo sed -i 's/^TEMPERATURE_GAUGE=.*/TEMPERATURE_GAUGE=1/' /etc/steamos-led-serial.conf
 sudo systemctl restart steamos-led-serial
 ```
 
-It replaces the rainbow rather than adding an entry because Steam's menu cannot
-be extended — those entries are built into the client, and nothing outside it
-can add one. Taking over an effect Steam already offers is the only way to show
-something new, and the rainbow is the one most people are happy to give up.
-Every other effect keeps working exactly as before, and switching the gauge off
-gives the rainbow back.
+It replaces the rainbow because Steam's menu cannot be extended: those entries
+are built into the client. Taking over an effect it already offers is the only
+way to show something new, and the rainbow is the one most people are happy to
+give up. Every other effect keeps working, and switching the gauge off gives
+the rainbow back.
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
@@ -402,10 +322,8 @@ gives the rainbow back.
 | `TEMPERATURE_MAX` | `85.0` | at this the bar is full and red |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor to read |
 
-`auto` picks the CPU or GPU package sensor — `k10temp`/`amdgpu` on a Steam
-Machine — ahead of the dozen other things a PC measures, such as the SSD, the
-wifi card or the battery. To see what your machine reports, what the automatic
-choice landed on, and what the bar makes of it right now:
+`auto` picks the CPU or GPU package sensor ahead of the dozen other things a PC
+measures. To see what your machine reports and what the bar makes of it:
 
 ```bash
 /var/lib/steamos-led-serial/steamos-led-serial --temperature
@@ -414,7 +332,6 @@ choice landed on, and what the bar makes of it right now:
 ```
 Temperature sensors on this machine:
   [use ] k10temp      Tctl          63.5 C  /sys/class/hwmon/hwmon1/temp2_input
-  [    ] k10temp      Tccd1         49.0 C  /sys/class/hwmon/hwmon1/temp1_input
   [    ] nvme         Composite     41.0 C  /sys/class/hwmon/hwmon0/temp1_input
 
 Reading /sys/class/hwmon/hwmon1/temp2_input: 63.5 C
@@ -422,76 +339,56 @@ Gauge: empty at or below 40 C, full at 85 C.
 Right now: 9 of 17 LEDs lit, colour #fff300
 ```
 
-To watch something else — the GPU while the CPU is what `auto` chose, say — put
-that path into `TEMPERATURE_SENSOR`, or pick it from the control panel's
-drop-down, which lists the same sensors by name. If a machine reports no
-temperature at all, the rainbow is shown as usual; a dark bar would just look
-like the service had died.
+To watch something else, put that path into `TEMPERATURE_SENSOR` or pick it
+from the control panel. If a machine reports no temperature at all, the rainbow
+is shown as usual.
 
-**Reading rate.** The sensor is read once a second and the readings are
-averaged over about six seconds. Both matter: a CPU sensor moves a degree or
-two between one reading and the next while nothing is happening, and over the
-45 degree span that is most of an LED — so the leading one, the only one lit
-part way, would flicker on every read. Averaging settles it without hiding a
-real warm-up, which takes far longer than six seconds. The two constants are
-at the top of `server/steamos_led/temperature.py`.
+The sensor is read once a second and averaged over about six. Both matter: a
+CPU sensor moves a degree or two between readings while nothing is happening,
+which over the gauge's span is most of an LED, so the leading one would flicker
+constantly.
 
 ## Notifications
 
-A notification takes over the whole bar for a few seconds and then hands it
-straight back to whatever Steam was showing. The flash grows out of the middle,
-takes one breath once it reaches both ends, and retracts back into the middle:
+A notification takes over the whole bar for a few seconds and hands it straight
+back to whatever Steam was showing:
 
 ```
  0.00s |·················|
  0.29s |······+###+······|   growing outwards
- 0.73s |··+###########+··|
  1.02s |#################|   fully out
- 1.60s |-----------------|   breathing down to 8%...
- 2.04s |#################|   ...and back up
+ 1.60s |-----------------|   breathing down to 8%
  2.48s |··+###########+··|   retracting
  3.21s |·······+#+·······|
 ```
 
-The dip is a fade, not a blink — it never switches off.
-
-Gold for an achievement, purple for a message. Try it right now, with the
-service running:
+Try it with the service running:
 
 ```bash
 steamos-led-serial --notify achievement
 steamos-led-serial --notify message
-steamos-led-serial --notify '#00ff88'      # any colour you like
+steamos-led-serial --notify '#00ff88'
 ```
 
-(the command lives in `/var/lib/steamos-led-serial/`)
-
-Under the hood that writes one word into a named pipe, `/run/steamos-led-serial/notify`.
-**Anything** that can write a line can flash the bar — no library, no API:
+That writes one word into a named pipe, `/run/steamos-led-serial/notify`.
+**Anything that can write a line can flash the bar**, no library and no API:
 
 ```bash
 echo achievement > /run/steamos-led-serial/notify
 ```
 
-So a game launch script, a `.desktop` action or your own tool can drive it.
-Known words are `achievement`, `message`, `friend` and `warning`; anything else
-is read as a colour (`#rrggbb` or `r,g,b`).
-
-Either can be prefixed with a **shape**, for that one flash only:
+Known words are `achievement`, `message`, `friend` and `warning`. Anything else
+is read as a colour (`#rrggbb` or `r,g,b`). Either can carry a shape for that
+one flash:
 
 ```bash
 steamos-led-serial --notify comet:#1a9fff
 echo alternate:achievement > /run/steamos-led-serial/notify
 ```
 
-Nothing is stored. It is there because choosing between five shapes by writing
-each one into the config and restarting is the wrong way round — the control
-panel's *Test* tab is a row of these, one per shape, all in Steam blue so the
-only difference between the buttons is the thing you are choosing.
-
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `NOTIFY` | `1` | enable the overlay at all — with this off nothing flashes, `--notify` included |
+| `NOTIFY` | `1` | the master switch; with this off nothing flashes at all |
 | `NOTIFY_ACHIEVEMENTS` | `1` | watch for achievement unlocks |
 | `NOTIFY_MESSAGES` | `1` | watch for friend messages |
 | `NOTIFY_FRIEND_ONLINE` | `1` | watch for friends coming online |
@@ -499,153 +396,76 @@ only difference between the buttons is the thing you are choosing.
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
-| `NOTIFY_STYLE` | `bloom` | shape of the flash — see [the shapes](#the-shapes) |
-| `ACHIEVEMENT_COLOR` | `#ffd700` | what `achievement` flashes |
-| `MESSAGE_COLOR` | `#8000ff` | what `message` flashes |
-| `FRIEND_COLOR` | `#00c850` | what `friend` flashes |
-| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` | `default` | shape for that one kind — a shape name, or `default` to follow `NOTIFY_STYLE` |
+| `NOTIFY_STYLE` | `bloom` | default shape |
+| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` | `#ffd700` / `#8000ff` / `#00c850` | what each one flashes |
+| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` | `default` | shape for that one kind, or `default` to follow `NOTIFY_STYLE` |
 
 ### The shapes
 
 | Shape | What it looks like |
 | ----- | ------------------ |
-| `bloom` | grows out of the middle, breathes once, retracts — the default |
+| `bloom` | grows out of the middle, breathes once, retracts |
 | `pulse` | the whole bar swells three times and fades |
 | `double_flash` | two short blinks, a pause, and again |
 | `comet` | a bright head with a fading tail, once across the bar |
-| `alternate` | the two halves of the bar flash in turn |
+| `alternate` | the two halves flash in turn |
 
-`double_flash` is timed in **seconds**, not in fractions of the flash: a pair
-is two 80 ms blinks 80 ms apart, roughly once a second. Make the notification
-longer and you get more pairs rather than slower ones — a strobe that slows
-down is no longer a strobe. Every duration gets a whole number of pairs, so it
-never ends mid-pair.
+`comet` is the only shape with a direction, and the only one `REVERSE` applies
+to. `double_flash` is timed in seconds rather than in fractions of the flash, so
+a longer notification gives more pairs rather than slower ones.
 
-`comet` is the only shape with a **direction**, and the only one `REVERSE`
-means anything to. A flash goes to the strip without passing the renderer, so
-the setting is applied to the flash separately — otherwise the comet would run
-against every other effect on the bar. It starts before the first LED and ends
-past the last, so it neither appears out of nothing nor dies on the edge.
-
-### Telling them apart
-
-Achievements, friend messages and friends coming online each have a colour and
-a shape of their own. The colour is the fast
-one — gold, purple, green, recognisable from across the room — and the shape is
-there for when two of them are the same colour, or when you want an achievement
-to feel like more of an event than a friend logging in.
-
-The shape settings start at `default`, which means "whatever `NOTIFY_STYLE`
-says". So `NOTIFY_STYLE` stays the one knob for *everything looks like this*,
-and a kind only leaves it once you say so. A colour asked for directly —
-`--notify '#00ff88'` — is nobody's kind and always follows it.
-
-`warning` is the exception, deliberately: it is always **red** and always
-`alternate`, and neither can be changed. It is the one notification you must
-not have to recognise — it has to mean the same thing on this machine as on
-anyone else's. `NOTIFY_WARNING` says whether it fires; that is the whole
-setting.
-
-The duration is shared: whatever the shape, a flash lasts `NOTIFY_DURATION`.
-
-### Overheating
-
-The one notification the **service** produces on its own — no game, no Steam,
-no watcher. It reads every sensor the machine has and flashes red when one has
-stayed within a few degrees of **its own** critical point for a minute.
-
-Nothing about it is configurable except whether it runs, and that is on
-purpose:
-
-* **The thresholds come from the parts.** hwmon publishes the manufacturer's
-  own limits next to each reading, so there is no number here to get wrong. An
-  APU sitting at 95 °C is doing exactly what it was designed to do; an NVMe
-  drive at 95 °C is ten degrees past its critical point. One figure cannot
-  serve both, and two drives in the same machine often disagree.
-* **A sensor that publishes no limit is not watched at all.** `k10temp` — the
-  CPU — publishes nothing on current AMD hardware, and that is the right
-  outcome rather than a gap: Zen boosts until it reaches its limit and stays
-  there, so CPU temperature is a poor alarm by design. Cooling trouble shows
-  up on the GPU, the DIMMs and the SSDs, and those do publish limits.
-* **`max` is ignored**, only `crit` (or `emergency`) counts. A DDR5 module
-  reports `max 55` with `crit 85`; an Ethernet controller reports `max 120`
-  and no `crit`. That file means whatever a driver wants it to.
-* **A minute of it**, because a chip touches its limit whenever it boosts.
-  After a warning that sensor stays quiet until it has cooled several degrees,
-  and no second warning follows within five minutes whatever trips it.
-
-To see what it would do on your machine, before switching it on:
-
-```bash
-steamos-led-serial --temperature
-```
-
-Every sensor is listed with the limits it publishes and the temperature it is
-watched at — or a dash, if it is not watched.
-
-It is **not** connected to the [temperature gauge](#temperature-gauge). The
-gauge displays one sensor you picked; this watches all of them, and either
-works with the other switched off.
+`warning` is fixed at **red** and `alternate`, on purpose: it is the one
+notification you must not have to recognise, so it means the same on every
+machine. `NOTIFY_WARNING` says whether it fires, and that is the whole setting.
 
 ### When several arrive at once
 
-Flashes **queue** rather than interrupt each other. The watcher checks
-achievements and messages on the same poll, so both landing in the same tick
-is ordinary — and the second one used to replace the first, leaving the bar
-saying "message" and never mentioning the achievement at all. Now it shows
-gold, then purple.
+Flashes **queue** rather than interrupt each other, so an achievement and a
+message in the same tick show gold, then purple.
 
-A repeat is not queued behind itself. While a trigger is being shown, and for
-`NOTIFY_REPEAT_GAP` seconds afterwards, the same one is ignored: three
-achievements in one poll are one flash, because gold three times in a row says
-nothing gold once does not. The gap is per trigger, so an achievement during a
-chat storm still gets through immediately.
-
-That gap is what stops a fast conversation from holding the bar lit. Measured
-over a message a second for half a minute:
+A repeat is not queued behind itself. While a trigger is showing, and for
+`NOTIFY_REPEAT_GAP` seconds after, the same one is ignored. Three achievements
+in one poll are one flash. The gap is per trigger, so an achievement during a
+chat storm still gets through. Measured over a message a second for half a
+minute:
 
 | | flashes | bar lit |
 | --- | --- | --- |
 | `NOTIFY_REPEAT_GAP=10` | 3 | 26% of the time |
 | `NOTIFY_REPEAT_GAP=0` | 8 | 70% of the time |
 
-Set it to `0` to switch the quiet time off entirely; the queue stays either
-way. Four flashes may wait at most — past that the bar has stopped reporting
-and started reciting.
+At most four flashes wait. Past that the bar has stopped reporting and started
+reciting.
 
-The two colours take any `#rrggbb` or `r,g,b`. The trigger word stays the same
-either way — everything that flashes the bar asks for `achievement`, so which
-gold that is stays one setting in one place. The control panel offers a few
-ready-made ones (Gold, Bronze, Platinum; Purple, Green, Blue) and writes the
-value for you. `friend` and `warning` keep their colours.
+### Overheating
+
+The one notification the **service** produces on its own, with no game and no
+Steam involved. It reads every sensor and flashes red when one has stayed
+within a few degrees of **its own** critical point for a minute.
+
+Nothing about it is configurable except whether it runs:
+
+* **The thresholds come from the parts.** hwmon publishes the manufacturer's
+  limits next to each reading, so there is no number here to get wrong. An APU
+  at 95 °C is fine; an NVMe drive at 95 °C is ten degrees past its limit.
+* **A sensor publishing no limit is not watched.** `k10temp` publishes none on
+  current AMD hardware, which is the right outcome: Zen boosts until it reaches
+  its limit and stays there, so CPU temperature is a poor alarm by design.
+* **Only `crit` counts, `max` is ignored.** A DDR5 module reports `max 55` with
+  `crit 85`. That file means whatever a driver wants it to.
+
+`--temperature` lists every sensor with the limits it publishes and the
+temperature it is watched at, so you can see what it would do before switching
+it on. It is not connected to the [gauge](#temperature-gauge): the gauge shows
+one sensor you picked, this watches all of them.
 
 ### Flashing on a real achievement
 
-The bar can flash the moment an achievement unlocks, with **no API key, no
-internet and no public profile** — by asking the Steam client running on your
-own machine, through Valve's local Steamworks API. This is the same route
-[Steam Achievement Notifier](https://github.com/SteamAchievementNotifier/SteamAchievementNotifier)
-takes since V1.9.
+The bar flashes the moment an achievement unlocks, with **no API key, no
+internet and no public profile**, by asking the Steam client on your own
+machine through Valve's local Steamworks API.
 
-First check whether your machine can do it. **Start a game**, then run this as
-your normal user (not with `sudo`):
-
-```bash
-/var/lib/steamos-led-serial/steamos-led-serial --steam-check
-```
-
-It reports where Steam is, which `libsteam_api.so` it found, which game it
-believes is running, and whether it can talk to Steam as that game. If the last
-line says realtime detection works, start the watcher:
-
-```bash
-/var/lib/steamos-led-serial/steamos-led-serial --watch-achievements
-```
-
-Unlock something, and the bar flashes gold.
-
-**`install.sh` sets this up for you** — it installs the watcher as a user
-service for whoever ran `sudo ./install.sh`, so it starts with your session.
+`install.sh` sets this up as a user service that starts with your session.
 Nothing else to do. To check on it:
 
 ```bash
@@ -653,210 +473,125 @@ systemctl --user status steamos-led-achievements
 journalctl --user -u steamos-led-achievements -f
 ```
 
-Pass `--skip-watcher` to the installer to leave it out, or turn it off later
-with `systemctl --user disable --now steamos-led-achievements`.
+To see whether your machine can do it, **start a game** and run this as your
+normal user, not with `sudo`:
 
-**The log will show it restarting after every game — that is on purpose.** A
-process that has initialised Steamworks as a game stays registered with the
-Steam client as an instance of it, and Steam will not report that game as
-stopped while the registration exists. `SteamAPI_Shutdown` does not clear it;
-only the process ending does. So the watcher handles one game session and then
-exits, and systemd starts it again about twenty seconds later, in time for the
-next game.
+```bash
+/var/lib/steamos-led-serial/steamos-led-serial --steam-check
+```
 
-### Friend messages
+Pass `--skip-watcher` to the installer to leave it out, or disable it later with
+`systemctl --user disable --now steamos-led-achievements`.
 
-The bar also flashes **purple** when someone messages you on Steam, as long as a
-game is running. Two things are needed and the installer cannot guarantee
-either, so check with:
+**The log shows it restarting after every game, which is on purpose.** A process
+that has initialised Steamworks as a game stays registered with Steam as an
+instance of it, and Steam will not report that game as stopped while the
+registration exists. Only the process ending clears it, so the watcher handles
+one game session and exits.
+
+### Friend messages, and friends coming online
+
+The bar also flashes **purple** for a Steam message and **green** when a friend
+logs in, both only while a game is running. Check what your machine can do:
 
 ```bash
 steamos-led-serial --probe-messages
 ```
 
-It lists every `libsteam_api.so` on the machine and says which can do it.
-Chat arrives as a Steamworks *callback*, and callbacks only reach a Python
-binding through manual dispatch, which was added in SDK 1.51 - copies shipped
-inside older games and older Proton versions cannot deliver them. Steam's own
-copy under `steamrt64/` can, and it is there on every machine, which is why it
-is preferred.
+Chat arrives as a Steamworks callback, and callbacks only reach a Python
+binding through manual dispatch, added in SDK 1.51. Copies shipped inside older
+games and Proton versions cannot deliver them; Steam's own copy under
+`steamrt64/` can, and is on every machine, which is why it is preferred.
 
-Steam announces "your friend is typing" through the same callback as the
-message itself, so the entry type is read back to tell them apart - otherwise
-the bar would flash twice per message. Reading it means reading the message
-text, which is then discarded: what a friend wrote does not belong in a
-system log.
-
-Set `NOTIFY_MESSAGES=0` in the config to turn it off. If no suitable library
-is found for messages, the watcher says so in the log once and carries on with
-whatever else is switched on.
-
-### Friends coming online
-
-The bar flashes **green** when one of your friends logs in — again only while a
-game is running, and switched off with `NOTIFY_FRIEND_ONLINE=0`.
-
-This rides on the same callbacks as chat, but asks Steam for less: messages
-need `SetListenForFriendsMessages`, which the client is allowed to decline,
-while a friend's state change arrives whether you asked for it or not. So on a
-machine where `--probe-messages` says chat will not work, this one still can.
-
-Steam sends that same callback for every change to anyone it knows about — a
-new nickname, a new avatar, someone starting a game — so only the "came
-online" flag counts, and `GetFriendRelationship` throws out the strangers you
-share a group chat with. Two more things are ignored on purpose:
-
-* the first 20 seconds after attaching, because Steam replays who is *already*
-  online as soon as the friend list loads, and that is not anyone arriving;
-* more than three at once, for the same reason as the achievement flood guard —
-  that is Steam catching up, not four people logging in together.
-
-The three switches are independent: all of them are found through the same
-Steamworks session, so switching one off leaves the others working. With all
-three off the watcher attaches to nothing at all.
+Friends coming online ride the same callbacks but ask Steam for less, so on a
+machine where chat will not work this one still can. Steam replays who is
+already online when the friend list loads, so the first 20 seconds are ignored,
+as is any burst of more than three at once.
 
 **Why only while a game runs?** Steamworks has to be initialised *as* an app,
-so there is nothing to attach to otherwise - and a process registered with
-Steam as a game keeps Steam from ever finishing "Stopping" that game. Desktop
-Mode and Game Mode both work; what matters is a running game, not the session.
+so there is nothing to attach to otherwise. Desktop Mode and Game Mode both
+work; what matters is a running game, not the session.
 
-**Why a separate user service?** Steamworks is a game-side API: it talks to the
-Steam client of the logged-in user, and it has to be initialised *as* a
-specific game. The LED service runs as root, walled off from your home
-directory — exactly where Steam lives. So the watcher runs beside Steam in your
-session and only writes a word into the pipe. The service never has to know
-Steam exists.
+**Why a separate user service?** Steamworks talks to the Steam client of the
+logged-in user. The LED service runs as root, walled off from your home
+directory, which is exactly where Steam lives. So the watcher runs beside Steam
+in your session and only writes a word into the pipe.
 
-Two consequences of how Steamworks works, worth knowing:
-
-* It offers no way to ask *which* game is running, so the watcher works that
-  out itself, from `RunningAppID` in Steam's registry file and from the
-  `SteamAppId` in the environment of running processes. Switching games is
-  picked up automatically.
-* `libsteam_api.so` belongs to the Steamworks SDK and ships inside games rather
-  than being redistributable, so it is not vendored here. The watcher borrows
-  the copy from one of your installed games; `--steam-check` lists every copy it
-  found and which it picked. Architecture matters: Proton keeps a 32-bit copy in
-  `files/lib` next to the 64-bit one in `files/lib64`, and only the one matching
-  your Python will load. Set `STEAM_LIBRARY` to a path to override the choice.
-
-### If that does not work on your machine
-
-The pipe is always there, and it does not care who writes to it: anything that
-can already tell an achievement happened only has to `echo achievement` into
-it. A game launcher hook, a script watching a log, an overlay - all of them
-work without this service knowing they exist.
+The three switches are independent. With all three off the watcher attaches to
+nothing at all.
 
 ## The control panel
 
-Everything after the first install has a window, so you do not have to edit
-`/etc/steamos-led-serial.conf` by hand and restart the service:
+Everything after the first install has a window:
 
 ```bash
 ./gui/steamos-led-panel
 ```
 
-`install.sh` also puts it in the application menu as **SteamOS LED bar**. It
-has five tabs:
+`install.sh` also puts it in the application menu as **SteamOS LED bar**. Five
+tabs:
 
-- **Strip** — the bar itself (length, direction, brightness limits) and what
-  runs on it (patrol dots, effect speed, the temperature gauge). The strip
-  length stops at 120: that is where the GPIO14 firmware's `MAX_LEDS` sits and
-  where 230400 baud stops keeping up at 60 fps. Longer strips work, but they
-  are a config file edit, because they also need firmware and frame rate to
-  match.
-- **Notifications** — what flashes (the master switch, achievements and
-  friend messages with a colour each) and how it looks (duration, shape).
-- **Advanced** — the ones you set once, if ever: mapping, gamma, the
-  [notify repeat cooldown](#when-several-arrive-at-once), the two frame rates
-  and the log level.
-- **Test** — fire each notification in whatever colour it is set to, or any
-  colour you pick; run the strip self-test; run the Steam check, the message
-  probe and the sensor list behind the
-  [temperature gauge](#temperature-gauge).
-- **Status & repair** — what is installed, what is running, one button that
-  puts it back, [updating](#updating) to the newest version of whichever
-  branch you pick, and flashing the ESP firmware.
+| Tab | What is on it |
+| --- | ------------- |
+| **Strip** | length, direction, brightness limits, patrol dots, effect speed, temperature gauge |
+| **Notifications** | what flashes, in which colour and shape, and for how long |
+| **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
+| **Test** | fire each notification, run the self-test, the Steam check, the message probe, the sensor list |
+| **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating), flashing the firmware |
 
-**Apply and Reload sit under all of them**, because there is one config file:
-Apply writes every setting from every tab (keeping the comments in the file)
-and restarts both the service and the achievement watcher, so a changed switch
-takes effect now. Settings that depend on a switch — the temperature marks,
-the two flash colours — are greyed out while that switch is off, so you can
-see they exist without them asking for attention they have not earned.
+**Apply and Reload sit under all of them**, because there is one config file.
+Apply writes every setting from every tab, keeps the comments in the file, and
+restarts both the service and the watcher.
 
-**After a SteamOS update, press *Rebuild and reinstall*.** A system update brings a new
-kernel, and the LED module was built for the old one - so it is gone, and with
-it `/dev/valve-leds-shim`. The panel names that as the problem and rebuilds it.
-Your configuration is kept, and the ESP is never reflashed.
+**After a SteamOS update, press *Rebuild and reinstall*.** A system update
+brings a new kernel and the module was built for the old one, so it is gone and
+`/dev/valve-leds-shim` with it. Your configuration is kept and the ESP is never
+reflashed.
 
-It runs as you, not as root: flashing the bar and asking Steam questions need
-no rights at all. Only writing the config, the self-test and repairing do, and
-each asks once through the normal system password prompt.
+The panel runs as you, not as root. Flashing the bar and asking Steam questions
+need no rights; writing the config, the self-test and repairing each ask once
+through the normal password prompt.
 
 **In Game Mode the privileged half cannot work.** You can add the panel as a
-non-Steam game and the Test tab works fine there - but changing settings, the
-self-test and repairing all need a password, and Game Mode has nothing that
-can ask for one: no polkit agent runs in it, and there is no terminal to fall
-back on. The panel says so rather than failing with pkexec's own message about
-`/dev/tty`, which explains nothing. Switch to Desktop Mode for those.
+non-Steam game and the Test tab works there, but Game Mode runs no polkit agent
+and has no terminal to fall back on, so anything needing a password has to
+happen in Desktop Mode. The panel says so rather than failing with pkexec's own
+message about `/dev/tty`.
 
-It follows your Plasma theme. tkinter has no idea a desktop theme exists,
-which is why an unstyled window looks like a visitor from another decade -
-but Plasma writes its active colour scheme into `~/.config/kdeglobals` as
-plain INI, so the panel reads it: window and text colours, the accent, the
-font, and whether the scheme is light or dark. Switch Plasma to Breeze Dark
-and reopen the panel and it comes back dark. Without KDE it falls back to
-Breeze light.
+It follows your Plasma colour scheme, read from `~/.config/kdeglobals`. Without
+KDE it falls back to Breeze light.
 
 **Its icon is a file you can replace.** Drop a PNG in as
 `gui/steamos-led-panel.png` (512x512 is a good size) and run
-`sudo ./install.sh --yes`. The installer copies it into your icon theme under
-`~/.local/share/icons/hicolor/`, points the menu entry at it and rebuilds
-Plasma's menu cache — that cache is why a changed icon otherwise seems not to
-take. The panel window reads the same file directly, so it picks up a new icon
-on the next start without reinstalling. Without the file, both fall back to a
-stock icon. If you also added the panel to Steam as a non-Steam game, the same
-file works as the artwork there.
-
-If the menu still shows the old icon, the cache is stale — log out and back in,
-or run `kbuildsycoca6 --noincremental`. To check what the entry actually says:
-
-```bash
-grep Icon= ~/.local/share/applications/steamos-led-panel.desktop
-```
+`sudo ./install.sh --yes`. If the menu still shows the old one, the cache is
+stale: log out and back in, or run `kbuildsycoca6 --noincremental`.
 
 > The panel needs Python's `tkinter`. It is present on SteamOS, but a system
-> update can remove it (`sudo pacman -S tk` brings it back). Nothing here is
-> only available in the panel - every button runs a command you can also type,
-> and the panel prints the command it ran.
+> update can remove it (`sudo pacman -S tk` brings it back). Nothing is only
+> available in the panel: every button runs a command you can also type, and
+> the panel prints the command it ran.
 
 ## Testing and diagnostics
 
-The service holds the serial port exclusively, so stop it before testing:
+The service holds the serial port exclusively, so stop it first:
 
 ```bash
 sudo systemctl stop steamos-led-serial
 ```
 
-The commands below live in `/var/lib/steamos-led-serial/`:
+These live in `/var/lib/steamos-led-serial/`:
 
 | Command | Purpose |
 | ------- | ------- |
 | `steamos-led-serial --list-ports` | list connected USB serial devices |
-| `steamos-led-serial --self-test` | test patterns — works without Steam and without the kernel module |
+| `steamos-led-serial --self-test` | test patterns, without Steam or the kernel module |
 | `steamos-led-serial --simulate rainbow` | show one effect continuously |
 | `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs |
-| `steamos-led-serial --temperature` | list the machine's temperature sensors and what the [gauge](#temperature-gauge) makes of them |
+| `steamos-led-serial --temperature` | list sensors and what the [gauge](#temperature-gauge) makes of them |
 | `steamos-led-serial -v` | run in the foreground with debug output |
 
-Afterwards, start it again:
-
-```bash
-sudo systemctl start steamos-led-serial
-```
-
-Follow the log: `journalctl -u steamos-led-serial -f`
+Then `sudo systemctl start steamos-led-serial` again. Follow the log with
+`journalctl -u steamos-led-serial -f`.
 
 ## When something does not work
 
@@ -869,44 +604,37 @@ sudo /var/lib/steamos-led-serial/steamos-led-serial --self-test
 sudo systemctl start steamos-led-serial
 ```
 
-If the self test looks right, the problem sits between Steam and the service.
-If it does not, the problem is hardware or firmware.
+If it looks right, the problem sits between Steam and the service. If it does
+not, the problem is hardware or firmware.
 
 | Symptom | Cause and fix |
 | ------- | ------------- |
 | `/dev/valve-leds-shim not found` | module not loaded: `sudo modprobe leds-valve-shim`, otherwise `sudo ./install.sh --rebuild-module` |
-| Bar dead after a SteamOS update | kernel module gone, or no longer matching the kernel: `sudo ./install.sh --rebuild-module` |
-| `cannot build the kernel module, missing: headers` | say yes when the installer offers to install them, or do it by hand — see [On a fresh SteamOS](#on-a-fresh-steamos). The package is named after your kernel: `linux-neptune-616-headers`, not `linux-headers` |
-| `pacman` refuses everything with a signature error | the keyring has never been initialised on this machine: `sudo pacman-key --init && sudo pacman-key --populate` |
-| `pacman` cannot write anything | the SteamOS rootfs is read-only: `sudo steamos-readonly disable` |
-| `sudo` rejects your password on a fresh Deck | there is no password yet — run `passwd` once as the `deck` user |
-| `no ESP serial device found` | check `--list-ports`; if it stays empty, try another USB cable (charging cables often have no data wires) |
-| Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0 → `MIN_BRIGHTNESS=40` |
+| Bar dead after a SteamOS update | module gone or no longer matching the kernel: `sudo ./install.sh --rebuild-module` |
+| `cannot build the kernel module, missing: headers` | say yes when the installer offers to install them. The package is named after your kernel, `linux-neptune-616-headers`, not `linux-headers` |
+| `pacman` refuses everything with a signature error | keyring never initialised: `sudo pacman-key --init && sudo pacman-key --populate` |
+| `pacman` cannot write anything | rootfs is read-only: `sudo steamos-readonly disable` |
+| `sudo` rejects your password on a fresh Deck | there is no password yet, run `passwd` once |
+| `no ESP serial device found` | check `--list-ports`; if empty, try another USB cable, charging cables often have no data wires |
+| Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0: `MIN_BRIGHTNESS=40` |
 | Red and green swapped | colour order of the firmware, see [docs/WIRING.md](docs/WIRING.md#colour-order) |
-| Download bar fills from the wrong end | `REVERSE=1` — the strip is mounted the other way round from where its data line starts |
-| Dark after switching firmware | the GPIO2 and GPIO14 builds drive **different pins** — does the firmware match your wiring? |
-| Flicker, LEDs dropping out | baud rate too high for the adapter or for bit-banging → back to 230400 (firmware *and* config), or move the data line to GPIO2 |
-| First LED misbehaves | 3.3 V logic level too low → 74AHCT125 or 1N4148, see [docs/WIRING.md](docs/WIRING.md) |
+| Download bar fills from the wrong end | `REVERSE=1` |
+| Dark after switching firmware | the GPIO2 and GPIO14 builds drive different pins, does the firmware match your wiring? |
+| Flicker, LEDs dropping out | baud rate too high: back to 230400 in firmware *and* config, or move the data line to GPIO2 |
+| First LED misbehaves | 3.3 V logic level too low, use a 74AHCT125 or 1N4148, see [docs/WIRING.md](docs/WIRING.md) |
 | Only part of the strip lights up | `LED_COUNT` is wrong, or above the firmware's `MAX_LEDS` |
-| Strip stays lit after unplugging | it should go dark after 5 s (firmware watchdog); if not, the firmware is outdated |
-| While flashing: `No module named 'intelhex'` | `flash-esp.sh` installs it for you; otherwise: `~/.platformio/penv/bin/python -m pip install intelhex` |
+| Strip stays lit after unplugging | it should go dark after 5 s; if not, the firmware is outdated |
+| While flashing: `No module named 'intelhex'` | `flash-esp.sh` installs it; otherwise `~/.platformio/penv/bin/python -m pip install intelhex` |
 
 ## Updating
 
-**From the control panel:** *Status & repair* → *Update*. Pick a branch, press
-**Check for updates** to see what would arrive, then **Update and install**.
-It fetches into your clone and runs the installer, asking for your password
-once — for the install only, since the clone is yours already.
+**From the control panel:** *Status & repair* > *Update*. Pick a branch, press
+**Check for updates**, then **Update and install**.
 
-It refuses rather than resolves. Local edits or commits of your own stop it
-with a message naming them, because an updater that throws away your work to
-succeed is worse than one that stops. Untracked files of your own are fine.
-The kernel module is only rebuilt when `leds-valve-shim/` actually changed —
-that costs half a minute and needs kernel headers, so it has to be worth it.
-
-When it is done it offers to restart itself, since it is still running from
-the files it started with. Saying no costs nothing: the new version is
-installed either way, it is only this window that is still the old one.
+It refuses rather than resolves: local edits or commits of your own stop it with
+a message naming them, because an updater that throws away your work to succeed
+is worse than one that stops. Untracked files are fine. The kernel module is
+only rebuilt when `leds-valve-shim/` actually changed.
 
 **From the terminal**, the same thing:
 
@@ -916,13 +644,11 @@ git pull
 sudo ./install.sh --yes
 ```
 
-An existing `/etc/steamos-led-serial.conf` is left untouched, so your settings
-survive the update. The ESP firmware only needs reflashing when something in
-`firmware/` changed.
+Your `/etc/steamos-led-serial.conf` is left untouched. The ESP firmware only
+needs reflashing when something in `firmware/` changed.
 
-> **After a SteamOS system update:** the kernel module lives on the root
-> filesystem, which SteamOS resets on update — and a module only ever matches
-> one kernel. So run this once:
+> **After a SteamOS system update** the kernel module is gone, since the rootfs
+> is reset and a module only ever matches one kernel:
 > ```bash
 > cd ~/SteamOS-Led-Bar && sudo ./install.sh --rebuild-module
 > ```
@@ -953,19 +679,18 @@ sudo ./uninstall.sh --remove-module    # also remove the kernel module
 ```
 
 The kernel module presents Steam with an LED bar that does not exist and
-exposes the written state as a snapshot at `/dev/valve-leds-shim`. The service
-reads it, **renders the effects on the PC** and sends finished pixels to the
-ESP. That makes the strip length free (the picture is interpolated from 17 onto
-N LEDs), lets effects be tuned without reflashing, and keeps the firmware small
-and robust.
+exposes the written state as a snapshot. The service reads it, **renders the
+effects on the PC** and sends finished pixels to the ESP. That makes the strip
+length free, lets effects be tuned without reflashing, and keeps the firmware
+small and robust.
 
 Built-in safety nets:
 
-* The service reconnects on its own when the ESP is unplugged and plugged back
-  in, and waits patiently if the kernel module only shows up later.
+* The service reconnects when the ESP is unplugged and plugged back in, and
+  waits if the kernel module only shows up later.
 * Every packet is CRC16 protected; the parser resynchronises after
   interference.
-* If the link goes quiet for 5 s, the firmware blanks the strip — a pulled
+* If the link goes quiet for 5 s the firmware blanks the strip, so a pulled
   cable leaves no LEDs stuck on.
 * Stopping the service clears the strip.
 * The systemd unit runs with no network access and `ProtectSystem=strict`.
@@ -973,13 +698,12 @@ Built-in safety nets:
 ## Development
 
 ```
-leds-valve-shim/          kernel module (GPL-2.0+, vendored unmodified),
-                          provides /dev/valve-leds-shim
-server/steamos_led/       service: config, shim (snapshot), render (effects),
-                          link (protocol), serialport (termios), service
+leds-valve-shim/          kernel module (GPL-2.0+, vendored unmodified)
+server/steamos_led/       service: config, shim, render, link, serialport
 server/steamos-led-serial            executable entry point
 server/steamos-led-serial.service    systemd unit template
 server/steamos-led-serial.conf       example configuration
+gui/                      the control panel
 firmware/led-client/      PlatformIO project for ESP8266/ESP32
 udev/                     rule for /dev/steamos-led-esp
 docs/PROTOCOL.md          frame format and message types
@@ -991,10 +715,9 @@ tests/firmware/           firmware tests against Arduino stubs
 Tests run without hardware and without third-party packages:
 
 ```bash
-python3 -m unittest discover -s tests   # effects, protocol, config; plus an
+python3 -m unittest discover -s tests   # effects, protocol, config, plus an
                                         # integration test running the real
-                                        # service against a FIFO and a pty, and
-                                        # a check against the kernel source
+                                        # service against a FIFO and a pty
 ./tests/firmware/run.sh                 # firmware parser on the PC (needs g++)
 ```
 
