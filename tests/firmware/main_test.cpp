@@ -47,7 +47,7 @@ int main() {
   // It has to run from loop(), not block setup(): the host gives up on the
   // handshake after about four seconds, and a blocking animation would eat it.
   {
-    g_millis += WAIT_FRAME_MS + 1;
+    g_millis += BREATH_FRAME_MS + 1;
     pump();
     check(g_lastShown.size() == LED_COUNT, "waiting animation lights the strip");
     check(g_lastShown[0].R > 0 && g_lastShown[0].B == 0,
@@ -57,8 +57,8 @@ int main() {
 
     // Sample a full breath: it must move, dip low, and never quite go out.
     uint8_t low = 255, high = 0;
-    for (uint32_t step = 0; step < WAIT_BREATH_MS; step += WAIT_FRAME_MS + 1) {
-      g_millis += WAIT_FRAME_MS + 1;
+    for (uint32_t step = 0; step < WAIT_BREATH_MS; step += BREATH_FRAME_MS + 1) {
+      g_millis += BREATH_FRAME_MS + 1;
       pump();
       const uint8_t level = g_lastShown[0].R;
       if (level < low) low = level;
