@@ -100,8 +100,6 @@ def build_renderer(config):
         speed_scale=config["SPEED"],
         patrol_dots=config["PATROL_DOTS"],
         temperature=build_temperature_source(config),
-        temperature_range=(config["TEMPERATURE_MIN"],
-                           config["TEMPERATURE_MAX"]),
     )
 
 
@@ -510,21 +508,24 @@ def run_temperature(config):
     print("Reading %s: %s"
           % (source.path,
              "%.1f C" % celsius if celsius is not None else "nothing"))
-    low, high = config["TEMPERATURE_MIN"], config["TEMPERATURE_MAX"]
-    print("Gauge: empty at or below %g C, full at %g C." % (low, high))
+    print("The whole bar takes one colour, from green when cool to red when "
+          "hot:")
+    last = len(render.TEMPERATURE_STOPS) - 1
+    for index, (mark, colour) in enumerate(render.TEMPERATURE_STOPS):
+        note = "and below" if index == 0 else (
+            "and above" if index == last else "")
+        print("  %5.1f C %-9s #%02x%02x%02x"
+              % (mark, note,
+                 int(colour[0]), int(colour[1]), int(colour[2])))
+    print("Between the marks the colour is mixed, so it moves as the machine "
+          "does.")
     print("Read every %g s and averaged over %g s, because a CPU sensor jumps "
           "a degree" % (source.interval, source.smoothing))
-    print("or two between readings and the leading LED would flicker with it.")
+    print("or two between readings and the colour would twitch with it.")
     if celsius is not None:
-        renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
-                                   temperature=source,
-                                   temperature_range=(low, high))
-        frame = renderer.render_logical(
-            shim.make_snapshot(shim.EFFECT_RAINBOW), 0.0)
-        lit = sum(1 for pixel in frame if max(pixel) > 0.5)
-        print("Right now: %d of %d LEDs lit, colour #%02x%02x%02x"
-              % ((lit, shim.LOGICAL_LEDS)
-                 + tuple(int(value) for value in max(frame, key=max))))
+        red, green, blue = render.temperature_colour(celsius)
+        print("Right now: #%02x%02x%02x across all %d LEDs"
+              % (int(red), int(green), int(blue), shim.LOGICAL_LEDS))
     return 0
 
 

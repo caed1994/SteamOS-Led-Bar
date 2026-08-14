@@ -202,7 +202,6 @@ sudo systemctl start steamos-led-serial
 | `PATROL_DOTS` | `1` | dots in the patrol effect |
 | `STANDBY_PULSE` | `1` | breathe white while [suspended](#while-the-machine-sleeps) |
 | `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
-| `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `85.0` | degrees at which the gauge is empty / full |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
 | `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` | `#ffd700` / `#8000ff` / `#00c850` | what the three automatic [notifications](#notifications) flash |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
@@ -294,17 +293,23 @@ strip.
 
 ## Temperature gauge
 
-The bar can show how hot the machine is instead of running the rainbow. It
-fills as the temperature rises and walks from green through yellow and orange
-to red:
+The bar can show how hot the machine is instead of running the rainbow. The
+whole strip stays lit and **the colour** carries the reading, from green when
+cool through yellow to red when hot:
 
 ```
- 35 C |·················|   below the lower mark: dark
- 50 C |·············####|   green
- 62 C |········#########|   yellow
- 75 C |···##############|   orange
- 85 C |#################|   red
+ 30 C  #00ff00   green, and so is anything cooler
+ 40 C  #00ff00   still green
+ 50 C  #7fff00
+ 60 C  #ffff00   yellow
+ 70 C  #ff7f00
+ 80 C  #ff0000   red, and so is anything hotter
 ```
+
+The scale is fixed and there is nothing to set. A bar whose meaning depends on
+two numbers you configured months ago is not one you can read at a glance -
+and the length of a part-filled bar was only ever saying the same thing as its
+colour, twice.
 
 Switch it on, then pick **Rainbow** in Steam's LED menu:
 
@@ -322,8 +327,6 @@ the rainbow back.
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `TEMPERATURE_GAUGE` | `0` | show the gauge instead of the rainbow |
-| `TEMPERATURE_MIN` | `40.0` | at or below this the bar is dark |
-| `TEMPERATURE_MAX` | `85.0` | at this the bar is full and red |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor to read |
 
 `auto` picks the CPU or GPU package sensor ahead of the dozen other things a PC

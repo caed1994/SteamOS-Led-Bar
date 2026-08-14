@@ -373,10 +373,12 @@ class TestConfig(unittest.TestCase):
         # option turned that line into a service that would not start at all.
         # A key the reader mistyped is their problem; a key we withdrew is not.
         path = self._write("LED_COUNT=60\nWARNING_COLOR=#ff3c00\n"
-                           "WARNING_STYLE=default\n")
+                           "WARNING_STYLE=default\n"
+                           "TEMPERATURE_MIN=40.0\nTEMPERATURE_MAX=85.0\n")
         loaded = config.load(path)
         self.assertEqual(loaded["LED_COUNT"], 60)
-        self.assertNotIn("WARNING_COLOR", loaded)
+        for gone in config.RETIRED:
+            self.assertNotIn(gone, loaded)
 
     def test_a_typo_is_still_a_typo(self):
         # The reason unknown keys are fatal in the first place: LED_COUTN=60
@@ -402,10 +404,6 @@ class TestConfig(unittest.TestCase):
     def test_invalid_values_rejected(self):
         for override in ({"LED_COUNT": 0}, {"FPS": 999}, {"MAPPING": "spiral"},
                          {"GAMMA": 0}, {"MAX_BRIGHTNESS": 300},
-                         # A gauge needs a span to fill over, and a mark
-                         # outside the plausible range means a unit mix-up.
-                         {"TEMPERATURE_MAX": 30}, {"TEMPERATURE_MIN": 200},
-                         {"TEMPERATURE_MIN": 84, "TEMPERATURE_MAX": 85},
                          # A colour the service cannot parse would be found
                          # out at flash time, which is no time to find out.
                          {"ACHIEVEMENT_COLOR": "goldish"},

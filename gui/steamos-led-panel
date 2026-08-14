@@ -68,16 +68,10 @@ STRIP = [
         # frozen, so the strip has to carry on alone.
         ("STANDBY_PULSE", "Pulse white while the machine sleeps", "bool",
          None, None, None),
+        # No marks to set: the whole bar takes one colour and the scale is
+        # fixed, so all that is left to choose is which sensor it reads.
         ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow",
          "bool", None, None, None),
-        # The two marks are coupled - the bar fills over a span, not at a
-        # point - and the ranges are kept apart so no combination can produce
-        # a config the service refuses. Anything more exotic belongs in the
-        # file, which takes 0-150 for both. Whole degrees: half of one is
-        # below what 17 LEDs show, and "85.38" reads like a measurement.
-        ("TEMPERATURE_MIN", "Temperature: bar starts filling (C)", "int",
-         20, 70, 1),
-        ("TEMPERATURE_MAX", "Temperature: bar full (C)", "int", 75, 120, 1),
         # Not a "choice": the values are paths into /sys and the machine
         # decides what they are, so the menu is built from what it reports.
         ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor",
@@ -169,8 +163,6 @@ SETTINGS_TABS = (
 # greyed out rather than hidden: you can still see that the setting exists,
 # and where it lives, without it asking for attention it has not earned.
 DEPENDS_ON = {
-    "TEMPERATURE_MIN": ("TEMPERATURE_GAUGE",),
-    "TEMPERATURE_MAX": ("TEMPERATURE_GAUGE",),
     "TEMPERATURE_SENSOR": ("TEMPERATURE_GAUGE",),
     "NOTIFY_ACHIEVEMENTS": ("NOTIFY",),
     "NOTIFY_MESSAGES": ("NOTIFY",),

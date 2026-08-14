@@ -143,16 +143,40 @@ def _demo(snapshot, elapsed, options):
     return [(r * level, g * level, b * level) for r, g, b in frame]
 
 
-# Green to red around the hue circle, which passes through yellow and orange -
-# the sequence everybody already reads as "getting worse".
-GREEN_HUE = 1.0 / 3.0
+# What the whole bar shows at each temperature, and the marks in between are
+# mixed. Green, yellow, red is the sequence everybody already reads as
+# "getting worse", and mixing these three in RGB walks the same path around
+# the hue circle: between any two of them only one channel moves.
+#
+# Fixed rather than configurable. The bar answers one question - is the
+# machine hot - and an answer whose scale moves from machine to machine is
+# not one you can read at a glance.
+TEMPERATURE_STOPS = (
+    (40.0, (0.0, 255.0, 0.0)),          # cool, and everything below it
+    (60.0, (255.0, 255.0, 0.0)),        # working
+    (80.0, (255.0, 0.0, 0.0)),          # hot, and everything above it
+)
+
+
+def temperature_colour(celsius, stops=TEMPERATURE_STOPS):
+    """The colour for a temperature: the stops, mixed."""
+    if celsius <= stops[0][0]:
+        return stops[0][1]
+    for (low, cold), (high, warm) in zip(stops, stops[1:]):
+        if celsius <= high:
+            blend = (celsius - low) / (high - low)
+            return tuple(cold[channel]
+                         + (warm[channel] - cold[channel]) * blend
+                         for channel in range(3))
+    return stops[-1][1]
 
 
 def _temperature(snapshot, elapsed, options):
-    """A gauge: fills as the machine warms, greening to red as it fills.
+    """The whole bar in one colour, from green when cool to red when hot.
 
-    Below the cold mark nothing is lit - which is what "starts filling at 40"
-    means, and the least distracting thing a cool machine can do.
+    Not a filling gauge: a bar that is part dark says two things at once, its
+    colour and its length, and only one of them was ever the answer. Lit end
+    to end, the colour is the whole message.
     """
     celsius = options.temperature.celsius()
     if celsius is None:
@@ -160,23 +184,7 @@ def _temperature(snapshot, elapsed, options):
         # like the service had died. The log says what happened.
         return _rainbow(snapshot, elapsed, options)
 
-    low, high = options.temperature_range
-    fraction = 0.0 if high <= low else (celsius - low) / (high - low)
-    fraction = max(0.0, min(fraction, 1.0))
-
-    red, green, blue = hsv_to_rgb(GREEN_HUE * (1.0 - fraction), 1.0, 1.0)
-
-    # Fractional, so the leading LED fades in rather than the bar stepping a
-    # notch at a time - at 17 LEDs a step is nearly three degrees.
-    lit = fraction * shim.LOGICAL_LEDS
-    last = shim.LOGICAL_LEDS - 1
-    frame = []
-    for index in range(shim.LOGICAL_LEDS):
-        # Grows from the far end, the way the other effects run. REVERSE
-        # still flips the whole strip on top of this.
-        level = max(0.0, min(lit - (last - index), 1.0))
-        frame.append((red * level, green * level, blue * level))
-    return frame
+    return [temperature_colour(celsius)] * shim.LOGICAL_LEDS
 
 
 _EFFECTS = {
@@ -195,8 +203,7 @@ class Renderer:
 
     def __init__(self, led_count, mapping=MAPPING_STRETCH, reverse=False,
                  max_brightness=255, min_brightness=0, gamma=1.0,
-                 speed_scale=1.0, patrol_dots=1, temperature=None,
-                 temperature_range=(40.0, 85.0)):
+                 speed_scale=1.0, patrol_dots=1, temperature=None):
         if led_count < 1:
             raise ValueError("led_count must be >= 1")
         if mapping not in MAPPINGS:
@@ -210,7 +217,6 @@ class Renderer:
         self.patrol_dots = max(1, min(int(patrol_dots), 8))
         # Something with .celsius(), or None to leave the rainbow alone.
         self.temperature = temperature
-        self.temperature_range = temperature_range
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}
 

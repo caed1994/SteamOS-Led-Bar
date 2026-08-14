@@ -542,9 +542,12 @@ LAST = shim.LOGICAL_LEDS - 1        # the end the gauge fills from
 
 
 class GaugeTest(unittest.TestCase):
-    """What the bar shows: fills as it warms, green at the bottom, red at the top."""
+    """What the bar shows: the whole strip in one colour, green to red.
 
-    LOW, HIGH = 40.0, 85.0
+    Not a filling gauge any more. A bar that is part dark says two things at
+    once - its colour and its length - and only one of them was ever the
+    answer to "how hot is it".
+    """
 
     def setUp(self):
         self.source = FakeSource()
@@ -552,73 +555,77 @@ class GaugeTest(unittest.TestCase):
         # and not an interpolation of it.
         self.renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
                                         mapping=render.MAPPING_CROP,
-                                        temperature=self.source,
-                                        temperature_range=(self.LOW, self.HIGH))
+                                        temperature=self.source)
         self.snapshot = shim.make_snapshot(shim.EFFECT_RAINBOW)
 
     def _frame(self, celsius):
         self.source.value = celsius
         return self.renderer.render_logical(self.snapshot, 0.0)
 
-    def _lit(self, celsius):
-        return sum(1 for pixel in self._frame(celsius) if max(pixel) > 127)
+    # -- the whole bar, whatever the reading ------------------------------
 
-    def test_a_cool_machine_leaves_the_bar_dark(self):
-        self.assertEqual(self._lit(25.0), 0)
+    def test_every_led_is_lit_when_cool(self):
+        frame = self._frame(20.0)
+        self.assertEqual(len(frame), shim.LOGICAL_LEDS)
+        self.assertTrue(all(max(pixel) > 127 for pixel in frame))
 
-    def test_nothing_is_lit_at_the_lower_mark_itself(self):
-        self.assertEqual(self._lit(self.LOW), 0)
+    def test_every_led_is_lit_when_hot(self):
+        self.assertTrue(all(max(pixel) > 127 for pixel in self._frame(95.0)))
 
-    def test_the_bar_is_full_at_the_upper_mark(self):
-        self.assertEqual(self._lit(self.HIGH), shim.LOGICAL_LEDS)
+    def test_the_whole_bar_is_one_colour(self):
+        for value in (20.0, 45.0, 60.0, 72.0, 95.0):
+            frame = self._frame(value)
+            self.assertEqual(len(set(frame)), 1, "%.0f C is not even" % value)
 
-    def test_running_hotter_than_the_upper_mark_stays_full(self):
-        # Not wrapped round to empty, and not overflowing into the next effect.
-        self.assertEqual(self._lit(120.0), shim.LOGICAL_LEDS)
+    # -- and the colour is the message ------------------------------------
 
-    def test_halfway_fills_about_half(self):
-        lit = self._lit((self.LOW + self.HIGH) / 2.0)
-        self.assertAlmostEqual(lit, shim.LOGICAL_LEDS / 2.0, delta=1)
+    def test_cool_is_green(self):
+        red, green, blue = self._frame(20.0)[0]
+        self.assertEqual((red, green, blue), (0.0, 255.0, 0.0))
 
-    def test_it_fills_monotonically(self):
-        counts = [self._lit(value) for value in range(30, 100, 5)]
-        self.assertEqual(counts, sorted(counts))
+    def test_it_is_still_green_at_the_first_mark(self):
+        self.assertEqual(self._frame(40.0)[0], (0.0, 255.0, 0.0))
 
-    def test_it_fills_from_the_far_end(self):
-        # The same end the other effects run from, so the bar does not look
-        # like it is going backwards when the effect changes.
-        frame = self._frame(50.0)
-        lit = [index for index, pixel in enumerate(frame) if max(pixel) > 127]
-        self.assertEqual(lit, list(range(LAST + 1 - len(lit), LAST + 1)))
+    def test_the_middle_mark_is_yellow(self):
+        self.assertEqual(self._frame(60.0)[0], (255.0, 255.0, 0.0))
 
-    def test_the_leading_led_fades_in(self):
-        # A whole LED is nearly three degrees at this range; stepping a notch
-        # at a time would make a warming machine look jumpy. At these three
-        # readings LED 13 is the leading one, partly lit.
-        levels = [max(self._frame(value)[LAST - 3]) for value in (48.0, 48.5,
-                                                                  49.0)]
-        self.assertEqual(levels, sorted(levels))
-        self.assertNotEqual(levels[0], levels[-1])
+    def test_the_top_mark_is_red(self):
+        self.assertEqual(self._frame(80.0)[0], (255.0, 0.0, 0.0))
 
-    def test_it_starts_green_and_ends_red(self):
-        cool = self._frame(self.LOW + 0.5)[LAST]
-        hot = self._frame(self.HIGH)[LAST]
-        self.assertGreater(cool[1], cool[0], "the cool end should be green")
-        self.assertGreater(hot[0], hot[1], "the hot end should be red")
+    def test_hotter_than_the_top_mark_stays_red(self):
+        # Not wrapped round to green, which a hue that keeps turning would do.
+        self.assertEqual(self._frame(120.0)[0], (255.0, 0.0, 0.0))
 
-    def test_the_colour_walks_from_green_to_red(self):
-        # Through yellow and orange, which is the sequence everyone reads as
-        # "getting worse" - so red rises and green falls the whole way. Read
-        # off the LED that lights first, which is lit at every reading here.
+    def test_colder_than_the_first_mark_stays_green(self):
+        self.assertEqual(self._frame(-10.0)[0], (0.0, 255.0, 0.0))
+
+    def test_red_only_ever_rises_and_green_only_ever_falls(self):
+        # Which is what makes it readable without a legend: one direction,
+        # the whole way, through yellow and orange.
         reds, greens = [], []
-        for value in range(45, 90, 5):
-            red, green, _blue = self._frame(float(value))[LAST]
+        for value in range(20, 100, 2):
+            red, green, _blue = self._frame(float(value))[0]
             reds.append(round(red))
             greens.append(round(green))
         self.assertEqual(reds, sorted(reds))
         self.assertEqual(greens, sorted(greens, reverse=True))
-        self.assertGreater(max(reds), 200, "it should reach red")
-        self.assertGreater(max(greens), 200, "it should start green")
+
+    def test_blue_stays_out_of_it(self):
+        for value in range(20, 100, 5):
+            self.assertEqual(self._frame(float(value))[0][2], 0.0)
+
+    def test_the_colour_moves_between_the_marks(self):
+        # Half a degree is below what anyone sees, but the point is that the
+        # scale is continuous rather than three steps.
+        distinct = {self._frame(float(value) / 2)[0]
+                    for value in range(82, 160)}
+        self.assertGreater(len(distinct), 30)
+
+    def test_halfway_up_a_leg_is_halfway_between_its_ends(self):
+        self.assertEqual(self._frame(50.0)[0], (127.5, 255.0, 0.0))
+        self.assertEqual(self._frame(70.0)[0], (255.0, 127.5, 0.0))
+
+    # -- and everything around it -----------------------------------------
 
     def test_no_sensor_falls_back_to_the_rainbow(self):
         # A dark strip would look like the service had died.
@@ -642,13 +649,12 @@ class GaugeTest(unittest.TestCase):
         frame = renderer.render_logical(self.snapshot, 0.0)
         self.assertEqual(frame, render._rainbow(self.snapshot, 0.0, renderer))
 
-    def test_an_upside_down_range_does_not_divide_by_zero(self):
-        # validate() rejects this, but the renderer is also used directly.
-        renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
-                                   mapping=render.MAPPING_CROP,
-                                   temperature=FakeSource(60.0),
-                                   temperature_range=(85.0, 85.0))
-        renderer.render_logical(self.snapshot, 0.0)
+    def test_the_marks_are_in_order_and_span_something(self):
+        # The colour lookup walks them in pairs, so an unsorted table would
+        # divide by a negative and read backwards.
+        marks = [mark for mark, _colour in render.TEMPERATURE_STOPS]
+        self.assertEqual(marks, sorted(marks))
+        self.assertEqual(len(set(marks)), len(marks))
 
 
 class GaugeFrameRateTest(unittest.TestCase):
