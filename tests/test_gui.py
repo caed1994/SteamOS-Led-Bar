@@ -366,15 +366,16 @@ class SettingsProfileTest(unittest.TestCase):
 
     def test_settings_survive_the_round_trip(self):
         values = {"LED_COUNT": 42, "PATROL_DOTS": 3, "GAMMA": 2.2,
-                  "TEMPERATURE_GAUGE": True, "REVERSE": False,
+                  "STANDBY_PULSE": True, "REVERSE": False,
+                  "RAINBOW_SHOWS": "aurora",
                   "MESSAGE_COLOR": "#ff36c9", "NOTIFY_STYLE": "comet"}
         self.assertEqual(self._round_trip(values), values)
 
     def test_booleans_come_back_as_booleans(self):
         # Written as 1/0 like the config file, so they have to be read back
         # through the same coercion rather than as the strings "1" and "0".
-        back = self._round_trip({"TEMPERATURE_GAUGE": True, "REVERSE": False})
-        self.assertIs(back["TEMPERATURE_GAUGE"], True)
+        back = self._round_trip({"STANDBY_PULSE": True, "REVERSE": False})
+        self.assertIs(back["STANDBY_PULSE"], True)
         self.assertIs(back["REVERSE"], False)
 
     def test_a_profile_is_a_configuration_file(self):
@@ -633,16 +634,42 @@ class PanelSettingsTest(unittest.TestCase):
 
     def test_what_a_switch_governs_is_a_real_setting(self):
         # The greying-out map names keys on both sides; a typo in either would
-        # quietly leave a row enabled forever.
+        # quietly leave a row enabled forever - and in the entries that want a
+        # particular value, a typo in the value would grey one out forever.
         panel = self._panel()
-        depends = next(node.value for node in panel.body
-                       if isinstance(node, ast.Assign)
-                       and getattr(node.targets[0], "id", "") == "DEPENDS_ON")
+        constants, depends = {}, None
+        for node in panel.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            name = getattr(node.targets[0], "id", "")
+            if name == "DEPENDS_ON":
+                depends = node.value
+                continue
+            try:                # the named entries, e.g. TEMPERATURE_SHOWN
+                constants[name] = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                pass
+        self.assertIsNotNone(depends, "DEPENDS_ON not found in the panel")
+
         shown = set(self._settings())
         for key, needs in zip(depends.keys, depends.values):
             self.assertIn(key.value, shown, key.value)
             for need in needs.elts:
-                self.assertIn(need.value, shown, need.value)
+                if isinstance(need, ast.Name):
+                    self.assertIn(need.id, constants, need.id)
+                    entry = constants[need.id]
+                else:
+                    entry = ast.literal_eval(need)
+                switch, wanted = (entry if isinstance(entry, tuple)
+                                  else (entry, None))
+                self.assertIn(switch, shown, switch)
+                if wanted is None:
+                    continue
+                # A value the service would refuse is one this row can never
+                # be ungreyed by, however carefully it is spelled here.
+                settings = dict(config_module.DEFAULTS)
+                settings[switch] = wanted
+                config_module.validate(settings)
 
     def _firmware_max_leds(self):
         path = os.path.join(HERE, "..", "firmware", "led-client",

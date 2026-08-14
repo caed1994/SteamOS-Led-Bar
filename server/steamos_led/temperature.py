@@ -13,6 +13,8 @@ import logging
 import os
 import time
 
+from . import sampling
+
 LOG = logging.getLogger(__name__)
 
 HWMON_ROOT = "/sys/class/hwmon"
@@ -214,17 +216,8 @@ class TemperatureSource:
         return self._value
 
     def _smooth(self, sample, elapsed):
-        """Move the reported value part of the way towards a new sample.
-
-        Sized by elapsed time rather than a fixed fraction, so a skipped frame
-        does not change how quickly the gauge follows.
-        """
-        if sample is None or self._value is None or self.smoothing <= 0:
-            # Nothing to smooth against - first reading, or a sensor that
-            # stopped answering. Report the truth, not a memory of it.
-            return sample
-        weight = elapsed / (elapsed + self.smoothing)
-        return self._value + (sample - self._value) * weight
+        """Move the reported value part of the way towards a new sample."""
+        return sampling.smooth(self._value, sample, elapsed, self.smoothing)
 
 
 # -- watching every sensor for one that stays too hot ----------------------

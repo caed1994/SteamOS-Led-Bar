@@ -12,7 +12,8 @@ import sys
 import time
 
 from . import config as config_module
-from . import elf, notify, render, serialport, shim, steamworks, temperature
+from . import elf, load, notify, render, serialport, shim, steamworks
+from . import temperature
 from .link import EspLink
 
 LOG = logging.getLogger("steamos-led")
@@ -72,10 +73,17 @@ class _Stopped(Exception):
 
 
 def build_temperature_source(config):
-    """A sensor to read, or None when the gauge is switched off."""
-    if not config["TEMPERATURE_GAUGE"]:
+    """A sensor to read, or None unless the rainbow slot shows the gauge."""
+    if config["RAINBOW_SHOWS"] != render.SHOWS_TEMPERATURE:
         return None
     return temperature.TemperatureSource(path=config["TEMPERATURE_SENSOR"])
+
+
+def build_load_source(config):
+    """Counters to read, or None unless the rainbow slot shows the load."""
+    if config["RAINBOW_SHOWS"] != render.SHOWS_LOAD:
+        return None
+    return load.LoadSource()
 
 
 def build_overheat_watch(config):
@@ -102,6 +110,8 @@ def build_renderer(config):
         temperature=build_temperature_source(config),
         temperature_range=(config["TEMPERATURE_MIN"],
                            config["TEMPERATURE_MAX"]),
+        load=build_load_source(config),
+        rainbow_shows=config["RAINBOW_SHOWS"],
     )
 
 
@@ -503,8 +513,9 @@ def run_temperature(config):
     print()
     source = build_temperature_source(config)
     if source is None:
-        print("The gauge is off (TEMPERATURE_GAUGE=0), so the rainbow effect")
-        print("is shown as usual. Set TEMPERATURE_GAUGE=1 to swap it for this.")
+        print("The rainbow slot shows %r, not the temperature gauge."
+              % config["RAINBOW_SHOWS"])
+        print("Set RAINBOW_SHOWS=temperature to put the gauge there instead.")
         return 0
 
     celsius = source.celsius()
@@ -532,6 +543,57 @@ def run_temperature(config):
             celsius, config["TEMPERATURE_MIN"], config["TEMPERATURE_MAX"])
         print("Right now: #%02x%02x%02x across all %d LEDs"
               % (int(red), int(green), int(blue), shim.LOGICAL_LEDS))
+    return 0
+
+
+def run_load(config):
+    """Show what the load gauge can read here, and what it would draw.
+
+    Whether the GPU half works at all is a driver question - amdgpu answers,
+    most others do not - so this says which counters were found before anyone
+    wonders why half the bar is mirrored.
+    """
+    source = load.LoadSource()
+    gpu_path = source.resolve()
+
+    print("CPU: %s" % ("counters in " + load.CPU_STAT
+                       if load.read_cpu_totals() is not None
+                       else "NOT FOUND at " + load.CPU_STAT))
+    print("GPU: %s" % (gpu_path if gpu_path else
+                       "no gpu_busy_percent - this driver does not publish one"))
+    print()
+
+    if load.read_cpu_totals() is None and gpu_path is None:
+        print("Neither can be read here, so the gauge falls back to the "
+              "rainbow.")
+        return 1
+
+    # One interval, so the CPU has two readings to subtract - the first can
+    # only ever be a baseline.
+    source.fractions()
+    time.sleep(source.interval * 2)
+    cpu, gpu = source.fractions()
+
+    print("Over %.2f s: CPU %s, GPU %s"
+          % (source.interval * 2,
+             "%.0f%%" % (cpu * 100) if cpu is not None else "-",
+             "%.0f%%" % (gpu * 100) if gpu is not None else "-"))
+    if gpu is None:
+        print("With no GPU counter the CPU is drawn on both halves, so the "
+              "bar stays")
+        print("symmetric rather than leaving one side dark.")
+    print("Two bars grow out of the middle: CPU to the left in amber, GPU to "
+          "the")
+    print("right in blue. Read every %g s, averaged over %g s."
+          % (source.interval, source.smoothing))
+
+    print()
+    if config["RAINBOW_SHOWS"] == render.SHOWS_LOAD:
+        print("The rainbow slot shows this - pick \"Rainbow\" in Steam's LED "
+              "menu to see it.")
+    else:
+        print("The rainbow slot shows %r. Set RAINBOW_SHOWS=load to put this "
+              "there." % config["RAINBOW_SHOWS"])
     return 0
 
 
@@ -1138,6 +1200,9 @@ def build_parser():
     modes.add_argument("--temperature", action="store_true",
                        help="list the machine's temperature sensors and show "
                             "what the gauge would display right now")
+    modes.add_argument("--load", action="store_true",
+                       help="show which CPU and GPU load counters this machine "
+                            "has, and what the load gauge would display")
     modes.add_argument("--steam-check", action="store_true", dest="steam_check",
                        help="report whether realtime achievement detection can "
                             "work on this machine")
@@ -1206,6 +1271,8 @@ def main(argv=None):
             return run_check_config(config)
         if args.temperature:
             return run_temperature(config)
+        if args.load:
+            return run_load(config)
         if args.steam_check:
             return run_steam_check(config)
         if args.probe_messages is not None:

@@ -419,6 +419,11 @@ def temperature_command():
     return [BINARY, "--temperature"]
 
 
+def load_command():
+    """Show which CPU and GPU load counters this machine has."""
+    return [BINARY, "--load"]
+
+
 # -- notification colours --------------------------------------------------
 #
 # (label, value) pairs; the value goes in the config file, which takes any
@@ -450,6 +455,23 @@ FRIEND_COLOURS = (
 #
 # Not a list of its own: the service registers them, and a shape the panel
 # does not offer would be one nobody ever finds.
+
+def rainbow_choices(names):
+    """Menu entries for what the rainbow slot shows, in the service's order.
+
+    Same arrangement as the shapes: the service owns the list, and anything
+    it grows shows up here rather than needing to be named twice. Only the
+    wording lives here, because "load" on its own does not say load of what.
+    """
+    labels = {
+        "rainbow": "Steam's rainbow",
+        "temperature": "Temperature",
+        "load": "CPU and GPU load",
+        "fire": "Fire",
+        "aurora": "Aurora",
+    }
+    return tuple((labels.get(name, name.capitalize()), name) for name in names)
+
 
 def style_choices(styles, inherit=None):
     """Menu entries for the flash shapes, in the order the service has them.

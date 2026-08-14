@@ -68,8 +68,12 @@ STRIP = [
         # frozen, so the strip has to carry on alone.
         ("STANDBY_PULSE", "Pulse white while the machine sleeps", "bool",
          None, None, None),
-        ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow",
-         "bool", None, None, None),
+        # Steam's LED menu cannot be extended, so anything of ours has to take
+        # over an entry it already offers - and the rainbow is the one people
+        # give up most readily. One slot, so it holds whichever of these is
+        # picked rather than the first feature that wanted it.
+        ("RAINBOW_SHOWS", "The Rainbow entry shows", "named",
+         ledpanel.rainbow_choices(config_module.RAINBOW_CHOICES), None, None),
         # The whole bar takes one colour; these two say where on the scale it
         # sits. Below the first mark it is green, above the second red, and
         # yellow lands halfway between - so the two ranges are kept apart,
@@ -172,10 +176,15 @@ SETTINGS_TABS = (
 # Settings that only mean something while another switch is on. They are
 # greyed out rather than hidden: you can still see that the setting exists,
 # and where it lives, without it asking for attention it has not earned.
+#
+# An entry is either a key, which has to be switched on, or (key, value),
+# which has to be set to exactly that - the temperature settings mean nothing
+# unless the rainbow slot is showing the temperature in particular.
+TEMPERATURE_SHOWN = ("RAINBOW_SHOWS", "temperature")
 DEPENDS_ON = {
-    "TEMPERATURE_MIN": ("TEMPERATURE_GAUGE",),
-    "TEMPERATURE_MAX": ("TEMPERATURE_GAUGE",),
-    "TEMPERATURE_SENSOR": ("TEMPERATURE_GAUGE",),
+    "TEMPERATURE_MIN": (TEMPERATURE_SHOWN,),
+    "TEMPERATURE_MAX": (TEMPERATURE_SHOWN,),
+    "TEMPERATURE_SENSOR": (TEMPERATURE_SHOWN,),
     "NOTIFY_ACHIEVEMENTS": ("NOTIFY",),
     "NOTIFY_MESSAGES": ("NOTIFY",),
     "NOTIFY_FRIEND_ONLINE": ("NOTIFY",),
@@ -734,9 +743,7 @@ class Panel:
             control = ttk.Checkbutton(grid, variable=variable)
             control.grid(row=row, column=1, sticky="w")
             controls.append(control)
-            # Anything can be the switch another row hangs off, and following
-            # the variable costs nothing.
-            variable.trace_add("write", lambda *_args: self._refresh_enabled())
+            self._follow(variable)
         elif kind == "choice":
             variable = tk.StringVar(value=str(value))
             control = ttk.Combobox(grid, textvariable=variable,
@@ -752,8 +759,9 @@ class Panel:
                                                current=str(value))
                        if kind == "sensor" else list(low))
             self._menu(grid, row, key, variable, choices, str(value),
-                       width=34 if kind == "sensor" else 14)
+                       width=34 if kind == "sensor" else 18)
             controls.append(self._widgets[key])
+            self._follow(variable)
         else:
             variable = tk.DoubleVar(value=float(value))
             scale, readout = self._scale(grid, row, variable, low, high, step)
@@ -763,13 +771,37 @@ class Panel:
         self.vars[key] = (variable, kind)
         self._rows[key] = (labels, controls)
 
+    def _follow(self, variable):
+        """Re-grey the dependent rows whenever this control changes.
+
+        Anything can be the setting another row hangs off - a switch or a
+        menu - and following one costs nothing, so every candidate is
+        followed rather than DEPENDS_ON having to be kept in step by hand.
+        """
+        variable.trace_add("write", lambda *_args: self._refresh_enabled())
+
     def _refresh_enabled(self):
         """Grey out every setting whose switch is off."""
         for key, needs in DEPENDS_ON.items():
             if key not in self._rows:
                 continue
-            self._set_enabled(key, all(bool(self.vars[need][0].get())
-                                       for need in needs if need in self.vars))
+            self._set_enabled(key, all(self._satisfied(need) for need in needs))
+
+    def _satisfied(self, need):
+        """Whether one DEPENDS_ON entry is met: switched on, or set to this."""
+        wanted = None
+        if isinstance(need, tuple):
+            need, wanted = need
+        if need not in self.vars:
+            return True                 # not on any tab, so nothing to hang off
+        variable, kind = self.vars[need]
+        if wanted is None:
+            return bool(variable.get())
+        # A menu holds the label it shows, not the value it stands for.
+        shown = variable.get()
+        if kind in ("sensor", "named"):
+            shown = self._value_for(need, shown)
+        return shown == wanted
 
     def _set_enabled(self, key, on):
         labels, controls = self._rows[key]
@@ -1144,7 +1176,14 @@ class Panel:
                                                                 padx=(0, 6))
         ttk.Button(row, text="Temperature sensors",
                    command=lambda: self.runner.start(
-                       ledpanel.temperature_command())).pack(side="left")
+                       ledpanel.temperature_command())).pack(side="left",
+                                                             padx=(0, 6))
+        # Whether the GPU half of the load gauge works at all is a driver
+        # question, so it is worth being able to ask before wondering why the
+        # bar came out symmetric.
+        ttk.Button(row, text="Load counters",
+                   command=lambda: self.runner.start(
+                       ledpanel.load_command())).pack(side="left")
         ttk.Label(
             strip,
             text="Steam check and the message probe need a game running.",

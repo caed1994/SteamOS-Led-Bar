@@ -10,6 +10,7 @@ import logging
 import os
 
 from . import notify
+from . import render
 from .serialport import BAUD_CONSTANTS
 
 LOG = logging.getLogger(__name__)
@@ -26,6 +27,21 @@ DEFAULT_CONFIG_PATH = "/etc/steamos-led-serial.conf"
 RETIRED = {
     "WARNING_COLOR": "a warning is always red now",
     "WARNING_STYLE": "a warning always uses the alternate shape now",
+    "TEMPERATURE_GAUGE": "the rainbow slot now picks which of several "
+                         "effects it shows, and RAINBOW_SHOWS says which",
+}
+
+# Withdrawn options that still carry a setting worth keeping, and what to make
+# of it: {old: (new, {old value: new value})}.
+#
+# Being ignored is right for an option that stopped meaning anything, but
+# TEMPERATURE_GAUGE=1 means exactly one of the choices that replaced it. Just
+# dropping it would switch off a gauge somebody is looking at, with no error
+# and nothing to search for - so it is translated instead. An explicit new
+# setting always wins, whichever order the two appear in.
+MIGRATED = {
+    "TEMPERATURE_GAUGE": ("RAINBOW_SHOWS", {True: "temperature",
+                                            False: "rainbow"}),
 }
 
 DEFAULTS = {
@@ -57,7 +73,7 @@ DEFAULTS = {
     "ACHIEVEMENT_STYLE": notify.STYLE_INHERIT,
     "MESSAGE_STYLE": notify.STYLE_INHERIT,
     "FRIEND_STYLE": notify.STYLE_INHERIT,
-    "TEMPERATURE_GAUGE": False,
+    "RAINBOW_SHOWS": "rainbow",
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 80.0,
     "TEMPERATURE_SENSOR": "auto",
@@ -104,6 +120,7 @@ def _strip_quotes(value):
 
 def parse_file(path):
     values = {}
+    carried = {}
     with open(path, "r") as handle:
         for lineno, raw in enumerate(handle, 1):
             line = raw.strip()
@@ -114,15 +131,47 @@ def parse_file(path):
             key, _, value = line.partition("=")
             key = key.strip().upper()
             if key in RETIRED:
-                LOG.warning("%s:%d: %s is no longer a setting - %s. The line "
-                            "is ignored, and the control panel removes it the "
-                            "next time it saves.",
-                            path, lineno, key, RETIRED[key])
+                moved = _migrate(key, _strip_quotes(value))
+                LOG.warning("%s:%d: %s is no longer a setting - %s. %s; the "
+                            "control panel drops the line the next time it "
+                            "saves.",
+                            path, lineno, key, RETIRED[key],
+                            "carried over as "
+                            + ", ".join("%s=%s" % (new, format_value(setting))
+                                        for new, setting in moved.items())
+                            if moved else "it is ignored")
+                carried.update(moved)
                 continue
             if key not in DEFAULTS:
                 raise ConfigError("%s:%d: unknown option %r" % (path, lineno, key))
             values[key] = _coerce(key, _strip_quotes(value), DEFAULTS[key])
+
+    # Only where the file did not say it itself: a line naming the new option
+    # is the reader's actual intention, and outranks whatever the old one
+    # would have translated to regardless of which came first.
+    for key, value in carried.items():
+        values.setdefault(key, value)
     return values
+
+
+def _migrate(key, value):
+    """What a withdrawn option now sets, as {key: value}. Usually nothing."""
+    target = MIGRATED.get(key)
+    if target is None:
+        return {}
+    new_key, table = target
+    template = next(iter(table))    # the old option's type, from its own keys
+    try:
+        old = _coerce(key, value, template)
+    except ConfigError:
+        # A setting we no longer accept, spelled wrongly. Refusing to start
+        # over a line we are only reading out of politeness would be worse
+        # than letting the new option's default stand.
+        LOG.warning("%s=%s could not be carried over to %s", key, value, new_key)
+        return {}
+    if old not in table:
+        return {}
+    return {new_key: table[old]}
 
 
 def format_value(value):
@@ -196,8 +245,9 @@ def load(path=DEFAULT_CONFIG_PATH, overrides=None):
 
 
 MAPPINGS = ("stretch", "repeat", "crop")
-# Taken from the module that implements them, so the validator cannot drift.
+# Taken from the modules that implement them, so the validator cannot drift.
 NOTIFY_STYLES = notify.STYLES
+RAINBOW_CHOICES = render.RAINBOW_CHOICES
 # One notification's own style may also say "whichever NOTIFY_STYLE says".
 PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 
@@ -257,6 +307,9 @@ def validate(config):
     if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
         raise ConfigError("NOTIFY_STYLE must be one of: %s"
                           % ", ".join(NOTIFY_STYLES))
+    if config["RAINBOW_SHOWS"] not in RAINBOW_CHOICES:
+        raise ConfigError("RAINBOW_SHOWS must be one of: %s"
+                          % ", ".join(RAINBOW_CHOICES))
     for key in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
         if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
             raise ConfigError("%s must be between %g and %g degrees"

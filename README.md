@@ -17,15 +17,17 @@ Wi-Fi, no IP configuration, no access point.
 4. [All options](#all-options)
 5. [Effects](#effects)
 6. [While the machine sleeps](#while-the-machine-sleeps)
-7. [Temperature gauge](#temperature-gauge)
-8. [Notifications](#notifications)
-9. [The control panel](#the-control-panel)
-10. [Testing and diagnostics](#testing-and-diagnostics)
-11. [When something does not work](#when-something-does-not-work)
-12. [Updating](#updating)
-13. [Uninstalling](#uninstalling)
-14. [How it works](#how-it-works)
-15. [Development](#development)
+7. [The rainbow slot](#the-rainbow-slot)
+8. [Temperature gauge](#temperature-gauge)
+9. [Load gauge](#load-gauge)
+10. [Notifications](#notifications)
+11. [The control panel](#the-control-panel)
+12. [Testing and diagnostics](#testing-and-diagnostics)
+13. [When something does not work](#when-something-does-not-work)
+14. [Updating](#updating)
+15. [Uninstalling](#uninstalling)
+16. [How it works](#how-it-works)
+17. [Development](#development)
 
 ## Quick start
 
@@ -172,7 +174,8 @@ The restart is required, nothing happens without it.
 | Too bright, or the strip runs off USB power | `MAX_BRIGHTNESS=80` |
 | Effects run too fast | `SPEED=0.5` |
 | Patrol with three dots | `PATROL_DOTS=3` |
-| Show the temperature instead of the rainbow | `TEMPERATURE_GAUGE=1` |
+| Show the temperature instead of the rainbow | `RAINBOW_SHOWS=temperature` |
+| Show how busy the CPU and GPU are | `RAINBOW_SHOWS=load` |
 | Strip stays dark although an effect is on | `MIN_BRIGHTNESS=40` |
 | Dimmed colours look blotchy | `GAMMA=2.2` |
 | A fixed port instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` |
@@ -201,9 +204,9 @@ sudo systemctl start steamos-led-serial
 | `SPEED` | `1.0` | animation speed (`0.5` is half as fast) |
 | `PATROL_DOTS` | `1` | dots in the patrol effect |
 | `STANDBY_PULSE` | `1` | breathe white while [suspended](#while-the-machine-sleeps) |
-| `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
-| `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `80.0` | where the gauge is green and where it is red |
-| `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
+| `RAINBOW_SHOWS` | `rainbow` | what the [rainbow entry](#the-rainbow-slot) shows: `rainbow`, `temperature`, `load`, `fire` or `aurora` |
+| `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `80.0` | where the [temperature gauge](#temperature-gauge) is green and where it is red |
+| `TEMPERATURE_SENSOR` | `auto` | which sensor the temperature gauge reads |
 | `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` | `#ffd700` / `#8000ff` / `#00c850` | what the three automatic [notifications](#notifications) flash |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
 | `BAUD` | `230400` | preferred baud rate, corrected on connect if needed |
@@ -292,9 +295,54 @@ minute of *running* time. That uses the monotonic clock, which does not advance
 across a suspend, so a machine asleep for three days still wakes to a breathing
 strip.
 
+## The rainbow slot
+
+Steam's LED menu cannot be extended - its entries are built into the client -
+so anything of ours has to take over one it already offers. The rainbow is
+that one: it is the effect most people are happy to give up, and it is the
+only place a new effect can appear at all.
+
+Rather than spending that single slot on one feature, `RAINBOW_SHOWS` decides
+what stands in it:
+
+| `RAINBOW_SHOWS` | What the bar does |
+| --------------- | ----------------- |
+| `rainbow` | Steam's own rainbow, untouched. The default |
+| `temperature` | [how hot the machine is](#temperature-gauge), as one colour across the whole bar |
+| `load` | [how busy the CPU and GPU are](#load-gauge), as two bars out of the middle |
+| `fire` | flame drifting along the strip |
+| `aurora` | slow curtains of green and violet |
+
+Set it, then pick **Rainbow** in Steam's LED menu:
+
+```bash
+sudo sed -i 's/^RAINBOW_SHOWS=.*/RAINBOW_SHOWS=aurora/' /etc/steamos-led-serial.conf
+sudo systemctl restart steamos-led-serial
+```
+
+Every other effect Steam offers keeps working exactly as before - taking the
+rainbow is the price, and it is the whole price. Set `RAINBOW_SHOWS=rainbow`
+and you have it back.
+
+To look at one without going into Game Mode, stop the service and simulate the
+rainbow - it draws whatever `RAINBOW_SHOWS` says:
+
+```bash
+sudo systemctl stop steamos-led-serial
+sudo /var/lib/steamos-led-serial/steamos-led-serial --simulate rainbow
+```
+
+Steam's colour slider still shifts `aurora`, the way it shifts the rainbow, so
+you choose where the curtain sits. `fire` ignores it: a fire is the colour a
+fire is.
+
+If a choice cannot work on your machine - `temperature` with no sensor,
+`load` with no counters - the rainbow is drawn instead and the log says why. A
+dark strip would look like a service that had died.
+
 ## Temperature gauge
 
-The bar can show how hot the machine is instead of running the rainbow. The
+With `RAINBOW_SHOWS=temperature` the bar shows how hot the machine is. The
 whole strip stays lit and **the colour** carries the reading, from green when
 cool through yellow to red when hot:
 
@@ -317,22 +365,9 @@ least 5 degrees apart, or there is no room left to fade through.
 The bar always fills the whole strip. The length of a part-filled bar was only
 ever saying the same thing as its colour, twice.
 
-Switch it on, then pick **Rainbow** in Steam's LED menu:
-
-```bash
-sudo sed -i 's/^TEMPERATURE_GAUGE=.*/TEMPERATURE_GAUGE=1/' /etc/steamos-led-serial.conf
-sudo systemctl restart steamos-led-serial
-```
-
-It replaces the rainbow because Steam's menu cannot be extended: those entries
-are built into the client. Taking over an effect it already offers is the only
-way to show something new, and the rainbow is the one most people are happy to
-give up. Every other effect keeps working, and switching the gauge off gives
-the rainbow back.
-
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `TEMPERATURE_GAUGE` | `0` | show the gauge instead of the rainbow |
+| `RAINBOW_SHOWS` | `rainbow` | set to `temperature` to put the gauge in the [rainbow slot](#the-rainbow-slot) |
 | `TEMPERATURE_MIN` | `40.0` | green up to here |
 | `TEMPERATURE_MAX` | `80.0` | red from here up |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor to read |
@@ -366,6 +401,56 @@ The sensor is read once a second and averaged over about six. Both matter: a
 CPU sensor moves a degree or two between readings while nothing is happening,
 which over the gauge's span is most of an LED, so the leading one would flicker
 constantly.
+
+## Load gauge
+
+With `RAINBOW_SHOWS=load` the bar shows how busy the two big chips are. Two
+bars grow **out of the middle**: the CPU to the left in amber, the GPU to the
+right in blue.
+
+```
+idle          |        ..*.*..        |
+in a menu     |     ...***.***..      |
+in a game     | ..*********.********. |
+```
+
+Length rather than colour, and this is the one place that is right: load has a
+real zero and a real full, so how far a bar has come *is* the reading.
+Temperature has neither, which is why that gauge uses colour instead.
+
+Out of the middle rather than from one end because the two readings are peers.
+Stacking them would put one of them at the far end of the strip, which is where
+you look last. The innermost LED of each side never goes fully dark, so an idle
+machine still looks like a meter rather than a strip somebody switched off.
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `RAINBOW_SHOWS` | `rainbow` | set to `load` to put the gauge in the [rainbow slot](#the-rainbow-slot) |
+
+Nothing else to set. To see what your machine can report:
+
+```bash
+/var/lib/steamos-led-serial/steamos-led-serial --load
+```
+
+```
+CPU: counters in /proc/stat
+GPU: /sys/class/drm/card0/device/gpu_busy_percent
+
+Over 0.50 s: CPU 23%, GPU 61%
+Two bars grow out of the middle: CPU to the left in amber, GPU to the right
+in blue. Read every 0.25 s, averaged over 0.6 s.
+```
+
+**The GPU half depends on your driver.** amdgpu publishes `gpu_busy_percent`,
+which is what a Steam Machine has; most others do not. Without it the CPU is
+drawn on both halves, so the bar stays symmetric rather than leaving one side
+permanently dark - `--load` says which of the two you got.
+
+Read four times a second and averaged over about half of one. Far quicker than
+the temperature gauge on purpose: load is what the machine is doing *now*, and
+a meter that lags a second behind the thing you just started is not showing you
+the thing you just started.
 
 ## Notifications
 
@@ -428,10 +513,17 @@ echo alternate:achievement > /run/steamos-led-serial/notify
 | `double_flash` | two short blinks, a pause, and again |
 | `comet` | a bright head with a fading tail, once across the bar |
 | `alternate` | the two halves flash in turn |
+| `sparkle` | grains of light flicker on and die out all over the bar |
 
 `comet` is the only shape with a direction, and the only one `REVERSE` applies
-to. `double_flash` is timed in seconds rather than in fractions of the flash, so
-a longer notification gives more pairs rather than slower ones.
+to. `double_flash` and `sparkle` are timed in seconds rather than in fractions
+of the flash, so a longer notification gives more pairs, or more glitter,
+rather than slower ones.
+
+`sparkle` is the only shape without an order to it: every LED runs its own
+little clock at its own rate, so nothing marches and nothing lines up. That
+suits the notifications you are glad to get rather than the ones you have to
+act on.
 
 `warning` is fixed at **red** and `alternate`, on purpose: it is the one
 notification you must not have to recognise, so it means the same on every
@@ -552,10 +644,10 @@ tabs:
 
 | Tab | What is on it |
 | --- | ------------- |
-| **Strip** | length, direction, brightness limits, patrol dots, effect speed, temperature gauge |
+| **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
 | **Notifications** | what flashes, in which colour and shape, and for how long |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
-| **Test** | fire each notification, run the self-test, the Steam check, the message probe, the sensor list |
+| **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists |
 | **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating), flashing the firmware |
 
 **Apply and Reload sit under all of them**, because there is one config file.
@@ -627,6 +719,7 @@ These live in `/var/lib/steamos-led-serial/`:
 | `steamos-led-serial --simulate rainbow` | show one effect continuously |
 | `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs |
 | `steamos-led-serial --temperature` | list sensors and what the [gauge](#temperature-gauge) makes of them |
+| `steamos-led-serial --load` | show which CPU and GPU [load counters](#load-gauge) this machine has |
 | `steamos-led-serial -v` | run in the foreground with debug output |
 
 Then `sudo systemctl start steamos-led-serial` again. Follow the log with

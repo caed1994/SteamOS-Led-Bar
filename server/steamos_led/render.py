@@ -154,6 +154,27 @@ TEMPERATURE_HOT = (255.0, 0.0, 0.0)
 DEFAULT_TEMPERATURE_RANGE = (40.0, 80.0)
 
 
+def blend_stops(value, stops):
+    """Mix a colour out of ((mark, colour), ...), which must be in order.
+
+    Below the first mark and above the last the end colours are held rather
+    than extrapolated: a scale that keeps going past its own ends is one that
+    reports 300 C in ultraviolet.
+    """
+    if value <= stops[0][0]:
+        return stops[0][1]
+    for (low_mark, low), (high_mark, high) in zip(stops, stops[1:]):
+        if value <= high_mark:
+            span = high_mark - low_mark
+            # Callers validate their marks, but this is also used directly -
+            # and dividing by nothing here would be a crash in the render
+            # loop rather than a message at startup.
+            blend = 0.0 if span <= 0 else (value - low_mark) / span
+            return tuple(low[channel] + (high[channel] - low[channel]) * blend
+                         for channel in range(3))
+    return stops[-1][1]
+
+
 def temperature_stops(low, high):
     """(mark, colour) from the two marks: green at one end, red at the other.
 
@@ -169,20 +190,7 @@ def temperature_stops(low, high):
 def temperature_colour(celsius, low=DEFAULT_TEMPERATURE_RANGE[0],
                        high=DEFAULT_TEMPERATURE_RANGE[1]):
     """The colour for a temperature: the stops, mixed."""
-    stops = temperature_stops(low, high)
-    if celsius <= stops[0][0]:
-        return stops[0][1]
-    for (cold_mark, cold), (warm_mark, warm) in zip(stops, stops[1:]):
-        if celsius <= warm_mark:
-            span = warm_mark - cold_mark
-            # The validator keeps the marks apart, but the renderer is also
-            # used directly - and dividing by nothing here would be a crash
-            # in the render loop rather than a message at startup.
-            blend = 0.0 if span <= 0 else (celsius - cold_mark) / span
-            return tuple(cold[channel]
-                         + (warm[channel] - cold[channel]) * blend
-                         for channel in range(3))
-    return stops[-1][1]
+    return blend_stops(celsius, temperature_stops(low, high))
 
 
 def _temperature(snapshot, elapsed, options):
@@ -202,6 +210,193 @@ def _temperature(snapshot, elapsed, options):
     return [temperature_colour(celsius, low, high)] * shim.LOGICAL_LEDS
 
 
+# -- the load gauge --------------------------------------------------------
+#
+# Length, not colour, and for once that is the right way round: load has a
+# real zero and a real full, so how far the bar has come *is* the reading.
+# Temperature has neither, which is why that one uses colour instead.
+#
+# The colour says which chip. Amber and blue sit as far apart as two colours
+# on this strip can, so the two halves never read as one bar that happens to
+# be uneven.
+LOAD_CPU_COLOUR = (255.0, 110.0, 0.0)
+LOAD_GPU_COLOUR = (26.0, 159.0, 255.0)
+
+# The innermost LED of each half never goes fully dark, or an idle machine
+# looks like a strip somebody switched off.
+LOAD_FLOOR = 0.12
+
+
+def load_levels(fraction, length):
+    """How brightly each of `length` LEDs is lit at this load, innermost first.
+
+    The bar is fractional: at a third of the way up a three LED half, the
+    second LED is half lit rather than the bar jumping a whole LED at a time.
+    On seventeen LEDs a whole-LED bar could only ever show eighths.
+    """
+    if length < 1:
+        return []
+    filled = max(0.0, min(float(fraction), 1.0)) * length
+    levels = []
+    for index in range(length):
+        levels.append(max(0.0, min(filled - index, 1.0)))
+    levels[0] = max(levels[0], LOAD_FLOOR)
+    return levels
+
+
+def _load(snapshot, elapsed, options):
+    """Two bars growing out of the middle: CPU one way, GPU the other.
+
+    Out of the centre rather than from one end, because the two readings are
+    peers - a bar for each, meeting in the middle, says that. Stacking them
+    end to end would put one of them on the far side of the strip, which is
+    where you look last.
+    """
+    readings = options.load.fractions()
+    if readings is None:
+        # Same reason as the temperature gauge: a dark strip would look like
+        # the service had died, and the log already said what happened.
+        return _rainbow(snapshot, elapsed, options)
+
+    cpu, gpu = readings
+    # A machine whose driver publishes no GPU counter shows the CPU on both
+    # halves. One reading drawn symmetrically still reads as one reading.
+    if gpu is None:
+        gpu = cpu
+    elif cpu is None:
+        cpu = gpu
+
+    half = shim.LOGICAL_LEDS // 2
+    # The odd middle LED belongs to neither and stays dark, which is what
+    # makes the two sides read as two - the same trick the alarm shape uses.
+    gap = shim.LOGICAL_LEDS % 2
+    left = load_levels(cpu, half)
+    right = load_levels(gpu, half)
+
+    frame = [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
+    for index, level in enumerate(left):
+        frame[half - 1 - index] = tuple(channel * level
+                                        for channel in LOAD_CPU_COLOUR)
+    for index, level in enumerate(right):
+        frame[half + gap + index] = tuple(channel * level
+                                          for channel in LOAD_GPU_COLOUR)
+    return frame
+
+
+# -- fire ------------------------------------------------------------------
+
+# Embers at the bottom through to the white-hot tips. Not a hue sweep: a fire
+# desaturates as it gets hotter rather than changing colour, which is why the
+# top of the scale is nearly white and a rainbow never looks like flame.
+FIRE_STOPS = ((0.00, (40.0, 0.0, 0.0)),
+              (0.35, (170.0, 20.0, 0.0)),
+              (0.65, (255.0, 90.0, 0.0)),
+              (0.88, (255.0, 170.0, 20.0)),
+              (1.00, (255.0, 230.0, 150.0)))
+
+FIRE_CYCLE = 4.0        # one trip through the slowest of the waves
+
+# Three waves, deliberately not in any whole ratio to each other: their sum
+# never repeats, so the flicker has no beat you can catch. The pairs are
+# (how many humps across the strip, how fast that wave drifts).
+FIRE_WAVES = ((0.9, 1.00), (2.3, -1.71), (5.7, 2.53))
+
+
+def _fire(snapshot, elapsed, options):
+    """Flame, drawn as drifting heat rather than as flickering pixels.
+
+    Random per-LED brightness looks like a fault, not a fire. What reads as
+    flame is heat that moves along the strip, so this sums a few travelling
+    waves and colours the result - and being a function of time rather than a
+    random draw, it also survives a dropped frame without a visible jump.
+    """
+    period = _cycle(snapshot, FIRE_CYCLE, options.speed_scale)
+    phase = elapsed / period
+    span = float(shim.LOGICAL_LEDS)
+
+    frame = []
+    for index in range(shim.LOGICAL_LEDS):
+        heat = 0.0
+        for humps, speed in FIRE_WAVES:
+            heat += math.sin(2.0 * math.pi
+                             * (index / span * humps + phase * speed))
+        # Three waves land in -3..3; centre it high so the strip is mostly
+        # burning and only occasionally dips to embers.
+        heat = 0.58 + heat / 6.4
+        frame.append(blend_stops(max(0.0, min(heat, 1.0)), FIRE_STOPS))
+    return frame
+
+
+# -- aurora ----------------------------------------------------------------
+
+# The hue window the northern lights actually occupy: green through cyan into
+# violet, never the warm half of the circle. That restraint is the whole
+# effect - a rainbow already exists, and it is the one people turn off.
+# The two waves below sum to -2..2, so the hue lands within AURORA_SPREAD of
+# AURORA_HUE: 0.33 is pure green and 0.71 is violet-blue, and staying inside
+# that is what keeps it from wandering into the yellows and becoming a slow
+# rainbow.
+AURORA_HUE = 0.52
+AURORA_SPREAD = 0.19
+
+AURORA_CYCLE = 9.0          # slow: this is the calm one
+
+# Two waves for the hue and one for the brightness, all at different speeds,
+# so the colour bands and the bright bands drift apart instead of moving as
+# one lit block.
+AURORA_HUE_WAVES = ((0.7, 1.0), (1.9, -0.43))
+AURORA_LEVEL_WAVE = (1.3, 0.61)
+AURORA_FLOOR = 0.35         # the curtain thins, it does not go out
+
+
+def _aurora(snapshot, elapsed, options):
+    """Slow curtains of green and violet - a rainbow that learned patience."""
+    period = _cycle(snapshot, AURORA_CYCLE, options.speed_scale)
+    phase = elapsed / period
+    span = float(shim.LOGICAL_LEDS)
+    # Steam's colour picker still moves it, the same way it shifts the
+    # rainbow: the effect keeps its character, you choose where it sits.
+    shift = snapshot.color_shift / 255.0
+
+    frame = []
+    for index in range(shim.LOGICAL_LEDS):
+        drift = 0.0
+        for humps, speed in AURORA_HUE_WAVES:
+            drift += math.sin(2.0 * math.pi
+                              * (index / span * humps + phase * speed))
+        humps, speed = AURORA_LEVEL_WAVE
+        swell = math.sin(2.0 * math.pi
+                         * (index / span * humps + phase * speed))
+        level = AURORA_FLOOR + (1.0 - AURORA_FLOOR) * (0.5 + swell * 0.5)
+        frame.append(hsv_to_rgb(AURORA_HUE + shift + AURORA_SPREAD * drift / 2.0,
+                                0.9, level))
+    return frame
+
+
+# What the rainbow entry shows. Steam's LED menu cannot be extended - the
+# entries are built into the client - so anything new has to take over one it
+# already offers, and the rainbow is the one people are happy to give up.
+# Rather than spending that single slot on one feature, it holds whichever of
+# these is chosen; SHOWS_RAINBOW leaves Steam's own effect alone.
+SHOWS_RAINBOW = "rainbow"
+SHOWS_TEMPERATURE = "temperature"
+SHOWS_LOAD = "load"
+SHOWS_FIRE = "fire"
+SHOWS_AURORA = "aurora"
+
+# Which renderer each choice puts in the rainbow's place, and - for the two
+# that read hardware - the Renderer attribute that has to be there for the
+# choice to mean anything. config validates against this table, so a new
+# entry is all a further effect needs.
+_SUBSTITUTES = {
+    SHOWS_TEMPERATURE: (_temperature, "temperature"),
+    SHOWS_LOAD: (_load, "load"),
+    SHOWS_FIRE: (_fire, None),
+    SHOWS_AURORA: (_aurora, None),
+}
+RAINBOW_CHOICES = (SHOWS_RAINBOW,) + tuple(_SUBSTITUTES)
+
+
 _EFFECTS = {
     shim.EFFECT_MANUAL: lambda snap, t, options: _static(snap),
     shim.EFFECT_NORMAL: lambda snap, t, options: _static(snap),
@@ -219,11 +414,20 @@ class Renderer:
     def __init__(self, led_count, mapping=MAPPING_STRETCH, reverse=False,
                  max_brightness=255, min_brightness=0, gamma=1.0,
                  speed_scale=1.0, patrol_dots=1, temperature=None,
-                 temperature_range=DEFAULT_TEMPERATURE_RANGE):
+                 temperature_range=DEFAULT_TEMPERATURE_RANGE, load=None,
+                 rainbow_shows=None):
         if led_count < 1:
             raise ValueError("led_count must be >= 1")
         if mapping not in MAPPINGS:
             raise ValueError("unknown mapping %r" % mapping)
+        if rainbow_shows is None:
+            # Handing over a sensor and nothing else has always meant "show
+            # the gauge", and that reading predates there being a choice.
+            rainbow_shows = (SHOWS_TEMPERATURE if temperature is not None
+                             else SHOWS_LOAD if load is not None
+                             else SHOWS_RAINBOW)
+        if rainbow_shows not in RAINBOW_CHOICES:
+            raise ValueError("unknown rainbow effect %r" % rainbow_shows)
         self.led_count = led_count
         self.mapping = mapping
         self.reverse = reverse
@@ -231,9 +435,12 @@ class Renderer:
         self.min_brightness = max(0, min(int(min_brightness), 255))
         self.speed_scale = speed_scale
         self.patrol_dots = max(1, min(int(patrol_dots), 8))
-        # Something with .celsius(), or None to leave the rainbow alone.
+        # Something with .celsius(), or None when nothing reads a sensor.
         self.temperature = temperature
         self.temperature_range = temperature_range
+        # Something with .fractions(), likewise.
+        self.load = load
+        self.rainbow_shows = rainbow_shows
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}
 
@@ -260,35 +467,44 @@ class Renderer:
             self._stretch[source] = weights
         return weights
 
-    def _gauge_active(self, snapshot):
-        """Whether the gauge has taken the rainbow's place for this snapshot.
+    def _substitute(self, snapshot):
+        """The renderer standing in for the rainbow here, or None.
 
-        Steam's menu cannot be extended - the entries are built into the client
-        - so the gauge has to take over one it already offers, and the rainbow
-        is the one people are happy to give up.
+        None also covers a choice whose hardware is missing - a gauge with no
+        source to read would draw nothing at all, and Steam's own rainbow is a
+        better answer to that than a dark strip.
         """
-        return (self.temperature is not None
-                and snapshot.effect == shim.EFFECT_RAINBOW)
+        if snapshot.effect != shim.EFFECT_RAINBOW:
+            return None
+        effect, needs = _SUBSTITUTES.get(self.rainbow_shows, (None, None))
+        if effect is None or (needs and getattr(self, needs) is None):
+            return None
+        return effect
 
     def is_animated(self, snapshot):
         """Whether this scene changes from frame to frame.
 
-        The gauge does not: it redraws when the sensor moves, which is orders
-        of magnitude slower than a frame, so driving it at the full rate sends
-        the same bytes sixty times a second. Without a sensor it falls back to
-        the rainbow, which does animate.
+        The two gauges do not: they redraw when their sensor moves, which is
+        orders of magnitude slower than a frame, so driving them at the full
+        rate sends the same bytes sixty times a second. With nothing to read
+        they fall back to the rainbow, which does animate - and fire and
+        aurora are animations like any other.
         """
-        if self._gauge_active(snapshot):
+        effect = self._substitute(snapshot)
+        if effect is _temperature:
             return self.temperature.celsius() is None
+        if effect is _load:
+            return self.load.fractions() is None
+        if effect is not None:
+            return True
         return snapshot.is_animated
 
     def render_logical(self, snapshot, elapsed):
         """The 17 logical LEDs of the Steam Machine bar, floats in 0..255."""
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
-        effect = _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL])
-        if self._gauge_active(snapshot):
-            effect = _temperature
+        effect = (self._substitute(snapshot)
+                  or _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL]))
         return effect(snapshot, elapsed, self)
 
     def _map_to_strip(self, logical):

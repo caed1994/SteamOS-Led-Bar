@@ -401,6 +401,43 @@ class TestConfig(unittest.TestCase):
         for key in config.RETIRED:
             self.assertNotIn(key, config.DEFAULTS, key)
 
+    def test_a_withdrawn_setting_that_still_means_something_is_carried_over(self):
+        # Being ignored is right for an option that stopped meaning anything.
+        # TEMPERATURE_GAUGE=1 means exactly one of the choices that replaced
+        # it, and dropping it would switch off a gauge somebody is looking at
+        # with no error and nothing to search for.
+        path = self._write("LED_COUNT=17\nTEMPERATURE_GAUGE=1\n")
+        self.assertEqual(config.load(path)["RAINBOW_SHOWS"], "temperature")
+
+        path = self._write("LED_COUNT=17\nTEMPERATURE_GAUGE=0\n")
+        self.assertEqual(config.load(path)["RAINBOW_SHOWS"], "rainbow")
+
+    def test_the_new_setting_outranks_the_one_it_replaced(self):
+        # Whichever order the two appear in: a line naming the new option is
+        # the reader's actual intention, and a leftover line is not.
+        for text in ("RAINBOW_SHOWS=fire\nTEMPERATURE_GAUGE=1\n",
+                     "TEMPERATURE_GAUGE=1\nRAINBOW_SHOWS=fire\n"):
+            loaded = config.load(self._write(text))
+            self.assertEqual(loaded["RAINBOW_SHOWS"], "fire", text)
+
+    def test_a_withdrawn_setting_spelled_wrongly_is_not_fatal(self):
+        # We are only reading the line out of politeness. Refusing to start
+        # over one we no longer accept would be worse than ignoring it.
+        loaded = config.load(self._write("TEMPERATURE_GAUGE=maybe\n"))
+        self.assertEqual(loaded["RAINBOW_SHOWS"], config.DEFAULTS["RAINBOW_SHOWS"])
+
+    def test_everything_carried_over_lands_somewhere_real(self):
+        # A migration pointing at a key that no longer exists, or producing a
+        # value the validator refuses, would be a config that cannot start -
+        # and it would only show up on the machines that still had the line.
+        for old, (new, table) in config.MIGRATED.items():
+            self.assertIn(old, config.RETIRED, old)
+            self.assertIn(new, config.DEFAULTS, new)
+            for value in table.values():
+                settings = dict(config.DEFAULTS)
+                settings[new] = value
+                config.validate(settings)
+
     def test_invalid_values_rejected(self):
         for override in ({"LED_COUNT": 0}, {"FPS": 999}, {"MAPPING": "spiral"},
                          {"GAMMA": 0}, {"MAX_BRIGHTNESS": 300},
@@ -410,8 +447,11 @@ class TestConfig(unittest.TestCase):
                          {"MESSAGE_COLOR": "#12345"},
                          # Same for a shape: a name nothing implements would
                          # silently become the default one at flash time.
-                         {"ACHIEVEMENT_STYLE": "sparkle"},
-                         {"FRIEND_STYLE": ""}):
+                         {"ACHIEVEMENT_STYLE": "kaleidoscope"},
+                         {"FRIEND_STYLE": ""},
+                         # And for the rainbow slot, where an unknown name
+                         # would quietly leave Steam's own effect in place.
+                         {"RAINBOW_SHOWS": "temperatures"}):
             with self.assertRaises(config.ConfigError):
                 config.load(path=None, overrides=override)
 

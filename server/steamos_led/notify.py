@@ -36,6 +36,7 @@ STYLE_PULSE = "pulse"
 STYLE_DOUBLE_FLASH = "double_flash"
 STYLE_COMET = "comet"
 STYLE_ALTERNATE = "alternate"
+STYLE_SPARKLE = "sparkle"
 
 # What a per-kind style is set to when it should simply follow the general one.
 # Not a style itself: it never reaches _STYLES, it only means "not set here".
@@ -69,6 +70,22 @@ COMET_TAIL = 0.33
 # Floors in LEDs, for strips too short for the fractions to mean anything.
 COMET_MIN_HEAD = 0.8
 COMET_MIN_TAIL = 1.0
+
+# The sparkle, in seconds like the flashes: a grain of glitter is a grain of
+# glitter whether the notification lasts two seconds or ten, and stretching
+# one into a slow fade would turn the whole effect into a lava lamp.
+SPARK_LIFE = 0.22           # how long one grain stays visible
+# Each LED gets its own period out of this range. Nothing shared, nothing in a
+# whole ratio to anything else - that is what stops the strip from settling
+# into a rhythm and starting to look like a pattern.
+SPARK_PERIOD_MIN = 0.40
+SPARK_PERIOD_MAX = 1.15
+# Two irrationals, used to give each LED a period and a head start. The
+# fractional parts of their multiples spread evenly and never repeat, which is
+# a well-behaved substitute for randomness - and unlike randomness it draws
+# the same picture after a dropped frame instead of jumping.
+SPARK_SPREAD_PERIOD = 0.7548776662
+SPARK_SPREAD_OFFSET = 0.5698402909
 
 # The alternating halves, in seconds for the same reason as the double flash.
 # One period is both sides once, so half a second is two switches a second -
@@ -182,6 +199,44 @@ def comet_levels(progress, led_count, duration):
     return levels
 
 
+def sparkle_levels(progress, led_count, duration):
+    """Per-LED brightness for the sparkle: grains lighting and dying out.
+
+    The only shape without an order to it. The others all say "here is a
+    thing, watch it happen"; this one just glitters, which is why it suits the
+    notifications you are glad to get rather than the ones you must act on.
+
+    Each LED runs its own little clock at its own rate, so nothing marches and
+    nothing lines up. It fades out at the end rather than stopping, or the
+    last grain would be cut off mid-life and read as a fault.
+    """
+    if led_count < 1:
+        return []
+
+    elapsed = progress * duration
+    span = SPARK_PERIOD_MAX - SPARK_PERIOD_MIN
+    fade = 1.0
+    if progress > 1.0 - FADE_TAIL:
+        fade = max(0.0, (1.0 - progress) / FADE_TAIL)
+
+    levels = []
+    for index in range(led_count):
+        period = SPARK_PERIOD_MIN + span * _spread(index, SPARK_SPREAD_PERIOD)
+        offset = period * _spread(index, SPARK_SPREAD_OFFSET)
+        age = (elapsed + offset) % period
+        # Lit the instant it starts and decaying away: a grain that faded in
+        # would be a slow pulse, and glitter is all attack.
+        grain = 0.0 if age >= SPARK_LIFE else (1.0 - age / SPARK_LIFE) ** 2
+        levels.append(grain * fade)
+    return levels
+
+
+def _spread(index, irrational):
+    """A number in 0..1 for this LED - evenly spread, and always the same."""
+    value = index * irrational
+    return value - math.floor(value)
+
+
 def alternate_levels(progress, led_count, duration):
     """Per-LED brightness for the alternating halves: left, right, left.
 
@@ -229,6 +284,7 @@ _STYLES = {
     STYLE_DOUBLE_FLASH: double_flash_levels,
     STYLE_COMET: comet_levels,
     STYLE_ALTERNATE: alternate_levels,
+    STYLE_SPARKLE: sparkle_levels,
 }
 STYLES = tuple(_STYLES)
 

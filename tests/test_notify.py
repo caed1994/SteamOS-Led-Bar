@@ -307,7 +307,10 @@ class ConfiguredStyleTest(unittest.TestCase):
         self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
 
     def test_a_shape_nothing_implements_is_dropped_at_the_door(self):
-        overlay = self._overlay(styles={"achievement": "sparkle"})
+        # Deliberately not a shape name anyone might add later: this test is
+        # about a value the service has never heard of, and it stopped being
+        # about that the day "sparkle" became real.
+        overlay = self._overlay(styles={"achievement": "kaleidoscope"})
         overlay.trigger("achievement", 0.0)
         self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
         self.assertNotIn("achievement", overlay.styles)
@@ -385,7 +388,7 @@ class ShapeInTheTriggerTest(unittest.TestCase):
         # It stays part of the colour, which then fails to parse - so nonsense
         # is refused rather than silently flashed in the default shape.
         overlay = self._overlay()
-        self.assertFalse(overlay.trigger("sparkle:#1a9fff", 0.0))
+        self.assertFalse(overlay.trigger("kaleidoscope:#1a9fff", 0.0))
         self.assertIsNone(overlay.current)
 
     def test_a_shape_with_no_colour_is_refused(self):
@@ -996,6 +999,78 @@ class AlternateShapeTest(ShapeTestCase):
         overlay.trigger("warning", 0.0)
         left, right = self._sides(self._levels(overlay, 0.05))
         self.assertTrue(left and not right)
+
+    def test_works_on_other_strip_lengths(self):
+        for count in (1, 2, 3, 5, 30, 144):
+            overlay = self._overlay(led_count=count)
+            lit = [max(self._levels(overlay, step / 40.0 * self.DURATION))
+                   for step in range(40)]
+            self.assertEqual(len(self._levels(overlay, 0.05)), count)
+            self.assertGreater(max(lit), 0, "%d LEDs stayed dark" % count)
+
+
+class SparkleShapeTest(ShapeTestCase):
+    """Glitter: every LED on its own little clock, and none of them agreeing."""
+
+    STYLE = notify.STYLE_SPARKLE
+
+    def _samples(self, overlay, count=200):
+        return [self._levels(overlay, step / float(count) * self.DURATION)
+                for step in range(count)]
+
+    def test_the_leds_do_not_move_together(self):
+        # The whole point. If they shared a clock this would be the pulse,
+        # drawn the hard way.
+        overlay = self._overlay()
+        agreed = 0
+        for levels in self._samples(overlay):
+            lit = [level > 0 for level in levels]
+            if all(lit) or not any(lit):
+                agreed += 1
+        self.assertLess(agreed, 20, "the strip is blinking as one")
+
+    def test_every_led_gets_a_turn(self):
+        # An LED whose grain never fires would look like a dead pixel on a
+        # strip somebody just bought.
+        overlay = self._overlay()
+        best = [0] * self.LEDS
+        for levels in self._samples(overlay):
+            best = [max(seen, level) for seen, level in zip(best, levels)]
+        self.assertTrue(all(peak > 200 for peak in best), best)
+
+    def test_a_grain_decays_rather_than_switching_off(self):
+        # Sampled inside one grain's life: it has to be on the way down, not
+        # holding at full and then vanishing.
+        overlay = self._overlay()
+        for led in range(self.LEDS):
+            trace = [levels[led] for levels in self._samples(overlay, 400)]
+            peak = max(trace)
+            self.assertGreater(len({level for level in trace
+                                    if 0 < level < peak}), 2, led)
+
+    def test_it_ends_dark(self):
+        overlay = self._overlay()
+        self.assertEqual(max(self._levels(overlay, self.DURATION - 0.001)), 0)
+
+    def test_it_fades_out_rather_than_stopping(self):
+        # A grain cut off mid-life reads as a fault rather than as an ending.
+        overlay = self._overlay()
+        late = max(self._levels(overlay, self.DURATION * 0.95))
+        early = max(max(levels) for levels in self._samples(overlay, 40)[:20])
+        self.assertLess(late, early)
+
+    def test_the_tempo_does_not_stretch_with_the_duration(self):
+        # Timed in seconds like the flashes: a longer notification means more
+        # glitter, not slower glitter.
+        short = self._overlay(duration=2.0)
+        long = self._overlay(duration=8.0)
+        self.assertEqual(self._levels(short, 0.4), self._levels(long, 0.4))
+
+    def test_the_same_moment_draws_the_same_frame(self):
+        # Spread by arithmetic rather than by a random draw, so a dropped
+        # frame resumes where it would have been.
+        self.assertEqual(self._levels(self._overlay(), 1.234),
+                         self._levels(self._overlay(), 1.234))
 
     def test_works_on_other_strip_lengths(self):
         for count in (1, 2, 3, 5, 30, 144):
