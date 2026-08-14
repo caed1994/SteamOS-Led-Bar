@@ -68,10 +68,18 @@ STRIP = [
         # frozen, so the strip has to carry on alone.
         ("STANDBY_PULSE", "Pulse white while the machine sleeps", "bool",
          None, None, None),
-        # No marks to set: the whole bar takes one colour and the scale is
-        # fixed, so all that is left to choose is which sensor it reads.
         ("TEMPERATURE_GAUGE", "Show temperature instead of the rainbow",
          "bool", None, None, None),
+        # The whole bar takes one colour; these two say where on the scale it
+        # sits. Below the first mark it is green, above the second red, and
+        # yellow lands halfway between - so the two ranges are kept apart,
+        # and no pair the sliders can offer breaks TEMPERATURE_SPAN.
+        #
+        # The ends are narrower than the validator's 0..150: a mark down at 0
+        # or up at 150 would paint one colour for every reading a machine
+        # ever produces, which is a gauge that has stopped saying anything.
+        ("TEMPERATURE_MIN", "Green up to (degrees)", "float", 20, 70, 1),
+        ("TEMPERATURE_MAX", "Red from (degrees)", "float", 75, 120, 1),
         # Not a "choice": the values are paths into /sys and the machine
         # decides what they are, so the menu is built from what it reports.
         ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor",
@@ -163,6 +171,8 @@ SETTINGS_TABS = (
 # greyed out rather than hidden: you can still see that the setting exists,
 # and where it lives, without it asking for attention it has not earned.
 DEPENDS_ON = {
+    "TEMPERATURE_MIN": ("TEMPERATURE_GAUGE",),
+    "TEMPERATURE_MAX": ("TEMPERATURE_GAUGE",),
     "TEMPERATURE_SENSOR": ("TEMPERATURE_GAUGE",),
     "NOTIFY_ACHIEVEMENTS": ("NOTIFY",),
     "NOTIFY_MESSAGES": ("NOTIFY",),

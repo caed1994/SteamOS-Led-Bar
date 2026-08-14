@@ -652,9 +652,33 @@ class GaugeTest(unittest.TestCase):
     def test_the_marks_are_in_order_and_span_something(self):
         # The colour lookup walks them in pairs, so an unsorted table would
         # divide by a negative and read backwards.
-        marks = [mark for mark, _colour in render.TEMPERATURE_STOPS]
+        marks = [mark for mark, _colour in render.temperature_stops(40.0, 80.0)]
         self.assertEqual(marks, sorted(marks))
         self.assertEqual(len(set(marks)), len(marks))
+
+    def test_yellow_lands_halfway_between_the_marks(self):
+        stops = render.temperature_stops(30.0, 90.0)
+        self.assertEqual(stops[1][0], 60.0)
+        self.assertEqual(stops[1][1], render.TEMPERATURE_WARM)
+
+    def test_the_marks_move_the_whole_scale(self):
+        # Set narrower and the same reading is further along: at 50 C a
+        # 40..80 scale is barely warm and a 35..65 one is already yellow.
+        wide = render.temperature_colour(50.0, 40.0, 80.0)
+        narrow = render.temperature_colour(50.0, 35.0, 65.0)
+        self.assertGreater(narrow[0], wide[0], "red should have risen further")
+
+    def test_marks_with_no_span_do_not_divide_by_zero(self):
+        # validate() keeps them apart, but the renderer is also used directly
+        # - and a crash here would be in the render loop, not at startup.
+        # Collapsed marks leave no room to fade, so the bar simply steps from
+        # one end to the other at the mark.
+        self.assertEqual(render.temperature_colour(50.0, 60.0, 60.0),
+                         render.TEMPERATURE_COOL)
+        self.assertEqual(render.temperature_colour(60.0, 60.0, 60.0),
+                         render.TEMPERATURE_COOL)
+        self.assertEqual(render.temperature_colour(70.0, 60.0, 60.0),
+                         render.TEMPERATURE_HOT)
 
 
 class GaugeFrameRateTest(unittest.TestCase):

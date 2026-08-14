@@ -202,6 +202,7 @@ sudo systemctl start steamos-led-serial
 | `PATROL_DOTS` | `1` | dots in the patrol effect |
 | `STANDBY_PULSE` | `1` | breathe white while [suspended](#while-the-machine-sleeps) |
 | `TEMPERATURE_GAUGE` | `0` | show the [temperature gauge](#temperature-gauge) instead of the rainbow |
+| `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `80.0` | where the gauge is green and where it is red |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the gauge reads |
 | `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` | `#ffd700` / `#8000ff` / `#00c850` | what the three automatic [notifications](#notifications) flash |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
@@ -306,10 +307,15 @@ cool through yellow to red when hot:
  80 C  #ff0000   red, and so is anything hotter
 ```
 
-The scale is fixed and there is nothing to set. A bar whose meaning depends on
-two numbers you configured months ago is not one you can read at a glance -
-and the length of a part-filled bar was only ever saying the same thing as its
-colour, twice.
+Two numbers place that scale: `TEMPERATURE_MIN` is where green ends and
+`TEMPERATURE_MAX` where red begins, with yellow landing halfway between them.
+The defaults above are 40 and 80. Machines run at different temperatures, so
+move both up for a part that idles hot, or bring them together to see smaller
+changes - at 35/65 the same 50 C already reads yellow. They have to stay at
+least 5 degrees apart, or there is no room left to fade through.
+
+The bar always fills the whole strip. The length of a part-filled bar was only
+ever saying the same thing as its colour, twice.
 
 Switch it on, then pick **Rainbow** in Steam's LED menu:
 
@@ -327,6 +333,8 @@ the rainbow back.
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `TEMPERATURE_GAUGE` | `0` | show the gauge instead of the rainbow |
+| `TEMPERATURE_MIN` | `40.0` | green up to here |
+| `TEMPERATURE_MAX` | `80.0` | red from here up |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor to read |
 
 `auto` picks the CPU or GPU package sensor ahead of the dozen other things a PC
@@ -342,8 +350,12 @@ Temperature sensors on this machine:
   [    ] nvme         Composite     41.0 C  /sys/class/hwmon/hwmon0/temp1_input
 
 Reading /sys/class/hwmon/hwmon1/temp2_input: 63.5 C
-Gauge: empty at or below 40 C, full at 85 C.
-Right now: 9 of 17 LEDs lit, colour #fff300
+The whole bar takes one colour, from green when cool to red when hot:
+   40.0 C and below #00ff00
+   60.0 C           #ffff00
+   80.0 C and above #ff0000
+Between the marks the colour is mixed, so it moves as the machine does.
+Right now: #ffd200 across all 17 LEDs
 ```
 
 To watch something else, put that path into `TEMPERATURE_SENSOR` or pick it

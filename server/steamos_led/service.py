@@ -100,6 +100,8 @@ def build_renderer(config):
         speed_scale=config["SPEED"],
         patrol_dots=config["PATROL_DOTS"],
         temperature=build_temperature_source(config),
+        temperature_range=(config["TEMPERATURE_MIN"],
+                           config["TEMPERATURE_MAX"]),
     )
 
 
@@ -511,8 +513,10 @@ def run_temperature(config):
              "%.1f C" % celsius if celsius is not None else "nothing"))
     print("The whole bar takes one colour, from green when cool to red when "
           "hot:")
-    last = len(render.TEMPERATURE_STOPS) - 1
-    for index, (mark, colour) in enumerate(render.TEMPERATURE_STOPS):
+    stops = render.temperature_stops(config["TEMPERATURE_MIN"],
+                                     config["TEMPERATURE_MAX"])
+    last = len(stops) - 1
+    for index, (mark, colour) in enumerate(stops):
         note = "and below" if index == 0 else (
             "and above" if index == last else "")
         print("  %5.1f C %-9s #%02x%02x%02x"
@@ -524,7 +528,8 @@ def run_temperature(config):
           "a degree" % (source.interval, source.smoothing))
     print("or two between readings and the colour would twitch with it.")
     if celsius is not None:
-        red, green, blue = render.temperature_colour(celsius)
+        red, green, blue = render.temperature_colour(
+            celsius, config["TEMPERATURE_MIN"], config["TEMPERATURE_MAX"])
         print("Right now: #%02x%02x%02x across all %d LEDs"
               % (int(red), int(green), int(blue), shim.LOGICAL_LEDS))
     return 0

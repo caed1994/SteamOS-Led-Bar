@@ -26,10 +26,6 @@ DEFAULT_CONFIG_PATH = "/etc/steamos-led-serial.conf"
 RETIRED = {
     "WARNING_COLOR": "a warning is always red now",
     "WARNING_STYLE": "a warning always uses the alternate shape now",
-    "TEMPERATURE_MIN": "the gauge colours the whole bar now, so it has no "
-                       "ends to fill between",
-    "TEMPERATURE_MAX": "the gauge colours the whole bar now, so it has no "
-                       "ends to fill between",
 }
 
 DEFAULTS = {
@@ -62,6 +58,8 @@ DEFAULTS = {
     "MESSAGE_STYLE": notify.STYLE_INHERIT,
     "FRIEND_STYLE": notify.STYLE_INHERIT,
     "TEMPERATURE_GAUGE": False,
+    "TEMPERATURE_MIN": 40.0,
+    "TEMPERATURE_MAX": 80.0,
     "TEMPERATURE_SENSOR": "auto",
     "STEAM_LIBRARY": "auto",
     "STEAM_ROUTE": "auto",
@@ -216,6 +214,15 @@ CONFIGURABLE_KINDS = (("achievement", "ACHIEVEMENT"),
                       ("message", "MESSAGE"),
                       ("friend", "FRIEND"))
 
+# Where the gauge's two marks may sit: below the first the bar is green, above
+# the second it is red. Wide, because people watch different sensors, but not
+# unbounded - outside this is a unit mix-up, not an intention.
+TEMPERATURE_FLOOR = 0.0
+TEMPERATURE_CEILING = 150.0
+# And they need room between them: equal marks would divide by nothing, and a
+# bar that jumps green to red says less than one that walks there.
+TEMPERATURE_SPAN = 5.0
+
 
 def validate(config):
     if not 1 <= config["LED_COUNT"] <= 1024:
@@ -250,6 +257,13 @@ def validate(config):
     if config["NOTIFY_STYLE"] not in NOTIFY_STYLES:
         raise ConfigError("NOTIFY_STYLE must be one of: %s"
                           % ", ".join(NOTIFY_STYLES))
+    for key in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
+        if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
+            raise ConfigError("%s must be between %g and %g degrees"
+                              % (key, TEMPERATURE_FLOOR, TEMPERATURE_CEILING))
+    if config["TEMPERATURE_MAX"] - config["TEMPERATURE_MIN"] < TEMPERATURE_SPAN:
+        raise ConfigError("TEMPERATURE_MAX must be at least %g degrees above "
+                          "TEMPERATURE_MIN" % TEMPERATURE_SPAN)
     for _kind, prefix in CONFIGURABLE_KINDS:
         key = prefix + "_STYLE"
         if config[key] not in PER_KIND_STYLES:

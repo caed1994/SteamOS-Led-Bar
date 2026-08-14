@@ -143,28 +143,42 @@ def _demo(snapshot, elapsed, options):
     return [(r * level, g * level, b * level) for r, g, b in frame]
 
 
-# What the whole bar shows at each temperature, and the marks in between are
-# mixed. Green, yellow, red is the sequence everybody already reads as
-# "getting worse", and mixing these three in RGB walks the same path around
-# the hue circle: between any two of them only one channel moves.
-#
-# Fixed rather than configurable. The bar answers one question - is the
-# machine hot - and an answer whose scale moves from machine to machine is
-# not one you can read at a glance.
-TEMPERATURE_STOPS = (
-    (40.0, (0.0, 255.0, 0.0)),          # cool, and everything below it
-    (60.0, (255.0, 255.0, 0.0)),        # working
-    (80.0, (255.0, 0.0, 0.0)),          # hot, and everything above it
-)
+# What the whole bar shows, cool to hot. Green, yellow, red is the sequence
+# everybody already reads as "getting worse", and mixing these three in RGB
+# walks the same path around the hue circle: between any two of them only one
+# channel moves, so no hue conversion is needed to get the same result.
+TEMPERATURE_COOL = (0.0, 255.0, 0.0)
+TEMPERATURE_WARM = (255.0, 255.0, 0.0)
+TEMPERATURE_HOT = (255.0, 0.0, 0.0)
+
+DEFAULT_TEMPERATURE_RANGE = (40.0, 80.0)
 
 
-def temperature_colour(celsius, stops=TEMPERATURE_STOPS):
+def temperature_stops(low, high):
+    """(mark, colour) from the two marks: green at one end, red at the other.
+
+    Yellow sits halfway between rather than being a third setting. It is the
+    only placement that needs no explaining - and with the shipped 40 and 80
+    it lands on 60, which is where a machine under load actually sits.
+    """
+    return ((low, TEMPERATURE_COOL),
+            ((low + high) / 2.0, TEMPERATURE_WARM),
+            (high, TEMPERATURE_HOT))
+
+
+def temperature_colour(celsius, low=DEFAULT_TEMPERATURE_RANGE[0],
+                       high=DEFAULT_TEMPERATURE_RANGE[1]):
     """The colour for a temperature: the stops, mixed."""
+    stops = temperature_stops(low, high)
     if celsius <= stops[0][0]:
         return stops[0][1]
-    for (low, cold), (high, warm) in zip(stops, stops[1:]):
-        if celsius <= high:
-            blend = (celsius - low) / (high - low)
+    for (cold_mark, cold), (warm_mark, warm) in zip(stops, stops[1:]):
+        if celsius <= warm_mark:
+            span = warm_mark - cold_mark
+            # The validator keeps the marks apart, but the renderer is also
+            # used directly - and dividing by nothing here would be a crash
+            # in the render loop rather than a message at startup.
+            blend = 0.0 if span <= 0 else (celsius - cold_mark) / span
             return tuple(cold[channel]
                          + (warm[channel] - cold[channel]) * blend
                          for channel in range(3))
@@ -184,7 +198,8 @@ def _temperature(snapshot, elapsed, options):
         # like the service had died. The log says what happened.
         return _rainbow(snapshot, elapsed, options)
 
-    return [temperature_colour(celsius)] * shim.LOGICAL_LEDS
+    low, high = options.temperature_range
+    return [temperature_colour(celsius, low, high)] * shim.LOGICAL_LEDS
 
 
 _EFFECTS = {
@@ -203,7 +218,8 @@ class Renderer:
 
     def __init__(self, led_count, mapping=MAPPING_STRETCH, reverse=False,
                  max_brightness=255, min_brightness=0, gamma=1.0,
-                 speed_scale=1.0, patrol_dots=1, temperature=None):
+                 speed_scale=1.0, patrol_dots=1, temperature=None,
+                 temperature_range=DEFAULT_TEMPERATURE_RANGE):
         if led_count < 1:
             raise ValueError("led_count must be >= 1")
         if mapping not in MAPPINGS:
@@ -217,6 +233,7 @@ class Renderer:
         self.patrol_dots = max(1, min(int(patrol_dots), 8))
         # Something with .celsius(), or None to leave the rainbow alone.
         self.temperature = temperature
+        self.temperature_range = temperature_range
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}
 
