@@ -7,3 +7,6 @@ __pycache__/
 .pioenvs/
 .piolibdeps/
 firmware/led-client/.vscode/
+
+# Saved settings profiles from the control panel
+profiles/

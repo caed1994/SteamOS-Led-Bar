@@ -346,6 +346,77 @@ class ShapeTestButtonTest(unittest.TestCase):
         self.assertNotIn("pkexec", ledpanel.shape_test_command("bloom"))
 
 
+class SettingsProfileTest(unittest.TestCase):
+    """Saving the settings to a file and reading them back.
+
+    A profile is the same KEY=value format as the configuration, which is the
+    whole trick: the parser and the validator already exist, so a profile
+    cannot smuggle in an option the service would refuse.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+        self.path = os.path.join(self.directory, "profile.conf")
+
+    def _round_trip(self, values):
+        with open(self.path, "w") as handle:
+            handle.write(ledpanel.profile_text(values))
+        return ledpanel.read_profile(self.path)
+
+    def test_settings_survive_the_round_trip(self):
+        values = {"LED_COUNT": 42, "PATROL_DOTS": 3, "GAMMA": 2.2,
+                  "TEMPERATURE_GAUGE": True, "REVERSE": False,
+                  "MESSAGE_COLOR": "#ff36c9", "NOTIFY_STYLE": "comet"}
+        self.assertEqual(self._round_trip(values), values)
+
+    def test_booleans_come_back_as_booleans(self):
+        # Written as 1/0 like the config file, so they have to be read back
+        # through the same coercion rather than as the strings "1" and "0".
+        back = self._round_trip({"TEMPERATURE_GAUGE": True, "REVERSE": False})
+        self.assertIs(back["TEMPERATURE_GAUGE"], True)
+        self.assertIs(back["REVERSE"], False)
+
+    def test_a_profile_is_a_configuration_file(self):
+        # Which means the lines can also be pasted into /etc by hand, and
+        # that is worth keeping true.
+        self._round_trip({"LED_COUNT": 42})
+        merged = dict(config_module.DEFAULTS)
+        merged.update(config_module.parse_file(self.path))
+        config_module.validate(merged)
+
+    def test_an_unknown_option_is_refused_rather_than_loaded(self):
+        with open(self.path, "w") as handle:
+            handle.write("LED_COUNT=17\nLED_COUTN=60\n")
+        with self.assertRaises(config_module.ConfigError):
+            ledpanel.read_profile(self.path)
+
+    def test_an_old_profile_with_a_withdrawn_option_still_loads(self):
+        # Profiles outlive settings: someone who saved one before the gauge
+        # lost its two marks should not have to edit the file by hand.
+        with open(self.path, "w") as handle:
+            handle.write("LED_COUNT=17\nTEMPERATURE_MIN=40.0\n")
+        loaded = ledpanel.read_profile(self.path)
+        self.assertEqual(loaded, {"LED_COUNT": 17})
+
+    def test_the_file_says_what_it_is(self):
+        text = ledpanel.profile_text({"LED_COUNT": 17})
+        self.assertTrue(text.startswith("#"))
+        self.assertIn("profile", text.lower())
+
+    def test_profiles_live_beside_the_clone(self):
+        # Not under /etc: no privileges, and it is where you already go for
+        # this project.
+        directory = ledpanel.profiles_dir("/home/deck/SteamOS-Led-Bar")
+        self.assertTrue(directory.startswith("/home/deck/SteamOS-Led-Bar"))
+        self.assertNotIn("/etc", directory)
+
+    def test_they_are_not_committed_by_accident(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "..", ".gitignore")) as handle:
+            self.assertIn(ledpanel.PROFILE_DIR, handle.read())
+
+
 class StyleMenuTest(unittest.TestCase):
     """The flash shapes in the panel come from the service, not from a list."""
 

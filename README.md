@@ -550,6 +550,26 @@ tabs:
 Apply writes every setting from every tab, keeps the comments in the file, and
 restarts both the service and the watcher.
 
+### Profiles
+
+Next to those two: **Save profile** writes everything the window can set into a
+file of its own, and **Load profile** reads one back. Profiles land in
+`profiles/` inside the clone, need no password, and are ignored by git.
+
+A profile *is* a config file — the same `KEY=value` lines, read by the same
+parser — so you can also paste from one into `/etc/steamos-led-serial.conf` by
+hand. Two consequences of that: a typo in a profile is refused when you load
+it rather than at the next service start, and a profile that names a setting
+which has since been withdrawn still loads, minus that line.
+
+It holds exactly what the panel shows, which is deliberate: the serial port,
+the baud rate and the device are not in the window, so they are never in a
+profile and cannot arrive from another machine.
+
+**Loading does not apply.** The settings land in the window the same way
+*Reload from file* does — you see what arrived, then press Apply if you want
+it.
+
 **After a SteamOS update, press *Rebuild and reinstall*.** A system update
 brings a new kernel and the module was built for the old one, so it is gone and
 `/dev/valve-leds-shim` with it. Your configuration is kept and the ESP is never

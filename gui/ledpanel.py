@@ -10,6 +10,7 @@ import os
 import platform
 import subprocess
 
+from steamos_led import config as config_module
 from steamos_led import temperature
 
 INSTALL_DIR = "/var/lib/steamos-led-serial"
@@ -154,6 +155,48 @@ def repair_summary(checks):
                 "kernel - that is what a SteamOS update does, and reinstalling "
                 "puts it back." % len(problems))
     return "%d problem(s) found." % len(problems)
+
+
+# -- settings profiles -----------------------------------------------------
+#
+# A profile is the same KEY=value file as the configuration, which is what
+# makes this cheap: the parser, the validator and the formatter all already
+# exist. It holds exactly what the panel can set, so the machine-specific
+# lines the panel does not show - serial port, baud rate, device - are never
+# in one and cannot arrive from somebody else's machine.
+#
+# In the clone rather than under ~/.config, because that is where you already
+# go for this project, and because it needs no privileges: the panel writes it
+# as you, unlike the configuration in /etc.
+PROFILE_DIR = "profiles"
+PROFILE_SUFFIX = ".conf"
+
+
+def profiles_dir(source_dir):
+    return os.path.join(source_dir, PROFILE_DIR)
+
+
+def profile_text(values):
+    """A profile file, ready to write."""
+    lines = [
+        "# A settings profile for the SteamOS LED bar control panel.",
+        "# Load it from the panel with \"Load profile\", or copy the lines",
+        "# you want into /etc/steamos-led-serial.conf by hand.",
+        "",
+    ]
+    for key in sorted(values):
+        lines.append("%s=%s" % (key, config_module.format_value(values[key])))
+    return "\n".join(lines) + "\n"
+
+
+def read_profile(path):
+    """The settings in a profile file.
+
+    Straight through the configuration parser, so an unknown option is
+    refused here rather than at the next service start, and one we withdrew
+    is skipped with a note the same way.
+    """
+    return config_module.parse_file(path)
 
 
 # What Steam's Game Mode session looks like from inside a program it started.

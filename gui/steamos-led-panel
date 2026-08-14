@@ -26,7 +26,7 @@ sys.path.insert(0, HERE)
 
 try:
     import tkinter as tk
-    from tkinter import ttk, colorchooser, messagebox
+    from tkinter import ttk, colorchooser, filedialog, messagebox
 except ImportError:                                         # pragma: no cover
     sys.exit(
         "This panel needs Python's tkinter, which is not installed.\n"
@@ -820,6 +820,13 @@ class Panel:
                        style="Accent.TButton", command=self.apply_settings),
             ttk.Button(self.apply_row, text="Reload from file",
                        command=self.reload_settings),
+            # Profiles sit here rather than on a tab of their own: this is
+            # already the row for "what to do with these settings", and a
+            # profile is those settings by another name.
+            ttk.Button(self.apply_row, text="Save profile...",
+                       command=self.save_profile),
+            ttk.Button(self.apply_row, text="Load profile...",
+                       command=self.load_profile),
         ]
         self._show_apply(True)
 
@@ -973,16 +980,92 @@ class Panel:
         self.runner.start(
             ledpanel.apply_config_command(SOURCE_DIR, staged.name), finished)
 
-    def reload_settings(self):
-        self.config = self._load_config()
+    def _show_values(self, values):
+        """Put these settings into the controls. Keys we do not show are
+        ignored, and anything missing falls back to the shipped default."""
+        shown = 0
         for key, (variable, kind) in self.vars.items():
-            value = self.config.get(key, config_module.DEFAULTS[key])
+            if key not in values:
+                continue
+            value = values[key]
             variable.set(bool(value) if kind == "bool"
                          else self._label_for(key, str(value))
                          if kind in ("sensor", "named")
                          else str(value) if kind == "choice"
                          else float(value))
+            shown += 1
         self._refresh_enabled()
+        return shown
+
+    def reload_settings(self):
+        self.config = self._load_config()
+        merged = dict(config_module.DEFAULTS)
+        merged.update(self.config)
+        self._show_values(merged)
+
+    # -- profiles ---------------------------------------------------------
+
+    def save_profile(self):
+        """Write the settings in this window to a file of their own."""
+        try:
+            values = self._collect()
+        except config_module.ConfigError as exc:
+            messagebox.showerror("Not a usable setting", str(exc))
+            return
+
+        directory = ledpanel.profiles_dir(SOURCE_DIR)
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror("Profiles", str(exc))
+            return
+
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="Save profile",
+            initialdir=directory, initialfile="my-profile",
+            defaultextension=ledpanel.PROFILE_SUFFIX,
+            filetypes=[("Profile", "*" + ledpanel.PROFILE_SUFFIX),
+                       ("All files", "*")])
+        if not path:
+            return
+        try:
+            with open(path, "w") as handle:
+                handle.write(ledpanel.profile_text(values))
+        except OSError as exc:
+            messagebox.showerror("Profiles", str(exc))
+            return
+        self._write("Saved %d settings to %s\n\n" % (len(values), path))
+
+    def load_profile(self):
+        """Read a profile into the controls - and no further.
+
+        Deliberately not applied: it lands in the window the same way Reload
+        does, so you see what arrived before anything is written to /etc.
+        """
+        directory = ledpanel.profiles_dir(SOURCE_DIR)
+        path = filedialog.askopenfilename(
+            parent=self.root, title="Load profile",
+            initialdir=directory if os.path.isdir(directory) else SOURCE_DIR,
+            filetypes=[("Profile", "*" + ledpanel.PROFILE_SUFFIX),
+                       ("All files", "*")])
+        if not path:
+            return
+        try:
+            values = ledpanel.read_profile(path)
+        except (config_module.ConfigError, OSError) as exc:
+            messagebox.showerror("Profile", str(exc))
+            return
+
+        shown = self._show_values(values)
+        self._write("Loaded %d settings from %s\n" % (shown, path))
+        skipped = len(values) - shown
+        if skipped:
+            # Options the service has but this window does not - the serial
+            # port and its like. Saying so beats letting someone believe they
+            # were applied and lost.
+            self._write("%d setting(s) in the file are not shown here and "
+                        "were left alone.\n" % skipped)
+        self._write("Nothing is written yet - press Apply to keep it.\n\n")
         self._write("Reloaded %s\n\n" % config_module.DEFAULT_CONFIG_PATH)
 
     # -- tests ------------------------------------------------------------
