@@ -692,12 +692,15 @@ class PanelSettingsTest(unittest.TestCase):
         for entry in self._rows():
             if entry.elts[0].value in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
                 marks[entry.elts[0].value] = (entry.elts[3].value,
-                                              entry.elts[4].value)
+                                              entry.elts[4].value,
+                                              entry.elts[5].value)
         self.assertEqual(len(marks), 2, "both marks should be on a tab")
 
+        # In the sliders' own steps: those are the settings a person can
+        # actually land on, and _scale() snaps anything between them.
         low, high = marks["TEMPERATURE_MIN"], marks["TEMPERATURE_MAX"]
-        for cold in range(int(low[0]), int(low[1]) + 1):
-            for hot in range(int(high[0]), int(high[1]) + 1):
+        for cold in range(int(low[0]), int(low[1]) + 1, int(low[2])):
+            for hot in range(int(high[0]), int(high[1]) + 1, int(high[2])):
                 settings = dict(config_module.DEFAULTS)
                 settings["TEMPERATURE_MIN"] = float(cold)
                 settings["TEMPERATURE_MAX"] = float(hot)

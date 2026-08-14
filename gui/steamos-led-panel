@@ -78,8 +78,10 @@ STRIP = [
         # The ends are narrower than the validator's 0..150: a mark down at 0
         # or up at 150 would paint one colour for every reading a machine
         # ever produces, which is a gauge that has stopped saying anything.
-        ("TEMPERATURE_MIN", "Green up to (degrees)", "float", 20, 70, 1),
-        ("TEMPERATURE_MAX", "Red from (degrees)", "float", 75, 120, 1),
+        # Five degrees at a time, because a gauge is read at a glance and a
+        # single degree either way is not a difference you can see on it.
+        ("TEMPERATURE_MIN", "Green up to (degrees)", "float", 20, 50, 5),
+        ("TEMPERATURE_MAX", "Red from (degrees)", "float", 60, 90, 5),
         # Not a "choice": the values are paths into /sys and the machine
         # decides what they are, so the menu is built from what it reports.
         ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor",
