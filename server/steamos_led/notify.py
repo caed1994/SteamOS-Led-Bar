@@ -338,7 +338,8 @@ class NotificationOverlay:
 
     def __init__(self, enabled=True, duration=3.5, led_count=17,
                  style=STYLE_BLOOM, colors=None,
-                 repeat_gap=DEFAULT_REPEAT_GAP, styles=None, reverse=False):
+                 repeat_gap=DEFAULT_REPEAT_GAP, styles=None, reverse=False,
+                 max_brightness=255):
         self.enabled = enabled
         self.duration = duration
         self.led_count = led_count
@@ -347,6 +348,16 @@ class NotificationOverlay:
         # was symmetric; a comet running against every other effect is exactly
         # the complaint the temperature gauge earned.
         self.reverse = reverse
+        # And so does the brightness ceiling, for a better reason than looks:
+        # people cap it because the strip runs off the ESP's USB rail, and a
+        # flash is the worst case there - the whole bar lit at once. Ignoring
+        # it browns out exactly the strips the setting exists to protect.
+        #
+        # Only this one of the three. MIN_BRIGHTNESS is a floor under what
+        # Steam asked for, and a flash asks for nothing - it also has to reach
+        # zero at both ends or two in a row would run together. GAMMA reshapes
+        # how Steam's own colours are presented; a flash is not Steam's state.
+        self.brightness = max(0, min(int(max_brightness), 255)) / 255.0
         self.style = style if style in STYLES else STYLE_BLOOM
         self.repeat_gap = max(0.0, float(repeat_gap))
         # A trigger word stays the interface - callers ask for "achievement",
@@ -446,6 +457,9 @@ class NotificationOverlay:
         red, green, blue = self.current.color
         if self.reverse:
             levels = levels[::-1]
+        red *= self.brightness
+        green *= self.brightness
+        blue *= self.brightness
         frame = bytearray()
         for level in levels:
             frame.append(int(red * level + 0.5))

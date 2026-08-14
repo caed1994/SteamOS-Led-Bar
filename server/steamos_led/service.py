@@ -145,6 +145,7 @@ class Runner:
             colors=notification_colors(config),
             styles=notification_styles(config),
             reverse=config["REVERSE"],
+            max_brightness=config["MAX_BRIGHTNESS"],
             repeat_gap=config["NOTIFY_REPEAT_GAP"],
         )
         self.overheat = build_overheat_watch(config)

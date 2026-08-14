@@ -470,6 +470,54 @@ class FixedWarningTest(unittest.TestCase):
         self.assertEqual(overlay.current.color, (1, 2, 3))
 
 
+class BrightnessCeilingTest(unittest.TestCase):
+    """A flash has to respect MAX_BRIGHTNESS, and for more than looks.
+
+    People cap it because the strip runs off the ESP's USB rail, and a flash
+    is the worst case there: the whole bar lit at once. Measured before this
+    was fixed - a capped strip rendered at 80 and flashed at 254.
+    """
+
+    def _peak(self, cap, kind="achievement"):
+        overlay = notify.NotificationOverlay(duration=2.0, led_count=17,
+                                             max_brightness=cap)
+        overlay.trigger(kind, 0.0)
+        return max(overlay.frame(0.6))
+
+    def test_a_capped_strip_flashes_within_its_cap(self):
+        self.assertLessEqual(self._peak(80), 80)
+
+    def test_the_cap_scales_rather_than_clips(self):
+        # The same proportion the renderer applies, so a flash at a cap looks
+        # like the rest of the bar rather than a differently shaped thing.
+        full, capped = self._peak(255), self._peak(128)
+        self.assertAlmostEqual(capped / full, 128 / 255.0, places=1)
+
+    def test_no_cap_leaves_the_colour_alone(self):
+        overlay = notify.NotificationOverlay(duration=2.0, led_count=17)
+        overlay.trigger("warning", 0.0)
+        self.assertEqual(max(overlay.frame(0.05)), 255)
+
+    def test_it_applies_to_every_kind_and_to_a_bare_colour(self):
+        for kind in ("achievement", "message", "friend", "warning",
+                     "#00ff88"):
+            self.assertLessEqual(self._peak(40, kind), 40, kind)
+
+    def test_zero_is_dark_rather_than_full(self):
+        # A cap of 0 is a strip someone wants silent; the flash is not an
+        # exception to that.
+        self.assertEqual(self._peak(0), 0)
+
+    def test_no_floor_is_imposed_the_way_the_renderer_imposes_one(self):
+        # MIN_BRIGHTNESS is a floor under what Steam asked for, and a flash
+        # asks for nothing. It also has to fade to nothing at both ends, or
+        # two in a row would run together - so the overlay takes no floor.
+        overlay = notify.NotificationOverlay(duration=2.0, led_count=17)
+        overlay.trigger("achievement", 0.0)
+        self.assertEqual(max(overlay.frame(0.0)), 0, "it starts from nothing")
+        self.assertLess(max(overlay.frame(1.999)), 5, "and returns to it")
+
+
 class ConfiguredOverlayTest(unittest.TestCase):
     """What the service hands the overlay, straight from a configuration."""
 

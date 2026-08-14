@@ -195,7 +195,7 @@ sudo systemctl start steamos-led-serial
 | `LED_COUNT` | `17` | LEDs on the strip |
 | `REVERSE` | `0` | flip the direction |
 | `MAPPING` | `stretch` | how the 17 logical LEDs spread out: `stretch` (interpolated), `repeat` (tiled), `crop` (1:1, rest dark) |
-| `MAX_BRIGHTNESS` | `255` | brightness ceiling |
+| `MAX_BRIGHTNESS` | `255` | brightness ceiling, notification flashes included |
 | `MIN_BRIGHTNESS` | `0` | brightness floor, for when Steam reports 0 |
 | `GAMMA` | `1.0` | `2.2` looks smoother when dimmed |
 | `SPEED` | `1.0` | animation speed (`0.5` is half as fast) |
