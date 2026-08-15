@@ -142,20 +142,26 @@ class LiveWindowTest(unittest.TestCase):
             heights[key] = controls[0].winfo_height()
         self.assertEqual(len(set(heights.values())), 1, heights)
 
-    def test_a_block_is_fenced_off_from_what_is_around_it(self):
-        # The stepped-in rows under a switch belong to it; the gap above the
-        # next switch is what says so, every row being the same height.
+    def test_a_switch_has_the_same_room_either_side_of_it(self):
+        # A switch that opens a block stands clear of both what is above it
+        # and what it governs; the rows it governs sit close together under it.
+        # Equal gaps either side are what stop the switch reading as glued to
+        # the drop-down beneath it.
         self.panel.notebook.select(self._pages()[1])
         self.root.update()
-        rows = ("NOTIFY_ACHIEVEMENTS", "ACHIEVEMENT_COLOR",
+        rows = ("NOTIFY", "NOTIFY_ACHIEVEMENTS", "ACHIEVEMENT_COLOR",
                 "ACHIEVEMENT_STYLE", "NOTIFY_MESSAGES")
         tops = [self.panel._rows[key][1][0].winfo_rooty() for key in rows]
-        inside = [tops[index + 1] - tops[index] for index in range(2)]
-        crossing = tops[3] - tops[2]
-        self.assertEqual(len(set(inside)), 1,
-                         "the rows inside a block are not evenly spaced")
-        self.assertGreater(crossing, inside[0],
-                           "a block runs into the next with no gap")
+        above, below, tight, closing = (tops[index + 1] - tops[index]
+                                        for index in range(4))
+        self.assertEqual(above, below,
+                         "the switch is not the same distance from the row "
+                         "above it as from the one it governs")
+        self.assertLess(tight, below,
+                        "the rows a switch governs are no closer to each "
+                        "other than the switch is to them")
+        self.assertEqual(closing, above,
+                         "a block does not close the way it opened")
 
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
         # The rail takes a sixth of the width, so wrapping to the window laid
@@ -169,9 +175,16 @@ class LiveWindowTest(unittest.TestCase):
                 self.root.update()
             for page in self._pages():
                 self.panel.notebook.select(page)
-                self.root.update()
+                # A page that has just been mapped needs more than one pass
+                # before its width is the one it will keep.
+                for _ in range(4):
+                    self.root.update()
+                # Only this page's own labels: a page that has been shown once
+                # still reports itself mapped after the notebook moves on, and
+                # keeps whatever width it had when it was last laid out.
+                belongs = str(self.root.nametowidget(page)) + "."
                 for label in self.panel._wrapped:
-                    if not label.winfo_ismapped():
+                    if not str(label).startswith(belongs):
                         continue
                     self.assertLessEqual(
                         label.winfo_reqwidth(), label.winfo_width(),
@@ -202,6 +215,61 @@ class LiveWindowTest(unittest.TestCase):
             # And they are worth looking at: an LED thinner than this is a
             # line, not a preview.
             self.assertGreater(boxes[0][2] - boxes[0][0], 12, width)
+
+    def _bar(self, page):
+        holder = self.root.nametowidget(page)
+        return next(child for child in holder.winfo_children()
+                    if child.winfo_class() == "TScrollbar")
+
+    def test_a_page_too_long_for_the_window_can_be_scrolled_to_its_end(self):
+        # The settings pages are longer than a 1080p screen can hold at a
+        # large desktop font, so the foot of one has to be reachable.
+        self.root.geometry("1100x520")
+        page = self._pages()[1]                 # notifications, the longest
+        self.panel.notebook.select(page)
+        for _ in range(6):
+            self.root.update()
+        canvas = self.panel._scrollers[page]
+        self.assertLess(canvas.yview()[1], 1.0, "there is nothing to scroll")
+        self.assertTrue(self._bar(page).winfo_ismapped(),
+                        "a page that does not fit offers no scrollbar")
+        canvas.yview_moveto(1.0)
+        self.root.update()
+        self.assertAlmostEqual(canvas.yview()[1], 1.0, places=2)
+
+    def test_a_page_that_fits_keeps_its_scrollbar_out_of_the_way(self):
+        self.root.geometry("1100x1000")
+        page = self._pages()[2]                 # advanced, the shortest
+        self.panel.notebook.select(page)
+        for _ in range(6):
+            self.root.update()
+        self.assertFalse(self._bar(page).winfo_ismapped(),
+                         "a page with room to spare still shows a scrollbar")
+
+    def test_the_foot_of_the_window_keeps_its_place_on_a_short_screen(self):
+        # Pack hands out room in the order it was asked for it. With the pages
+        # asking first and taking the lot, a window too short for them had no
+        # Apply row and no log at all - both were packed later and there was
+        # nothing left to give them.
+        self.root.geometry("1100x520")
+        self.panel.notebook.select(self._pages()[1])
+        for _ in range(6):
+            self.root.update()
+        bottom = self.root.winfo_rooty() + self.root.winfo_height()
+        for _side, button in self.panel._apply_buttons:
+            self.assertTrue(button.winfo_ismapped(),
+                            "%s was squeezed out" % button.cget("text"))
+            self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
+                                 bottom, button.cget("text"))
+        self.assertTrue(self.panel.output_toggle.winfo_ismapped(),
+                        "the log went missing")
+
+    def test_the_window_never_opens_taller_than_the_screen(self):
+        self.panel._refit()
+        for _ in range(4):
+            self.root.update()
+        self.assertLessEqual(self.root.winfo_height(),
+                             self.root.winfo_screenheight())
 
     def test_the_log_folds_away_until_something_writes_to_it(self):
         self.assertFalse(self.panel._output_open)

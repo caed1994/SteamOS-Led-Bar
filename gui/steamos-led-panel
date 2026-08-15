@@ -258,6 +258,10 @@ MENU_WIDTH = 18
 SENSOR_WIDTH = 30
 DETAILS_GAP = 10            # under the checklist, and part of what it costs
 
+# What to leave for the titlebar and whatever panel the desktop has, when
+# deciding how tall the window may open.
+SCREEN_ALLOWANCE = 120
+
 # Everything else a control measures is worked out from the desktop's own font
 # - see material.control_sizes, and the note there on why a fixed size is
 # wrong. Sized for fingers and a trackpad rather than a mouse on a desk: this
@@ -801,6 +805,8 @@ class Panel:
         self._widgets = {}
         # key -> (labels, controls), so a setting can be greyed out whole
         self._rows = {}
+        # page -> the canvas that scrolls it, for the wheel to find
+        self._scrollers = {}
         # Explanations that should use the width the window actually has
         self._wrapped = []
         self._wrap_width = 0
@@ -817,32 +823,42 @@ class Panel:
         # the left side is what picks them, and the notebook is only the stack
         # of pages underneath.
         body = ttk.Frame(root)
-        body.pack(fill="both", expand=True,
-                  padx=SIDE_MARGIN // 2, pady=(GROUP_GAP, 0))
         self.rail = ttk.Frame(body)
         self.rail.pack(side="left", fill="y", padx=(SIDE_MARGIN, GROUP_GAP))
         notebook = self.notebook = ttk.Notebook(body)
         notebook.pack(side="left", fill="both", expand=True)
 
-        # Under the tabs, not inside them: one file, one Apply.
-        self._build_apply(root)
+        # The foot of the window is claimed before the pages are, and from the
+        # bottom up: pack hands out room in the order it was asked, so the
+        # pages taking all of it first left a short window with no Apply row
+        # and no log at all - they were packed later and there was nothing
+        # left. The pages scroll and these do not, so these go first.
+        #
+        # Under the pages, not inside them: one file, one Apply.
         self.output = self._build_output(root)
         self.runner = Runner(root, self._write)
+        self._build_apply(root)
+        body.pack(fill="both", expand=True,
+                  padx=SIDE_MARGIN // 2, pady=(GROUP_GAP, 0))
 
         # Which tabs the Apply row belongs under, by widget rather than by
         # position - reordering the tabs must not silently change this.
         self._settings_tabs = set()
         for title, table in SETTINGS_TABS:
-            tab = self._build_settings(notebook, table)
+            tab = self._page(notebook,
+                             lambda where, t=table: self._build_settings(where, t))
             notebook.add(tab, text=title)
             self._settings_tabs.add(str(tab))
-        self.preview_tab = self._build_preview(notebook)
+        self.preview_tab = self._page(notebook, self._build_preview)
         notebook.add(self.preview_tab, text="Preview")
-        notebook.add(self._build_tests(notebook), text="Test")
-        self.status_tab = self._build_status(notebook)
+        notebook.add(self._page(notebook, self._build_tests), text="Test")
+        self.status_tab = self._page(notebook, self._build_status)
         notebook.add(self.status_tab, text="Status & repair")
         self._build_rail()
         self._refresh_enabled()
+
+        for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            root.bind_all(wheel, self._wheel)
 
         notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
         self._tab_changed()
@@ -859,6 +875,71 @@ class Panel:
         # Open at the height the content needs, so the first thing anyone does
         # is not what resizes the window.
         self._fit_window()
+
+    def _page(self, notebook, build):
+        """One page of the notebook, scrolling if the window is too short.
+
+        A page is as long as its settings are; a window is only as tall as the
+        screen allows. Without this the foot of the longest page is simply out
+        of reach on a smaller screen - and a settings panel with a setting
+        nobody can get to is worse than an ugly one.
+
+        Nothing appears while it is not needed: the bar shows up when the
+        content outgrows the room and goes away again when it fits, so on a
+        screen with the height for it the panel looks exactly as it did.
+        """
+        holder = ttk.Frame(notebook)
+        canvas = tk.Canvas(holder, highlightthickness=0, borderwidth=0,
+                           background=self.roles["surface"])
+        bar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = ttk.Frame(canvas)
+        window = canvas.create_window(0, 0, window=inner, anchor="nw")
+        build(inner).pack(fill="both", expand=True)
+
+        def fit(_event=None):
+            wanted = inner.winfo_reqheight()
+            width, room = canvas.winfo_width(), canvas.winfo_height()
+            # At least the room it has, so a page with something set to expand
+            # - the preview's stage - still fills the window when it fits.
+            height = max(wanted, room)
+            canvas.itemconfigure(window, width=width, height=height)
+            canvas.configure(scrollregion=(0, 0, width, height))
+            # Asking for the content's height keeps the window opening at the
+            # size the page wants; the cap in _refit is what decides whether it
+            # gets it. Only when it changed, or setting it brings this handler
+            # straight back and the two chase each other.
+            if canvas.winfo_reqheight() != wanted:
+                canvas.configure(height=wanted)
+            if (wanted > room) != bool(bar.winfo_ismapped()):
+                if wanted > room:
+                    bar.pack(side="right", fill="y")
+                else:
+                    bar.pack_forget()
+                    canvas.yview_moveto(0)
+
+        inner.bind("<Configure>", fit)
+        canvas.bind("<Configure>", fit)
+        self._scrollers[str(holder)] = canvas
+        return holder
+
+    def _wheel(self, event):
+        """Turn the wheel into a scroll of whichever page is open.
+
+        Bound to everything rather than to the canvas: an event goes to the
+        widget under the pointer and then up its bindtags, not up its parents,
+        so a wheel over a label in the middle of the page would never reach the
+        canvas underneath it. It also takes the wheel away from the drop-downs,
+        which is a mercy - a readonly combobox changes the setting it holds
+        when the wheel turns over it, whether or not it was open.
+        """
+        canvas = self._scrollers.get(self.notebook.select())
+        if canvas is None or not canvas.winfo_ismapped():
+            return
+        down = getattr(event, "num", 0) == 5 or getattr(event, "delta", 0) < 0
+        canvas.yview_scroll(1 if down else -1, "units")
 
     def _build_rail(self):
         """Fill the rail, once the notebook knows what pages it has.
@@ -927,8 +1008,8 @@ class Panel:
         saying where it went.
         """
         holder = ttk.Frame(parent)
-        holder.pack(fill="x", padx=SIDE_MARGIN + SIDE_MARGIN // 2,
-                    pady=(0, ROW_GAP))
+        holder.pack(side="bottom", fill="x",
+                    padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, ROW_GAP))
         self.output_toggle = ttk.Button(holder, text="Output ▾",
                                         style="Text.TButton",
                                         command=self.toggle_output)
@@ -1013,16 +1094,18 @@ class Panel:
                     pady=(0 if index == 0 else GROUP_GAP, ROW_GAP))
                 row += 1
             # A block is a switch with stepped-in rows under it. The extra
-            # space goes both above the switch that opens one and above the
-            # row that follows the last of them, so a block is fenced on both
-            # sides - every control being the same height, the gap is the only
-            # thing that says where one ends and the next begins.
+            # space goes above the switch that opens one, above the first row
+            # under it, and above the row that follows the last of them - so a
+            # switch has the same gap either side of it, and what belongs to it
+            # is what is stepped in and packed close underneath.
             indents = [self._indent(entry[0]) for entry in entries]
             for position, entry in enumerate(entries):
+                here = indents[position]
+                before = indents[position - 1]
                 after = (indents[position + 1]
                          if position + 1 < len(indents) else 0)
-                fenced = indents[position] == 0 and (
-                    after > 0 or indents[position - 1] > 0)
+                fenced = (here == 0 and (after > 0 or before > 0)
+                          or here > 0 and before == 0)
                 self._build_row(grid, row, *entry,
                                 lead=BLOCK_GAP if position and fenced else 0)
                 row += 1
@@ -1195,20 +1278,33 @@ class Panel:
         is a whole window shifting under the pointer.
         """
         self.apply_row = ttk.Frame(parent)
-        self.apply_row.pack(fill="x", padx=SIDE_MARGIN + SIDE_MARGIN // 2,
+        self.apply_row.pack(side="bottom", fill="x",
+                            padx=SIDE_MARGIN + SIDE_MARGIN // 2,
                             pady=(GROUP_GAP, GROUP_GAP))
+        # Two pairs, and the width between them says which is which: what to do
+        # with the settings in this window on the left, what to do with a file
+        # of settings on the right. Packed to the two edges rather than
+        # huddled at one - the row is the width of the window and was using a
+        # third of it.
+        #
+        # Profiles sit here rather than on a page of their own: this is already
+        # the row for "what to do with these settings", and a profile is those
+        # settings by another name.
         self._apply_buttons = [
-            ttk.Button(self.apply_row, text="Apply and restart service",
-                       style="Filled.TButton", command=self.apply_settings),
-            ttk.Button(self.apply_row, text="Reload from file",
-                       command=self.reload_settings),
-            # Profiles sit here rather than on a tab of their own: this is
-            # already the row for "what to do with these settings", and a
-            # profile is those settings by another name.
-            ttk.Button(self.apply_row, text="Save profile...",
-                       command=self.save_profile),
-            ttk.Button(self.apply_row, text="Load profile...",
-                       command=self.load_profile),
+            ("left", ttk.Button(self.apply_row,
+                                text="Apply and restart service",
+                                style="Filled.TButton",
+                                command=self.apply_settings)),
+            ("left", ttk.Button(self.apply_row, text="Reload from file",
+                                command=self.reload_settings)),
+            # Right-hand ones in reverse: pack puts each new one to the left of
+            # the last, so this is what reads Save, Load across the page.
+            ("right", ttk.Button(self.apply_row, text="Load profile...",
+                                 style="Outlined.TButton",
+                                 command=self.load_profile)),
+            ("right", ttk.Button(self.apply_row, text="Save profile...",
+                                 style="Outlined.TButton",
+                                 command=self.save_profile)),
         ]
         self._show_apply(True)
 
@@ -1216,8 +1312,9 @@ class Panel:
         self._apply_shown = show
         if show:
             self.apply_row.pack_propagate(True)
-            for index, button in enumerate(self._apply_buttons):
-                button.pack(side="left", padx=(6, 0) if index else 0)
+            for side, button in self._apply_buttons:
+                button.pack(side=side, padx=(0, ROW_GAP) if side == "left"
+                            else (ROW_GAP, 0))
             return
         # Hold the height the buttons had, then take them out: with the row
         # free to shrink, the rest of the window slides up to meet it.
@@ -1225,7 +1322,7 @@ class Panel:
         if height > 1:
             self.apply_row.configure(height=height)
             self.apply_row.pack_propagate(False)
-        for button in self._apply_buttons:
+        for _side, button in self._apply_buttons:
             button.pack_forget()
 
     def _tab_changed(self, _event=None):
@@ -1866,7 +1963,12 @@ class Panel:
             width = self.root.winfo_width()
             if width <= 1:                      # not on screen yet
                 width = self.root.winfo_reqwidth()
-            self.root.geometry("%dx%d" % (width, self.root.winfo_reqheight()))
+            # Never taller than the screen. A window that opens past the bottom
+            # edge cannot be resized back on some window managers, and the page
+            # inside it scrolls now, so there is nothing to lose by capping.
+            room = self.root.winfo_screenheight() - SCREEN_ALLOWANCE
+            height = min(self.root.winfo_reqheight(), room)
+            self.root.geometry("%dx%d" % (width, height))
         except tk.TclError:                                 # pragma: no cover
             pass
 
