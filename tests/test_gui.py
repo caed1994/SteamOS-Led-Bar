@@ -873,26 +873,17 @@ ForegroundNormal=252,252,252
     def test_an_alpha_channel_is_tolerated(self):
         self.assertEqual(kdetheme.parse_color("1,2,3,255"), "#010203")
 
-    def test_derived_shades_follow_the_scheme(self):
-        # Borders and hover states have no entry in the scheme - Qt draws them
-        # itself - so they are mixed, which has to work in the dark too.
+    def test_the_seed_and_the_brightness_are_what_the_panel_takes(self):
+        # Everything the window is painted with now comes from these three,
+        # material.py deriving the rest - so it is these that have to survive
+        # a scheme the file only half describes.
         for palette in (kdetheme.BREEZE_LIGHT,
                         kdetheme.read(self._write(self.BREEZE_DARK))):
-            shades = kdetheme.derived(palette)
-            for key in ("border", "hover", "muted", "raised"):
-                self.assertRegex(shades[key], r"^#[0-9a-f]{6}$", key)
-            # A border has to be visible against its own background.
-            self.assertNotEqual(shades["border"], palette["window"])
-
-    def test_dark_and_light_borders_go_opposite_ways(self):
-        dark = kdetheme.read(self._write(self.BREEZE_DARK))
-        light = kdetheme.BREEZE_LIGHT
-        self.assertGreater(kdetheme.luminance(kdetheme.derived(dark)["border"]),
-                           kdetheme.luminance(dark["window"]),
-                           "a dark scheme needs a lighter border")
-        self.assertLess(kdetheme.luminance(kdetheme.derived(light)["border"]),
-                        kdetheme.luminance(light["window"]),
-                        "a light scheme needs a darker one")
+            for key in ("selection", "negative", "positive"):
+                self.assertRegex(palette[key], r"^#[0-9a-f]{6}$", key)
+        self.assertTrue(kdetheme.is_dark(
+            kdetheme.read(self._write(self.BREEZE_DARK))))
+        self.assertFalse(kdetheme.is_dark(kdetheme.BREEZE_LIGHT))
 
     def test_a_broken_font_line_does_not_break_the_palette(self):
         palette = kdetheme.read(self._write("[General]\nfont=\n"))
@@ -1150,15 +1141,28 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
         self.assertLess(lowest[0], 12, "the corner of the tick is on the left")
         self.assertGreater(highest[0], lowest[0], "and it rises to the right")
 
-    def test_the_checkbox_is_big_enough_to_hit(self):
+    def test_the_switch_is_big_enough_to_hit(self):
         # clam's own indicator is a handful of pixels; that was the complaint.
         path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
         with open(path) as handle:
             tree = ast.parse(handle.read())
-        size = next(node.value.value for node in tree.body
-                    if isinstance(node, ast.Assign)
-                    and getattr(node.targets[0], "id", "") == "CHECKBOX_SIZE")
-        self.assertGreaterEqual(size, 16)
+        sizes = {node.targets[0].id: node.value.value for node in tree.body
+                 if isinstance(node, ast.Assign)
+                 and isinstance(node.value, ast.Constant)}
+        self.assertGreaterEqual(sizes["SWITCH_HEIGHT"], 16)
+        self.assertGreater(sizes["SWITCH_WIDTH"], sizes["SWITCH_HEIGHT"])
+
+    def test_the_switch_thumb_grows_when_it_goes_on(self):
+        # The state has to be readable without relying on colour alone.
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(path) as handle:
+            tree = ast.parse(handle.read())
+        sizes = {node.targets[0].id: node.value.value for node in tree.body
+                 if isinstance(node, ast.Assign)
+                 and isinstance(node.value, ast.Constant)}
+        self.assertGreater(sizes["SWITCH_THUMB_ON"], sizes["SWITCH_THUMB_OFF"])
+        # And it still has to fit inside the track it slides along.
+        self.assertLess(sizes["SWITCH_THUMB_ON"] * 2, sizes["SWITCH_HEIGHT"])
 
     def test_segment_coverage_is_thickest_on_the_line(self):
         on_line = roundrect.segment_coverage(5, 5, (0, 5), (10, 5), 3)
@@ -1242,8 +1246,12 @@ class TouchTargetTest(unittest.TestCase):
                       and isinstance(node.value, ast.Constant)
                       and getattr(node.targets[0], "id", "").isupper()}
 
-    def test_the_checkbox_is_hittable(self):
-        self.assertGreaterEqual(self.sizes["CHECKBOX_SIZE"], self.MINIMUM)
+    def test_the_switch_is_hittable(self):
+        self.assertGreaterEqual(self.sizes["SWITCH_HEIGHT"], self.MINIMUM)
+        self.assertGreaterEqual(self.sizes["SWITCH_WIDTH"], self.MINIMUM)
+
+    def test_the_radio_button_is_hittable(self):
+        self.assertGreaterEqual(self.sizes["RADIO_SIZE"], self.MINIMUM)
 
     def test_the_slider_knob_is_hittable(self):
         self.assertGreaterEqual(self.sizes["KNOB_DIAMETER"], self.MINIMUM)

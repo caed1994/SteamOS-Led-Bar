@@ -5,7 +5,13 @@
 
 tkinter has no idea a desktop theme exists, which is why an unstyled panel
 looks like a visitor from another decade. Plasma writes its active scheme into
-~/.config/kdeglobals as plain INI, so it can simply be read and handed to ttk.
+~/.config/kdeglobals as plain INI, so it can simply be read.
+
+What the panel takes from here is small: the accent colour, whether the scheme
+is light or dark, the two status colours, and the font. material.py grows the
+rest of the window out of those - see the note there on why a Material palette
+is worked out from one seed rather than picked colour by colour.
+
 No tkinter in here: parsing a file is worth testing, painting widgets is not.
 """
 
@@ -87,16 +93,6 @@ def is_dark(palette):
     return luminance(palette["window"]) < 0.5
 
 
-def mix(first, second, weight=0.5):
-    """Blend two "#rrggbb" colours; weight is how much of `second`."""
-    channels = []
-    for index in (1, 3, 5):
-        left = int(first[index:index + 2], 16)
-        right = int(second[index:index + 2], 16)
-        channels.append(int(round(left * (1 - weight) + right * weight)))
-    return "#%02x%02x%02x" % tuple(channels)
-
-
 def read(path=None):
     """The desktop's palette, falling back to Breeze where anything is missing.
 
@@ -123,20 +119,3 @@ def read(path=None):
     if parser.has_option("General", "font"):
         palette["font"] = parse_font(parser.get("General", "font"))
     return palette
-
-
-def derived(palette):
-    """The few shades a widget set needs that Plasma does not name.
-
-    Qt draws borders and hover states itself, so the scheme has no entry for
-    them. Mixing from the named colours keeps them right in a dark scheme too.
-    """
-    text = palette["window_text"]
-    window = palette["window"]
-    return {
-        "border": mix(window, text, 0.25),
-        "hover": mix(window, palette["selection"], 0.18),
-        "muted": mix(window, text, 0.55),
-        "raised": mix(window, "#ffffff" if not is_dark(palette) else "#000000",
-                      0.35),
-    }

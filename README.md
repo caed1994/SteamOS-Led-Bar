@@ -521,8 +521,12 @@ work.** You can add the panel as a non-Steam game and the Test tab works there,
 but Game Mode runs no polkit agent and has no terminal to fall back on, so
 anything needing a password has to happen in Desktop Mode.
 
-It follows your Plasma colour scheme, read from `~/.config/kdeglobals`, and
-falls back to Breeze light without KDE. Its icon is a file you can replace: drop
+The window is drawn to Material Design 3, seeded from your own Plasma accent
+colour and read from `~/.config/kdeglobals`, falling back to Breeze light
+without KDE. That one colour decides the rest: the tonal ladders it implies
+give every surface, label and outline its shade, so a dark scheme, a warm
+accent or a cold one all come out consistent without a second theme to pick.
+Its icon is a file you can replace: drop
 a PNG in as `gui/steamos-led-panel.png` (512x512 is a good size) and run
 `sudo ./install.sh --yes`. If the menu still shows the old one, log out and back
 in or run `kbuildsycoca6 --noincremental`.

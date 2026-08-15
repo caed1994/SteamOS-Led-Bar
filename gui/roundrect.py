@@ -170,22 +170,74 @@ def segment_coverage(x, y, start, end, thickness):
     return max(0.0, min(1.0, thickness / 2.0 + 0.5 - near))
 
 
-def draw_check(picture, color, thickness=2.2):
-    """Put a tick in the middle of an existing picture.
+def draw_check(picture, color, thickness=2.2, box=None):
+    """Put a tick into an existing picture, filling it or a part of it.
 
     Drawn rather than taken from a font: at this size the wrong fallback font
     is unreadable, and which one that is depends on the machine.
+
+    `box` is (left, top, width, height) for a tick that belongs to something
+    smaller than the whole picture - the thumb of a switch, which is a circle
+    somewhere along a track and not the track itself.
     """
-    height, width = len(picture), len(picture[0])
-    points = ((0.26 * width, 0.53 * height),
-              (0.44 * width, 0.71 * height),
-              (0.76 * width, 0.31 * height))
-    for y in range(height):
-        for x in range(width):
+    if box is None:
+        box = (0, 0, len(picture[0]), len(picture))
+    left, top, width, height = box
+    points = ((left + 0.26 * width, top + 0.53 * height),
+              (left + 0.44 * width, top + 0.71 * height),
+              (left + 0.76 * width, top + 0.31 * height))
+    for y in range(max(0, int(top)), min(len(picture), int(top + height) + 1)):
+        for x in range(max(0, int(left)),
+                       min(len(picture[0]), int(left + width) + 1)):
             ink = max(segment_coverage(x, y, points[0], points[1], thickness),
                       segment_coverage(x, y, points[1], points[2], thickness))
             if ink > 0:
                 picture[y][x] = blend(picture[y][x], color, ink)
+    return picture
+
+
+def disc_coverage(x, y, centre_x, centre_y, radius):
+    """How much of this pixel a filled circle covers, 0..1."""
+    return max(0.0, min(1.0, radius + 0.5
+                        - math.hypot(x - centre_x, y - centre_y)))
+
+
+def draw_disc(picture, centre_x, centre_y, radius, colour):
+    """Put a filled circle into an existing picture.
+
+    Onto the picture rather than beside it: a switch's thumb sits on its track
+    and a radio's dot inside its ring, and with no alpha the only way to get a
+    clean edge is to blend against what is really underneath.
+    """
+    height, width = len(picture), len(picture[0])
+    for y in range(max(0, int(centre_y - radius - 1)),
+                   min(height, int(centre_y + radius + 2))):
+        for x in range(max(0, int(centre_x - radius - 1)),
+                       min(width, int(centre_x + radius + 2))):
+            ink = disc_coverage(x, y, centre_x, centre_y, radius)
+            if ink > 0:
+                picture[y][x] = blend(picture[y][x], colour, ink)
+    return picture
+
+
+def draw_ring(picture, centre_x, centre_y, radius, thickness, colour):
+    """An unfilled circle: a disc with a smaller one taken back out.
+
+    The hole is cut by remembering what was there and putting it back, so a
+    ring can be drawn over anything - which is what a radio button on a card
+    needs, the middle of it being the card and not a colour anyone knows here.
+    """
+    keep = [row[:] for row in picture]
+    draw_disc(picture, centre_x, centre_y, radius, colour)
+    height, width = len(picture), len(picture[0])
+    inner = max(0.0, radius - thickness)
+    for y in range(max(0, int(centre_y - inner - 1)),
+                   min(height, int(centre_y + inner + 2))):
+        for x in range(max(0, int(centre_x - inner - 1)),
+                       min(width, int(centre_x + inner + 2))):
+            ink = disc_coverage(x, y, centre_x, centre_y, inner)
+            if ink > 0:
+                picture[y][x] = blend(picture[y][x], keep[y][x], ink)
     return picture
 
 

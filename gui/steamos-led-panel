@@ -39,6 +39,7 @@ except ImportError:                                         # pragma: no cover
         "(and remember a SteamOS update will remove it again).")
 
 import kdetheme                                             # noqa: E402
+import material                                             # noqa: E402
 import roundrect                                            # noqa: E402
 import ledpanel                                             # noqa: E402
 import preview as preview_module                            # noqa: E402
@@ -175,9 +176,9 @@ ADVANCED = [
 # Status & repair come after them and are things you do rather than set,
 # which is why the Apply row does not appear under those two.
 SETTINGS_TABS = (
-    ("  Strip  ", STRIP),
-    ("  Notifications  ", NOTIFICATIONS),
-    ("  Advanced  ", ADVANCED),
+    ("Strip", STRIP),
+    ("Notifications", NOTIFICATIONS),
+    ("Advanced", ADVANCED),
 )
 
 # Settings that only mean something while another switch is on. They are
@@ -216,17 +217,59 @@ WM_CLASS = "steamos-led-panel"
 # element does not count - so they are parked here for the window's life.
 _IMAGES = []
 
-TAB_RADIUS = 9
-BOX_RADIUS = 10
-BUTTON_RADIUS = 9
+# -- how the window is dressed ---------------------------------------------
+#
+# Material Design 3, grown from the desktop's own accent colour. material.py
+# turns that one colour into tonal ladders and named roles; this is the half
+# that needs tkinter - roles into ttk styles, and the shapes ttk cannot draw.
+#
+# Two Material ideas do most of the visible work. A raised surface is a
+# lighter *tone* rather than a border or a shadow, so a window can hold a
+# dozen grouped controls without a dozen boxes drawn round them. And hover,
+# press and disabled are one mechanism - a wash of the content colour over the
+# container - instead of a shade picked per widget, so everything lights up by
+# the same amount.
+
+# Material's shape scale, at the sizes this window uses it. A radius is a
+# statement about size: a pill for a button, a soft corner for a panel, barely
+# a corner for a field you type in.
+BUTTON_HEIGHT = 36
+CARD_RADIUS = material.SHAPE_MEDIUM
+FIELD_RADIUS = material.SHAPE_EXTRA_SMALL
+
+# Primary tabs: a label, and a bar under the one you are on. No box, no chip -
+# the tab row sits on the same surface as the page under it.
+TAB_INDICATOR = 3
+TAB_HEIGHT = 42
+
 # Sized for fingers and a trackpad, not a mouse on a desk: this runs on a
 # machine people also use handheld. Everything here is comfortably above the
 # ~20 px that desktop guidelines call the smallest sensible target.
-CHECKBOX_SIZE = 24          # clam's own indicator is barely a quarter of this
+SWITCH_WIDTH = 46           # a switch, not a tick: these are all on/off
+SWITCH_HEIGHT = 28          # settings, and a tick only says "chosen"
+SWITCH_THUMB_ON = 10        # radii. The thumb grows when it goes on, so the
+SWITCH_THUMB_OFF = 7        # state can be read from the shape as well
+RADIO_SIZE = 24
+RADIO_GAP = 8               # drawn beside the ring, where the label goes
 TRACK_THICKNESS = 12        # the groove a slider runs in
 KNOB_DIAMETER = 24          # thick enough to grab, round enough to read as a pill
 ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
 DETAILS_GAP = 10            # under the checklist, and part of what it costs
+
+# The 4dp grid Material spaces everything on, in the four amounts this window
+# needs. The gap between groups is what replaces the boxes that used to be
+# drawn round them, so it is deliberately larger than any gap inside one.
+SIDE_MARGIN = 4 * material.SPACE
+GROUP_GAP = 6 * material.SPACE
+ROW_GAP = 2 * material.SPACE
+INDENT_STEP = 5 * material.SPACE
+
+# The type scale, as offsets from whatever size the desktop is set to. Material
+# has fifteen sizes; a window this size needs four, and the weights matter more
+# than the sizes do.
+TYPE_HEADLINE = 6
+TYPE_SECTION = 0
+TYPE_SUPPORT = -1
 
 
 def _decimals(step):
@@ -242,185 +285,281 @@ def _photo(picture):
     return photo
 
 
-def _rounded(width, height, radius, fill, background, border=None):
-    return _photo(roundrect.rows(width, height, radius, fill, background,
-                                 border=border,
-                                 border_width=1 if border else 0))
+def _slice(radius, fill, background, border=None, width=1):
+    """A rounded rectangle sized to be stretched by nine-slice scaling.
 
-
-def round_the_corners(style, palette, shade):
-    """Replace the square widget parts with rounded pictures - see roundrect.
-
-    Best effort: an older Tk that will not take image elements keeps the flat
-    look rather than leaving an unpainted window.
+    Only the corners of these are ever seen: ttk keeps a square of `radius` at
+    each one and stretches what is between them, so one picture serves a button
+    of any width.
     """
-    window, view = palette["window"], palette["view"]
-    accent = palette["selection"]
+    return _photo(roundrect.rows(radius * 2 + 4, radius * 2 + 4, radius, fill,
+                                 background, border=border,
+                                 border_width=width if border else 0))
 
-    def faded(colour):
-        """Halfway to the background: what "you cannot use this" looks like.
 
-        Every drawn part needs its own picture for it. A widget that is
-        disabled but still drawn in full colour is worse than one that was
-        never greyed out at all - it looks usable and does nothing.
-        """
-        return kdetheme.mix(colour, window, 0.55)
+def dress(style, roles):
+    """Replace the parts ttk draws square and flat with Material ones.
 
-    def tab(fill, background):
-        # Square at the bottom, no border along it - see roundrect's
-        # open_bottom for why.
-        return _photo(roundrect.rows(
-            TAB_RADIUS * 2 + 4, 34, (TAB_RADIUS, TAB_RADIUS, 0, 0),
-            fill, background, border=shade["border"], border_width=1,
-            open_bottom=True))
+    Best effort throughout: an older Tk that will not take image elements keeps
+    the plain look rather than leaving an unpainted window, and each group
+    stands on its own so one refusal does not take the rest with it.
+    """
+    surface = roles["surface"]
 
-    def box(fill, background, radius=BOX_RADIUS):
-        return _rounded(radius * 2 + 4, radius * 2 + 4, radius, fill,
-                        background, border=shade["border"])
+    def wash(container, content, amount):
+        """A state layer: the content colour laid over its container."""
+        return material.blend(roles[container], roles[content], amount)
 
-    # Each group stands on its own: an older Tk that refuses one element
-    # should leave that part flat, not everything after it as well.
     def attempt(what, build):
         try:
             build()
         except tk.TclError as exc:                          # pragma: no cover
-            print("could not round %s: %s" % (what, exc), file=sys.stderr)
+            print("could not draw %s: %s" % (what, exc), file=sys.stderr)
 
     def tabs():
-        # --- tabs: rounded on top, square where they meet the page ---------
+        def picture(indicator, ground):
+            width = TAB_INDICATOR * 2 + 4
+            rows = [[ground] * width for _ in range(TAB_HEIGHT)]
+            if indicator:
+                # Round on top, square where it meets the page - the bar marks
+                # the tab, it is not a shape in its own right.
+                bar = roundrect.rows(
+                    width, TAB_INDICATOR,
+                    (TAB_INDICATOR, TAB_INDICATOR, 0, 0), indicator, ground,
+                    border_width=0)
+                rows[TAB_HEIGHT - TAB_INDICATOR:] = bar
+            return _photo(rows)
+
+        hovered = wash("surface", "on_surface", material.STATE_HOVER)
         style.element_create(
-            "Rounded.Tab", "image", tab(shade["raised"], window),
-            ("selected", tab(window, window)),
-            ("active", tab(shade["hover"], window)),
-            border=(TAB_RADIUS, TAB_RADIUS, TAB_RADIUS, 0),
-            sticky="nsew", padding=(18, 8))
+            "Material.Tab", "image", picture(None, surface),
+            # Selected and hovered first, or a tab you are pointing at loses
+            # its bar while the pointer is over it.
+            ("selected", "active", picture(roles["primary"], hovered)),
+            ("selected", picture(roles["primary"], surface)),
+            ("active", picture(None, hovered)),
+            border=(TAB_INDICATOR, 0, TAB_INDICATOR, 0), sticky="nsew",
+            padding=(20, 10, 20, 10 + TAB_INDICATOR))
         style.layout("TNotebook.Tab", [
-            ("Rounded.Tab", {"sticky": "nsew", "children": [
+            ("Material.Tab", {"sticky": "nsew", "children": [
                 ("Notebook.label", {"side": "top", "sticky": ""})]})])
 
-    def page():
-        style.element_create("Rounded.Client", "image", box(window, window),
-                             border=BOX_RADIUS, sticky="nsew")
-        style.layout("TNotebook", [
-            ("Rounded.Client", {"sticky": "nsew"})])
-
-    def boxes():
-        style.element_create("Rounded.Box", "image", box(window, window),
-                             border=BOX_RADIUS, sticky="nsew")
-        style.layout("TLabelframe", [("Rounded.Box", {"sticky": "nsew"})])
+    def panels():
+        # The one raised surface in the window: a tone up from the page, no
+        # line round it. Used where the content is not a ttk widget and so
+        # cannot take a background of its own - the log and the preview stage.
+        style.element_create(
+            "Material.Panel", "image",
+            _slice(CARD_RADIUS, roles["surface_container_low"], surface),
+            border=CARD_RADIUS, sticky="nsew")
+        style.layout("Card.TFrame", [("Material.Panel", {"sticky": "nsew"})])
 
     def buttons():
-        def button_element(name, fill, hover, pressed):
-            def picture(colour):
-                return _rounded(BUTTON_RADIUS * 2 + 4, 32, BUTTON_RADIUS,
-                                colour, window, border=shade["border"])
+        def variant(name, fill, over, outline=None, sides=20):
+            def picture(colour, edge=outline):
+                return _slice(BUTTON_HEIGHT // 2, colour, roles[over],
+                              border=edge)
+
             style.element_create(
                 name, "image", picture(fill),
                 # Disabled first: it has to win over hover, or a button you
                 # cannot press lights up under the pointer as if you could.
-                ("disabled", picture(faded(fill))),
-                ("pressed", picture(pressed)),
-                ("active", picture(hover)),
-                border=BUTTON_RADIUS, sticky="nsew", padding=(14, 7))
+                ("disabled", picture(material.disabled_container(roles),
+                                     None)),
+                ("pressed", picture(material.blend(fill, roles["on_surface"],
+                                                   material.STATE_PRESSED))),
+                ("active", picture(material.blend(fill, roles["on_surface"],
+                                                  material.STATE_HOVER))),
+                # The padding lives on the element, not on the style: an
+                # image element's own padding wins, so configuring it later
+                # changes nothing at all.
+                border=BUTTON_HEIGHT // 2, sticky="nsew", padding=(sides, 8))
 
-        button_element("Rounded.Button", palette["button"], shade["hover"],
-                       accent)
+        # Material's four weights of button, which is how a row of them says
+        # which one you probably want: filled for the action the page is for,
+        # tonal for the ones beside it, outlined and text for the rest.
+        variant("Filled.Button", roles["primary"], "surface")
+        variant("Tonal.Button", roles["secondary_container"], "surface")
+        variant("Outlined.Button", surface, "surface", outline=roles["outline"])
+        # A text button stands among text and lines up with it; the padding a
+        # filled button needs would hang it off to the right of everything.
+        variant("Text.Button", surface, "surface", sides=2)
+        for name in ("Filled", "Tonal", "Outlined", "Text"):
+            style.layout("%s.TButton" % name, [
+                ("%s.Button" % name, {"sticky": "nsew", "children": [
+                    ("Button.label", {"side": "top", "sticky": ""})]})])
         style.layout("TButton", [
-            ("Rounded.Button", {"sticky": "nsew", "children": [
+            ("Tonal.Button", {"sticky": "nsew", "children": [
                 ("Button.label", {"side": "top", "sticky": ""})]})])
 
-        button_element("Accent.Button", accent,
-                       kdetheme.mix(accent, "#ffffff", 0.18),
-                       kdetheme.mix(accent, "#000000", 0.15))
-        style.layout("Accent.TButton", [
-            ("Accent.Button", {"sticky": "nsew", "children": [
-                ("Button.label", {"side": "top", "sticky": ""})]})])
-
-    def checkboxes():
-        # clam's indicator is a few pixels of hairline - too small to hit and
-        # too small to read. A drawn one can be any size.
-        size = CHECKBOX_SIZE
-
-        def indicator(fill, edge, tick=None):
-            picture = roundrect.rows(size, size, 5, fill, window,
-                                     border=edge, border_width=1)
+    def switches():
+        def picture(track, edge, thumb, radius, on, tick=None):
+            rows = roundrect.rows(SWITCH_WIDTH, SWITCH_HEIGHT,
+                                  SWITCH_HEIGHT / 2.0, track, surface,
+                                  border=edge, border_width=2 if edge else 0)
+            middle = SWITCH_HEIGHT / 2.0
+            across = (SWITCH_WIDTH - middle) if on else middle
+            roundrect.draw_disc(rows, across, middle - 0.5, radius, thumb)
             if tick:
-                roundrect.draw_check(picture, tick)
-            return _photo(picture)
+                roundrect.draw_check(
+                    rows, tick, thickness=1.8,
+                    box=(across - radius, middle - 0.5 - radius,
+                         radius * 2, radius * 2))
+            return _photo(rows)
+
+        def off(track, edge, thumb):
+            return picture(track, edge, thumb, SWITCH_THUMB_OFF, False)
+
+        def on(track, thumb, tick):
+            return picture(track, None, thumb, SWITCH_THUMB_ON, True, tick)
 
         style.element_create(
-            "Rounded.Indicator", "image",
-            indicator(view, shade["border"]),
+            "Material.Switch", "image",
+            off(roles["surface_container_highest"], roles["outline"],
+                roles["outline"]),
             # A greyed-out switch still has to say whether it is on: the
             # setting it governs is off, which is not the same as this one
             # being off.
             ("disabled", "selected",
-             indicator(faded(accent), faded(accent),
-                       faded(palette["selection_text"]))),
-            ("disabled", indicator(faded(view), faded(shade["border"]))),
-            ("selected", indicator(accent, accent,
-                                   palette["selection_text"])),
-            ("active", indicator(shade["hover"], accent)),
+             on(material.disabled(roles, roles["primary"]),
+                material.disabled(roles, roles["on_primary"]),
+                material.disabled(roles, roles["primary"]))),
+            ("disabled",
+             off(material.disabled_container(roles),
+                 material.disabled(roles, roles["outline"]),
+                 material.disabled(roles, roles["outline"]))),
+            ("selected", "active",
+             on(material.blend(roles["primary"], roles["on_primary"],
+                               material.STATE_HOVER),
+                roles["on_primary"], roles["primary"])),
+            ("selected", on(roles["primary"], roles["on_primary"],
+                            roles["primary"])),
+            ("active", off(wash("surface_container_highest", "on_surface",
+                                material.STATE_HOVER),
+                           roles["outline"], roles["on_surface_variant"])),
             sticky="", padding=2)
         style.layout("TCheckbutton", [
             ("Checkbutton.padding", {"sticky": "nsew", "children": [
-                ("Rounded.Indicator", {"side": "left", "sticky": ""}),
+                ("Material.Switch", {"side": "left", "sticky": ""}),
                 ("Checkbutton.label", {"side": "left", "sticky": "w"})]})])
+
+    def radios():
+        def picture(ring, dot=None, ground=None):
+            # Wider than it is tall: the label beside it is a separate element
+            # and ttk puts them flush, so the gap has to be part of the
+            # picture or the text sits against the ring.
+            ground = ground or surface
+            rows = [[ground] * (RADIO_SIZE + RADIO_GAP)
+                    for _ in range(RADIO_SIZE)]
+            middle = (RADIO_SIZE - 1) / 2.0
+            roundrect.draw_ring(rows, middle, middle, RADIO_SIZE / 2.0 - 1.0,
+                                2.0, ring)
+            if dot:
+                roundrect.draw_disc(rows, middle, middle, RADIO_SIZE / 4.0,
+                                    dot)
+            return _photo(rows)
+
+        style.element_create(
+            "Material.Radio", "image", picture(roles["on_surface_variant"]),
+            ("disabled", "selected",
+             picture(material.disabled(roles, roles["primary"]),
+                     material.disabled(roles, roles["primary"]))),
+            ("disabled", picture(material.disabled(roles,
+                                                   roles["on_surface"]))),
+            ("selected", picture(roles["primary"], roles["primary"])),
+            ("active", picture(roles["on_surface"], None,
+                               wash("surface", "on_surface",
+                                    material.STATE_HOVER))),
+            sticky="", padding=2)
+        style.layout("TRadiobutton", [
+            ("Radiobutton.padding", {"sticky": "nsew", "children": [
+                ("Material.Radio", {"side": "left", "sticky": ""}),
+                ("Radiobutton.label", {"side": "left", "sticky": "w"})]})])
 
     def sliders():
         # A pill-shaped groove and a round knob.
         radius = TRACK_THICKNESS / 2.0
 
-        # Drawn inside an image as tall as the knob: ttk sizes the widget
-        # from the trough, so a groove-sized one would crop the larger knob.
-        groove = roundrect.pill(TRACK_THICKNESS * 3, TRACK_THICKNESS, view,
-                                window, border=shade["border"], border_width=1)
+        # Drawn inside an image as tall as the knob: ttk sizes the widget from
+        # the trough, so a groove-sized one would crop the larger knob.
+        groove = roundrect.pill(TRACK_THICKNESS * 3, TRACK_THICKNESS,
+                                roles["surface_container_highest"], surface,
+                                border_width=0)
         padding = (KNOB_DIAMETER - TRACK_THICKNESS) // 2
-        picture = [[window] * (TRACK_THICKNESS * 3)
-                   for _ in range(KNOB_DIAMETER)]
-        for offset, line in enumerate(groove):
-            picture[padding + offset] = line
-        track = _photo(picture)
-        knob = _photo(roundrect.pill(KNOB_DIAMETER, KNOB_DIAMETER, accent,
-                                     window, border=shade["border"],
-                                     border_width=1))
-        knob_hot = _photo(roundrect.pill(
-            KNOB_DIAMETER, KNOB_DIAMETER,
-            kdetheme.mix(accent, "#ffffff", 0.22), window,
-            border=shade["border"], border_width=1))
+        rows = [[surface] * (TRACK_THICKNESS * 3)
+                for _ in range(KNOB_DIAMETER)]
+        rows[padding:padding + TRACK_THICKNESS] = groove
 
-        style.element_create("Pill.trough", "image", track,
+        def knob(colour):
+            return _photo(roundrect.pill(KNOB_DIAMETER, KNOB_DIAMETER, colour,
+                                         surface, border_width=0))
+
+        # The two names end in "trough" and "slider" because ttk::scale finds
+        # them by that suffix: it is what tells the widget which element to
+        # move as the value changes. Named anything else the scale still draws,
+        # and the knob sits at the left whatever the setting is - which is a
+        # slider that lies about every value on the tab.
+        style.element_create("Material.trough", "image", _photo(rows),
                              border=(int(radius), 0, int(radius), 0),
                              sticky="ew", padding=0)
-        knob_off = _photo(roundrect.pill(
-            KNOB_DIAMETER, KNOB_DIAMETER, faded(accent), window,
-            border=shade["border"], border_width=1))
-        style.element_create("Pill.slider", "image", knob,
-                             ("disabled", knob_off),
-                             ("active", knob_hot), sticky="")
+        style.element_create(
+            "Material.slider", "image", knob(roles["primary"]),
+            ("disabled", knob(material.disabled(roles, roles["primary"]))),
+            ("active", knob(material.blend(roles["primary"],
+                                           roles["on_surface"],
+                                           material.STATE_HOVER))),
+            sticky="")
         style.layout("Horizontal.TScale", [
-            ("Pill.trough", {"sticky": "ew", "children": [
-                ("Pill.slider", {"side": "left", "sticky": ""})]})])
+            ("Material.trough", {"sticky": "ew", "children": [
+                ("Material.slider", {"side": "left", "sticky": ""})]})])
+
+    def fields():
+        # Material's outlined field: a thin edge that thickens and takes the
+        # accent when the field has the focus.
+        def picture(edge, width=1, fill=None):
+            return _slice(FIELD_RADIUS, fill or surface, surface, border=edge,
+                          width=width)
+
+        style.element_create(
+            "Material.Field", "image", picture(roles["outline"]),
+            ("disabled", picture(material.disabled(roles, roles["outline"]),
+                                 fill=material.disabled_container(roles))),
+            ("focus", picture(roles["primary"], width=2)),
+            ("hover", picture(roles["on_surface"])),
+            border=FIELD_RADIUS, sticky="nsew")
+        style.layout("TCombobox", [
+            ("Material.Field", {"sticky": "nsew", "children": [
+                ("Combobox.downarrow", {"side": "right", "sticky": "ns"}),
+                ("Combobox.padding", {"expand": 1, "sticky": "nsew",
+                                      "children": [
+                                          ("Combobox.textarea",
+                                           {"sticky": "nsew"})]})]})])
 
     attempt("the tabs", tabs)
-    attempt("the checkboxes", checkboxes)
-    attempt("the page", page)
-    attempt("the boxes", boxes)
+    attempt("the panels", panels)
     attempt("the buttons", buttons)
+    attempt("the switches", switches)
+    attempt("the radio buttons", radios)
     attempt("the sliders", sliders)
+    attempt("the fields", fields)
 
 
 def apply_theme(root):
-    """Dress the window in whatever colours Plasma is using.
+    """Dress the window in Material 3, seeded from the desktop's accent.
 
     ttk ships no theme resembling a modern desktop and cannot ask one either,
-    so the scheme is read from KDE's config and painted on. clam is the base:
-    the only built-in theme that honours colour options rather than drawing
-    fixed bitmaps. Returns the palette, for the parts ttk cannot reach.
+    so the scheme is worked out and painted on. clam is the base: the only
+    built-in theme that honours colour options rather than drawing fixed
+    bitmaps. Returns the roles, for the parts ttk cannot reach.
     """
-    palette = kdetheme.read()
-    shade = kdetheme.derived(palette)
-    dark = kdetheme.is_dark(palette)
+    desktop = kdetheme.read()
+    roles = material.scheme(desktop["selection"],
+                            dark=kdetheme.is_dark(desktop),
+                            error=desktop["negative"],
+                            positive=desktop["positive"])
+    surface = roles["surface"]
+    on_surface = roles["on_surface"]
+    variant = roles["on_surface_variant"]
 
     style = ttk.Style()
     try:
@@ -428,108 +567,115 @@ def apply_theme(root):
     except tk.TclError:                                     # pragma: no cover
         pass
 
-    if palette["font"]:
-        family, size = palette["font"]
-        root.option_add("*Font", (family, size))
-        style.configure(".", font=(family, size))
-        heading = (family, size + 3, "bold")
-    else:
-        heading = ("TkDefaultFont", 13, "bold")
+    family, size = desktop["font"] or ("TkDefaultFont", 10)
+    root.option_add("*Font", (family, size))
+    style.configure(".", font=(family, size))
 
-    root.configure(background=palette["window"])
-    style.configure(".", background=palette["window"],
-                    foreground=palette["window_text"],
-                    fieldbackground=palette["view"],
-                    bordercolor=shade["border"],
-                    focuscolor=palette["selection"],
-                    troughcolor=shade["raised"], relief="flat")
-    style.configure("TFrame", background=palette["window"])
-    style.configure("TLabel", background=palette["window"],
-                    foreground=palette["window_text"])
-    style.configure("Heading.TLabel", font=heading)
-    style.configure("Muted.TLabel", foreground=shade["muted"])
-    style.configure("Good.TLabel", foreground=palette["positive"])
-    style.configure("Bad.TLabel", foreground=palette["negative"])
+    root.configure(background=surface)
+    # One background for the whole window. Material tells groups apart by
+    # spacing and a heading rather than by a box round each, which is what
+    # keeps a page of thirty settings from reading as thirty compartments -
+    # and it means no widget has to be told which container it is standing on.
+    style.configure(".", background=surface, foreground=on_surface,
+                    fieldbackground=surface, bordercolor=roles["outline"],
+                    focuscolor=roles["primary"],
+                    troughcolor=roles["surface_container_highest"],
+                    relief="flat", borderwidth=0)
+    style.configure("TFrame", background=surface)
+    style.configure("Card.TFrame", background=roles["surface_container_low"])
+    style.configure("TLabel", background=surface, foreground=on_surface)
+    style.configure("Heading.TLabel", font=(family, size + TYPE_HEADLINE))
+    # A group's name, in the accent: it is the one place colour is used to
+    # organise rather than to decorate, and it lets the boxes go away.
+    style.configure("Section.TLabel", foreground=roles["primary"],
+                    font=(family, size + TYPE_SECTION, "bold"))
+    style.configure("Muted.TLabel", foreground=variant,
+                    font=(family, size + TYPE_SUPPORT))
+    style.configure("Good.TLabel", foreground=roles["positive"])
+    style.configure("Bad.TLabel", foreground=roles["error"])
+    style.configure("TSeparator", background=roles["outline_variant"])
 
-    style.configure("TLabelframe", background=palette["window"],
-                    bordercolor=shade["border"])
-    style.configure("TLabelframe.Label", background=palette["window"],
-                    foreground=shade["muted"])
+    # Material's four weights of button. Written out one by one rather than
+    # looped: a style name that only ever appears in a variable is a name
+    # nothing can check, and a misspelled one is the quietest bug ttk has -
+    # the widget keeps the default look and nothing is reported.
+    def button(fill, text, sides=20):
+        return dict(background=roles[fill], foreground=roles[text],
+                    padding=(sides, 8), anchor="center")
 
-    style.configure("TButton", background=palette["button"],
-                    foreground=palette["button_text"],
-                    bordercolor=shade["border"], padding=(12, 6))
-    # The disabled entries matter: setting a map replaces clam's own, so
-    # without them the label of a disabled button keeps its full colour.
-    style.map("TButton",
-              background=[("pressed", palette["selection"]),
-                          ("active", shade["hover"])],
-              foreground=[("disabled", shade["muted"]),
-                          ("pressed", palette["selection_text"])])
+    def label_fades(text):
+        # Setting a map replaces clam's own, so without this the label of a
+        # disabled button keeps its full colour.
+        return dict(foreground=[("disabled",
+                                 material.disabled(roles, roles[text]))])
 
-    style.configure("Accent.TButton", background=palette["selection"],
-                    foreground=palette["selection_text"])
-    style.map("Accent.TButton",
-              background=[("active", kdetheme.mix(palette["selection"],
-                                                  "#ffffff", 0.15))],
-              foreground=[("disabled", shade["muted"])])
+    style.configure("TButton", **button("secondary_container",
+                                        "on_secondary_container"))
+    style.map("TButton", **label_fades("on_secondary_container"))
+    style.configure("Filled.TButton", **button("primary", "on_primary"))
+    style.map("Filled.TButton", **label_fades("on_primary"))
+    style.configure("Tonal.TButton", **button("secondary_container",
+                                              "on_secondary_container"))
+    style.map("Tonal.TButton", **label_fades("on_secondary_container"))
+    style.configure("Outlined.TButton", **button("surface", "primary"))
+    style.map("Outlined.TButton", **label_fades("primary"))
+    style.configure("Text.TButton", **button("surface", "primary", sides=2))
+    style.map("Text.TButton", **label_fades("primary"))
 
-    style.configure("TNotebook", background=palette["window"],
-                    bordercolor=shade["border"], tabmargins=(2, 6, 2, 0))
-    style.configure("TNotebook.Tab", background=shade["raised"],
-                    foreground=shade["muted"], padding=(16, 8),
-                    bordercolor=shade["border"])
+    style.configure("TNotebook", background=surface, borderwidth=0,
+                    bordercolor=surface, lightcolor=surface,
+                    darkcolor=surface, tabmargins=(0, 4, 0, 0))
+    style.configure("TNotebook.Tab", background=surface, foreground=variant,
+                    focuscolor=surface)
     style.map("TNotebook.Tab",
-              background=[("selected", palette["window"])],
-              foreground=[("selected", palette["window_text"])],
-              expand=[("selected", (0, 0, 0, 2))])
+              foreground=[("selected", roles["primary"])])
 
-    style.configure("TCheckbutton", background=palette["window"],
-                    foreground=palette["window_text"],
-                    indicatorcolor=palette["view"])
-    style.map("TCheckbutton",
-              indicatorcolor=[("selected", palette["selection"])],
-              background=[("active", palette["window"])])
+    style.configure("TCheckbutton", background=surface, foreground=on_surface,
+                    focuscolor=surface)
+    style.map("TCheckbutton", background=[("active", surface)])
+    style.configure("TRadiobutton", background=surface, foreground=on_surface,
+                    focuscolor=surface, padding=(0, 3))
+    style.map("TRadiobutton", background=[("active", surface)])
 
-    style.configure("TCombobox", fieldbackground=palette["view"],
-                    background=palette["button"],
-                    foreground=palette["view_text"],
-                    arrowcolor=palette["window_text"],
-                    bordercolor=shade["border"], padding=(8, 7),
+    # The field is a drawn element, so bordercolor and the two 3D shades reach
+    # only clam's own drop-down arrow - and setting all three to the surface is
+    # what flattens it. Left alone it is a raised grey button from 1995 sitting
+    # inside a Material field.
+    style.configure("TCombobox", fieldbackground=surface, background=surface,
+                    foreground=on_surface, arrowcolor=variant,
+                    bordercolor=surface, lightcolor=surface,
+                    darkcolor=surface, padding=(10, 7),
                     arrowsize=ARROW_SIZE)
     # A read-only combobox draws its text as a *selection*, so without these
     # the label comes out pale grey on pale grey.
     style.map("TCombobox",
-              fieldbackground=[("readonly", palette["view"]),
-                               ("disabled", palette["window"])],
-              foreground=[("readonly", palette["view_text"]),
-                          ("disabled", shade["muted"])],
-              selectbackground=[("readonly", palette["view"]),
-                                ("focus", palette["view"])],
-              selectforeground=[("readonly", palette["view_text"]),
-                                ("focus", palette["view_text"])],
-              arrowcolor=[("readonly", palette["window_text"])],
-              bordercolor=[("focus", palette["selection"])])
-    root.option_add("*TCombobox*Listbox.background", palette["view"])
-    root.option_add("*TCombobox*Listbox.foreground", palette["view_text"])
+              fieldbackground=[("readonly", surface), ("disabled", surface)],
+              foreground=[("readonly", on_surface),
+                          ("disabled", material.disabled(roles, on_surface))],
+              selectbackground=[("readonly", surface), ("focus", surface)],
+              selectforeground=[("readonly", on_surface),
+                                ("focus", on_surface)],
+              arrowcolor=[("readonly", variant),
+                          ("disabled", material.disabled(roles, variant))],
+              background=[("active", surface), ("pressed", surface)])
+    root.option_add("*TCombobox*Listbox.background",
+                    roles["surface_container"])
+    root.option_add("*TCombobox*Listbox.foreground", on_surface)
     root.option_add("*TCombobox*Listbox.selectBackground",
-                    palette["selection"])
+                    roles["secondary_container"])
     root.option_add("*TCombobox*Listbox.selectForeground",
-                    palette["selection_text"])
+                    roles["on_secondary_container"])
 
-    style.configure("Horizontal.TScale", background=palette["window"],
-                    troughcolor=shade["raised"],
-                    bordercolor=shade["border"])
-    style.configure("TScrollbar", background=shade["raised"],
-                    troughcolor=palette["window"],
-                    bordercolor=shade["border"],
-                    arrowcolor=palette["window_text"])
+    style.configure("Horizontal.TScale", background=surface,
+                    troughcolor=roles["surface_container_highest"])
+    style.configure("TScrollbar", background=roles["surface_container_highest"],
+                    troughcolor=surface, bordercolor=surface,
+                    arrowcolor=variant, relief="flat")
 
-    round_the_corners(style, palette, shade)
+    dress(style, roles)
 
-    palette["_shade"] = shade
-    palette["_dark"] = dark
-    return palette
+    roles["_font"] = (family, size)
+    return roles
 
 
 class Runner:
@@ -604,8 +750,7 @@ class Panel:
         root.minsize(720, 640)
         self._set_window_icon()
 
-        self.palette = apply_theme(root)
-        self.shade = self.palette["_shade"]
+        self.roles = apply_theme(root)
         self.config = self._load_config()
         self.vars = {}
         # key -> the (label, value) pairs and the widget, so a value that
@@ -619,14 +764,16 @@ class Panel:
         self._wrap_width = 0
 
         header = ttk.Frame(root)
-        header.pack(fill="x", padx=16, pady=(14, 0))
+        header.pack(fill="x", padx=SIDE_MARGIN + SIDE_MARGIN // 2,
+                    pady=(GROUP_GAP, 0))
         ttk.Label(header, text="SteamOS LED bar",
                   style="Heading.TLabel").pack(anchor="w")
         self.headline = ttk.Label(header, text="", style="Muted.TLabel")
         self.headline.pack(anchor="w", pady=(2, 0))
 
         notebook = self.notebook = ttk.Notebook(root)
-        notebook.pack(fill="both", expand=True, padx=16, pady=(12, 0))
+        notebook.pack(fill="both", expand=True,
+                      padx=SIDE_MARGIN // 2, pady=(GROUP_GAP, 0))
 
         # Under the tabs, not inside them: one file, one Apply.
         self._build_apply(root)
@@ -641,10 +788,10 @@ class Panel:
             notebook.add(tab, text=title)
             self._settings_tabs.add(str(tab))
         self.preview_tab = self._build_preview(notebook)
-        notebook.add(self.preview_tab, text="  Preview  ")
-        notebook.add(self._build_tests(notebook), text="  Test  ")
+        notebook.add(self.preview_tab, text="Preview")
+        notebook.add(self._build_tests(notebook), text="Test")
         self.status_tab = self._build_status(notebook)
-        notebook.add(self.status_tab, text="  Status & repair  ")
+        notebook.add(self.status_tab, text="Status & repair")
         self._refresh_enabled()
 
         notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
@@ -696,54 +843,129 @@ class Panel:
         self.output.insert("end", text, tag or ())
         self.output.see("end")
         self.output.configure(state="disabled")
+        # Nobody opens a log to find out that something happened; the log says
+        # so itself. Only on the way in, so it can be folded away again while a
+        # long command is still running.
+        if not self._output_open:
+            self._show_output(True)
 
     def _build_output(self, parent):
-        frame = ttk.LabelFrame(parent, text="Output", padding=1)
-        # Fixed height, with the notebook above taking all the spare room.
-        # With both of them expanding, every change in what a tab asks for was
-        # split between the two - so the log grew and shrank under whatever
-        # you had just done, which is a strange thing for a log to do.
-        frame.pack(fill="x", padx=16, pady=14)
+        """The command log, folded away until there is something in it.
+
+        Nine fixed lines that are empty nearly all the time were a fifth of the
+        window spent on nothing. What is left when it is closed is one line
+        saying where it went.
+        """
+        holder = ttk.Frame(parent)
+        holder.pack(fill="x", padx=SIDE_MARGIN + SIDE_MARGIN // 2,
+                    pady=(0, ROW_GAP))
+        self.output_toggle = ttk.Button(holder, text="Output ▾",
+                                        style="Text.TButton",
+                                        command=self.toggle_output)
+        self.output_toggle.pack(anchor="w")
+
+        # One of the two raised panels in the window: the content is a tk.Text
+        # rather than a themed widget, so it cannot take a background of its
+        # own and the tone has to come from the frame it sits in.
+        self.output_box = ttk.Frame(holder, style="Card.TFrame", padding=6)
         # tk.Text is not themed, so its colours are set by hand - and it is
         # the one place a fixed-width font is right: this is command output.
-        text = tk.Text(frame, height=9, wrap="word", state="disabled",
+        text = tk.Text(self.output_box, height=9, wrap="word", state="disabled",
                        relief="flat", borderwidth=0, padx=10, pady=8,
-                       background=self.palette["view"],
-                       foreground=self.palette["view_text"],
-                       insertbackground=self.palette["view_text"],
-                       selectbackground=self.palette["selection"],
-                       selectforeground=self.palette["selection_text"],
+                       background=self.roles["surface_container_low"],
+                       foreground=self.roles["on_surface"],
+                       insertbackground=self.roles["on_surface"],
+                       selectbackground=self.roles["secondary_container"],
+                       selectforeground=self.roles["on_secondary_container"],
                        font=("TkFixedFont",))
-        scroll = ttk.Scrollbar(frame, command=text.yview)
+        scroll = ttk.Scrollbar(self.output_box, command=text.yview)
         text.configure(yscrollcommand=scroll.set)
         text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        text.tag_configure("command", foreground=self.shade["muted"])
+        text.tag_configure("command",
+                           foreground=self.roles["on_surface_variant"])
+        self._output_open = False
         return text
 
-    # -- settings ---------------------------------------------------------
+    def toggle_output(self):
+        self._show_output(not self._output_open)
+
+    def _show_output(self, show):
+        self._output_open = show
+        if show:
+            self.output_box.pack(fill="x", pady=(ROW_GAP, 0))
+        else:
+            self.output_box.pack_forget()
+        self.output_toggle.configure(text="Output ▴" if show else "Output ▾")
+        self._fit_window()
+
+    # -- the pieces a page is built from ----------------------------------
+
+    def _section(self, parent, title=None, first=False, before=None):
+        """A named group of controls, with no box drawn round it.
+
+        Material tells groups apart by a heading and the space around them
+        rather than by a line, which is what keeps a page of thirty settings
+        from reading as thirty compartments.
+
+        The heading goes *inside* the frame this returns rather than beside it,
+        so a group is one widget: something packed before it lands above the
+        heading and not between the heading and what it names.
+        """
+        holder = ttk.Frame(parent)
+        holder.pack(fill="x", padx=SIDE_MARGIN,
+                    pady=(ROW_GAP if first else GROUP_GAP, 0),
+                    **({"before": before} if before is not None else {}))
+        if title:
+            ttk.Label(holder, text=title, style="Section.TLabel").pack(
+                anchor="w", pady=(0, ROW_GAP))
+        return holder
 
     def _build_settings(self, parent, groups):
-        """One tab: a titled box per group, a row per setting."""
+        """One tab: a heading per group, a row per setting.
+
+        One grid for the whole tab rather than one per group, headings included
+        as rows spanning it. A grid per group sizes its label column to its own
+        longest label, so the controls of one group started at a different x
+        than the next - two ragged columns down a page whose whole point is
+        that it is a list.
+        """
         outer = ttk.Frame(parent)
-        for title, rows in groups:
-            if title is None:
-                box = ttk.Frame(outer)
-                box.pack(fill="x", padx=6, pady=10)
-            else:
-                box = ttk.LabelFrame(outer, text=title)
-                box.pack(fill="x", padx=10, pady=(10, 0))
-            grid = ttk.Frame(box)
-            grid.pack(fill="x", padx=10, pady=8)
-            grid.columnconfigure(1, weight=1)
-            for row, entry in enumerate(rows):
+        grid = ttk.Frame(outer)
+        grid.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
+        grid.columnconfigure(1, weight=1)
+
+        row = 0
+        for index, (title, entries) in enumerate(groups):
+            if title:
+                ttk.Label(grid, text=title, style="Section.TLabel").grid(
+                    row=row, column=0, columnspan=2, sticky="w",
+                    pady=(0 if index == 0 else GROUP_GAP, ROW_GAP))
+                row += 1
+            for entry in entries:
                 self._build_row(grid, row, *entry)
+                row += 1
         return outer
+
+    def _indent(self, key):
+        """How far in a setting sits, by what it hangs off.
+
+        A row that only needs the tab's own master switch stays at the margin;
+        one that also needs a particular row above it is stepped in under it,
+        which is what makes the three notification blocks read as blocks rather
+        than as twelve equal lines. A row waiting on a *choice* - the
+        temperature marks, which mean nothing unless the slot is showing the
+        temperature - is stepped in for the same reason.
+        """
+        needs = DEPENDS_ON.get(key, ())
+        return (max(0, len(needs) - 1)
+                + (1 if any(isinstance(need, tuple) for need in needs) else 0))
 
     def _build_row(self, grid, row, key, label, kind, low, high, step):
         """One setting: its name, its control, and a way to grey both out."""
         name = ttk.Label(grid, text=label)
-        name.grid(row=row, column=0, sticky="w", pady=5, padx=(0, 14))
+        name.grid(row=row, column=0, sticky="w", pady=5,
+                  padx=(self._indent(key) * INDENT_STEP, 14))
         value = self.config.get(key, config_module.DEFAULTS[key])
         labels, controls = [name], []
 
@@ -867,10 +1089,11 @@ class Panel:
         is a whole window shifting under the pointer.
         """
         self.apply_row = ttk.Frame(parent)
-        self.apply_row.pack(fill="x", padx=16, pady=(12, 0))
+        self.apply_row.pack(fill="x", padx=SIDE_MARGIN + SIDE_MARGIN // 2,
+                            pady=(GROUP_GAP, GROUP_GAP))
         self._apply_buttons = [
             ttk.Button(self.apply_row, text="Apply and restart service",
-                       style="Accent.TButton", command=self.apply_settings),
+                       style="Filled.TButton", command=self.apply_settings),
             ttk.Button(self.apply_row, text="Reload from file",
                        command=self.reload_settings),
             # Profiles sit here rather than on a tab of their own: this is
@@ -1133,6 +1356,10 @@ class Panel:
     # them in Steam, and the standby and startup breaths are states the
     # machine puts itself into rather than anything chosen here.
 
+    # How many buttons fit across the window at its narrowest, which is what a
+    # row of them wraps at.
+    BUTTONS_ACROSS = 4
+
     PREVIEW_FPS = 25
     PREVIEW_CELL = 28
     PREVIEW_GAP = 5
@@ -1149,8 +1376,11 @@ class Panel:
                  + self.PREVIEW_MARGIN * 2)
         height = self.PREVIEW_MARGIN * 2 + self.PREVIEW_BAR + self.PREVIEW_SPILL * 2
 
-        stage = ttk.Frame(outer)
-        stage.pack(fill="x", padx=10, pady=(10, 6))
+        # The stage keeps its own dark backdrop whatever the desktop is set to
+        # - a strip is judged against a dim room, not against the theme - so it
+        # is a raised panel rather than part of the page.
+        stage = ttk.Frame(outer, style="Card.TFrame", padding=10)
+        stage.pack(padx=SIDE_MARGIN, pady=(GROUP_GAP, ROW_GAP))
         self.preview_canvas = tk.Canvas(
             stage, width=width, height=height, highlightthickness=0,
             background=preview_module.BACKDROP)
@@ -1180,7 +1410,7 @@ class Panel:
         self.preview_blurb.pack(anchor="center", pady=(0, 8))
 
         picker = ttk.Frame(outer)
-        picker.pack(fill="x", padx=10)
+        picker.pack(fill="x", padx=SIDE_MARGIN)
         picker.columnconfigure(0, weight=1)
         picker.columnconfigure(1, weight=1)
 
@@ -1191,22 +1421,24 @@ class Panel:
         groups = (("In the rainbow slot", "slot"),
                   ("Notification shapes", "shape"))
         for column, (title, wanted) in enumerate(groups):
-            box = ttk.LabelFrame(picker, text=title)
+            box = ttk.Frame(picker)
             box.grid(row=0, column=column, sticky="nsew",
-                     padx=(0, 8) if column == 0 else (8, 0))
+                     padx=(0, GROUP_GAP) if column == 0 else (GROUP_GAP, 0))
+            ttk.Label(box, text=title, style="Section.TLabel").pack(
+                anchor="w", pady=(0, 4))
             for label, kind, name, _blurb in preview_module.entries():
                 if kind != wanted:
                     continue
                 ttk.Radiobutton(box, text=label, value=kind + ":" + name,
-                                variable=self.preview_choice).pack(
-                                    anchor="w", padx=8, pady=2)
+                                variable=self.preview_choice).pack(anchor="w")
 
         self._note(
             outer,
             "Drawn by the same code that drives the strip, on seventeen LEDs "
             "and with the settings currently in this window - move a slider "
             "and it follows. Nothing here is applied and the strip is not "
-            "touched.").pack(anchor="w", padx=10, pady=(10, 12))
+            "touched.").pack(anchor="w", padx=SIDE_MARGIN,
+                             pady=(GROUP_GAP, GROUP_GAP))
 
         self._preview = preview_module.Preview()
         self._preview_job = None
@@ -1283,80 +1515,77 @@ class Panel:
                 continue
         return values
 
+    def _buttons(self, parent, entries, style="Tonal.TButton"):
+        """A row of buttons that wraps rather than running off the window.
+
+        Six shape buttons in a row are wider than the window is at its
+        smallest, and a row packed left simply loses the last of them - so they
+        are gridded and the columns are counted, not packed and hoped for.
+        """
+        row = ttk.Frame(parent)
+        row.pack(fill="x")
+        for column in range(self.BUTTONS_ACROSS):
+            row.columnconfigure(column, weight=1, uniform="buttons")
+        for index, (label, command) in enumerate(entries):
+            ttk.Button(row, text=label, style=style, command=command).grid(
+                row=index // self.BUTTONS_ACROSS,
+                column=index % self.BUTTONS_ACROSS, sticky="ew",
+                padx=(0, ROW_GAP), pady=(0, ROW_GAP))
+        return row
+
     def _build_tests(self, parent):
         outer = ttk.Frame(parent)
-        flashes = ttk.LabelFrame(outer, text="Flash the bar")
-        flashes.pack(fill="x", padx=10, pady=10)
-        ttk.Label(
-            flashes,
-            text="Needs no privileges - the trigger pipe is open to anyone.",
-        ).pack(anchor="w", padx=8, pady=(6, 2))
 
-        row = ttk.Frame(flashes)
-        row.pack(fill="x", padx=8, pady=(0, 8))
+        flashes = self._section(outer, "Flash the bar", first=True)
+        self._note(flashes,
+                   "Needs no privileges - the trigger pipe is open to anyone."
+                   ).pack(anchor="w", pady=(0, ROW_GAP))
         # No colour in the labels: three of the four are a setting now, so
         # naming one here would be a promise the button cannot keep. It
         # flashes whatever the trigger is set to, which is the point.
-        for kind, label in (("achievement", "Achievement"),
-                            ("message", "Friend message"),
-                            ("friend", "Friend online"),
-                            ("warning", "Warning")):
-            ttk.Button(row, text=label,
-                       command=lambda k=kind: self.runner.start(
-                           ledpanel.notify_command(k))).pack(side="left",
-                                                             padx=(0, 6))
-        ttk.Button(row, text="Pick a colour...",
-                   command=self.flash_colour).pack(side="left")
+        self._buttons(flashes, [
+            (label, lambda k=kind: self.runner.start(
+                ledpanel.notify_command(k)))
+            for kind, label in (("achievement", "Achievement"),
+                                ("message", "Friend message"),
+                                ("friend", "Friend online"),
+                                ("warning", "Warning"))
+        ] + [("Pick a colour...", self.flash_colour)])
 
         # The shapes, all in one colour, so what differs between the buttons
         # is only the thing you are choosing between. Nothing is saved: this
         # asks the service for one flash in that shape, which is what makes it
         # useful for choosing at all.
-        shapes = ttk.LabelFrame(outer, text="Try a flash shape")
-        shapes.pack(fill="x", padx=10, pady=(0, 10))
-        ttk.Label(
-            shapes,
-            text="Shown in Steam blue and not saved anywhere - pick one here, "
-                 "then set it on the Notifications tab.",
-        ).pack(anchor="w", padx=8, pady=(6, 2))
-        row = ttk.Frame(shapes)
-        row.pack(fill="x", padx=8, pady=(0, 8))
-        for label, shape in STYLE_CHOICES:
-            ttk.Button(row, text=label,
-                       command=lambda s=shape: self.runner.start(
-                           ledpanel.shape_test_command(s))).pack(
-                               side="left", padx=(0, 6))
+        shapes = self._section(outer, "Try a flash shape")
+        self._note(shapes,
+                   "Shown in Steam blue and not saved anywhere - pick one "
+                   "here, then set it on the Notifications tab."
+                   ).pack(anchor="w", pady=(0, ROW_GAP))
+        self._buttons(shapes, [
+            (label, lambda s=shape: self.runner.start(
+                ledpanel.shape_test_command(s)))
+            for label, shape in STYLE_CHOICES])
 
-        strip = ttk.LabelFrame(outer, text="Strip and Steam")
-        strip.pack(fill="x", padx=10, pady=(0, 10))
-        row = ttk.Frame(strip)
-        row.pack(fill="x", padx=8, pady=8)
-        ttk.Button(row, text="Self-test (stops the service briefly)",
-                   command=lambda: self.runner.start(
-                       ledpanel.self_test_command(SOURCE_DIR))).pack(
-                           side="left", padx=(0, 6))
-        ttk.Button(row, text="Steam check",
-                   command=lambda: self.runner.start(
-                       ledpanel.steam_check_command())).pack(side="left",
-                                                             padx=(0, 6))
-        ttk.Button(row, text="Message probe",
-                   command=lambda: self.runner.start(
-                       ledpanel.probe_messages_command())).pack(side="left",
-                                                                padx=(0, 6))
-        ttk.Button(row, text="Temperature sensors",
-                   command=lambda: self.runner.start(
-                       ledpanel.temperature_command())).pack(side="left",
-                                                             padx=(0, 6))
+        strip = self._section(outer, "Strip and Steam")
+        self._note(strip,
+                   "Steam check and the message probe need a game running."
+                   ).pack(anchor="w", pady=(0, ROW_GAP))
         # Whether the GPU half of the load gauge works at all is a driver
         # question, so it is worth being able to ask before wondering why the
         # bar came out symmetric.
-        ttk.Button(row, text="Load counters",
-                   command=lambda: self.runner.start(
-                       ledpanel.load_command())).pack(side="left")
-        ttk.Label(
-            strip,
-            text="Steam check and the message probe need a game running.",
-        ).pack(anchor="w", padx=8, pady=(0, 8))
+        self._buttons(strip, (
+            ("Self-test", lambda: self.runner.start(
+                ledpanel.self_test_command(SOURCE_DIR))),
+            ("Steam check", lambda: self.runner.start(
+                ledpanel.steam_check_command())),
+            ("Message probe", lambda: self.runner.start(
+                ledpanel.probe_messages_command())),
+            ("Temperature sensors", lambda: self.runner.start(
+                ledpanel.temperature_command())),
+            ("Load counters", lambda: self.runner.start(
+                ledpanel.load_command()))))
+        self._note(strip, "The self-test stops the service briefly."
+                   ).pack(anchor="w", pady=(0, GROUP_GAP))
         return outer
 
     def flash_colour(self):
@@ -1375,18 +1604,24 @@ class Panel:
         """
         outer = ttk.Frame(parent)
 
-        buttons = ttk.Frame(outer)
-        buttons.pack(fill="x", padx=10, pady=(12, 2))
+        holder = self._section(outer, "This installation", first=True)
+        buttons = ttk.Frame(holder)
+        buttons.pack(fill="x")
+        # The one thing on this tab that changes the machine is filled; the two
+        # that only look at it are not. A row of buttons that all shout is a
+        # row that says nothing about which one you want.
         self.details = ttk.Button(buttons, text="Details \u25be",
+                                  style="Text.TButton",
                                   command=self.toggle_details)
-        self.details.pack(side="left", padx=(0, 6))
-        ttk.Button(buttons, text="Check again",
-                   command=self.refresh_status).pack(side="left", padx=(0, 6))
+        self.details.pack(side="left", padx=(0, ROW_GAP))
+        ttk.Button(buttons, text="Check again", style="Outlined.TButton",
+                   command=self.refresh_status).pack(side="left",
+                                                     padx=(0, ROW_GAP))
         ttk.Button(buttons, text="Rebuild and reinstall",
-                   style="Accent.TButton",
+                   style="Filled.TButton",
                    command=self.reinstall).pack(side="left")
-        self._note(outer, "Keeps your settings, never touches the ESP."
-                   ).pack(anchor="w", padx=10, pady=(0, 8))
+        self._note(holder, "Keeps your settings, never touches the ESP."
+                   ).pack(anchor="w", pady=(ROW_GAP, 0))
 
         # Packed straight into the page, not into a slot of its own. Measured:
         # Tk does not reset a frame's requested size when its *last* child is
@@ -1414,7 +1649,8 @@ class Panel:
         height = self.root.winfo_height() + self._details_change(show)
         if show:
             self.root.geometry("%dx%d" % (width, height))
-            self.checklist.pack(fill="x", padx=16, pady=(0, DETAILS_GAP),
+            self.checklist.pack(fill="x", padx=SIDE_MARGIN,
+                                pady=(0, DETAILS_GAP),
                                 before=self.update_box)
         else:
             self.checklist.pack_forget()
@@ -1477,22 +1713,22 @@ class Panel:
 
     def _build_firmware(self, parent):
         """The last thing that still needed a terminal after installing."""
-        frame = ttk.LabelFrame(parent, text="ESP firmware")
-        frame.pack(fill="x", padx=10, pady=(0, 10))
+        frame = self._section(parent, "ESP firmware")
 
         row = ttk.Frame(frame)
-        row.pack(fill="x", padx=8, pady=(8, 2))
+        row.pack(fill="x")
         self.firmware = tk.StringVar(value=ledpanel.FIRMWARE_ENVS[0][0])
         # Grows with the window: at a fixed width the longest build name was
         # cut off mid-word, and which pin it drives is the whole point.
         ttk.Combobox(row, textvariable=self.firmware, state="readonly",
                      values=[label for label, _env in ledpanel.FIRMWARE_ENVS]
-                     ).pack(side="left", fill="x", expand=True, padx=(0, 12))
-        ttk.Button(row, text="Flash firmware",
+                     ).pack(side="left", fill="x", expand=True,
+                            padx=(0, GROUP_GAP))
+        ttk.Button(row, text="Flash firmware", style="Tonal.TButton",
                    command=self.flash_firmware).pack(side="left")
         self._note(frame,
                    "Takes a minute; the strip is dark and the service stops "
-                   "while it runs.").pack(anchor="w", padx=8, pady=(0, 8))
+                   "while it runs.").pack(anchor="w", pady=(ROW_GAP, 0))
 
     def flash_firmware(self):
         environment = ledpanel.menu_value(ledpanel.FIRMWARE_ENVS,
@@ -1510,8 +1746,7 @@ class Panel:
 
     def _build_update(self, parent):
         """Fetch a branch and install it: the two halves of "get the new one"."""
-        frame = ttk.LabelFrame(parent, text="Update")
-        frame.pack(fill="x", padx=10, pady=(0, 10))
+        frame = self._section(parent, "Update")
 
         if not ledpanel.is_git_clone(SOURCE_DIR):
             self._note(
@@ -1519,26 +1754,26 @@ class Panel:
                 "%s is not a git clone, so there is nothing to update from - "
                 "this is what downloading a zip leaves you with. Clone it "
                 "with git to get updates here." % SOURCE_DIR,
-            ).pack(anchor="w", padx=8, pady=8)
+            ).pack(anchor="w")
             return frame
 
         row = ttk.Frame(frame)
-        row.pack(fill="x", padx=8, pady=(8, 2))
-        ttk.Label(row, text="Branch").pack(side="left", padx=(0, 8))
+        row.pack(fill="x")
+        ttk.Label(row, text="Branch").pack(side="left", padx=(0, ROW_GAP))
         self.branch = tk.StringVar(value=ledpanel.current_branch(SOURCE_DIR))
         self.branch_menu = ttk.Combobox(row, textvariable=self.branch,
                                         state="readonly", width=22)
-        self.branch_menu.pack(side="left", padx=(0, 12))
+        self.branch_menu.pack(side="left", padx=(0, GROUP_GAP))
         self._refresh_branches()
-        ttk.Button(row, text="Check for updates",
+        ttk.Button(row, text="Check for updates", style="Outlined.TButton",
                    command=self.check_for_updates).pack(side="left",
-                                                        padx=(0, 6))
-        ttk.Button(row, text="Update and install", style="Accent.TButton",
+                                                        padx=(0, ROW_GAP))
+        ttk.Button(row, text="Update and install", style="Filled.TButton",
                    command=self.update_now).pack(side="left")
         self._note(frame,
                    "Fetches into the clone and installs it. Local changes or "
                    "commits of your own stop it, with a message.").pack(
-                       anchor="w", padx=8, pady=(0, 8))
+                       anchor="w", pady=(ROW_GAP, 0))
         return frame
 
     def _refresh_branches(self):
@@ -1638,7 +1873,8 @@ class Panel:
                                               pady=2)
             ttk.Label(self.checklist, text=check.name,
                       style="TLabel" if check.ok else "Bad.TLabel").grid(
-                          row=row, column=1, sticky="w", pady=2)
+                          row=row, column=1, sticky="w", pady=2,
+                          padx=(0, GROUP_GAP))
             if not check.ok:
                 ttk.Label(self.checklist, text=check.detail, wraplength=460,
                           justify="left", style="Muted.TLabel").grid(
