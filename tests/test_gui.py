@@ -1141,6 +1141,25 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
         self.assertLess(lowest[0], 12, "the corner of the tick is on the left")
         self.assertGreater(highest[0], lowest[0], "and it rises to the right")
 
+    def test_a_chevron_points_down_and_stays_in_its_box(self):
+        picture = roundrect.rows(16, 16, 0, self.BACK, self.BACK)
+        roundrect.draw_chevron(picture, self.FILL)
+        ink = [(x, y) for y, row in enumerate(picture)
+               for x, pixel in enumerate(row) if pixel != self.BACK]
+        self.assertTrue(ink, "nothing was drawn")
+        for x, y in ink:
+            self.assertTrue(0 <= x < 16 and 0 <= y < 16, (x, y))
+        # The point of it is the lowest ink, and it sits in the middle.
+        lowest = max(ink, key=lambda point: point[1])
+        self.assertTrue(5 <= lowest[0] <= 10, lowest)
+
+    def test_a_chevron_can_point_the_other_way(self):
+        down = roundrect.rows(16, 16, 0, self.BACK, self.BACK)
+        roundrect.draw_chevron(down, self.FILL)
+        up = roundrect.rows(16, 16, 0, self.BACK, self.BACK)
+        roundrect.draw_chevron(up, self.FILL, up=True)
+        self.assertNotEqual(down, up)
+
     def test_segment_coverage_is_thickest_on_the_line(self):
         on_line = roundrect.segment_coverage(5, 5, (0, 5), (10, 5), 3)
         beside = roundrect.segment_coverage(5, 9, (0, 5), (10, 5), 3)

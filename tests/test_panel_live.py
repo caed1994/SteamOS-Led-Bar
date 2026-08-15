@@ -345,6 +345,36 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertNotIn("ACHIEVEMENT_COLOR", self.panel._differences())
 
+    def test_a_colour_menu_shows_the_colour_it_holds(self):
+        # A list of colours that shows only their names is the one place in a
+        # window about light where you cannot see what you are choosing.
+        button = self.panel._widgets["ACHIEVEMENT_COLOR"]
+        self.assertTrue(button.cget("image"),
+                        "the chosen colour has no swatch on it")
+
+    def test_a_menu_that_holds_no_colours_carries_no_swatch(self):
+        # Told by the value rather than by a list kept by hand: anything the
+        # file holds as #rrggbb is a colour, and nothing else is.
+        button = self.panel._widgets["ACHIEVEMENT_STYLE"]
+        self.assertFalse(button.cget("image"))
+
+    def test_the_swatch_follows_what_is_chosen(self):
+        button = self.panel._widgets["ACHIEVEMENT_COLOR"]
+        first = button.cget("image")
+        variable, _kind = self.panel.vars["ACHIEVEMENT_COLOR"]
+        variable.set("Bronze")
+        self.root.update()
+        self.assertNotEqual(button.cget("image"), first)
+
+    def test_a_colour_the_menu_never_offered_still_gets_a_swatch(self):
+        # Editing the file by hand and pressing Reload is how these are meant
+        # to be used from a terminal, so an unknown value becomes an entry.
+        variable, _kind = self.panel.vars["MESSAGE_COLOR"]
+        self.panel._show_values({"MESSAGE_COLOR": "#123456"})
+        self.root.update()
+        self.assertEqual(variable.get(), "#123456")
+        self.assertTrue(self.panel._widgets["MESSAGE_COLOR"].cget("image"))
+
     def _log_order(self):
         """Which of "grow the window" and "fill it" happened first."""
         order = []

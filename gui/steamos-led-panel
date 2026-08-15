@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -256,6 +257,11 @@ ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
 # being able to see which sensor was picked.
 MENU_WIDTH = 18
 SENSOR_WIDTH = 30
+
+# The square of colour a menu entry carries when what it holds is a colour.
+SWATCH_SIZE = 16
+SWATCH_GAP = 7              # drawn beside it, where the name goes
+_COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
 DETAILS_GAP = 10            # under the checklist, and part of what it costs
 
 # What to leave for the titlebar and whatever panel the desktop has, when
@@ -535,6 +541,21 @@ def dress(style, roles, sizes):
             ("Material.trough", {"sticky": "ew", "children": [
                 ("Material.slider", {"side": "left", "sticky": ""})]})])
 
+    def arrows():
+        # One mark for every drop-down. clam draws the combobox a hairline and
+        # the menu button a filled triangle half the height of the field, and
+        # a page carrying both kinds looked like it had two of them.
+        def picture(colour):
+            rows = [[surface] * ARROW_SIZE for _ in range(ARROW_SIZE)]
+            roundrect.draw_chevron(rows, colour, thickness=1.9)
+            return _photo(rows)
+
+        muted = roles["on_surface_variant"]
+        style.element_create(
+            "Material.Arrow", "image", picture(muted),
+            ("disabled", picture(material.disabled(roles, muted))),
+            sticky="")
+
     def fields():
         # Material's outlined field: a thin edge that thickens and takes the
         # accent when the field has the focus.
@@ -551,11 +572,20 @@ def dress(style, roles, sizes):
             border=FIELD_RADIUS, sticky="nsew")
         style.layout("TCombobox", [
             ("Material.Field", {"sticky": "nsew", "children": [
-                ("Combobox.downarrow", {"side": "right", "sticky": "ns"}),
+                ("Material.Arrow", {"side": "right", "sticky": ""}),
                 ("Combobox.padding", {"expand": 1, "sticky": "nsew",
                                       "children": [
                                           ("Combobox.textarea",
                                            {"sticky": "nsew"})]})]})])
+        # The same field around a menu button, so a drop-down that carries
+        # images looks like one that does not.
+        style.layout("Field.TMenubutton", [
+            ("Material.Field", {"sticky": "nsew", "children": [
+                ("Material.Arrow", {"side": "right", "sticky": ""}),
+                ("Menubutton.padding", {"expand": 1, "sticky": "nsew",
+                                        "children": [
+                                            ("Menubutton.label",
+                                             {"sticky": "w"})]})]})])
 
     attempt("the rail", rail)
     attempt("the panels", panels)
@@ -563,6 +593,7 @@ def dress(style, roles, sizes):
     attempt("the switches", switches)
     attempt("the radio buttons", radios)
     attempt("the sliders", sliders)
+    attempt("the arrows", arrows)
     attempt("the fields", fields)
 
 
@@ -699,6 +730,15 @@ def apply_theme(root):
     root.option_add("*TCombobox*Listbox.selectForeground",
                     roles["on_secondary_container"])
 
+    style.configure("Field.TMenubutton", background=surface,
+                    foreground=on_surface, arrowcolor=variant,
+                    padding=(10, sizes["field_padding"]),
+                    arrowsize=ARROW_SIZE, anchor="w", compound="left")
+    style.map("Field.TMenubutton",
+              foreground=[("disabled", material.disabled(roles, on_surface))],
+              arrowcolor=[("disabled", material.disabled(roles, variant))],
+              background=[("active", surface), ("pressed", surface)])
+
     style.configure("Horizontal.TScale", background=surface,
                     troughcolor=roles["surface_container_highest"])
     style.configure("TScrollbar", background=roles["surface_container_highest"],
@@ -803,6 +843,8 @@ class Panel:
         # turns up later can be added to both.
         self._menus = {}
         self._widgets = {}
+        # key -> (the tk.Menu it drops down, the variable it writes)
+        self._menu_parts = {}
         # key -> (labels, controls), so a setting can be greyed out whole
         self._rows = {}
         # page -> the canvas that scrolls it, for the wheel to find
@@ -1182,22 +1224,16 @@ class Panel:
                          pady=(ROW_PAD + lead, ROW_PAD))
             controls.append(control)
             self._follow(variable)
-        elif kind == "choice":
-            variable = tk.StringVar(value=str(value))
-            control = ttk.Combobox(grid, textvariable=variable,
-                                   values=list(low), state="readonly",
-                                   width=MENU_WIDTH)
-            control.grid(row=row, column=1, sticky="w",
-                         pady=(ROW_PAD + lead, ROW_PAD))
-            controls.append(control)
-            self._follow(variable)
-        elif kind in ("sensor", "named"):
+        elif kind in ("choice", "sensor", "named"):
             # Entries that are labels for something else - see the menu
-            # helpers in ledpanel.
+            # helpers in ledpanel. A "choice" is the case where the label and
+            # the value are the same word.
             variable = tk.StringVar()
             choices = (ledpanel.sensor_choices(*ledpanel.read_sensors(),
                                                current=str(value))
-                       if kind == "sensor" else list(low))
+                       if kind == "sensor"
+                       else [(entry, entry) for entry in low]
+                       if kind == "choice" else list(low))
             self._menu(grid, row, key, variable, choices, str(value),
                        width=SENSOR_WIDTH if kind == "sensor" else MENU_WIDTH,
                        lead=ROW_PAD + lead)
@@ -1439,14 +1475,66 @@ class Panel:
 
     def _menu(self, grid, row, key, variable, choices, current, width,
               lead=0):
-        """A drop-down of (label, value) pairs, showing labels."""
+        """A drop-down of (label, value) pairs, showing labels.
+
+        A menu rather than a combobox, and for one reason: a combobox drops
+        down a Tk listbox, and a listbox holds text and nothing else. A menu
+        holds an image per entry - which is what lets a list of colours show
+        the colours. Picking "Hot Pink" out of a column of words was the one
+        place in a window about light where you could not see what you were
+        choosing.
+        """
         self._menus[key] = list(choices)
-        widget = ttk.Combobox(grid, textvariable=variable, state="readonly",
-                              width=width,
-                              values=[label for label, _value in choices])
-        widget.grid(row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
-        self._widgets[key] = widget
+        button = ttk.Menubutton(grid, textvariable=variable, width=width,
+                                style="Field.TMenubutton", compound="left")
+        menu = tk.Menu(button, tearoff=0, borderwidth=0, activeborderwidth=0,
+                       background=self.roles["surface_container"],
+                       foreground=self.roles["on_surface"],
+                       activebackground=self.roles["secondary_container"],
+                       activeforeground=self.roles["on_secondary_container"],
+                       disabledforeground=self.roles["on_surface_variant"])
+        button.configure(menu=menu)
+        button.grid(row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
+        self._widgets[key] = button
+        self._menu_parts[key] = (menu, variable)
+        for label, value in list(choices):
+            self._add_entry(key, label, value)
+        # The button carries the swatch of whatever is chosen, so the colour is
+        # readable without opening anything.
+        variable.trace_add("write", lambda *_a: self._show_swatch(key))
         variable.set(self._label_for(key, current))
+        self._show_swatch(key)
+
+    def _swatch(self, value, ground):
+        """A square of colour for a menu entry, or None if this is not one.
+
+        Told by the value rather than by a list of which settings are colours:
+        anything the config file holds as #rrggbb is one, and a colour setting
+        added later gets its swatch without anything here being told.
+        """
+        if not _COLOUR.match(str(value)):
+            return None
+        square = roundrect.rows(
+            SWATCH_SIZE, SWATCH_SIZE, material.SHAPE_EXTRA_SMALL, value,
+            self.roles[ground], border=self.roles["outline"], border_width=1)
+        # Wider than it is tall: a menu entry has no padding to give, so the
+        # gap between the colour and its name is part of the picture.
+        blank = [self.roles[ground]] * SWATCH_GAP
+        return _photo([row + blank for row in square])
+
+    def _add_entry(self, key, label, value):
+        menu, variable = self._menu_parts[key]
+        menu.add_radiobutton(label=label, value=label, variable=variable,
+                             image=self._swatch(value, "surface_container"),
+                             compound="left", indicatoron=False,
+                             hidemargin=True)
+
+    def _show_swatch(self, key):
+        """Put the chosen colour on the button, where it can be seen."""
+        button = self._widgets[key]
+        image = self._swatch(self._value_for(key, button.cget("text")),
+                             "surface")
+        button.configure(image=image or "")
 
     def _label_for(self, key, value):
         """The entry for a configured value, added to the menu if it is new.
@@ -1460,8 +1548,7 @@ class Panel:
         if label is not None:
             return label
         choices.append((value, value))
-        self._widgets[key].configure(
-            values=[entry for entry, _value in choices])
+        self._add_entry(key, value, value)
         return value
 
     def _value_for(self, key, label):

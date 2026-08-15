@@ -196,6 +196,30 @@ def draw_check(picture, color, thickness=2.2, box=None):
     return picture
 
 
+def draw_chevron(picture, color, thickness=2.0, box=None, up=False):
+    """Two strokes meeting in a point: the mark on a drop-down.
+
+    Drawn rather than left to the widget set, because the two kinds of
+    drop-down here draw it differently - one a hairline, the other a triangle
+    half the height of the field - and a page carrying both wants one mark.
+    """
+    if box is None:
+        box = (0, 0, len(picture[0]), len(picture))
+    left, top, width, height = box
+    near, far = (0.62, 0.38) if up else (0.38, 0.62)
+    points = ((left + 0.22 * width, top + near * height),
+              (left + 0.50 * width, top + far * height),
+              (left + 0.78 * width, top + near * height))
+    for y in range(max(0, int(top)), min(len(picture), int(top + height) + 1)):
+        for x in range(max(0, int(left)),
+                       min(len(picture[0]), int(left + width) + 1)):
+            ink = max(segment_coverage(x, y, points[0], points[1], thickness),
+                      segment_coverage(x, y, points[1], points[2], thickness))
+            if ink > 0:
+                picture[y][x] = blend(picture[y][x], color, ink)
+    return picture
+
+
 def disc_coverage(x, y, centre_x, centre_y, radius):
     """How much of this pixel a filled circle covers, 0..1."""
     return max(0.0, min(1.0, radius + 0.5
