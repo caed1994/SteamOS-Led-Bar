@@ -461,7 +461,7 @@ install_achievement_watcher() {
     if ! watcher_user_dirs; then
         warn "cannot tell which desktop user to install the watcher for."
         warn "Run the installer with sudo from your normal account, or start"
-        warn "it yourself - see \"Flashing on a real achievement\" in the README."
+        warn "it yourself - see \"Achievements, messages and friends\" in the README."
         WATCHER_STATUS="NOT installed - run the installer with sudo from your account"
         return 1
     fi
