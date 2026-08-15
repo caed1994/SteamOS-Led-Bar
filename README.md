@@ -10,11 +10,6 @@ Personalization menu in SteamOS Game Mode, download progress included.
 &mdash; all twenty of them on a simulated strip, with the explanation beside
 each. The pictures further down are stills from the same frames.
 
-This is the USB variant of
-[rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release),
-which connects the ESP over Wi-Fi. Same kernel module, different transport: no
-Wi-Fi, no IP configuration, no access point.
-
 ## Contents
 
 1. [Quick start](#quick-start)
@@ -895,10 +890,41 @@ python3 -m unittest discover -s tests   # effects, protocol, config, plus an
 ./tests/firmware/run.sh                 # firmware parser on the PC (needs g++)
 ```
 
-## Origin and licence
+## Origin and credits
 
-The kernel module in `leds-valve-shim/` is taken unmodified from
-[rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release)
-and is licensed **GPL-2.0-or-later**; it names Valve Corporation and Anna Oake
-as its authors. Details, checksums and the vendored commit are in
-[leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
+Inspired by
+**[rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release)**,
+which mirrors the same bar over Wi-Fi. This one went a different way &ndash; a USB
+serial link, all rendering on the PC and a deliberately dumb firmware &ndash; but the
+idea started there, and so did the kernel module below.
+
+### The kernel module
+
+`leds-valve-shim/` is vendored **unmodified** and licensed **GPL-2.0-or-later**.
+It names **Valve Corporation** and **Anna Oake** as its authors. That licence
+applies to that directory on its own terms, independently of the rest of this
+repository: anyone changing the code in there has to release those changes under
+GPL-2.0+ as well. The vendored commit, the checksums and the full licence text
+are in [leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
+
+### What the firmware is built on
+
+None of this is shipped here. PlatformIO fetches the first two at build time,
+but they end up inside the binary you flash, which is why they are named.
+
+| | |
+| --- | --- |
+| **[NeoPixelBus](https://github.com/Makuna/NeoPixelBus)** by Michael C. Miller | LGPL-3.0-or-later. Clocks the WS2812 protocol, on the ESP8266 straight out of the UART so serial reception never stalls. The one part of the firmware nobody should write themselves. |
+| **Arduino cores** for [ESP8266](https://github.com/esp8266/Arduino) and [ESP32](https://github.com/espressif/arduino-esp32) | Each under its own licence. Everything below `Serial` and `pinMode`. |
+| **[PlatformIO](https://platformio.org/)** | Builds and flashes it. Not linked into anything. |
+
+### Valve
+
+Beyond the module: the bar, its effects and the parameters this reproduces are
+Valve's design &ndash; the renderer here is a reimplementation of what a real Steam
+Machine runs on its own microcontroller. Achievement detection loads
+`libsteam_api.so` out of your own Steam installation at runtime; nothing from
+the Steamworks SDK is redistributed here.
+
+Everything else &ndash; the service, the protocol, the firmware around NeoPixelBus,
+the control panel and the tests &ndash; was written for this project.
