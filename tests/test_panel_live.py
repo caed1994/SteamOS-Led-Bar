@@ -178,6 +178,31 @@ class LiveWindowTest(unittest.TestCase):
                         "at %d px wide, %r is cut off"
                         % (width, label.cget("text")[:40]))
 
+    def test_the_preview_strip_fills_the_room_it_is_given(self):
+        # The strip is laid out for the canvas it ends up with rather than
+        # drawn at one fixed size, so what has to hold is that seventeen LEDs
+        # land inside it, in order and without overlapping, at any width.
+        self.panel.notebook.select(self.panel.preview_tab)
+        canvas = self.panel.preview_canvas
+        for width in (900, 1360, 840):
+            self.root.geometry("%dx900" % width)
+            for _ in range(6):
+                self.root.update()
+            boxes = [canvas.coords(body)
+                     for _halo, body, _spill in self.panel._preview_items]
+            self.assertEqual(len(boxes), 17)
+            self.assertGreaterEqual(min(box[0] for box in boxes), 0, width)
+            self.assertLessEqual(max(box[2] for box in boxes),
+                                 canvas.winfo_width(), width)
+            self.assertLessEqual(max(box[3] for box in boxes),
+                                 canvas.winfo_height(), width)
+            for left, right in zip(boxes, boxes[1:]):
+                self.assertLess(left[2], right[0],
+                                "the LEDs overlap at %d px wide" % width)
+            # And they are worth looking at: an LED thinner than this is a
+            # line, not a preview.
+            self.assertGreater(boxes[0][2] - boxes[0][0], 12, width)
+
     def test_the_log_folds_away_until_something_writes_to_it(self):
         self.assertFalse(self.panel._output_open)
         self.assertFalse(self.panel.output_box.winfo_ismapped())

@@ -275,7 +275,10 @@ INDENT_STEP = 5 * material.SPACE
 # gets when it starts a new block - the switch that a stepped-in pair hangs
 # off. With every control the same height, that extra is the only thing saying
 # where one block ends and the next begins.
-ROW_PAD = 1 * material.SPACE
+# Six a side, so twelve between one control and the next - Material's own
+# spacing for a list of them. Four left two filled shapes forty pixels tall
+# looking glued together, which is what a switch above a drop-down was.
+ROW_PAD = 6
 BLOCK_GAP = 4 * material.SPACE
 
 # The type scale, as offsets from whatever size the desktop is set to. Material
@@ -1469,49 +1472,43 @@ class Panel:
     BUTTONS_ACROSS = 4
 
     PREVIEW_FPS = 25
-    PREVIEW_CELL = 28
-    PREVIEW_GAP = 5
-    PREVIEW_BAR = 34
-    PREVIEW_MARGIN = 12
-    PREVIEW_SPILL = 9
+    # The stage takes whatever room the page has left and the strip is laid
+    # out to fit it, rather than being drawn at one fixed size in the corner.
+    # It is the thing this page is for, so it should be the thing on it.
+    PREVIEW_CELL_MAX = 56       # a wide window must not give absurd LEDs
+    PREVIEW_BAR_MAX = 84
+    PREVIEW_MARGIN = 16
+    PREVIEW_MIN_HEIGHT = 150
 
     def _build_preview(self, parent):
         """A simulated strip, so an effect can be looked at before it is set."""
         outer = ttk.Frame(parent)
 
-        leds = shim.LOGICAL_LEDS
-        width = (leds * self.PREVIEW_CELL + (leds - 1) * self.PREVIEW_GAP
-                 + self.PREVIEW_MARGIN * 2)
-        height = self.PREVIEW_MARGIN * 2 + self.PREVIEW_BAR + self.PREVIEW_SPILL * 2
-
         # The stage keeps its own dark backdrop whatever the desktop is set to
         # - a strip is judged against a dim room, not against the theme - so it
-        # is a raised panel rather than part of the page.
+        # is a raised panel rather than part of the page. It expands: the page
+        # is shorter than the tallest one and the slack has to go somewhere,
+        # and a dim room with a strip in the middle of it is a better use of
+        # that room than blank window.
         stage = ttk.Frame(outer, style="Card.TFrame", padding=10)
-        stage.pack(padx=SIDE_MARGIN, pady=(GROUP_GAP, ROW_GAP))
+        stage.pack(fill="both", expand=True, padx=SIDE_MARGIN,
+                   pady=(GROUP_GAP, ROW_GAP))
         self.preview_canvas = tk.Canvas(
-            stage, width=width, height=height, highlightthickness=0,
+            stage, height=self.PREVIEW_MIN_HEIGHT, highlightthickness=0,
             background=preview_module.BACKDROP)
-        self.preview_canvas.pack()
+        self.preview_canvas.pack(fill="both", expand=True)
+        self.preview_canvas.bind("<Configure>", self._preview_layout)
 
-        # Built once and only recoloured afterwards: creating seventeen times
-        # four items twenty-five times a second is how a canvas gets slow.
+        # Built once and only moved and recoloured afterwards: creating
+        # seventeen times four items twenty-five times a second is how a canvas
+        # gets slow. The coordinates are put in by _preview_layout, which is
+        # the only place that knows how much room there is.
         self._preview_items = []
-        for index in range(leds):
-            left = self.PREVIEW_MARGIN + index * (self.PREVIEW_CELL + self.PREVIEW_GAP)
-            top = self.PREVIEW_MARGIN
-            halo = self.preview_canvas.create_rectangle(
-                left - 4, top - 4, left + self.PREVIEW_CELL + 4,
-                top + self.PREVIEW_BAR + 4, width=0)
-            body = self.preview_canvas.create_rectangle(
-                left, top, left + self.PREVIEW_CELL, top + self.PREVIEW_BAR,
-                width=0)
-            spill = []
-            for step in range(2):
-                spill_top = top + self.PREVIEW_BAR + 2 + step * self.PREVIEW_SPILL
-                spill.append(self.preview_canvas.create_rectangle(
-                    left - 3, spill_top, left + self.PREVIEW_CELL + 3,
-                    spill_top + self.PREVIEW_SPILL, width=0))
+        for _index in range(shim.LOGICAL_LEDS):
+            halo = self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
+            body = self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
+            spill = [self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
+                     for _step in range(2)]
             self._preview_items.append((halo, body, spill))
 
         self.preview_blurb = ttk.Label(outer, style="Muted.TLabel")
@@ -1548,11 +1545,28 @@ class Panel:
             "touched.").pack(anchor="w", padx=SIDE_MARGIN,
                              pady=(GROUP_GAP, GROUP_GAP))
 
+        # This page is shorter than the tallest one, and the slack has to land
+        # somewhere. Halved between the stage and here, so the room the strip
+        # stands in grows with the window without swallowing the lot - all of
+        # it left the strip adrift in the middle of a very large dark box.
+        ttk.Frame(outer).pack(fill="both", expand=True)
+
         self._preview = preview_module.Preview()
         self._preview_job = None
         self._preview_started = None
+        # The animation has a frame booked at all times while the page is up.
+        # Closing the window would leave that one to fire at a callback that
+        # no longer exists, which Tk reports as an invalid command name.
+        self.root.bind("<Destroy>", self._stop_preview, add="+")
         self._preview_chosen()
         return outer
+
+    def _stop_preview(self, event=None):
+        if event is not None and event.widget is not self.root:
+            return                              # a child of ours, not the window
+        if self._preview_job is not None:
+            self.root.after_cancel(self._preview_job)
+            self._preview_job = None
 
     def _preview_chosen(self):
         """Restart the clock, so a shape is seen from its beginning."""
@@ -1564,6 +1578,43 @@ class Panel:
         self._preview = preview_module.Preview()
         if self._preview_job is None and self._preview_visible():
             self._preview_tick()
+
+    def _preview_layout(self, _event=None):
+        """Lay the strip out for the room the canvas actually has.
+
+        Sized from the width - seventeen LEDs across it, whatever it is - and
+        centred in the height, so the strip sits in the middle of its dim room
+        however tall the page leaves that room.
+        """
+        width = self.preview_canvas.winfo_width()
+        height = self.preview_canvas.winfo_height()
+        if width < 80 or height < 40:
+            return                              # not laid out yet
+        leds = len(self._preview_items)
+        gap = max(4, width // 150)
+        cell = min(self.PREVIEW_CELL_MAX,
+                   (width - 2 * self.PREVIEW_MARGIN - (leds - 1) * gap) // leds)
+        cell = max(4, cell)
+        bar = min(self.PREVIEW_BAR_MAX, int(cell * 1.4))
+        # The glow below the strip is what a real one throws onto the shelf it
+        # stands on, so it is a share of the strip rather than a fixed depth.
+        spill = max(5, bar // 4)
+        span = leds * cell + (leds - 1) * gap
+        first = (width - span) // 2
+        top = max(6, (height - bar - spill * 2) // 2)
+
+        # The halo grows with the LED rather than with the gap: it is the
+        # bloom around a bright thing, so a bigger thing blooms further.
+        edge = max(3, cell // 7)
+        for index, (halo, body, spill_items) in enumerate(self._preview_items):
+            left = first + index * (cell + gap)
+            self.preview_canvas.coords(halo, left - edge, top - edge,
+                                       left + cell + edge, top + bar + edge)
+            self.preview_canvas.coords(body, left, top, left + cell, top + bar)
+            for step, item in enumerate(spill_items):
+                below = top + bar + 2 + step * spill
+                self.preview_canvas.coords(item, left - edge, below,
+                                           left + cell + edge, below + spill)
 
     def _preview_visible(self):
         return (getattr(self, "preview_tab", None) is not None
