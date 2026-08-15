@@ -77,7 +77,7 @@ COMET_MIN_TAIL = 1.0
 # The sparkle, in seconds like the flashes: a grain of glitter is a grain of
 # glitter whether the notification lasts two seconds or ten, and stretching
 # one into a slow fade would turn the whole effect into a lava lamp.
-SPARK_LIFE = 0.33           # how long one grain stays visible
+SPARK_LIFE = 0.50           # how long one grain stays visible
 # Each LED gets its own period out of this range. Nothing shared, nothing in a
 # whole ratio to anything else - that is what stops the strip from settling
 # into a rhythm and starting to look like a pattern.
@@ -85,8 +85,8 @@ SPARK_LIFE = 0.33           # how long one grain stays visible
 # The life and the two ends move together: how densely the strip is covered is
 # life divided by period, so scaling all three keeps the same amount of light
 # on the bar and only changes how hurried it looks.
-SPARK_PERIOD_MIN = 0.60
-SPARK_PERIOD_MAX = 1.70
+SPARK_PERIOD_MIN = 0.90
+SPARK_PERIOD_MAX = 2.55
 # Two irrationals, used to give each LED a period and a head start. The
 # fractional parts of their multiples spread evenly and never repeat, which is
 # a well-behaved substitute for randomness - and unlike randomness it draws
