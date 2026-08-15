@@ -1059,6 +1059,18 @@ class SparkleShapeTest(ShapeTestCase):
         early = max(max(levels) for levels in self._samples(overlay, 40)[:20])
         self.assertLess(late, early)
 
+    def test_the_strip_is_neither_bare_nor_covered(self):
+        # How densely it glitters is the grain's life divided by its period,
+        # so the three constants have to move together. Lengthening only the
+        # life turns it into a slow shimmer; lengthening only the period
+        # leaves a bar with one lonely grain on it.
+        overlay = self._overlay()
+        samples = self._samples(overlay, 200)
+        lit = sum(1 for levels in samples for level in levels if level > 0)
+        share = lit / float(len(samples) * self.LEDS)
+        self.assertGreater(share, 0.12, "too sparse to read as glitter")
+        self.assertLess(share, 0.55, "too dense to read as separate grains")
+
     def test_the_tempo_does_not_stretch_with_the_duration(self):
         # Timed in seconds like the flashes: a longer notification means more
         # glitter, not slower glitter.
