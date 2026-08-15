@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LED-Bar Effektkatalog</title>
-<meta name="description" content="Alle Effekte der SteamOS-LED-Leiste, abgespielt aus echten Frames des Renderers.">
+<title>LED Bar Effect Catalogue</title>
+<meta name="description" content="Every effect the SteamOS LED bar can show, played back from real frames of the renderer.">
 <style>
   /* One committed visual world: an LED strip is judged in a dim room, and a
      white page would misrepresent every colour on it. The chrome is kept
@@ -70,6 +70,15 @@
     color: var(--ink-faint);
     margin: 0;
   }
+
+  a {
+    color: var(--ink-dim);
+    text-decoration-color: var(--edge);
+    text-underline-offset: 0.2em;
+  }
+
+  a:hover { color: var(--ink); text-decoration-color: var(--ink-faint); }
+  a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
   h1 {
     font-family: var(--mono);
@@ -339,16 +348,16 @@
 <body>
 <div class="wrap">
   <header class="masthead">
-    <p class="eyebrow"><a href="https://github.com/caed1994/SteamOS-Led-Bar">SteamOS LED Bar</a> &middot; 17 LEDs &middot; echte Frames aus dem Renderer</p>
-    <h1>LED-Bar Effektkatalog</h1>
-    <p class="standfirst">Alles, was die Leiste zeigen kann &ndash; Steams eigene Effekte, was wir
-      in den Rainbow-Slot stellen k&ouml;nnen, die Blitzformen f&uuml;r Benachrichtigungen und
-      das, was der ESP allein zeichnet. Kein Nachbau: die Bilder kommen Frame f&uuml;r Frame
-      aus <code>render.py</code> und <code>notify.py</code>, so wie sie auch &uuml;ber USB gehen.</p>
+    <p class="eyebrow"><a href="https://github.com/caed1994/SteamOS-Led-Bar">SteamOS LED Bar</a> &middot; 17 LEDs &middot; real frames from the renderer</p>
+    <h1>LED Bar Effect Catalogue</h1>
+    <p class="standfirst">Everything the bar can show &ndash; Steam's own effects, what can
+      stand in the rainbow slot, the flash shapes for notifications, and what the ESP
+      draws on its own. Not a reconstruction: these frames come out of
+      <code>render.py</code> and <code>notify.py</code>, the same ones that go over USB.</p>
   </header>
 
-  <section class="stage" aria-label="Vorschau der LED-Leiste">
-    <div class="bar" id="bar" role="img" aria-label="Simulierte LED-Leiste mit 17 Dioden"></div>
+  <section class="stage" aria-label="Preview of the LED bar">
+    <div class="bar" id="bar" role="img" aria-label="Simulated LED bar with 17 diodes"></div>
     <div class="spill" id="spill" aria-hidden="true"></div>
     <div class="readout">
       <span id="clock">0.0 s</span>
@@ -358,32 +367,31 @@
 
   <div class="controls">
     <button class="chip" id="playpause" aria-pressed="true">Pause</button>
-    <button class="chip" id="slowmo" aria-pressed="false">Zeitlupe 4&times;</button>
+    <button class="chip" id="slowmo" aria-pressed="false">Slow motion 4&times;</button>
     <div class="variants" id="variants" hidden>
       <span class="label" id="variant-label"></span>
       <div class="chip-row" id="variant-chips" style="display:flex;gap:0.4rem"></div>
     </div>
   </div>
 
-  <nav class="catalogue" id="catalogue" aria-label="Effekt w&auml;hlen"></nav>
+  <nav class="catalogue" id="catalogue" aria-label="Pick an effect"></nav>
 
   <section class="sheet">
     <div class="prose" id="prose"></div>
     <table class="facts">
-      <caption>Wie es gebaut ist</caption>
+      <caption>How it is built</caption>
       <tbody id="facts"></tbody>
     </table>
   </section>
 
-  <p class="foot">Ein Bildschirm ist kein WS2812: echte Dioden sind deutlich greller und ihr
-    Streulicht ist st&auml;rker, vor allem bei Fire. Die beiden Atemanimationen unten sind
-    dagegen wirklich so dunkel, wie sie hier aussehen &ndash; deswegen gibt es dort einen
-    Knopf zum Aufhellen. Zum Anschauen auf der echten Leiste:
-    <code>steamos-led-serial --simulate rainbow</code> zeigt, was
-    <code>RAINBOW_SHOWS</code> gerade sagt, und der Formen-Tester im Test-Tab der GUI
-    feuert jede Blitzform einmal ab.</p>
+  <p class="foot">A screen is not a WS2812: real diodes are considerably brighter and
+    their spill is stronger, fire especially. The two breathing animations really are
+    as dim as they look here, though &ndash; which is why there is a button to brighten
+    them. To see any of this on the real strip:
+    <code>steamos-led-serial --simulate rainbow</code> draws whatever
+    <code>RAINBOW_SHOWS</code> currently says, and the shape tester on the control
+    panel's Test tab fires each flash shape once.</p>
 </div>
-
 <script>
 (function () {
   "use strict";
@@ -420,64 +428,63 @@
       parsed[name].mono = mono;
       return parsed[name];
     }
-
     var SHAPE_COLOURS = {
-      label: "Farbe",
+      label: "Colour",
       options: [
-        { label: "Steam-Blau", tint: STEAM_BLUE },
+        { label: "Steam blue", tint: STEAM_BLUE },
         { label: "Achievement", tint: GOLD },
-        { label: "Nachricht", tint: PURPLE }
+        { label: "Message", tint: PURPLE }
       ]
     };
 
     var BOOST = {
-      label: "Anzeige",
+      label: "Shown",
       options: [
-        { label: "Original", gain: 1 },
-        { label: "6\u00d7 heller", gain: 6 }
+        { label: "Actual", gain: 1 },
+        { label: "6\u00d7 brighter", gain: 6 }
       ]
     };
 
     var CATALOGUE = [
       {
-        group: "Steam-Effekte",
-        why: "Was Steams Personalization-Men\u00fc anbietet. Farbe und Tempo kommen von dort.",
+        group: "Steam's own",
+        why: "What Steam's Personalization menu offers. Colour and speed come from there.",
         items: [
           {
-            id: "static", name: "Statisch", gloss: "Eine Farbe, so wie gew\u00e4hlt",
+            id: "static", name: "Static", gloss: "One colour, as picked",
             clip: "static", lit: "#1a9fff",
             body: [
-              "Steam schreibt hier nicht <em>eine</em> Farbe, sondern alle siebzehn LEDs einzeln \u2013 jede mit eigener Helligkeit. Die Leiste kann also auch einen Verlauf zeigen, wenn Steam einen schickt; meistens schickt es \u00fcberall dasselbe.",
-              "Das ist der einzige Effekt, bei dem sich nichts bewegt. Der Dienst merkt das und f\u00e4llt auf die Leerlauf-Bildrate zur\u00fcck, statt viermal pro Sekunde dasselbe Bild \u00fcber USB zu schieben."
+              "Steam does not write <em>one</em> colour here but all seventeen LEDs separately, each with its own brightness. So the bar can show a gradient if Steam sends one; mostly it sends the same thing everywhere.",
+              "The only effect where nothing moves. The service notices and drops to the idle frame rate rather than pushing the same picture down the wire sixty times a second."
             ],
-            facts: [["Steam-Effekt", "manual / normal"], ["Bewegung", "keine"],
-                    ["Bildrate", "IDLE_FPS, 4 fps"], ["Aufl\u00f6sung", "17 LEDs einzeln"]]
+            facts: [["Steam effect", "manual / normal"], ["Movement", "none"],
+                    ["Frame rate", "IDLE_FPS, 4 fps"], ["Resolution", "17 LEDs, each its own"]]
           },
           {
-            id: "rainbow", name: "Rainbow", gloss: "Der Farbkreis, einmal rundherum",
+            id: "rainbow", name: "Rainbow", gloss: "The hue circle, once around",
             clip: "rainbow", lit: "linear-gradient(180deg,#ff0040,#ffd000,#00e05a,#00a2ff,#a26bff)",
             body: [
-              "Der Farbkreis einmal \u00fcber die Leiste verteilt und dann durchgedreht. Bei Steams Standard-Tempo dauert ein Umlauf 3,5 Sekunden; der Verz\u00f6gerungsregler in Steam streckt ihn bis auf das Zweieinhalbfache.",
-              "Das ist auch der Eintrag, den wir \u00fcbernehmen, wenn wir etwas Eigenes zeigen wollen \u2013 Steams Men\u00fc l\u00e4sst sich nicht erweitern, und der Regenbogen ist der Effekt, auf den die meisten am ehesten verzichten."
+              "The hue circle spread across the bar and turned. One trip takes 3.5 seconds at Steam's default speed; the delay slider in Steam stretches that to two and a half times as long.",
+              "This is also the entry we take over to show anything of our own. Steam's menu cannot be extended &ndash; its entries are built into the client &ndash; and the rainbow is the one most people give up most readily."
             ],
-            facts: [["Zyklus", "3,5 s"], ["Steam-Farbregler", "verschiebt den Startpunkt"],
-                    ["S\u00e4ttigung", "voll"], ["Wird ersetzt von", "RAINBOW_SHOWS"]]
+            facts: [["Cycle", "3.5 s"], ["Steam colour slider", "moves the starting point"],
+                    ["Saturation", "full"], ["Replaced by", "RAINBOW_SHOWS"]]
           },
           {
-            id: "breath", name: "Breath", gloss: "Ein- und ausatmen",
+            id: "breath", name: "Breath", gloss: "In and out",
             clip: "breath", lit: "#1a9fff",
             body: [
-              "Eine Farbe, die ein- und ausatmet: ein angehobener Kosinus \u00fcber einen Zyklus. Angehoben, weil ein Atem, der auf null geht, kein Atem mehr ist, sondern ein Blinken \u2013 die dunkelste Stelle liegt bei 6 Prozent.",
-              "Dieselbe Kurve zeichnet auch die Bootanimation und den Standby-Puls weiter unten. Ein Atemzug soll \u00fcberall gleich aussehen, egal wer ihn gerade malt."
+              "One colour breathing in and out: a raised cosine over a cycle. Raised, because a breath that reaches zero is not a breath any more but a blink &ndash; the darkest point sits at 6 per cent.",
+              "The same curve draws the startup animation and the standby pulse further down. A breath should look the same everywhere, whoever happens to be drawing it."
             ],
-            facts: [["Zyklus", "1,6 s"], ["Dunkelste Stelle", "6 %"],
-                    ["Kurve", "angehobener Kosinus"], ["Farbe", "aus Steam"]]
+            facts: [["Cycle", "1.6 s"], ["Darkest point", "6 %"],
+                    ["Curve", "raised cosine"], ["Colour", "from Steam"]]
           },
           {
-            id: "patrol", name: "Patrol", gloss: "Punkte laufen hin und her",
+            id: "patrol", name: "Patrol", gloss: "Dots running back and forth",
             clip: "patrol_1", lit: "#1a9fff",
             variants: {
-              label: "Punkte",
+              label: "Dots",
               options: [
                 { label: "1", clip: "patrol_1" },
                 { label: "2", clip: "patrol_2" },
@@ -485,183 +492,183 @@
               ]
             },
             body: [
-              "Punkte, die von einem Ende zum anderen und zur\u00fcck laufen. Kein harter Punkt, sondern eine Glockenkurve \u00fcber gut zwei LEDs \u2013 auf siebzehn Dioden w\u00e4re ein einzelner leuchtender Pixel eher ein Defekt als ein Effekt.",
-              "Mehrere Punkte werden <em>zeitlich</em> versetzt, nicht r\u00e4umlich. Versch\u00f6be man sie im Raum, m\u00fcsste ein Punkt am Streifenende f\u00fcr ein Bild auf LED 0 springen. So starten sie einfach zu verschiedenen Momenten dieselbe Bahn."
+              "Dots running from one end to the other and back. Not a hard dot but a bell curve across a good two LEDs &ndash; on seventeen diodes a single lit pixel reads as a defect rather than an effect.",
+              "Several dots are offset in <em>time</em>, not in space. Offset in space, a dot sitting at the far end would have to jump back to LED 0 for one frame. This way they simply start the same path at different moments."
             ],
-            facts: [["Zyklus", "2,5 s hin und zur\u00fcck"], ["Punktbreite", "\u2248 2,2 LEDs"],
-                    ["Anzahl", "PATROL_DOTS, 1 \u2013 3"], ["Versatz", "in der Zeit"]]
+            facts: [["Cycle", "2.5 s there and back"], ["Dot width", "≈ 2.2 LEDs"],
+                    ["Count", "PATROL_DOTS, 1 – 3"], ["Offset", "in time"]]
           },
           {
-            id: "demo", name: "Demo", gloss: "Regenbogen unter einer Atemh\u00fclle",
+            id: "demo", name: "Demo", gloss: "Rainbow under a breathing envelope",
             clip: "demo", lit: "linear-gradient(180deg,#ffd000,#00a2ff,#a26bff)",
             body: [
-              "Der Regenbogen, \u00fcber den eine zweite, langsamere Atemkurve gelegt wird. Zwei Zyklen laufen gegeneinander \u2013 3,5 Sekunden f\u00fcr die Farbe, 3,2 f\u00fcr die Helligkeit \u2013, also wiederholt sich das Bild praktisch nie.",
-              "Valve hat den Effekt f\u00fcr die Auslage gebaut: er zeigt in wenigen Sekunden alles, was die Leiste kann."
+              "The rainbow with a second, slower breath laid over it. Two cycles run against each other &ndash; 3.5 seconds for the colour, 3.2 for the brightness &ndash; so the picture practically never repeats.",
+              "Valve built it for the shop shelf: it shows everything the bar can do inside a few seconds."
             ],
-            facts: [["Farbzyklus", "3,5 s"], ["Atemzyklus", "3,2 s"],
-                    ["Dunkelste Stelle", "6 %"]]
+            facts: [["Colour cycle", "3.5 s"], ["Breath cycle", "3.2 s"],
+                    ["Darkest point", "6 %"]]
           },
           {
-            id: "factory", name: "Factory", gloss: "Rot, Gr\u00fcn, Blau, Wei\u00df",
+            id: "factory", name: "Factory", gloss: "Red, green, blue, white",
             clip: "factory", lit: "linear-gradient(180deg,#ff0000,#00ff00,#0000ff,#ffffff)",
             body: [
-              "Valves Pr\u00fcfbild: jede Grundfarbe eine Sekunde lang \u00fcber die ganze Leiste, dann Wei\u00df. Kein Effekt zum Anschauen, sondern einer zum Nachsehen.",
-              "Wenn ein Kanal nicht schaltet oder eine Diode tot ist, sieht man es hier sofort \u2013 bei Wei\u00df f\u00e4llt eine fehlende Farbe als Farbstich auf, bei den drei Einzelfarben als dunkle L\u00fccke."
+              "Valve's test pattern: each primary for a second across the whole bar, then white. Not an effect to watch but one to check against.",
+              "A channel that will not switch, or a dead diode, shows up at once &ndash; on white a missing colour reads as a cast, on the three primaries as a dark gap."
             ],
-            facts: [["Je Farbe", "1,0 s"], ["Reihenfolge", "rot, gr\u00fcn, blau, wei\u00df"],
-                    ["Zweck", "Kanal- und Diodentest"]]
+            facts: [["Per colour", "1.0 s"], ["Order", "red, green, blue, white"],
+                    ["What it is for", "channel and diode test"]]
           }
         ]
       },
       {
-        group: "Im Rainbow-Slot",
-        why: "Der eine Eintrag, den wir \u00fcbernehmen k\u00f6nnen. RAINBOW_SHOWS entscheidet, was drinsteht.",
+        group: "In the rainbow slot",
+        why: "The one entry we can take over. RAINBOW_SHOWS decides what stands in it.",
         items: [
           {
-            id: "temperature", name: "Temperature", gloss: "Farbe tr\u00e4gt die W\u00e4rme",
+            id: "temperature", name: "Temperature", gloss: "Colour carries the heat",
             clip: "temperature", lit: "linear-gradient(180deg,#00ff00,#ffff00,#ff0000)",
             body: [
-              "Die ganze Leiste in einer Farbe, und die Farbe ist die Ablesung: gr\u00fcn solange es k\u00fchl ist, rot wenn es hei\u00df wird, dazwischen gemischt. Kein Balken, der sich f\u00fcllt \u2013 eine teilweise dunkle Leiste sagt zwei Dinge gleichzeitig, ihre L\u00e4nge und ihre Farbe, und nur eines davon war je die Antwort.",
-              "Wo die Skala sitzt, bestimmen zwei Regler: <em>TEMPERATURE_MIN</em> ist, wo Gr\u00fcn endet, <em>TEMPERATURE_MAX</em>, wo Rot beginnt. Gelb landet automatisch in der Mitte. Hier l\u00e4uft ein simulierter Anstieg von 25 auf 95 Grad und zur\u00fcck."
+              "The whole bar in one colour, and the colour is the reading: green while it is cool, red once it is hot, mixed in between. Not a filling bar &ndash; a partly dark bar says two things at once, its length and its colour, and only one of them was ever the answer.",
+              "Two settings place that scale: <em>TEMPERATURE_MIN</em> is where green ends, <em>TEMPERATURE_MAX</em> where red begins. Yellow lands halfway between them on its own. Shown here is a simulated climb from 25 to 95 degrees and back."
             ],
-            facts: [["Skala", "TEMPERATURE_MIN / MAX"], ["Standard", "40 / 80 \u00b0C"],
-                    ["Gelb", "genau dazwischen"], ["Sensor", "1\u00d7 pro Sekunde, \u00fcber 6 s gegl\u00e4ttet"],
-                    ["Hier gezeigt", "simulierter Sweep 25 \u2192 95 \u00b0C"]]
+            facts: [["Scale", "TEMPERATURE_MIN / MAX"], ["Default", "40 / 80 °C"],
+                    ["Yellow", "exactly between them"],
+                    ["Sensor", "once a second, smoothed over 6 s"],
+                    ["Shown here", "simulated sweep 25 → 95 °C"]]
           },
           {
-            id: "load", name: "Load", gloss: "CPU und GPU, aus der Mitte heraus",
+            id: "load", name: "Load", gloss: "CPU and GPU, out of the middle",
             clip: "load", lit: "linear-gradient(180deg,#ff6e00,#1a9fff)",
             body: [
-              "Zwei Balken wachsen aus der Mitte: CPU nach links in Bernstein, GPU nach rechts in Blau. Hier tr\u00e4gt die <em>L\u00e4nge</em> den Wert, nicht die Farbe \u2013 Auslastung hat eine echte Null und ein echtes Voll, Temperatur hat weder noch.",
-              "Aus der Mitte heraus, weil die beiden Werte gleichrangig sind. Hintereinander gestapelt l\u00e4ge einer am Streifenende, und dort schaut man zuletzt hin. Die innerste LED jeder Seite geht nie ganz aus, sonst s\u00e4he ein ruhiger Rechner aus wie ein abgeschalteter Streifen.",
-              "Gezeigt wird hier ein Durchlauf vom Leerlauf \u00fcber ein Men\u00fc bis ins Spiel und zur\u00fcck."
+              "Two bars grow out of the middle: CPU to the left in amber, GPU to the right in blue. Here the <em>length</em> carries the value rather than the colour &ndash; load has a real zero and a real full, temperature has neither.",
+              "Out of the middle because the two readings are peers. Stacked end to end, one of them would sit at the far end of the strip, which is where you look last. The innermost LED of each side never goes fully dark, or an idle machine looks like a strip somebody switched off.",
+              "Shown here is a run from idle through a menu into a game and back."
             ],
             facts: [["CPU", "/proc/stat"], ["GPU", "amdgpu gpu_busy_percent"],
-                    ["Ablesung", "4\u00d7 pro Sekunde, \u00fcber 0,6 s gegl\u00e4ttet"],
-                    ["Ohne GPU-Z\u00e4hler", "CPU auf beiden H\u00e4lften"],
-                    ["Mittlere LED", "bleibt als Trenner dunkel"]]
+                    ["Reading", "4× a second, smoothed over 0.6 s"],
+                    ["With no GPU counter", "CPU on both halves"],
+                    ["Middle LED", "stays dark, as the divider"]]
           },
           {
-            id: "fire", name: "Fire", gloss: "Flamme, die \u00fcber den Streifen zieht",
+            id: "fire", name: "Fire", gloss: "Flame drifting along the strip",
             clip: "fire", lit: "#ff8a2b",
             body: [
-              "Kein Flackern einzelner Dioden \u2013 das s\u00e4he nach Wackelkontakt aus, nicht nach Feuer. Was das Auge als Flamme liest, ist <em>wandernde Hitze</em>: drei Wellen laufen unterschiedlich schnell \u00fcber den Streifen und werden addiert.",
-              "Ihre Geschwindigkeiten stehen in keinem ganzzahligen Verh\u00e4ltnis zueinander, die Summe wiederholt sich also nie. Deswegen findest du keinen Takt, an dem du dich festhalten kannst \u2013 genau das unterscheidet Feuer von einer Animation.",
-              "Die Farben laufen von dunkler Glut \u00fcber Orange bis fast Wei\u00df an den hei\u00dfesten Stellen. Ein Feuer wechselt beim Hei\u00dferwerden nicht die Farbe, es <em>entf\u00e4rbt</em> sich \u2013 darum sieht ein Regenbogen nie aus wie eine Flamme."
+              "No flickering of individual diodes &ndash; that looks like a loose contact, not like fire. What reads as flame is <em>travelling heat</em>: three waves run along the strip at different speeds and are added together.",
+              "Their speeds stand in no whole-number ratio to one another, so the sum never repeats. That is why there is no beat to catch hold of &ndash; which is exactly what separates a fire from an animation.",
+              "The colours run from dark embers through orange to nearly white at the hottest points. A fire does not change colour as it gets hotter, it <em>loses</em> colour &ndash; which is why a rainbow never looks like a flame."
             ],
-            facts: [["Grundzyklus", "4,0 s"], ["Wellen", "3, Tempo 1,00 / \u22121,71 / 2,53"],
-                    ["Farbskala", "5 St\u00fctzstellen, #280000 \u2192 #ffe696"],
-                    ["Steam-Farbregler", "wirkt nicht"], ["Steam-Tempo", "wirkt"]]
+            facts: [["Base cycle", "4.0 s"], ["Waves", "3, at 1.00 / −1.71 / 2.53"],
+                    ["Colour scale", "5 stops, #280000 → #ffe696"],
+                    ["Steam colour slider", "no effect"], ["Steam speed", "applies"]]
           },
           {
-            id: "aurora", name: "Aurora", gloss: "Langsame Vorh\u00e4nge, Gr\u00fcn bis Violett",
+            id: "aurora", name: "Aurora", gloss: "Slow curtains, green to violet",
             clip: "aurora", lit: "linear-gradient(180deg,#3ee08f,#46a6ff,#a26bff)",
             body: [
-              "Der ruhige Gegenentwurf zum Regenbogen. Zwei Wellen verschieben den Farbton, eine dritte die Helligkeit \u2013 und alle drei laufen unterschiedlich schnell. Dadurch driften die farbigen B\u00e4nder und die hellen B\u00e4nder <em>auseinander</em>, statt sich als ein leuchtender Block zu bewegen.",
-              "Der Farbton bleibt dabei bewusst in einem schmalen Fenster: Gr\u00fcn \u00fcber T\u00fcrkis und Blau bis Violett. Die warme H\u00e4lfte des Farbkreises ist gesperrt. L\u00e4sst man sie zu, wird daraus ein langsamer Regenbogen \u2013 und den gibt es schon.",
-              "Der Vorhang wird d\u00fcnner, geht aber nie ganz aus. Steams Farbregler verschiebt das ganze Fenster, du entscheidest also, wo der Vorhang steht."
+              "The calm counterpart to the rainbow. Two waves move the hue, a third the brightness &ndash; and all three run at different speeds. So the coloured bands and the bright bands drift <em>apart</em> instead of travelling as one lit block.",
+              "The hue stays inside a narrow window on purpose: green through turquoise and blue to violet. The warm half of the circle is off limits. Allow it in and this becomes a slow rainbow &ndash; and that one already exists.",
+              "The curtain thins but never goes out. Steam's colour slider moves the whole window, so you decide where the curtain sits."
             ],
-            facts: [["Grundzyklus", "9,0 s"], ["Farbfenster", "Hue 0,33 \u2013 0,71"],
-                    ["Wellen", "2 f\u00fcr Farbe, 1 f\u00fcr Helligkeit"],
-                    ["Dunkelste Stelle", "35 %"], ["Steam-Farbregler", "verschiebt das Fenster"]]
+            facts: [["Base cycle", "9.0 s"], ["Hue window", "0.33 – 0.71"],
+                    ["Waves", "2 for colour, 1 for brightness"],
+                    ["Darkest point", "35 %"], ["Steam colour slider", "moves the window"]]
           }
         ]
       },
       {
-        group: "Benachrichtigungen",
-        why: "Blitzformen. Sie legen sich f\u00fcr ein paar Sekunden \u00fcber alles andere und geben die Leiste dann zur\u00fcck.",
+        group: "Notification shapes",
+        why: "They take the whole bar for a few seconds and hand it straight back.",
         items: [
           {
-            id: "bloom", name: "Bloom", gloss: "Aus der Mitte auf, einmal atmen, zur\u00fcck",
+            id: "bloom", name: "Bloom", gloss: "Out of the middle, one breath, back",
             clip: "shape_bloom", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
             body: [
-              "Der Standard. W\u00e4chst aus der Mitte nach beiden Seiten heraus, atmet einmal in voller Breite und zieht sich wieder zur\u00fcck \u2013 ein Anfang, eine Mitte und ein Ende, in dieser Reihenfolge.",
-              "Die Kante ist weich gefedert statt hart. Ohne diese Federung springt die Front auf siebzehn LEDs von Diode zu Diode und sieht klobig aus."
+              "The default. Grows out of the middle to both sides, breathes once at full width and pulls back in &ndash; a beginning, a middle and an end, in that order.",
+              "The travelling edge is feathered rather than hard. Without that, the front steps from diode to diode on seventeen LEDs and looks blocky."
             ],
-            facts: [["Ausgefahren nach", "28 % der Dauer"], ["Zieht zur\u00fcck ab", "64 %"],
-                    ["Federung", "0,18 halbe Leiste"], ["Atem-Boden", "8 %"]]
+            facts: [["Fully out at", "28 % of the flash"], ["Pulls back from", "64 %"],
+                    ["Feather", "0.18 of the half-strip"], ["Breath floor", "8 %"]]
           },
           {
-            id: "pulse", name: "Pulse", gloss: "Die ganze Leiste schwillt an",
+            id: "pulse", name: "Pulse", gloss: "The whole bar swells",
             clip: "shape_pulse", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
             body: [
-              "Die ganze Leiste schwillt dreimal an und blendet am Ende aus. Die einfachste Form und die, die am wenigsten Aufmerksamkeit verlangt: kein Ort, keine Richtung, nur Helligkeit.",
-              "Weil sie in Anteilen der Dauer getaktet ist, bleiben es immer drei Schwellungen \u2013 eine l\u00e4ngere Benachrichtigung macht sie langsamer, nicht zahlreicher."
+              "The whole bar swells three times and fades out at the end. The simplest shape, and the one that asks for the least attention: no place, no direction, only brightness.",
+              "Because it is timed in fractions of the flash, it stays three swells &ndash; a longer notification makes them slower, not more numerous."
             ],
-            facts: [["Schwellungen", "3, immer"], ["Ausblenden", "letzte 25 %"],
-                    ["Takt", "in Anteilen der Dauer"]]
+            facts: [["Swells", "3, always"], ["Fades out over", "the last 25 %"],
+                    ["Timing", "in fractions of the flash"]]
           },
           {
-            id: "double_flash", name: "Double flash", gloss: "Blink, blink, Pause \u2013 und wieder",
+            id: "double_flash", name: "Double flash", gloss: "Blink, blink, pause – and again",
             clip: "shape_double_flash", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
             body: [
-              "Zwei kurze Blitze, eine Pause, und wieder. Ganze Leiste, harte Kanten \u2013 hier ist die Sch\u00e4rfe die Botschaft, das genaue Gegenteil dessen, was Bloom will.",
-              "In Sekunden getaktet, nicht in Anteilen: was einen Blitz zum Blitz macht, ist dass er <em>kurz</em> ist. Eine l\u00e4ngere Benachrichtigung gibt also mehr Paare, nicht langsamere. Angeschnittene Paare gibt es nicht \u2013 lieber ein gestauchtes als ein halbes."
+              "Two short blinks, a pause, and again. Whole bar, hard edges &ndash; here the sharpness is the message, which is the opposite of what the bloom wants.",
+              "Timed in seconds rather than in fractions: what makes a flash a flash is that it is <em>short</em>. So a longer notification means more pairs rather than slower ones. There are no half pairs, either &ndash; a compressed one sooner than a truncated one."
             ],
-            facts: [["Blitz", "0,08 s"], ["L\u00fccke im Paar", "0,08 s"],
-                    ["Von Paar zu Paar", "1,0 s"], ["Takt", "in Sekunden"]]
+            facts: [["Blink", "0.08 s"], ["Gap inside the pair", "0.08 s"],
+                    ["Pair to pair", "1.0 s"], ["Timing", "in seconds"]]
           },
           {
-            id: "comet", name: "Comet", gloss: "Kopf mit Schweif, einmal quer",
+            id: "comet", name: "Comet", gloss: "Head with a tail, once across",
             clip: "shape_comet", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
             body: [
-              "Ein heller Kopf zieht einmal \u00fcber die Leiste und l\u00e4sst einen Schweif hinter sich. Die einzige Form mit einem <em>Ort</em> \u2013 die anderen unterscheiden sich in der Zeit, diese im Raum, und das f\u00e4ngt das Auge auch dann, wenn man nicht hinsieht.",
-              "Sie startet vor der ersten LED und endet hinter der letzten, damit an keinem Ende ein Komet aus dem Nichts auftaucht oder auf der Kante stirbt. Die einzige Form, auf die REVERSE wirkt."
+              "A bright head crosses the bar once and drags a tail behind it. The only shape with a <em>place</em> &ndash; the others differ in time, this one in space, and that is what the eye catches without looking straight at it.",
+              "It starts before the first LED and ends past the last, so neither end gets a comet appearing out of nothing or dying on the edge. The only shape REVERSE applies to."
             ],
-            facts: [["Kopf", "6 % der Leiste"], ["Schweif", "33 %"],
-                    ["Helligkeit im Schweif", "quadratisch abfallend"],
-                    ["REVERSE", "dreht sie um"]]
+            facts: [["Head", "6 % of the strip"], ["Tail", "33 %"],
+                    ["Tail brightness", "falls off squared"], ["REVERSE", "turns it around"]]
           },
           {
-            id: "alternate", name: "Alternate", gloss: "Zwei H\u00e4lften im Gegentakt \u2013 die Warnung",
+            id: "alternate", name: "Alternate", gloss: "Two halves in antiphase – the warning",
             clip: "shape_alternate", lit: "#ff0000", tint: RED,
             body: [
-              "Links, rechts, links. Zwei Seiten im Gegentakt ist das, was ein Einsatzfahrzeug macht, und nichts sonst auf dieser Leiste sieht auch nur entfernt so aus. Die einzige Form, die \u201eetwas stimmt nicht\u201c sagt statt \u201eetwas ist passiert\u201c.",
-              "Deswegen ist sie die Warnung, und deswegen ist sie <em>festgenagelt</em>: immer diese Form, immer Rot. Eine Warnung ist die eine Benachrichtigung, die man nicht erkennen k\u00f6nnen muss. NOTIFY_WARNING sagt nur, ob sie \u00fcberhaupt kommt.",
-              "Auf ungerader Leiste bleibt die mittlere LED dunkel \u2013 erst das l\u00e4sst die zwei Seiten als zwei lesen."
+              "Left, right, left. Two sides in antiphase is what an emergency vehicle does, and nothing else on this bar looks remotely like it. The only shape that says “something is wrong” rather than “something happened”.",
+              "Which is why it is the warning, and why it is <em>fixed</em>: always this shape, always red. A warning is the one notification you must not have to recognise. NOTIFY_WARNING says whether it fires, and that is the whole setting.",
+              "On an odd strip the middle LED stays dark &ndash; that is what makes the two sides read as two."
             ],
-            facts: [["Periode", "0,5 s, beide Seiten"], ["Einschaltdauer je Seite", "45 %"],
-                    ["Farbe", "#ff0000, fest"], ["Mittlere LED", "bleibt dunkel"],
-                    ["Ausl\u00f6ser", "Sensor 5 \u00b0C unter seinem Limit, 60 s lang"]]
+            facts: [["Period", "0.5 s, both sides"], ["Lit per side", "45 % of it"],
+                    ["Colour", "#ff0000, fixed"], ["Middle LED", "stays dark"],
+                    ["Trigger", "a sensor within 5 °C of its limit for 60 s"]]
           },
           {
-            id: "sparkle", name: "Sparkle", gloss: "K\u00f6rner glitzern auf und klingen ab",
+            id: "sparkle", name: "Sparkle", gloss: "Grains light up and die out",
             clip: "shape_sparkle", lit: "#ffd700", tint: GOLD, variants: SHAPE_COLOURS,
             body: [
-              "Die einzige Blitzform <em>ohne Richtung und ohne Reihenfolge</em>. Die anderen f\u00fcnf sagen alle \u201ehier passiert etwas, schau hin\u201c \u2013 diese glitzert einfach.",
-              "Jede LED l\u00e4uft auf ihrer eigenen kleinen Uhr, mit eigener Periode zwischen 0,6 und 1,7 Sekunden und eigenem Vorlauf. Nichts marschiert, nichts trifft sich. Ein Korn geht sofort auf volle Helligkeit und klingt dann ab \u2013 Glitzer ist reiner Anschlag, ohne Anlauf.",
-              "Am Ende blendet der ganze Effekt aus, statt einfach zu stoppen: ein Korn, das mitten im Leben abgeschnitten wird, liest sich als Fehler und nicht als Schluss."
+              "The only flash shape <em>without a direction and without an order</em>. The other five all say “here is a thing, watch it happen” &ndash; this one just glitters.",
+              "Every LED runs its own little clock, at its own period between 0.6 and 1.7 seconds and with its own head start. Nothing marches and nothing lines up. A grain is lit the instant it starts and decays from there &ndash; glitter is all attack, with no run-up.",
+              "At the end the whole thing fades out rather than stopping: a grain cut off mid-life reads as a fault rather than as an ending."
             ],
-            facts: [["Lebensdauer je Korn", "0,33 s"], ["Periode je LED", "0,60 \u2013 1,70 s"],
-                    ["Belegung", "\u2248 5 von 17 LEDs"], ["Ausblenden", "letzte 25 %"],
-                    ["Takt", "in Sekunden"]]
+            facts: [["Life of one grain", "0.33 s"], ["Period per LED", "0.60 – 1.70 s"],
+                    ["Coverage", "≈ 5 of 17 LEDs"], ["Fades out over", "the last 25 %"],
+                    ["Timing", "in seconds"]]
           }
         ]
       },
       {
-        group: "Systemzust\u00e4nde",
-        why: "Zeichnet der ESP selbst \u2013 genau dann, wenn vom Rechner kein Bild kommt.",
+        group: "System states",
+        why: "Drawn by the ESP itself – precisely when no frame is coming from the PC.",
         items: [
           {
-            id: "startup", name: "Bootanimation", gloss: "Bernstein, bis Steam \u00fcbernimmt",
+            id: "startup", name: "Startup breath", gloss: "Amber, until Steam takes over",
             clip: "startup", lit: "#ff8a2b", variants: BOOST,
             body: [
-              "Nach dem Einschalten meldet das Kernelmodul \u201eaus\u201c, bis Steam die LEDs zum ersten Mal anfasst \u2013 und das dauert den gr\u00f6\u00dften Teil eines Bootvorgangs. Das getreu zu zeichnen w\u00e4re ein schwarzer Streifen.",
-              "Also atmet die Leiste stattdessen in Bernstein weiter, im Rhythmus der Firmware. Geschickt wird das vom Rechner aus, nicht der Firmware \u00fcberlassen: die Verbindung steht zu dem Zeitpunkt schon, und sie sp\u00e4ter aufzubauen w\u00fcrde das Board genau in dem Moment zur\u00fccksetzen, in dem Steam \u00fcbernimmt."
+              "After power-on the kernel module reports <em>off</em> until Steam touches the LEDs for the first time &ndash; and that is most of a boot. Rendering it faithfully would be a black strip.",
+              "So the bar breathes in amber instead, at the firmware's own rhythm. Sent from the PC rather than left to the firmware: the link is already up by then, and connecting later would reset the board at exactly the moment Steam takes over."
             ],
-            facts: [["Periode", "3,0 s"], ["Farbe", "#281000"], ["Dunkelste Stelle", "5 %"],
-                    ["Endet", "sobald Steam schreibt"]]
+            facts: [["Period", "3.0 s"], ["Colour", "#281000"], ["Darkest point", "5 %"],
+                    ["Ends", "the moment Steam writes"]]
           },
           {
-            id: "standby", name: "Standby-Puls", gloss: "Wei\u00df, w\u00e4hrend die Kiste schl\u00e4ft",
+            id: "standby", name: "Standby pulse", gloss: "White, while the machine sleeps",
             clip: "standby", lit: "#cfd3da", variants: BOOST,
             body: [
-              "Im Suspend l\u00e4uft kein Prozess, es kann also kein Bild gerendert werden. Ein systemd-Sleep-Hook sagt dem Dienst kurz vorher Bescheid, der Dienst reicht dem ESP eine Farbe und eine Ateml\u00e4nge, und der <em>ESP atmet allein weiter</em>, bis das erste Bild wieder ankommt.",
-              "Absichtlich sehr dunkel \u2013 der Maximalwert liegt bei 30 von 255. Das soll \u201edie Maschine ist aus, aber am Leben\u201c sagen und nicht das Zimmer beleuchten. Auf dem Bildschirm ist es kaum zu sehen; der Knopf oben hellt es nur f\u00fcr die Vorschau auf.",
-              "Bleibt der Resume aus, holt sich der Dienst die Leiste nach einer halben Minute <em>Laufzeit</em> zur\u00fcck. Die monotone Uhr steht im Suspend still, eine drei Tage schlafende Maschine wacht also an einer atmenden Leiste auf."
+              "During a suspend no process runs, so no frame can be rendered. A systemd sleep hook tells the service just before the machine goes down, the service hands the ESP a colour and a breath length, and the <em>ESP carries on alone</em> until the first frame arrives again.",
+              "Deliberately very dim &ndash; the peak is 30 out of 255. It should say “the machine is off but alive”, not light the room. On a screen that is barely visible, so the button above brightens it for the preview only.",
+              "If the resume never arrives, the service takes the strip back after half a minute of <em>running</em> time. The monotonic clock does not advance across a suspend, so a machine asleep for three days still wakes to a breathing strip."
             ],
-            facts: [["Periode", "6,0 s"], ["Farbe", "(30, 30, 30)"], ["Dunkelste Stelle", "5 %"],
-                    ["Gezeichnet von", "dem ESP"], ["Notbremse", "30 s Laufzeit"]]
+            facts: [["Period", "6.0 s"], ["Colour", "(30, 30, 30)"], ["Darkest point", "5 %"],
+                    ["Drawn by", "the ESP"], ["Failsafe", "30 s of running time"]]
           }
         ]
       }
@@ -865,10 +872,10 @@
     return answer.json();
   }).then(run).catch(function (problem) {
     document.getElementById("prose").innerHTML =
-      "<h2>Keine Daten</h2><p>effects.json wurde nicht geladen (" +
-      problem.message + "). Beim \u00d6ffnen als lokale Datei "  +
-      "verbietet der Browser das \u2013 <code>python3 -m http.server</code> "  +
-      "im Ordner <code>docs/</code> starten und die Seite dar\u00fcber aufrufen.</p>";
+      "<h2>No data</h2><p>effects.json did not load (" + problem.message +
+      "). Opened as a local file the browser refuses that fetch \u2013 run " +
+      "<code>python3 -m http.server</code> inside <code>docs/</code> and open " +
+      "the page through it instead.</p>";
   });
 })();
 </script>
