@@ -495,13 +495,16 @@ Six pages, picked from the list down the left side.
 | **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
 | **Notifications** | what flashes, in which colour and shape, and for how long |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
-| **Preview** | the effects this project added, animated in the window, drawn from the settings currently in it |
+| **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists |
 | **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating-and-removing), flashing the firmware |
 
 **Apply and Reload sit under all of them**, because there is one config file.
 Apply writes every setting from every page, keeps the comments in the file, and
-restarts both the service and the watcher. **After a SteamOS update, press
+restarts both the service and the watcher. It is greyed out while the window and
+the file agree, and the row says how much is unsaved when they do not. While a
+command runs there is a line under the title and the buttons go dead; the log at
+the foot stays folded and opens itself only when something fails. **After a SteamOS update, press
 *Rebuild and reinstall***: a system update brings a new kernel and the module was
 built for the old one, so it is gone and `/dev/valve-leds-shim` with it. Your
 configuration is kept and the ESP is never reflashed.
