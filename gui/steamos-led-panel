@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE_DIR = os.path.dirname(HERE)
@@ -40,8 +41,11 @@ except ImportError:                                         # pragma: no cover
 import kdetheme                                             # noqa: E402
 import roundrect                                            # noqa: E402
 import ledpanel                                             # noqa: E402
+import preview as preview_module                            # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
 from steamos_led import notify                              # noqa: E402
+from steamos_led import render                              # noqa: E402
+from steamos_led import shim                                # noqa: E402
 
 
 # Which settings to show, in order: key, label, kind, and for numeric ones the
@@ -636,6 +640,8 @@ class Panel:
             tab = self._build_settings(notebook, table)
             notebook.add(tab, text=title)
             self._settings_tabs.add(str(tab))
+        self.preview_tab = self._build_preview(notebook)
+        notebook.add(self.preview_tab, text="  Preview  ")
         notebook.add(self._build_tests(notebook), text="  Test  ")
         self.status_tab = self._build_status(notebook)
         notebook.add(self.status_tab, text="  Status & repair  ")
@@ -898,6 +904,10 @@ class Panel:
         show = self.notebook.select() in self._settings_tabs
         if show != self._apply_shown:
             self._show_apply(show)
+        # The preview only runs while it can be seen.
+        if self._preview_visible() and self._preview_job is None:
+            self._preview_started = time.monotonic()
+            self._preview_tick()
 
     def _menu(self, grid, row, key, variable, choices, current, width):
         """A drop-down of (label, value) pairs, showing labels."""
@@ -1116,6 +1126,162 @@ class Panel:
         self._write("Reloaded %s\n\n" % config_module.DEFAULT_CONFIG_PATH)
 
     # -- tests ------------------------------------------------------------
+
+    # -- the preview tab ---------------------------------------------------
+    #
+    # Only the effects this project added. Steam's own can be seen by picking
+    # them in Steam, and the standby and startup breaths are states the
+    # machine puts itself into rather than anything chosen here.
+
+    PREVIEW_FPS = 25
+    PREVIEW_CELL = 28
+    PREVIEW_GAP = 5
+    PREVIEW_BAR = 34
+    PREVIEW_MARGIN = 12
+    PREVIEW_SPILL = 9
+
+    def _build_preview(self, parent):
+        """A simulated strip, so an effect can be looked at before it is set."""
+        outer = ttk.Frame(parent)
+
+        leds = shim.LOGICAL_LEDS
+        width = (leds * self.PREVIEW_CELL + (leds - 1) * self.PREVIEW_GAP
+                 + self.PREVIEW_MARGIN * 2)
+        height = self.PREVIEW_MARGIN * 2 + self.PREVIEW_BAR + self.PREVIEW_SPILL * 2
+
+        stage = ttk.Frame(outer)
+        stage.pack(fill="x", padx=10, pady=(10, 6))
+        self.preview_canvas = tk.Canvas(
+            stage, width=width, height=height, highlightthickness=0,
+            background=preview_module.BACKDROP)
+        self.preview_canvas.pack()
+
+        # Built once and only recoloured afterwards: creating seventeen times
+        # four items twenty-five times a second is how a canvas gets slow.
+        self._preview_items = []
+        for index in range(leds):
+            left = self.PREVIEW_MARGIN + index * (self.PREVIEW_CELL + self.PREVIEW_GAP)
+            top = self.PREVIEW_MARGIN
+            halo = self.preview_canvas.create_rectangle(
+                left - 4, top - 4, left + self.PREVIEW_CELL + 4,
+                top + self.PREVIEW_BAR + 4, width=0)
+            body = self.preview_canvas.create_rectangle(
+                left, top, left + self.PREVIEW_CELL, top + self.PREVIEW_BAR,
+                width=0)
+            spill = []
+            for step in range(2):
+                spill_top = top + self.PREVIEW_BAR + 2 + step * self.PREVIEW_SPILL
+                spill.append(self.preview_canvas.create_rectangle(
+                    left - 3, spill_top, left + self.PREVIEW_CELL + 3,
+                    spill_top + self.PREVIEW_SPILL, width=0))
+            self._preview_items.append((halo, body, spill))
+
+        self.preview_blurb = ttk.Label(outer, style="Muted.TLabel")
+        self.preview_blurb.pack(anchor="center", pady=(0, 8))
+
+        picker = ttk.Frame(outer)
+        picker.pack(fill="x", padx=10)
+        picker.columnconfigure(0, weight=1)
+        picker.columnconfigure(1, weight=1)
+
+        self.preview_choice = tk.StringVar(value="slot:" + render.SHOWS_FIRE)
+        self.preview_choice.trace_add("write",
+                                      lambda *_a: self._preview_chosen())
+
+        groups = (("In the rainbow slot", "slot"),
+                  ("Notification shapes", "shape"))
+        for column, (title, wanted) in enumerate(groups):
+            box = ttk.LabelFrame(picker, text=title)
+            box.grid(row=0, column=column, sticky="nsew",
+                     padx=(0, 8) if column == 0 else (8, 0))
+            for label, kind, name, _blurb in preview_module.entries():
+                if kind != wanted:
+                    continue
+                ttk.Radiobutton(box, text=label, value=kind + ":" + name,
+                                variable=self.preview_choice).pack(
+                                    anchor="w", padx=8, pady=2)
+
+        self._note(
+            outer,
+            "Drawn by the same code that drives the strip, on seventeen LEDs "
+            "and with the settings currently in this window - move a slider "
+            "and it follows. Nothing here is applied and the strip is not "
+            "touched.").pack(anchor="w", padx=10, pady=(10, 12))
+
+        self._preview = preview_module.Preview()
+        self._preview_job = None
+        self._preview_started = None
+        self._preview_chosen()
+        return outer
+
+    def _preview_chosen(self):
+        """Restart the clock, so a shape is seen from its beginning."""
+        for label, kind, name, blurb in preview_module.entries():
+            if kind + ":" + name == self.preview_choice.get():
+                self.preview_blurb.configure(text=blurb)
+                break
+        self._preview_started = time.monotonic()
+        self._preview = preview_module.Preview()
+        if self._preview_job is None and self._preview_visible():
+            self._preview_tick()
+
+    def _preview_visible(self):
+        return (getattr(self, "preview_tab", None) is not None
+                and self.notebook.select() == str(self.preview_tab))
+
+    def _preview_tick(self):
+        """One frame, then book the next - but only while the tab is up.
+
+        A window on another tab must not be drawing seventeen rectangles
+        twenty-five times a second for nobody.
+        """
+        self._preview_job = None
+        if not self._preview_visible():
+            return
+
+        self._preview.settings = self._preview_settings()
+        elapsed = time.monotonic() - self._preview_started
+        kind, _, name = self.preview_choice.get().partition(":")
+        if kind == "slot":
+            pixels = self._preview.slot_frame(name, elapsed)
+        else:
+            pixels = self._preview.shape_frame(
+                name, ledpanel.SHAPE_TEST_COLOUR, elapsed)
+
+        for (halo, body, spill), pixel in zip(self._preview_items, pixels):
+            self.preview_canvas.itemconfigure(
+                body, fill=preview_module.hex_colour(pixel))
+            self.preview_canvas.itemconfigure(
+                halo, fill=preview_module.toward(pixel, 0.28))
+            self.preview_canvas.itemconfigure(
+                spill[0], fill=preview_module.toward(pixel, 0.22))
+            self.preview_canvas.itemconfigure(
+                spill[1], fill=preview_module.toward(pixel, 0.10))
+
+        self._preview_job = self.root.after(1000 // self.PREVIEW_FPS,
+                                            self._preview_tick)
+
+    def _preview_settings(self):
+        """The window's values as they stand, as far as they can be read.
+
+        Deliberately not _collect(): that validates and puts a dialog up when
+        it does not like something, and a preview redrawing twenty-five times
+        a second is no place to find that out. Anything unreadable is simply
+        left out, and Preview falls back to the shipped default.
+        """
+        values = {}
+        for key, (variable, kind) in self.vars.items():
+            try:
+                raw = variable.get()
+                values[key] = (bool(raw) if kind == "bool"
+                               else int(round(raw)) if kind == "int"
+                               else float(raw) if kind == "float"
+                               else self._value_for(key, raw)
+                               if kind in ("sensor", "named")
+                               else str(raw))
+            except (ValueError, TypeError, KeyError, tk.TclError):
+                continue
+        return values
 
     def _build_tests(self, parent):
         outer = ttk.Frame(parent)

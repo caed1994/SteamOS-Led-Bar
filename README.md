@@ -493,6 +493,7 @@ the application menu as **SteamOS LED bar**.
 | **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
 | **Notifications** | what flashes, in which colour and shape, and for how long |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
+| **Preview** | the effects this project added, animated in the window, drawn from the settings currently in it |
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists |
 | **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating-and-removing), flashing the firmware |
 

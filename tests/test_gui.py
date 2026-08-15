@@ -599,7 +599,7 @@ class PanelSettingsTest(unittest.TestCase):
 
     def _tab_titles(self):
         """Every tab's label: the settings tabs come from their own table,
-        the two that follow are added by name."""
+        the ones that follow are added by name."""
         panel = self._panel()
         table = next(node.value for node in panel.body
                      if isinstance(node, ast.Assign)
@@ -617,11 +617,12 @@ class PanelSettingsTest(unittest.TestCase):
         return titles
 
     def test_the_tabs_are_in_the_order_they_are_worked_through(self):
-        # What you set, then what you rarely set, then what you do - which is
-        # also the order of how often they are opened.
+        # What you set, then what you rarely set, then what those settings
+        # look like, then what you do - which is also the order of how often
+        # they are opened.
         self.assertEqual([title.strip() for title in self._tab_titles()],
-                         ["Strip", "Notifications", "Advanced", "Test",
-                          "Status & repair"])
+                         ["Strip", "Notifications", "Advanced", "Preview",
+                          "Test", "Status & repair"])
 
     def test_no_tab_label_carries_a_menu_escape(self):
         # "&&" is how a *menu* label spells one ampersand. A notebook tab
