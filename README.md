@@ -928,3 +928,20 @@ the Steamworks SDK is redistributed here.
 
 Everything else &ndash; the service, the protocol, the firmware around NeoPixelBus,
 the control panel and the tests &ndash; was written for this project.
+
+### Licence
+
+Copyright &copy; 2026 caed1994.
+
+This project is licensed **GPL-3.0-or-later**; the full text is in
+[LICENSE](LICENSE). Use it, change it, pass it on &ndash; and if you pass on a
+changed version, it goes out under the same terms, so the next person gets
+what you got.
+
+Two things carry licences of their own, and this one does not override them:
+
+* `leds-valve-shim/` is somebody else's work, vendored unmodified under
+  **GPL-2.0-or-later** &ndash; see [its LICENSE](leds-valve-shim/LICENSE).
+* NeoPixelBus and the Arduino cores are fetched at build time under their own
+  terms, never redistributed from here. Only source is published in this
+  repository; PlatformIO compiles the firmware on your machine.
