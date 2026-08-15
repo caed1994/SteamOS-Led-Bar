@@ -901,18 +901,23 @@ class Panel:
 
         def fit(_event=None):
             wanted = inner.winfo_reqheight()
+            across = inner.winfo_reqwidth()
             width, room = canvas.winfo_width(), canvas.winfo_height()
             # At least the room it has, so a page with something set to expand
             # - the preview's stage - still fills the window when it fits.
             height = max(wanted, room)
             canvas.itemconfigure(window, width=width, height=height)
             canvas.configure(scrollregion=(0, 0, width, height))
-            # Asking for the content's height keeps the window opening at the
+            # Asking for what the content needs keeps the window opening at the
             # size the page wants; the cap in _refit is what decides whether it
-            # gets it. Only when it changed, or setting it brings this handler
-            # straight back and the two chase each other.
-            if canvas.winfo_reqheight() != wanted:
-                canvas.configure(height=wanted)
+            # gets the height. The width matters as much: a canvas does not
+            # pass on what is inside it, it asks for its own default - so
+            # without this the window opened at a canvas's idea of wide and
+            # squeezed every page into it. Only when it changed, or setting it
+            # brings this handler straight back and the two chase each other.
+            if (canvas.winfo_reqheight() != wanted
+                    or canvas.winfo_reqwidth() != across):
+                canvas.configure(height=wanted, width=across)
             if (wanted > room) != bool(bar.winfo_ismapped()):
                 if wanted > room:
                     bar.pack(side="right", fill="y")

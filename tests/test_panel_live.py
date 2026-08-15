@@ -264,6 +264,33 @@ class LiveWindowTest(unittest.TestCase):
         self.assertTrue(self.panel.output_toggle.winfo_ismapped(),
                         "the log went missing")
 
+    def test_a_page_asks_for_the_width_its_content_needs(self):
+        # A canvas does not pass on the size of what it holds - it asks for its
+        # own default width. Without saying otherwise the window opened at that
+        # default and every page came out squeezed into it, drop-downs cut off
+        # mid-word and sliders with no travel.
+        for page in self._pages():
+            canvas = self.panel._scrollers[page]
+            inner = canvas.nametowidget(canvas.winfo_children()[0])
+            self.assertGreaterEqual(
+                canvas.winfo_reqwidth(), inner.winfo_reqwidth(),
+                "%s asks for less width than it holds"
+                % self.panel.notebook.tab(page, "text"))
+
+    def test_nothing_on_a_page_is_squeezed_out_of_shape(self):
+        # The width the window opens at has to be one every control fits in.
+        self.panel._refit()
+        for _ in range(6):
+            self.root.update()
+        self.panel.notebook.select(self._pages()[0])
+        for _ in range(4):
+            self.root.update()
+        for key in ("TEMPERATURE_SENSOR", "RAINBOW_SHOWS", "LED_COUNT"):
+            _labels, controls = self.panel._rows[key]
+            widget = controls[0]
+            self.assertGreaterEqual(widget.winfo_width(),
+                                    widget.winfo_reqwidth(), key)
+
     def test_the_window_never_opens_taller_than_the_screen(self):
         self.panel._refit()
         for _ in range(4):
