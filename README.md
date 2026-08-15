@@ -10,6 +10,20 @@ Personalization menu in SteamOS Game Mode, download progress included.
 &mdash; all twenty of them on a simulated strip, with the explanation beside
 each.
 
+## Contents
+
+1. [Quick start](#quick-start)
+2. [What you need](#what-you-need)
+3. [Settings](#settings)
+4. [Effects](#effects)
+5. [The rainbow slot](#the-rainbow-slot)
+6. [Notifications](#notifications)
+7. [The control panel](#the-control-panel)
+8. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
+9. [Updating and removing](#updating-and-removing)
+10. [How it works](#how-it-works)
+11. [Credits and licence](#credits-and-licence)
+
 ## Quick start
 
 ```bash
