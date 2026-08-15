@@ -298,6 +298,52 @@ class LiveWindowTest(unittest.TestCase):
         self.assertLessEqual(self.root.winfo_height(),
                              self.root.winfo_screenheight())
 
+    def _log_order(self):
+        """Which of "grow the window" and "fill it" happened first."""
+        order = []
+        pack, forget = self.panel.output_box.pack, self.panel.output_box.pack_forget
+        geometry = self.root.geometry
+
+        def note(what, call):
+            def spy(*args, **kwargs):
+                order.append(what)
+                return call(*args, **kwargs)
+            return spy
+
+        self.panel.output_box.pack = note("log", pack)
+        self.panel.output_box.pack_forget = note("log", forget)
+        self.root.geometry = note("window", geometry)
+        try:
+            self.panel.toggle_output()
+        finally:
+            self.panel.output_box.pack = pack
+            self.panel.output_box.pack_forget = forget
+            self.root.geometry = geometry
+        return order
+
+    def test_the_window_grows_before_the_log_is_put_into_it(self):
+        # The log sits at the foot and the pages are what expands, so packing
+        # it into a window that had not grown yet takes its height out of the
+        # pages until the window catches up - the whole thing jumps up and
+        # then settles back down. Grow first, then fill; empty first, then
+        # shrink.
+        #
+        # The order is what is checked rather than the heights along the way:
+        # with no window manager running, a geometry request takes effect at
+        # once and the squeezed frame never gets drawn, so measuring here
+        # would pass whichever way round the two calls went.
+        self.assertEqual(self._log_order()[:2], ["window", "log"],
+                         "the log is packed before the window has grown")
+        self.assertTrue(self.panel._output_open)
+
+    def test_the_log_is_taken_out_before_the_window_shrinks(self):
+        self.panel._show_output(True)
+        for _ in range(4):
+            self.root.update()
+        self.assertEqual(self._log_order()[:2], ["log", "window"],
+                         "the window shrinks before the log has gone")
+        self.assertFalse(self.panel._output_open)
+
     def test_the_log_folds_away_until_something_writes_to_it(self):
         self.assertFalse(self.panel._output_open)
         self.assertFalse(self.panel.output_box.winfo_ismapped())

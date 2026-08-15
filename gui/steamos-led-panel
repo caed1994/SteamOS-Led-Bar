@@ -807,6 +807,9 @@ class Panel:
         self._rows = {}
         # page -> the canvas that scrolls it, for the wheel to find
         self._scrollers = {}
+        # What is booked with after(), so it can be dropped when the window is
+        self._preview_job = None
+        self._refit_job = None
         # Explanations that should use the width the window actually has
         self._wrapped = []
         self._wrap_width = 0
@@ -1047,12 +1050,38 @@ class Panel:
         self._show_output(not self._output_open)
 
     def _show_output(self, show):
+        """Open or fold the log, and move the window to suit it.
+
+        The height and the content change in one go, and in the order that
+        never asks for more room than the window has: grow first, then fill it;
+        empty it first, then shrink. The log sits at the foot of the window and
+        the pages above it are what expands, so packing it into a window that
+        had not grown yet took its height out of the pages for a frame - the
+        whole window jumped up and then settled back down as the window caught
+        up. That flinch is what this order avoids, and it is the same order
+        _show_details uses for the checklist.
+        """
         self._output_open = show
+        width = self.root.winfo_width()
+        # Asked before it is packed: a widget knows the size it wants whether
+        # or not anything is showing it.
+        change = self.output_box.winfo_reqheight() + ROW_GAP
         if show:
+            room = self.root.winfo_screenheight() - SCREEN_ALLOWANCE
+            self.root.geometry("%dx%d" % (
+                width, min(room, self.root.winfo_height() + change)))
             self.output_box.pack(fill="x", pady=(ROW_GAP, 0))
         else:
             self.output_box.pack_forget()
+            # Let the window settle into its shorter self before it follows:
+            # without this the two reflows overlap and one of them is drawn
+            # with the pages stretched into room that is about to go.
+            self.root.update_idletasks()
+            self.root.geometry("%dx%d" % (
+                width, max(1, self.root.winfo_height() - change)))
         self.output_toggle.configure(text="Output ▴" if show else "Output ▾")
+        # Arithmetic gets it right to the pixel or it does not; this settles
+        # the difference afterwards, and shows nothing when there is none.
         self._fit_window()
 
     # -- the pieces a page is built from ----------------------------------
@@ -1659,16 +1688,24 @@ class Panel:
         # The animation has a frame booked at all times while the page is up.
         # Closing the window would leave that one to fire at a callback that
         # no longer exists, which Tk reports as an invalid command name.
-        self.root.bind("<Destroy>", self._stop_preview, add="+")
+        self.root.bind("<Destroy>", self._stop_timers, add="+")
         self._preview_chosen()
         return outer
 
-    def _stop_preview(self, event=None):
+    def _stop_timers(self, event=None):
+        """Drop what is booked, so nothing fires at a window that has gone.
+
+        Both of these have something pending most of the time - the preview
+        while its page is up, the resize between a fold and the layout pass
+        that follows it - and Tk reports a callback that outlives its window
+        as an invalid command name.
+        """
         if event is not None and event.widget is not self.root:
             return                              # a child of ours, not the window
-        if self._preview_job is not None:
-            self.root.after_cancel(self._preview_job)
-            self._preview_job = None
+        for job in (self._preview_job, self._refit_job):
+            if job is not None:
+                self.root.after_cancel(job)
+        self._preview_job = self._refit_job = None
 
     def _preview_chosen(self):
         """Restart the clock, so a shape is seen from its beginning."""
@@ -1950,9 +1987,11 @@ class Panel:
         """Give the window the height its content needs, and no more.
 
         after_idle, because the new height is only known once the layout has
-        been redone.
+        been redone. One booking at a time: a fold that asks twice in the same
+        pass has no more to say the second time.
         """
-        self.root.after_idle(self._refit)
+        if self._refit_job is None:
+            self._refit_job = self.root.after_idle(self._refit)
 
     def _refit(self):
         """Set the height outright; asking nicely does not work.
@@ -1963,6 +2002,9 @@ class Panel:
         changed nothing, because this one came from the window manager. The
         width is left alone: that one is genuinely the user's.
         """
+        # Cleared as it runs: what was booked has now fired, and cancelling it
+        # afterwards would be cancelling somebody else's booking.
+        self._refit_job = None
         try:
             self.root.update_idletasks()
             width = self.root.winfo_width()
