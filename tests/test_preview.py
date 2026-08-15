@@ -130,6 +130,56 @@ class FrameTest(unittest.TestCase):
         self.assertGreater(max(late), 200)
 
 
+class PhysicalStripTest(unittest.TestCase):
+    """It draws the strip you have, not the seventeen Steam works in.
+
+    The seventeen logical LEDs are what the effects are composed on, but they
+    are not what is on the desk - and the setting that turns one into the
+    other is the mapping, the hardest thing on the Strip page to picture.
+    """
+
+    def _frame(self, **settings):
+        preview_ = preview.Preview(settings)
+        return preview_.slot_frame(render.SHOWS_AURORA, 2.0)
+
+    def test_the_strip_is_as_long_as_the_setting_says(self):
+        for count in (1, 17, 30, 60):
+            self.assertEqual(len(self._frame(LED_COUNT=count)), count)
+            self.assertEqual(
+                len(preview.Preview({"LED_COUNT": count}).shape_frame(
+                    "bloom", "#1a9fff", 0.4)), count)
+
+    def test_the_mapping_is_the_one_in_the_window(self):
+        # Sixty LEDs stretched is a gradient; cropped it is seventeen lit and
+        # the rest dark. A preview drawn at seventeen could show neither.
+        stretched = self._frame(LED_COUNT=60, MAPPING="stretch")
+        cropped = self._frame(LED_COUNT=60, MAPPING="crop")
+        self.assertNotEqual(stretched, cropped)
+        self.assertEqual(cropped[40], (0, 0, 0))
+        self.assertNotEqual(stretched[40], (0, 0, 0))
+
+    def test_the_brightness_ceiling_reaches_both_halves(self):
+        # Both, now that both go through the service's own path - the flashes
+        # honoured it and the effects did not, which was the one setting the
+        # preview could not be trusted on.
+        for frame in (lambda cap: self._frame(MAX_BRIGHTNESS=cap),
+                      lambda cap: preview.Preview(
+                          {"MAX_BRIGHTNESS": cap}).shape_frame(
+                              "pulse", "#ffffff", 0.9)):
+            full = max(max(pixel) for pixel in frame(255))
+            capped = max(max(pixel) for pixel in frame(60))
+            self.assertLess(capped, full, "the ceiling did not reach it")
+
+    def test_reversing_the_strip_reverses_the_picture(self):
+        forward = self._frame(LED_COUNT=30, REVERSE=False)
+        backward = self._frame(LED_COUNT=30, REVERSE=True)
+        self.assertEqual(forward, list(reversed(backward)))
+
+    def test_a_strip_of_one_led_still_draws(self):
+        # The validator allows it, so the preview has to survive it.
+        self.assertEqual(len(self._frame(LED_COUNT=1)), 1)
+
+
 class SettingsTest(unittest.TestCase):
     """The window's values reach the picture, which is why it is worth having."""
 

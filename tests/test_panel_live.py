@@ -375,6 +375,28 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(variable.get(), "#123456")
         self.assertTrue(self.panel._widgets["MESSAGE_COLOR"].cget("image"))
 
+    def test_the_preview_follows_the_strip_length(self):
+        # The canvas is built once per length and only moved afterwards, so
+        # changing the setting has to rebuild it - otherwise the page draws a
+        # seventeen LED strip and calls it yours.
+        self.panel.notebook.select(self.panel.preview_tab)
+        for _ in range(6):
+            self.root.update()
+        self.assertEqual(len(self.panel._preview_items), 17)
+        self.panel.vars["LED_COUNT"][0].set(48)
+        # Time has to pass: the rebuild happens on the next drawn frame, and
+        # update() alone runs no timer that is not already due.
+        self.root.after(200, self.root.quit)
+        self.root.mainloop()
+        self.assertEqual(len(self.panel._preview_items), 48)
+        canvas = self.panel.preview_canvas
+        boxes = [canvas.coords(body)
+                 for _halo, body, _spill in self.panel._preview_items]
+        self.assertLessEqual(max(box[2] for box in boxes),
+                             canvas.winfo_width())
+        for left, right in zip(boxes, boxes[1:]):
+            self.assertLess(left[2], right[0], "the LEDs overlap")
+
     def _log_order(self):
         """Which of "grow the window" and "fill it" happened first."""
         order = []

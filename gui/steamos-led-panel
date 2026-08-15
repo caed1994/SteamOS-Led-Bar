@@ -1893,6 +1893,7 @@ class Panel:
     # It is the thing this page is for, so it should be the thing on it.
     PREVIEW_CELL_MAX = 56       # a wide window must not give absurd LEDs
     PREVIEW_BAR_MAX = 84
+    PREVIEW_BAR_MIN = 22
     PREVIEW_MARGIN = 16
     PREVIEW_MIN_HEIGHT = 150
 
@@ -1915,17 +1916,13 @@ class Panel:
         self.preview_canvas.pack(fill="both", expand=True)
         self.preview_canvas.bind("<Configure>", self._preview_layout)
 
-        # Built once and only moved and recoloured afterwards: creating
-        # seventeen times four items twenty-five times a second is how a canvas
-        # gets slow. The coordinates are put in by _preview_layout, which is
-        # the only place that knows how much room there is.
+        # Built once per strip length and only moved and recoloured
+        # afterwards: creating four items per LED twenty-five times a second is
+        # how a canvas gets slow. The coordinates are put in by
+        # _preview_layout, which is the only place that knows how much room
+        # there is.
         self._preview_items = []
-        for _index in range(shim.LOGICAL_LEDS):
-            halo = self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
-            body = self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
-            spill = [self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
-                     for _step in range(2)]
-            self._preview_items.append((halo, body, spill))
+        self._preview_leds(shim.LOGICAL_LEDS)
 
         self.preview_blurb = ttk.Label(outer, style="Muted.TLabel")
         self.preview_blurb.pack(anchor="center", pady=(0, 8))
@@ -1955,10 +1952,11 @@ class Panel:
 
         self._note(
             outer,
-            "Drawn by the same code that drives the strip, on seventeen LEDs "
-            "and with the settings currently in this window - move a slider "
-            "and it follows. Nothing here is applied and the strip is not "
-            "touched.").pack(anchor="w", padx=SIDE_MARGIN,
+            "Drawn by the same code that drives the strip, and on the strip "
+            "you have: the length, the mapping, the direction and the "
+            "brightness ceiling are the ones currently in this window, so "
+            "moving any of them changes what you see here. Nothing is applied "
+            "and the strip itself is not touched.").pack(anchor="w", padx=SIDE_MARGIN,
                              pady=(GROUP_GAP, GROUP_GAP))
 
         # This page is shorter than the tallest one, and the slack has to land
@@ -2007,6 +2005,25 @@ class Panel:
         self._preview = preview_module.Preview()
         if self._preview_job is None and self._preview_visible():
             self._preview_tick()
+
+    def _preview_leds(self, count):
+        """Lay out this many LEDs, rebuilding the canvas if the number changed.
+
+        The strip length is a setting, and the point of this page is now that
+        it shows the strip you have - so dragging that slider has to be
+        followed, not assumed away.
+        """
+        if count == len(self._preview_items):
+            return
+        self.preview_canvas.delete("all")
+        self._preview_items = []
+        for _index in range(count):
+            halo = self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
+            body = self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
+            spill = [self.preview_canvas.create_rectangle(0, 0, 1, 1, width=0)
+                     for _step in range(2)]
+            self._preview_items.append((halo, body, spill))
+        self._preview_layout()
 
     def _preview_layout(self, _event=None):
         """Lay the strip out for the room the canvas actually has.
@@ -2068,6 +2085,7 @@ class Panel:
             pixels = self._preview.shape_frame(
                 name, ledpanel.SHAPE_TEST_COLOUR, elapsed)
 
+        self._preview_leds(len(pixels))
         for (halo, body, spill), pixel in zip(self._preview_items, pixels):
             self.preview_canvas.itemconfigure(
                 body, fill=preview_module.hex_colour(pixel))

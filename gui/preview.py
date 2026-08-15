@@ -59,6 +59,12 @@ class _Scripted:
         return self.load_value
 
 
+def _unpack(payload, leds):
+    """The wire's bytes back into (r, g, b) per LED."""
+    return [(payload[led * 3], payload[led * 3 + 1], payload[led * 3 + 2])
+            for led in range(leds)]
+
+
 def _there_and_back(fraction):
     """0 -> 1 -> 0 across one cycle, so a sweep loops without a jump."""
     walk = (fraction % 1.0) * 2.0
@@ -92,12 +98,31 @@ class Preview:
     def setting(self, key):
         return self.settings.get(key, config_module.DEFAULTS[key])
 
+    def led_count(self):
+        """How many LEDs the strip has, as the window currently says."""
+        return max(1, int(self.setting("LED_COUNT")))
+
     # -- the four that can stand in the rainbow slot -----------------------
 
     def _renderer(self, shows):
+        """Built the way the service builds it, from the same settings.
+
+        The strip this draws is the physical one - your LED count, your
+        mapping, your brightness ceiling - and not the seventeen logical LEDs
+        Steam works in. Those seventeen are what the effects are composed on,
+        but they are not what is on your desk, and the setting that turns one
+        into the other is the mapping: the hardest thing on the Strip page to
+        picture, and the one thing a preview drawn at seventeen could never
+        show.
+        """
         return render.Renderer(
-            led_count=shim.LOGICAL_LEDS,
-            mapping=render.MAPPING_CROP,
+            led_count=self.led_count(),
+            mapping=self.setting("MAPPING"),
+            reverse=self.setting("REVERSE"),
+            max_brightness=self.setting("MAX_BRIGHTNESS"),
+            min_brightness=self.setting("MIN_BRIGHTNESS"),
+            gamma=self.setting("GAMMA"),
+            patrol_dots=self.setting("PATROL_DOTS"),
             speed_scale=self.setting("SPEED"),
             rainbow_shows=shows,
             temperature=self.sensor,
@@ -115,7 +140,8 @@ class Preview:
             self.sensor.load_value = _along(LOAD_WALK,
                                             elapsed / SWEEP_SECONDS)
         snapshot = shim.make_snapshot(shim.EFFECT_RAINBOW)
-        return self._renderer(shows).render_logical(snapshot, elapsed)
+        return _unpack(self._renderer(shows).render(snapshot, elapsed),
+                       self.led_count())
 
     # -- the six notification shapes ---------------------------------------
 
@@ -132,27 +158,29 @@ class Preview:
         here the repetition *is* the point, and the real gap would show the
         shape once and then leave the strip dark for ten seconds.
 
-        MAX_BRIGHTNESS is deliberately not applied. It would only reach the
-        shapes - render_logical, which draws the other half of this tab, has
-        no ceiling in it - and a preview where one half dims and the other
-        does not is worse than one that shows both at full.
+        Everything else is the service's own: the strip length, the direction
+        and the brightness ceiling, which a flash honours because it is the
+        worst case for a strip running off the ESP's USB rail.
         """
         duration = self.setting("NOTIFY_DURATION")
         cycle = duration + FLASH_PAUSE
         started = (elapsed // cycle) * cycle
-        key = (shape, colour, duration, started)
+        leds = self.led_count()
+        key = (shape, colour, duration, started, leds,
+               self.setting("REVERSE"), self.setting("MAX_BRIGHTNESS"))
         if key != self._overlay_key:
             self._overlay_key = key
             self._overlay = notify.NotificationOverlay(
-                duration=duration, led_count=shim.LOGICAL_LEDS, style=shape,
+                duration=duration, led_count=leds, style=shape,
+                reverse=self.setting("REVERSE"),
+                max_brightness=self.setting("MAX_BRIGHTNESS"),
                 repeat_gap=0.0)
             self._overlay.trigger(colour, started)
 
         payload = self._overlay.frame(elapsed)
         if payload is None:
-            return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
-        return [(payload[led * 3], payload[led * 3 + 1], payload[led * 3 + 2])
-                for led in range(shim.LOGICAL_LEDS)]
+            return [(0.0, 0.0, 0.0)] * leds
+        return _unpack(payload, leds)
 
 
 # What the tab offers, in the order it offers it. Steam's own effects are left
