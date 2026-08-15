@@ -319,6 +319,65 @@ class NotificationColourTest(unittest.TestCase):
             self.assertEqual(len(set(values)), len(values), key)
 
 
+class FlashPaletteTest(unittest.TestCase):
+    """The colours offered when one is picked outright."""
+
+    def setUp(self):
+        self.palette = ledpanel.palette()
+
+    def test_every_entry_is_a_colour_the_service_accepts(self):
+        from steamos_led import notify
+        for label, value in self.palette:
+            self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
+            notify.parse_color(value)           # raises if it is not one
+            self.assertTrue(label, value)
+
+    def test_nothing_is_offered_twice(self):
+        values = [value.lower() for _label, value in self.palette]
+        self.assertEqual(len(values), len(set(values)))
+        labels = [label for label, _value in self.palette]
+        self.assertEqual(len(labels), len(set(labels)))
+
+    def test_the_notification_colours_come_first(self):
+        # They are the ones this strip is known to look good in.
+        offered = [value for _label, value in self.palette]
+        known = [value for group in (ledpanel.ACHIEVEMENT_COLOURS,
+                                     ledpanel.MESSAGE_COLOURS,
+                                     ledpanel.FRIEND_COLOURS)
+                 for _label, value in group]
+        self.assertEqual(offered[:len(known)], known)
+
+    def test_the_colour_the_shape_buttons_use_is_offered(self):
+        self.assertIn(ledpanel.SHAPE_TEST_COLOUR,
+                      [value for _label, value in self.palette])
+
+
+class DialogTest(unittest.TestCase):
+    """Nothing in the window is drawn by the platform any more.
+
+    Tk draws its own message boxes and its own colour chooser, and next to a
+    Material window they are a visitor from another decade - the chooser worst
+    of all, being the one a project about colour puts up to ask for a colour.
+    """
+
+    def setUp(self):
+        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        with open(path) as handle:
+            self.source = handle.read()
+
+    def test_no_message_box_is_left(self):
+        self.assertNotIn("messagebox", self.source)
+
+    def test_the_colour_chooser_is_our_own(self):
+        self.assertNotIn("colorchooser", self.source)
+        self.assertIn("class ColourDialog", self.source)
+
+    def test_choosing_a_file_is_still_the_desktops_job(self):
+        # The one dialog worth keeping: people know their own file browser,
+        # and a hand-drawn one would be worse at the job in every way.
+        self.assertIn("filedialog", self.source)
+
+
 class ShapeTestButtonTest(unittest.TestCase):
     """The Test tab asks the service for one flash in a given shape."""
 

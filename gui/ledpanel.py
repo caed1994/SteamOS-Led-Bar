@@ -453,6 +453,29 @@ FRIEND_COLOURS = (
 )
 
 
+def palette():
+    """Colours to offer when one is being picked outright, in a sensible order.
+
+    The ones the notifications already use come first - they are the colours
+    this strip is known to look good in - and then the corners of the space,
+    for someone who only wants to see the bar go red. Anything else is typed
+    in: the config file takes any colour and so does the trigger.
+    """
+    offered = []
+    for group in (ACHIEVEMENT_COLOURS, MESSAGE_COLOURS, FRIEND_COLOURS):
+        for label, value in group:
+            if value.lower() not in {had.lower() for _n, had in offered}:
+                offered.append((label, value))
+    for entry in (("White", "#ffffff"), ("Red", "#ff0000"),
+                  ("Amber", "#ffa000"), ("Yellow", "#ffff00"),
+                  ("Green", "#00ff00"), ("Cyan", "#00ffff"),
+                  ("Steam blue", SHAPE_TEST_COLOUR), ("Blue", "#0000ff"),
+                  ("Magenta", "#ff00ff")):
+        if entry[1].lower() not in {had.lower() for _n, had in offered}:
+            offered.append(entry)
+    return tuple(offered)
+
+
 
 # -- the flash shapes ------------------------------------------------------
 #

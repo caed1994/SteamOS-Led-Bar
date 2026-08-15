@@ -31,7 +31,7 @@ sys.path.insert(0, HERE)
 
 try:
     import tkinter as tk
-    from tkinter import ttk, colorchooser, filedialog, messagebox
+    from tkinter import ttk, filedialog
     from tkinter import font as tkfont
 except ImportError:                                         # pragma: no cover
     sys.exit(
@@ -267,6 +267,10 @@ DETAILS_GAP = 10            # under the checklist, and part of what it costs
 # What to leave for the titlebar and whatever panel the desktop has, when
 # deciding how tall the window may open.
 SCREEN_ALLOWANCE = 120
+
+# How wide a message in a dialog is allowed to run before it wraps. Wide
+# enough for a path, narrow enough that a sentence is not one line.
+DIALOG_WRAP = 460
 
 # How thick the line under the title is while a command runs.
 PROGRESS_HEIGHT = 4
@@ -580,6 +584,11 @@ def dress(style, roles, sizes):
                                       "children": [
                                           ("Combobox.textarea",
                                            {"sticky": "nsew"})]})]})])
+        # And the same field around a typed-in one.
+        style.layout("Material.TEntry", [
+            ("Material.Field", {"sticky": "nsew", "children": [
+                ("Entry.padding", {"sticky": "nsew", "children": [
+                    ("Entry.textarea", {"sticky": "nsew"})]})]})])
         # The same field around a menu button, so a drop-down that carries
         # images looks like one that does not.
         style.layout("Field.TMenubutton", [
@@ -733,6 +742,12 @@ def apply_theme(root):
     root.option_add("*TCombobox*Listbox.selectForeground",
                     roles["on_secondary_container"])
 
+    style.configure("Material.TEntry", fieldbackground=surface,
+                    foreground=on_surface, insertcolor=on_surface,
+                    selectbackground=roles["secondary_container"],
+                    selectforeground=roles["on_secondary_container"],
+                    padding=(10, sizes["field_padding"]))
+
     style.configure("Field.TMenubutton", background=surface,
                     foreground=on_surface, arrowcolor=variant,
                     padding=(10, sizes["field_padding"]),
@@ -835,6 +850,127 @@ class Runner:
         except queue.Empty:
             pass
         self._job = self.widget.after(120, self._drain)
+
+
+class Dialog:
+    """A message in the window's own clothes.
+
+    Tk draws its message boxes itself, and next to a Material window they are
+    a visitor from another decade - which matters here because this window
+    puts one up for everything from a mistyped setting to "this reflashes the
+    ESP". A Toplevel costs about as much and inherits the theme, ttk styles
+    being global to the interpreter.
+
+    Modal the way a question has to be: transient to the window it belongs to,
+    grabbing the pointer, and waited on - so the caller reads the answer as a
+    return value rather than through a callback.
+    """
+
+    def __init__(self, parent, title, message, confirm=None, deny="Cancel"):
+        self.answer = confirm is None
+        self.window = window = tk.Toplevel(parent)
+        window.withdraw()                       # placed before it is shown
+        window.title(title)
+        window.transient(parent)
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", self._deny)
+        # A ttk frame fills it, but a sliver shows while it is being laid out
+        # and the default Tk grey is not a colour this window uses.
+        window.configure(background=ttk.Style().lookup("TFrame", "background"))
+
+        body = ttk.Frame(window, padding=GROUP_GAP)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=title, style="Heading.TLabel").pack(
+            anchor="w", pady=(0, ROW_GAP))
+        if message:
+            ttk.Label(body, text=message, justify="left",
+                      wraplength=DIALOG_WRAP).pack(anchor="w")
+        self.build(body)
+
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x", pady=(GROUP_GAP, 0))
+        ttk.Button(buttons, text=confirm or "OK", style="Filled.TButton",
+                   command=self._confirm).pack(side="right")
+        if confirm is not None:
+            ttk.Button(buttons, text=deny, style="Text.TButton",
+                       command=self._deny).pack(side="right",
+                                                padx=(0, ROW_GAP))
+
+        window.bind("<Return>", lambda _event: self._confirm())
+        window.bind("<Escape>", lambda _event: self._deny())
+        self._centre(parent)
+        window.deiconify()
+        window.grab_set()
+        window.focus_set()
+        parent.wait_window(window)
+
+    def build(self, body):
+        """What goes between the message and the buttons, if anything."""
+
+    def _centre(self, parent):
+        self.window.update_idletasks()
+        width = self.window.winfo_reqwidth()
+        height = self.window.winfo_reqheight()
+        left = parent.winfo_rootx() + (parent.winfo_width() - width) // 2
+        top = parent.winfo_rooty() + (parent.winfo_height() - height) // 3
+        self.window.geometry("+%d+%d" % (max(0, left), max(0, top)))
+
+    def _confirm(self):
+        self.answer = True
+        self.window.destroy()
+
+    def _deny(self):
+        self.answer = False
+        self.window.destroy()
+
+
+class ColourDialog(Dialog):
+    """Pick a colour to flash: a grid of them, or type one in.
+
+    Tk's own chooser is the ugliest window this panel could put up, and it is
+    the one that matters most - a project about colour asking for a colour.
+    The offered ones are the colours the notifications already use, which are
+    the ones this strip is known to look good in; anything else is typed, the
+    trigger taking any colour.
+    """
+
+    ACROSS = 5
+
+    def __init__(self, parent, swatch, title="Flash a colour"):
+        self.chosen = None
+        self.swatch = swatch
+        super().__init__(parent, title, None, confirm="Flash")
+
+    def build(self, body):
+        grid = ttk.Frame(body)
+        grid.pack(anchor="w")
+        for index, (label, value) in enumerate(ledpanel.palette()):
+            ttk.Button(grid, text=label, image=self.swatch(value),
+                       compound="left", style="Outlined.TButton",
+                       command=lambda hue=value: self._take(hue)).grid(
+                           row=index // self.ACROSS, column=index % self.ACROSS,
+                           sticky="ew", padx=(0, ROW_GAP), pady=(0, ROW_GAP))
+
+        typed = ttk.Frame(body)
+        typed.pack(fill="x", pady=(ROW_GAP, 0))
+        ttk.Label(typed, text="Or a colour of your own").pack(anchor="w")
+        self.entry = ttk.Entry(typed, width=12, style="Material.TEntry")
+        self.entry.insert(0, ledpanel.SHAPE_TEST_COLOUR)
+        self.entry.pack(anchor="w", pady=(ROW_GAP, 0))
+
+    def _take(self, value):
+        """A swatch is the whole answer: pick it and the dialog is done."""
+        self.chosen = value
+        self._confirm()
+
+    def _confirm(self):
+        if self.chosen is None:
+            typed = self.entry.get().strip()
+            if not _COLOUR.match(typed):
+                self.entry.focus_set()
+                return                      # not a colour; say nothing, wait
+            self.chosen = typed
+        super()._confirm()
 
 
 class Progress:
@@ -1109,6 +1245,15 @@ class Panel:
             if code:
                 self._show_output(True)
 
+    def _say(self, title, message):
+        """Tell the user something; there is nothing to answer."""
+        Dialog(self.root, title, message)
+
+    def _ask(self, title, message, confirm, deny="Cancel"):
+        """Ask a yes-or-no question, and return whether it was confirmed."""
+        return Dialog(self.root, title, message, confirm=confirm,
+                      deny=deny).answer
+
     def _close(self):
         self._stop_timers()
         self.root.destroy()
@@ -1153,10 +1298,9 @@ class Panel:
         try:
             return config_module.load()
         except (config_module.ConfigError, OSError) as exc:
-            messagebox.showwarning(
-                "Configuration",
-                "Could not read %s:\n%s\n\nShowing defaults instead."
-                % (config_module.DEFAULT_CONFIG_PATH, exc))
+            self._say("Configuration",
+                      "Could not read %s:\n%s\n\nShowing defaults instead."
+                      % (config_module.DEFAULT_CONFIG_PATH, exc))
             return dict(config_module.DEFAULTS)
 
     def _write(self, text, tag=None):
@@ -1638,6 +1782,10 @@ class Panel:
         variable.set(self._label_for(key, current))
         self._show_swatch(key)
 
+    def _swatch_image(self, value):
+        """A swatch on a button, which stands on the page rather than a menu."""
+        return self._swatch(value, "surface")
+
     def _swatch(self, value, ground):
         """A square of colour for a menu entry, or None if this is not one.
 
@@ -1747,7 +1895,7 @@ class Panel:
         try:
             values = self._collect()
         except config_module.ConfigError as exc:
-            messagebox.showerror("Not a usable setting", str(exc))
+            self._say("Not a usable setting", str(exc))
             return
 
         try:
@@ -1762,7 +1910,7 @@ class Panel:
                 with open(shipped) as handle:
                     text = handle.read()
             except OSError as exc:
-                messagebox.showerror("Configuration", str(exc))
+                self._say("Configuration", str(exc))
                 return
 
         staged = tempfile.NamedTemporaryFile(
@@ -1817,14 +1965,14 @@ class Panel:
         try:
             values = self._collect()
         except config_module.ConfigError as exc:
-            messagebox.showerror("Not a usable setting", str(exc))
+            self._say("Not a usable setting", str(exc))
             return
 
         directory = ledpanel.profiles_dir(SOURCE_DIR)
         try:
             os.makedirs(directory, exist_ok=True)
         except OSError as exc:
-            messagebox.showerror("Profiles", str(exc))
+            self._say("Profiles", str(exc))
             return
 
         path = filedialog.asksaveasfilename(
@@ -1839,7 +1987,7 @@ class Panel:
             with open(path, "w") as handle:
                 handle.write(ledpanel.profile_text(values))
         except OSError as exc:
-            messagebox.showerror("Profiles", str(exc))
+            self._say("Profiles", str(exc))
             return
         self._write("Saved %d settings to %s\n\n" % (len(values), path))
 
@@ -1860,7 +2008,7 @@ class Panel:
         try:
             values = ledpanel.read_profile(path)
         except (config_module.ConfigError, OSError) as exc:
-            messagebox.showerror("Profile", str(exc))
+            self._say("Profile", str(exc))
             return
 
         shown = self._show_values(values)
@@ -2195,7 +2343,8 @@ class Panel:
         return outer
 
     def flash_colour(self):
-        chosen = colorchooser.askcolor(title="Flash this colour")[1]
+        chosen = ColourDialog(
+            self.root, lambda value: self._swatch_image(value)).chosen
         if chosen:
             self.runner.start(ledpanel.notify_command(chosen))
 
@@ -2349,12 +2498,12 @@ class Panel:
     def flash_firmware(self):
         environment = ledpanel.menu_value(ledpanel.FIRMWARE_ENVS,
                                           self.firmware.get())
-        if not messagebox.askokcancel(
+        if not self._ask(
                 "Flash firmware",
                 "This writes the '%s' firmware to the ESP over USB.\n\n"
                 "The bar goes dark and the service stops until it is done. "
                 "If the flash fails, the board keeps the firmware it has."
-                % environment):
+                % environment, confirm="Flash"):
             return
         self.runner.start(
             ledpanel.flash_firmware_command(SOURCE_DIR, environment),
@@ -2407,11 +2556,11 @@ class Panel:
 
     def update_now(self):
         wanted = self.branch.get()
-        if wanted != ledpanel.current_branch(SOURCE_DIR) and not messagebox.askyesno(
+        if wanted != ledpanel.current_branch(SOURCE_DIR) and not self._ask(
                 "Switch branch",
-                "This will switch from %s to %s and install that instead.\n\n"
-                "Carry on?" % (ledpanel.current_branch(SOURCE_DIR) or "?",
-                               wanted)):
+                "This will switch from %s to %s and install that instead."
+                % (ledpanel.current_branch(SOURCE_DIR) or "?", wanted),
+                confirm="Switch"):
             return
 
         before = ledpanel.head_commit(SOURCE_DIR)
@@ -2440,10 +2589,10 @@ class Panel:
             self._write("The install did not finish, so the panel is still "
                         "running the old files.\n\n")
             return
-        if messagebox.askyesno(
+        if self._ask(
                 "Update",
                 "Installed.\n\nThe panel itself is still running the files it "
-                "started with. Restart it now?"):
+                "started with.", confirm="Restart the panel", deny="Later"):
             self._restart()
         else:
             self._write("Restart the panel when it suits you; until then it "
@@ -2498,15 +2647,14 @@ class Panel:
 
     def reinstall(self):
         if not os.path.exists(os.path.join(SOURCE_DIR, "install.sh")):
-            messagebox.showerror(
-                "Repair",
-                "install.sh is not next to this panel (%s).\nRepairing needs "
-                "the cloned repository." % SOURCE_DIR)
+            self._say("Repair",
+                      "install.sh is not next to this panel (%s).\nRepairing "
+                      "needs the cloned repository." % SOURCE_DIR)
             return
-        if not messagebox.askokcancel(
-                "Repair", "Re-run the installer?\n\nYour configuration is "
-                          "kept and the ESP is not touched. This asks for "
-                          "your password."):
+        if not self._ask(
+                "Repair", "Your configuration is kept and the ESP is not "
+                          "touched. This asks for your password.",
+                confirm="Re-run the installer"):
             return
         self.runner.start(ledpanel.reinstall_command(SOURCE_DIR),
                           lambda _code: self.refresh_status())
