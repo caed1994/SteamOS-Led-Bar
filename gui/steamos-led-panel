@@ -449,7 +449,10 @@ def dress(style, roles, sizes):
             ("active", off(wash("surface_container_highest", "on_surface",
                                 material.STATE_HOVER),
                            roles["outline"], roles["on_surface_variant"])),
-            sticky="", padding=2)
+            # No padding: the widget is then exactly as tall as the picture,
+            # which is what puts a switch and a drop-down on the same height
+            # and gives every row in the column the same air around it.
+            sticky="", padding=0)
         style.layout("TCheckbutton", [
             ("Checkbutton.padding", {"sticky": "nsew", "children": [
                 ("Material.Switch", {"side": "left", "sticky": ""}),
@@ -649,8 +652,11 @@ def apply_theme(root):
               background=[("active", surface)],
               foreground=[("selected", roles["on_secondary_container"])])
 
+    # No padding: the layout's padding element would otherwise add four
+    # pixels that a drop-down beside it does not have, and the two would stand
+    # at different heights in a column meant to be regular.
     style.configure("TCheckbutton", background=surface, foreground=on_surface,
-                    focuscolor=surface)
+                    focuscolor=surface, padding=0)
     style.map("TCheckbutton", background=[("active", surface)])
     style.configure("TRadiobutton", background=surface, foreground=on_surface,
                     focuscolor=surface, padding=(0, 3))
@@ -837,7 +843,7 @@ class Panel:
 
         notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
         self._tab_changed()
-        root.bind("<Configure>", self._rewrap)
+        notebook.bind("<Configure>", self._rewrap)
 
         if ledpanel.in_game_mode():
             self._write(
@@ -1139,19 +1145,32 @@ class Panel:
         return label
 
     def _rewrap(self, event):
-        """Follow the window's width - only when it actually changed.
+        """Follow the width of the page - only when it actually changed.
 
-        The first line is not a nicety: a toplevel is in the bindtags of every
-        widget under it, so this runs for each child's own Configure too, and
-        event.width is then that child's. Measured, it saw 14 px from a
-        scrollbar, wrapped every explanation into a column, changed the layout,
-        and got called again - a window flickering between two sizes until it
-        was killed. Setting wraplength can also bring a Configure straight
-        back, which is what comparing the width first ends.
+        Bound to the notebook rather than to the window, and for two reasons.
+        The page is narrower than the window by the whole rail, so wrapping to
+        the window's width laid the text out wider than the page it sits in and
+        it was cut off at the right edge rather than wrapped. And asking the
+        notebook how wide it is while handling the *window's* Configure gives
+        the width it had before the resize - measured, the wrapping stayed one
+        resize behind, so making the window smaller clipped the text until it
+        was resized again. The notebook's own Configure carries the width it is
+        about to have.
+
+        A toplevel is in the bindtags of every widget under it, so the same
+        binding on the window ran for each child's Configure too, with that
+        child's width: measured, it once saw 14 px from a scrollbar, wrapped
+        every explanation into a column, changed the layout and was called
+        again - a window flickering between two sizes until it was killed. A
+        widget is not in its children's bindtags, so binding here cannot see
+        anyone else's size; the guard stays as a statement of that.
+
+        Setting wraplength can also bring a Configure straight back, which is
+        what comparing the width first ends.
         """
-        if event.widget is not self.root:
+        if event.widget is not self.notebook:
             return
-        width = max(320, event.width - 90)
+        width = max(320, event.width - 3 * SIDE_MARGIN)
         if width == self._wrap_width:
             return
         self._wrap_width = width

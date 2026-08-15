@@ -130,6 +130,54 @@ class LiveWindowTest(unittest.TestCase):
         self.assertIsNone(self.panel._preview_job,
                           "the preview kept animating off-screen")
 
+    def test_the_controls_in_a_column_stand_the_same_height(self):
+        # A switch, a drop-down and a slider have no reason to agree on a
+        # height unless they are made to, and a column alternating between
+        # three of them has no rhythm whatever the padding between the rows.
+        self.panel.notebook.select(self._pages()[1])
+        self.root.update()
+        heights = {}
+        for key in ("NOTIFY", "ACHIEVEMENT_COLOR", "NOTIFY_STYLE"):
+            _labels, controls = self.panel._rows[key]
+            heights[key] = controls[0].winfo_height()
+        self.assertEqual(len(set(heights.values())), 1, heights)
+
+    def test_a_block_is_fenced_off_from_what_is_around_it(self):
+        # The stepped-in rows under a switch belong to it; the gap above the
+        # next switch is what says so, every row being the same height.
+        self.panel.notebook.select(self._pages()[1])
+        self.root.update()
+        rows = ("NOTIFY_ACHIEVEMENTS", "ACHIEVEMENT_COLOR",
+                "ACHIEVEMENT_STYLE", "NOTIFY_MESSAGES")
+        tops = [self.panel._rows[key][1][0].winfo_rooty() for key in rows]
+        inside = [tops[index + 1] - tops[index] for index in range(2)]
+        crossing = tops[3] - tops[2]
+        self.assertEqual(len(set(inside)), 1,
+                         "the rows inside a block are not evenly spaced")
+        self.assertGreater(crossing, inside[0],
+                           "a block runs into the next with no gap")
+
+    def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
+        # The rail takes a sixth of the width, so wrapping to the window laid
+        # the text out wider than the page it sits in - and a label whose text
+        # is wider than its slot is not wrapped, it is cut off. Asking the
+        # notebook its width while handling the window's own Configure gives
+        # the width before the resize, so the sizes are walked here.
+        for width in (1200, 860, 1400, 820):
+            self.root.geometry("%dx900" % width)
+            for _ in range(6):
+                self.root.update()
+            for page in self._pages():
+                self.panel.notebook.select(page)
+                self.root.update()
+                for label in self.panel._wrapped:
+                    if not label.winfo_ismapped():
+                        continue
+                    self.assertLessEqual(
+                        label.winfo_reqwidth(), label.winfo_width(),
+                        "at %d px wide, %r is cut off"
+                        % (width, label.cget("text")[:40]))
+
     def test_the_log_folds_away_until_something_writes_to_it(self):
         self.assertFalse(self.panel._output_open)
         self.assertFalse(self.panel.output_box.winfo_ismapped())

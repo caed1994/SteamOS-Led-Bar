@@ -318,7 +318,11 @@ def control_sizes(linespace):
     - so it is passed in and the arithmetic stays testable without a display.
     """
     control = max(CONTROL_FLOOR, linespace + CONTROL_PADDING)
-    switch = max(SWITCH_FLOOR, control - 4)
+    # Exactly as tall as a drop-down, not a few pixels under it. Rows are a
+    # fixed pitch, so a control that falls short of it leaves more air around
+    # itself than its neighbours have - which is what made a switch sitting
+    # above a drop-down look wrongly spaced even though the rows were even.
+    switch = max(SWITCH_FLOOR, control)
     knob = max(KNOB_FLOOR, control - 12)
     # The groove is drawn inside an image as tall as the knob, so an odd
     # difference would leave it half a pixel off centre.
