@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Just enough ELF parsing to list what a shared object exports.
 
 The flat Steamworks accessors carry a version suffix that depends on the SDK a

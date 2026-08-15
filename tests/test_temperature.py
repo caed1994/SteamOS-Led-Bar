@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Finding and reading a temperature sensor, against a made-up /sys tree.
 
 Picking the right sensor is the whole job: a machine reports a dozen, and most

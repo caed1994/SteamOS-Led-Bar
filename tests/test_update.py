@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Updating the clone, against real git repositories.
 
 This is the one script that reaches into somebody's working copy, so it is

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Reading how hot the machine is, from the kernel's hwmon interface.
 
 Every sensor shows up under /sys/class/hwmon as a chip with one or more

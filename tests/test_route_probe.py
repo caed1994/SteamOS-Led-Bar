@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The route probe has to survive a child that dies badly.
 
 Picking the wrong Steamworks interface version does not raise - it segfaults,

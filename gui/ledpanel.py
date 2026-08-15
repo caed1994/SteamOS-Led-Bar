@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """What the control panel knows, minus the widgets.
 
 Kept free of tkinter on purpose: the interesting parts are "what is broken"

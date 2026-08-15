@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Unit tests: python3 -m unittest discover -s tests
 
 Everything here is stdlib-only, so it runs on a stock SteamOS image.

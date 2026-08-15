@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Flashes the ESP firmware, giving it the serial port for the duration.
 #
 #   flash-firmware.sh <environment>

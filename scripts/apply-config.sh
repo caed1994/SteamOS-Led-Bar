@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Installs a prepared configuration file and restarts the service.
 #
 #   apply-config.sh <staged-file>

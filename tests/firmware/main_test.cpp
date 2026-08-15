@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 caed1994
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Drives the real firmware source against stubbed Arduino/NeoPixelBus.
 #include <cstdio>
 #include <cstdlib>

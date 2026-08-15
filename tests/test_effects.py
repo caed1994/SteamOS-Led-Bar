@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The rainbow slot, and the effects that can stand in it.
 
 Steam's LED menu cannot be extended, so everything of ours shares one entry.

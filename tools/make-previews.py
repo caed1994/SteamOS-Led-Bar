@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Draw the README's effect previews, straight from the renderer.
 
 GitHub runs no JavaScript in a README, so the previews have to be images.

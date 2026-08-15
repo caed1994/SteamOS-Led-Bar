@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Runs the strip self-test, giving it the serial port for the duration.
 #
 #   self-test.sh [seconds]

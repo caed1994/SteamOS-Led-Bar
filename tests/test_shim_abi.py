@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Checks shim.py and render.py against the vendored kernel module source.
 
 The Python side hardcodes the snapshot layout and the meaning of the tuning

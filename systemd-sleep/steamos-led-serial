@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Hand the LED strip over to the ESP while the machine sleeps, and take it
 # back on the way out.
 #

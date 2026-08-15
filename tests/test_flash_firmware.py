@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The firmware flasher's refusals.
 
 Flashing itself needs a board on the other end of a USB cable, so what is

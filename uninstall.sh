@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Removes the SteamOS LED bar USB-serial bridge.
 #   sudo ./uninstall.sh [--purge] [--remove-module]
 # --purge          also deletes /etc/steamos-led-serial.conf

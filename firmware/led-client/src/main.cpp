@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 caed1994
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // USB-serial LED client for the SteamOS LED bar bridge.
 //
 // The host renders every frame, so this firmware is deliberately dumb: parse

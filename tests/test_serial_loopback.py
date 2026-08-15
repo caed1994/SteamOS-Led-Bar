@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """End-to-end test of the serial layer against a fake ESP on a pty.
 
 Exercises the real termios configuration, the handshake and frame delivery

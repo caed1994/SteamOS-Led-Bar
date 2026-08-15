@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Compiles the firmware against stubbed Arduino/NeoPixelBus headers and
 # exercises its protocol handling on the host. No board required.
 #

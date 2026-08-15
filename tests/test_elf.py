@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tests for the ELF symbol reader.
 
 Guessing Steamworks symbol names is what broke first, so the reader that

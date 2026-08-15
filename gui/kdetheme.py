@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Read the colours and font KDE Plasma is using.
 
 tkinter has no idea a desktop theme exists, which is why an unstyled panel

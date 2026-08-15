@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Turns a shim snapshot into a frame of physical LED colours.
 
 The Steam Machine animates rainbow/breath/patrol on its own microcontroller, so

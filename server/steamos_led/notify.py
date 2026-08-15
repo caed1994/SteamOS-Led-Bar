@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Notification overlay: briefly take over the bar, then hand it back.
 
 Driven by an explicit trigger rather than by any detector of its own: anything

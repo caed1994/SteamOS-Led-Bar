@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Shared shell helpers for the achievement watcher.
 #
 # The watcher is a *user* systemd unit - Steamworks talks to the Steam client

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Minimal serial port support built on stdlib termios only.
 
 SteamOS has a read-only rootfs, so pyserial would mean either

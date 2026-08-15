@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Realtime achievement detection through Valve's local Steamworks API.
 
 No API key, no network: the Steam client already knows the achievement state

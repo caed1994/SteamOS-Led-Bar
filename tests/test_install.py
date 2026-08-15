@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The installer's prerequisite hunting, without installing anything.
 
 A first install on a fresh SteamOS stalls before the module is ever compiled:

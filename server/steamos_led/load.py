@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """How busy the CPU and the GPU are, for the load gauge.
 
 Two very different kernel interfaces for the same kind of number. The CPU

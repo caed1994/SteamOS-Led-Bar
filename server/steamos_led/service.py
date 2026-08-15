@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Service entry point: shim -> renderer -> USB serial -> ESP."""
 
 from __future__ import annotations

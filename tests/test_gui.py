@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tests for the control panel's logic, which is kept out of the widgets.
 
 There is no display here and there will not be one on a build machine, so

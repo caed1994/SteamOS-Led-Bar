@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Runs the real service process against a fake shim and a fake ESP.
 
 The shim is stood in for by a FIFO: the service only ever opens, polls and

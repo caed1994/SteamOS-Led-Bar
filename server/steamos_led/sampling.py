@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Smoothing shared by the things that read a number out of /sys and /proc.
 
 The render loop runs at up to sixty frames a second while the numbers it shows

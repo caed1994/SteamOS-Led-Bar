@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Reader for the leds-valve-shim character device.
 
 The shim exposes the LED state Steam writes in Game Mode as a packed 100 byte

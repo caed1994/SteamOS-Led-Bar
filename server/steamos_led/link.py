@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Framed binary protocol between the host service and the ESP.
 
     +------+------+---------+------+--------+---------+-------+

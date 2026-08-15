@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Builds and flashes the LED client firmware with PlatformIO.
 #
 #   ./flash-esp.sh                       # ESP8266 on GPIO2, the default

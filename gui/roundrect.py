@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Rounded rectangles as pixels, for widgets that ttk draws with sharp corners.
 
 ttk has no corner radius, but a widget part can be an image, stretched with

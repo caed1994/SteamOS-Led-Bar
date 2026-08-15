@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tests for the Steamworks achievement watcher.
 
 The API itself needs a running Steam and a game, so what is verified here is
