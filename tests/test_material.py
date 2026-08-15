@@ -176,6 +176,88 @@ class SchemeTest(unittest.TestCase):
             material.contrast(roles["on_surface"], roles["surface"]), 4.5)
 
 
+class ControlSizeTest(unittest.TestCase):
+    """How big a control is, for a desktop set to any font.
+
+    This runs on a machine people also use handheld, with a trackpad rather
+    than a mouse on a desk. Desktop guidelines put the smallest sensible target
+    at around twenty pixels; ttk's own defaults are well under that, which is
+    what made the first version fiddly. A fixed size is not enough either - one
+    that suits a ten point font is small against thirteen - so the sizes are
+    worked out, and it is the arithmetic that has to hold up.
+    """
+
+    MINIMUM = 20
+    # Ten point through about twenty, which is the range a desktop font and a
+    # scaling factor between them can plausibly produce.
+    FONTS = range(12, 40)
+
+    def _sizes(self):
+        return [(linespace, material.control_sizes(linespace))
+                for linespace in self.FONTS]
+
+    def test_every_target_is_big_enough_to_hit(self):
+        for linespace, sizes in self._sizes():
+            for name in ("switch_width", "switch_height", "knob", "radio",
+                         "control"):
+                self.assertGreaterEqual(sizes[name], self.MINIMUM,
+                                        "%s at linespace %d" % (name,
+                                                                linespace))
+
+    def test_a_switch_is_wider_than_it_is_tall(self):
+        for linespace, sizes in self._sizes():
+            self.assertGreater(sizes["switch_width"], sizes["switch_height"],
+                               linespace)
+
+    def test_the_thumb_grows_when_the_switch_goes_on(self):
+        # The state has to be readable without relying on colour alone.
+        for linespace, sizes in self._sizes():
+            self.assertGreater(sizes["thumb_on"], sizes["thumb_off"], linespace)
+            # And it still has to fit inside the track it slides along - these
+            # are radii, so twice one of them is the thumb.
+            self.assertLess(sizes["thumb_on"] * 2, sizes["switch_height"],
+                            linespace)
+
+    def test_the_knob_stands_proud_of_its_groove(self):
+        # A knob no bigger than the groove is invisible as a handle.
+        for linespace, sizes in self._sizes():
+            self.assertGreater(sizes["knob"], sizes["track"], linespace)
+            self.assertGreaterEqual(sizes["track"], 8, linespace)
+
+    def test_the_groove_is_centred_evenly_in_the_knob_sized_image(self):
+        # The groove is drawn inside an image as tall as the knob, so an odd
+        # difference would put it half a pixel off centre.
+        for linespace, sizes in self._sizes():
+            self.assertEqual((sizes["knob"] - sizes["track"]) % 2, 0, linespace)
+
+    def test_everything_grows_with_the_font(self):
+        # The point of measuring rather than fixing: a control that stays put
+        # while the text around it grows is the thing that looked wrong.
+        small = material.control_sizes(14)
+        large = material.control_sizes(30)
+        for name in ("control", "switch_width", "switch_height", "knob",
+                     "radio"):
+            self.assertGreater(large[name], small[name], name)
+
+    def test_a_switch_and_a_drop_down_stand_the_same_height(self):
+        # Which is what lets a column of settings have a rhythm at all: a page
+        # alternating between a 32 pixel control and a 42 pixel one has none,
+        # whatever the spacing between the rows.
+        for linespace, sizes in self._sizes():
+            field = linespace + 2 * sizes["field_padding"] + 8   # ttk's border
+            self.assertLessEqual(abs(field - sizes["switch_height"]), 6,
+                                 "at linespace %d a switch is %d and a "
+                                 "drop-down %d" % (linespace,
+                                                   sizes["switch_height"],
+                                                   field))
+
+    def test_no_control_is_taller_than_the_row_it_sits_in(self):
+        for linespace, sizes in self._sizes():
+            for name in ("switch_height", "knob", "radio"):
+                self.assertLessEqual(sizes[name], sizes["control"],
+                                     "%s at linespace %d" % (name, linespace))
+
+
 class StateLayerTest(unittest.TestCase):
     """Hover, press and disabled, which are one mechanism for every widget."""
 

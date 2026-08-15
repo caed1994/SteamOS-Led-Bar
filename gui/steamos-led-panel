@@ -31,6 +31,7 @@ sys.path.insert(0, HERE)
 try:
     import tkinter as tk
     from tkinter import ttk, colorchooser, filedialog, messagebox
+    from tkinter import font as tkfont
 except ImportError:                                         # pragma: no cover
     sys.exit(
         "This panel needs Python's tkinter, which is not installed.\n"
@@ -243,27 +244,39 @@ FIELD_RADIUS = material.SHAPE_EXTRA_SMALL
 # height of one entry, which is also the diameter of the pill behind it.
 RAIL_HEIGHT = 40
 
-# Sized for fingers and a trackpad, not a mouse on a desk: this runs on a
-# machine people also use handheld. Everything here is comfortably above the
-# ~20 px that desktop guidelines call the smallest sensible target.
-SWITCH_WIDTH = 46           # a switch, not a tick: these are all on/off
-SWITCH_HEIGHT = 28          # settings, and a tick only says "chosen"
-SWITCH_THUMB_ON = 10        # radii. The thumb grows when it goes on, so the
-SWITCH_THUMB_OFF = 7        # state can be read from the shape as well
-RADIO_SIZE = 24
-RADIO_GAP = 8               # drawn beside the ring, where the label goes
-TRACK_THICKNESS = 12        # the groove a slider runs in
-KNOB_DIAMETER = 24          # thick enough to grab, round enough to read as a pill
+# How wide a switch and a radio's ring stand from the label beside them. Drawn
+# into the picture, because the label is a separate element and ttk puts the
+# two flush.
+RADIO_GAP = 8
 ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
+
+# One width for every drop-down on a settings page, so a column of them has an
+# edge rather than a ragged one. The sensor menu is the exception it has to be:
+# its entries are paths into /sys, and cutting one off defeats the point of
+# being able to see which sensor was picked.
+MENU_WIDTH = 18
+SENSOR_WIDTH = 30
 DETAILS_GAP = 10            # under the checklist, and part of what it costs
 
-# The 4dp grid Material spaces everything on, in the four amounts this window
-# needs. The gap between groups is what replaces the boxes that used to be
-# drawn round them, so it is deliberately larger than any gap inside one.
+# Everything else a control measures is worked out from the desktop's own font
+# - see material.control_sizes, and the note there on why a fixed size is
+# wrong. Sized for fingers and a trackpad rather than a mouse on a desk: this
+# runs on a machine people also use handheld.
+
+# The 4dp grid Material spaces everything on, in the amounts this window needs.
+# The gap between groups is what replaces the boxes that used to be drawn round
+# them, so it is deliberately larger than any gap inside one.
 SIDE_MARGIN = 4 * material.SPACE
 GROUP_GAP = 6 * material.SPACE
 ROW_GAP = 2 * material.SPACE
 INDENT_STEP = 5 * material.SPACE
+
+# What one settings row keeps above and below its control, and the extra a row
+# gets when it starts a new block - the switch that a stepped-in pair hangs
+# off. With every control the same height, that extra is the only thing saying
+# where one block ends and the next begins.
+ROW_PAD = 1 * material.SPACE
+BLOCK_GAP = 4 * material.SPACE
 
 # The type scale, as offsets from whatever size the desktop is set to. Material
 # has fifteen sizes; a window this size needs four, and the weights matter more
@@ -298,7 +311,7 @@ def _slice(radius, fill, background, border=None, width=1):
                                  border_width=width if border else 0))
 
 
-def dress(style, roles):
+def dress(style, roles, sizes):
     """Replace the parts ttk draws square and flat with Material ones.
 
     Best effort throughout: an older Tk that will not take image elements keeps
@@ -391,12 +404,13 @@ def dress(style, roles):
                 ("Button.label", {"side": "top", "sticky": ""})]})])
 
     def switches():
+        width, height = sizes["switch_width"], sizes["switch_height"]
+
         def picture(track, edge, thumb, radius, on, tick=None):
-            rows = roundrect.rows(SWITCH_WIDTH, SWITCH_HEIGHT,
-                                  SWITCH_HEIGHT / 2.0, track, surface,
+            rows = roundrect.rows(width, height, height / 2.0, track, surface,
                                   border=edge, border_width=2 if edge else 0)
-            middle = SWITCH_HEIGHT / 2.0
-            across = (SWITCH_WIDTH - middle) if on else middle
+            middle = height / 2.0
+            across = (width - middle) if on else middle
             roundrect.draw_disc(rows, across, middle - 0.5, radius, thumb)
             if tick:
                 roundrect.draw_check(
@@ -406,10 +420,10 @@ def dress(style, roles):
             return _photo(rows)
 
         def off(track, edge, thumb):
-            return picture(track, edge, thumb, SWITCH_THUMB_OFF, False)
+            return picture(track, edge, thumb, sizes["thumb_off"], False)
 
         def on(track, thumb, tick):
-            return picture(track, None, thumb, SWITCH_THUMB_ON, True, tick)
+            return picture(track, None, thumb, sizes["thumb_on"], True, tick)
 
         style.element_create(
             "Material.Switch", "image",
@@ -442,19 +456,19 @@ def dress(style, roles):
                 ("Checkbutton.label", {"side": "left", "sticky": "w"})]})])
 
     def radios():
+        size = sizes["radio"]
+
         def picture(ring, dot=None, ground=None):
             # Wider than it is tall: the label beside it is a separate element
             # and ttk puts them flush, so the gap has to be part of the
             # picture or the text sits against the ring.
             ground = ground or surface
-            rows = [[ground] * (RADIO_SIZE + RADIO_GAP)
-                    for _ in range(RADIO_SIZE)]
-            middle = (RADIO_SIZE - 1) / 2.0
-            roundrect.draw_ring(rows, middle, middle, RADIO_SIZE / 2.0 - 1.0,
-                                2.0, ring)
+            rows = [[ground] * (size + RADIO_GAP) for _ in range(size)]
+            middle = (size - 1) / 2.0
+            roundrect.draw_ring(rows, middle, middle, size / 2.0 - 1.0, 2.0,
+                                ring)
             if dot:
-                roundrect.draw_disc(rows, middle, middle, RADIO_SIZE / 4.0,
-                                    dot)
+                roundrect.draw_disc(rows, middle, middle, size / 4.0, dot)
             return _photo(rows)
 
         style.element_create(
@@ -476,21 +490,21 @@ def dress(style, roles):
 
     def sliders():
         # A pill-shaped groove and a round knob.
-        radius = TRACK_THICKNESS / 2.0
+        thickness, diameter = sizes["track"], sizes["knob"]
+        radius = thickness / 2.0
 
         # Drawn inside an image as tall as the knob: ttk sizes the widget from
         # the trough, so a groove-sized one would crop the larger knob.
-        groove = roundrect.pill(TRACK_THICKNESS * 3, TRACK_THICKNESS,
+        groove = roundrect.pill(thickness * 3, thickness,
                                 roles["surface_container_highest"], surface,
                                 border_width=0)
-        padding = (KNOB_DIAMETER - TRACK_THICKNESS) // 2
-        rows = [[surface] * (TRACK_THICKNESS * 3)
-                for _ in range(KNOB_DIAMETER)]
-        rows[padding:padding + TRACK_THICKNESS] = groove
+        padding = (diameter - thickness) // 2
+        rows = [[surface] * (thickness * 3) for _ in range(diameter)]
+        rows[padding:padding + thickness] = groove
 
         def knob(colour):
-            return _photo(roundrect.pill(KNOB_DIAMETER, KNOB_DIAMETER, colour,
-                                         surface, border_width=0))
+            return _photo(roundrect.pill(diameter, diameter, colour, surface,
+                                         border_width=0))
 
         # The two names end in "trough" and "slider" because ttk::scale finds
         # them by that suffix: it is what tells the widget which element to
@@ -568,6 +582,12 @@ def apply_theme(root):
     family, size = desktop["font"] or ("TkDefaultFont", 10)
     root.option_add("*Font", (family, size))
     style.configure(".", font=(family, size))
+    # Every control's height comes from what the font actually measures, so a
+    # switch, a slider and a drop-down stand the same height as each other on
+    # any desktop - which is what a column of settings needs before any amount
+    # of spacing between the rows can look regular.
+    sizes = material.control_sizes(
+        tkfont.Font(root, font=(family, size)).metrics("linespace"))
 
     root.configure(background=surface)
     # One background for the whole window. Material tells groups apart by
@@ -643,7 +663,8 @@ def apply_theme(root):
     style.configure("TCombobox", fieldbackground=surface, background=surface,
                     foreground=on_surface, arrowcolor=variant,
                     bordercolor=surface, lightcolor=surface,
-                    darkcolor=surface, padding=(10, 7),
+                    darkcolor=surface,
+                    padding=(10, sizes["field_padding"]),
                     arrowsize=ARROW_SIZE)
     # A read-only combobox draws its text as a *selection*, so without these
     # the label comes out pale grey on pale grey.
@@ -671,9 +692,10 @@ def apply_theme(root):
                     troughcolor=surface, bordercolor=surface,
                     arrowcolor=variant, relief="flat")
 
-    dress(style, roles)
+    dress(style, roles, sizes)
 
     roles["_font"] = (family, size)
+    roles["_sizes"] = sizes
     return roles
 
 
@@ -981,8 +1003,19 @@ class Panel:
                     row=row, column=0, columnspan=2, sticky="w",
                     pady=(0 if index == 0 else GROUP_GAP, ROW_GAP))
                 row += 1
-            for entry in entries:
-                self._build_row(grid, row, *entry)
+            # A block is a switch with stepped-in rows under it. The extra
+            # space goes both above the switch that opens one and above the
+            # row that follows the last of them, so a block is fenced on both
+            # sides - every control being the same height, the gap is the only
+            # thing that says where one ends and the next begins.
+            indents = [self._indent(entry[0]) for entry in entries]
+            for position, entry in enumerate(entries):
+                after = (indents[position + 1]
+                         if position + 1 < len(indents) else 0)
+                fenced = indents[position] == 0 and (
+                    after > 0 or indents[position - 1] > 0)
+                self._build_row(grid, row, *entry,
+                                lead=BLOCK_GAP if position and fenced else 0)
                 row += 1
         return outer
 
@@ -1000,26 +1033,36 @@ class Panel:
         return (max(0, len(needs) - 1)
                 + (1 if any(isinstance(need, tuple) for need in needs) else 0))
 
-    def _build_row(self, grid, row, key, label, kind, low, high, step):
-        """One setting: its name, its control, and a way to grey both out."""
+    def _build_row(self, grid, row, key, label, kind, low, high, step,
+                   lead=0):
+        """One setting: its name, its control, and a way to grey both out.
+
+        `lead` is extra room above, for a row that begins a block. The row's
+        own padding is the same everywhere, which is what makes the column
+        regular now that the controls in it all stand the same height.
+        """
+        grid.rowconfigure(row, minsize=self.roles["_sizes"]["control"]
+                          + 2 * ROW_PAD + lead)
         name = ttk.Label(grid, text=label)
-        name.grid(row=row, column=0, sticky="w", pady=5,
-                  padx=(self._indent(key) * INDENT_STEP, 14))
+        name.grid(row=row, column=0, sticky="w", pady=(ROW_PAD + lead, ROW_PAD),
+                  padx=(self._indent(key) * INDENT_STEP, GROUP_GAP))
         value = self.config.get(key, config_module.DEFAULTS[key])
         labels, controls = [name], []
 
         if kind == "bool":
             variable = tk.BooleanVar(value=bool(value))
             control = ttk.Checkbutton(grid, variable=variable)
-            control.grid(row=row, column=1, sticky="w")
+            control.grid(row=row, column=1, sticky="w",
+                         pady=(ROW_PAD + lead, ROW_PAD))
             controls.append(control)
             self._follow(variable)
         elif kind == "choice":
             variable = tk.StringVar(value=str(value))
             control = ttk.Combobox(grid, textvariable=variable,
                                    values=list(low), state="readonly",
-                                   width=12)
-            control.grid(row=row, column=1, sticky="w")
+                                   width=MENU_WIDTH)
+            control.grid(row=row, column=1, sticky="w",
+                         pady=(ROW_PAD + lead, ROW_PAD))
             controls.append(control)
         elif kind in ("sensor", "named"):
             # Entries that are labels for something else - see the menu
@@ -1029,12 +1072,14 @@ class Panel:
                                                current=str(value))
                        if kind == "sensor" else list(low))
             self._menu(grid, row, key, variable, choices, str(value),
-                       width=34 if kind == "sensor" else 18)
+                       width=SENSOR_WIDTH if kind == "sensor" else MENU_WIDTH,
+                       lead=ROW_PAD + lead)
             controls.append(self._widgets[key])
             self._follow(variable)
         else:
             variable = tk.DoubleVar(value=float(value))
-            scale, readout = self._scale(grid, row, variable, low, high, step)
+            scale, readout = self._scale(grid, row, variable, low, high, step,
+                                         lead=ROW_PAD + lead)
             controls.append(scale)
             labels.append(readout)
 
@@ -1175,13 +1220,14 @@ class Panel:
             self._preview_started = time.monotonic()
             self._preview_tick()
 
-    def _menu(self, grid, row, key, variable, choices, current, width):
+    def _menu(self, grid, row, key, variable, choices, current, width,
+              lead=0):
         """A drop-down of (label, value) pairs, showing labels."""
         self._menus[key] = list(choices)
         widget = ttk.Combobox(grid, textvariable=variable, state="readonly",
                               width=width,
                               values=[label for label, _value in choices])
-        widget.grid(row=row, column=1, sticky="w")
+        widget.grid(row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
         self._widgets[key] = widget
         variable.set(self._label_for(key, current))
 
@@ -1205,9 +1251,9 @@ class Panel:
         """Back from the menu entry to what the config file wants."""
         return ledpanel.menu_value(self._menus[key], label)
 
-    def _scale(self, grid, row, variable, low, high, step):
+    def _scale(self, grid, row, variable, low, high, step, lead=0):
         holder = ttk.Frame(grid)
-        holder.grid(row=row, column=1, sticky="ew")
+        holder.grid(row=row, column=1, sticky="ew", pady=(lead, ROW_PAD))
         holder.columnconfigure(0, weight=1)
         readout = ttk.Label(holder, width=6)
         pattern = "%%.%df" % _decimals(step)

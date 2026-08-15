@@ -1141,29 +1141,6 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
         self.assertLess(lowest[0], 12, "the corner of the tick is on the left")
         self.assertGreater(highest[0], lowest[0], "and it rises to the right")
 
-    def test_the_switch_is_big_enough_to_hit(self):
-        # clam's own indicator is a handful of pixels; that was the complaint.
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
-        with open(path) as handle:
-            tree = ast.parse(handle.read())
-        sizes = {node.targets[0].id: node.value.value for node in tree.body
-                 if isinstance(node, ast.Assign)
-                 and isinstance(node.value, ast.Constant)}
-        self.assertGreaterEqual(sizes["SWITCH_HEIGHT"], 16)
-        self.assertGreater(sizes["SWITCH_WIDTH"], sizes["SWITCH_HEIGHT"])
-
-    def test_the_switch_thumb_grows_when_it_goes_on(self):
-        # The state has to be readable without relying on colour alone.
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
-        with open(path) as handle:
-            tree = ast.parse(handle.read())
-        sizes = {node.targets[0].id: node.value.value for node in tree.body
-                 if isinstance(node, ast.Assign)
-                 and isinstance(node.value, ast.Constant)}
-        self.assertGreater(sizes["SWITCH_THUMB_ON"], sizes["SWITCH_THUMB_OFF"])
-        # And it still has to fit inside the track it slides along.
-        self.assertLess(sizes["SWITCH_THUMB_ON"] * 2, sizes["SWITCH_HEIGHT"])
-
     def test_segment_coverage_is_thickest_on_the_line(self):
         on_line = roundrect.segment_coverage(5, 5, (0, 5), (10, 5), 3)
         beside = roundrect.segment_coverage(5, 9, (0, 5), (10, 5), 3)
@@ -1226,15 +1203,11 @@ class ComboboxReadabilityTest(unittest.TestCase):
 
 
 class TouchTargetTest(unittest.TestCase):
-    """The controls have to be big enough to hit.
+    """The one control size the panel still fixes rather than measures.
 
-    This runs on a machine people also use handheld, with a trackpad rather
-    than a mouse on a desk. Desktop guidelines put the smallest sensible
-    target at around twenty pixels; ttk's own defaults are well under that,
-    which is what made the first version fiddly.
+    Everything else a control measures is worked out from the desktop font by
+    material.control_sizes, and checked over a range of them in test_material.
     """
-
-    MINIMUM = 20
 
     def setUp(self):
         path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
@@ -1246,37 +1219,13 @@ class TouchTargetTest(unittest.TestCase):
                       and isinstance(node.value, ast.Constant)
                       and getattr(node.targets[0], "id", "").isupper()}
 
-    def test_the_switch_is_hittable(self):
-        self.assertGreaterEqual(self.sizes["SWITCH_HEIGHT"], self.MINIMUM)
-        self.assertGreaterEqual(self.sizes["SWITCH_WIDTH"], self.MINIMUM)
-
-    def test_the_radio_button_is_hittable(self):
-        self.assertGreaterEqual(self.sizes["RADIO_SIZE"], self.MINIMUM)
-
-    def test_the_slider_knob_is_hittable(self):
-        self.assertGreaterEqual(self.sizes["KNOB_DIAMETER"], self.MINIMUM)
-
     def test_the_dropdown_arrow_is_hittable(self):
         # Not the full twenty: the arrow sits inside a field that is taller
         # than it, so the clickable area is larger than the glyph.
         self.assertGreaterEqual(self.sizes["ARROW_SIZE"], 16)
 
-    def test_the_knob_stands_proud_of_its_groove(self):
-        # A knob no bigger than the groove is invisible as a handle.
-        self.assertGreater(self.sizes["KNOB_DIAMETER"],
-                           self.sizes["TRACK_THICKNESS"])
-
-    def test_the_groove_is_centred_evenly_in_the_knob_sized_image(self):
-        # The groove is drawn inside an image as tall as the knob, so ttk
-        # sizes the widget to fit the knob. An odd difference would put the
-        # groove half a pixel off centre.
-        slack = self.sizes["KNOB_DIAMETER"] - self.sizes["TRACK_THICKNESS"]
-        self.assertEqual(slack % 2, 0)
-
-    def test_the_groove_is_thick_enough_to_see(self):
-        self.assertGreaterEqual(self.sizes["TRACK_THICKNESS"], 8)
-
-
+    def test_a_radio_stands_clear_of_its_label(self):
+        self.assertGreaterEqual(self.sizes["RADIO_GAP"], 4)
 
 
 class GameModeTest(unittest.TestCase):

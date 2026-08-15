@@ -280,6 +280,67 @@ SHAPE_FULL = 999          # clamped to half the short side by roundrect
 # The 4dp grid everything is spaced on.
 SPACE = 4
 
+# -- how big a control is ---------------------------------------------------
+#
+# Not fixed. A switch that looks right against a ten point desktop font is
+# small against thirteen, and the three kinds of control in a settings row -
+# switch, slider, drop-down - have no reason to agree on a height unless they
+# are made to. Left to themselves they came out 32, 24 and 42 pixels, and a
+# column of rows alternating between those has no rhythm whatever the spacing
+# between them is. So all three are worked out from the font, and come out the
+# same height.
+
+# How much taller than its text a control is: Material's own field is the text
+# plus a comfortable thumb's worth above and below.
+CONTROL_PADDING = 20
+
+# Floors, for a desktop set to a very small font. These are what keeps every
+# target above the ~20 px that guidelines call the smallest sensible one, on a
+# machine that is also used handheld.
+CONTROL_FLOOR = 36
+SWITCH_FLOOR = 30
+KNOB_FLOOR = 24
+RADIO_FLOOR = 22
+
+# A switch is wider than it is tall by about this much - Material's own is
+# 52 by 32.
+SWITCH_RATIO = 1.65
+# The thumb, as a fraction of the switch's height. It grows when the switch
+# goes on, so the state can be read from the shape and not only the colour.
+THUMB_ON = 0.36
+THUMB_OFF = 0.25
+
+
+def control_sizes(linespace):
+    """Every control's pixels, for a desktop font this tall.
+
+    `linespace` is what the font actually measures, which only tkinter can say
+    - so it is passed in and the arithmetic stays testable without a display.
+    """
+    control = max(CONTROL_FLOOR, linespace + CONTROL_PADDING)
+    switch = max(SWITCH_FLOOR, control - 4)
+    knob = max(KNOB_FLOOR, control - 12)
+    # The groove is drawn inside an image as tall as the knob, so an odd
+    # difference would leave it half a pixel off centre.
+    track = knob // 2
+    if (knob - track) % 2:
+        track -= 1
+    return {
+        "control": control,
+        "switch_width": int(round(switch * SWITCH_RATIO)),
+        "switch_height": switch,
+        "thumb_on": int(round(switch * THUMB_ON)),
+        "thumb_off": int(round(switch * THUMB_OFF)),
+        "knob": knob,
+        "track": track,
+        "radio": max(RADIO_FLOOR, control - 12),
+        # What a drop-down needs above and below its text to stand as tall as
+        # the rest. Four off what the arithmetic says, because ttk adds a
+        # field border of its own - measured at eight pixels - that no style
+        # option reaches.
+        "field_padding": max(3, (control - linespace) // 2 - 4),
+    }
+
 
 def ladders(seed, error=None, positive=None):
     """The palettes one seed colour implies."""
