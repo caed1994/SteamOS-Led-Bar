@@ -27,11 +27,13 @@ CPU_STAT = "/proc/stat"
 # machine without one shows the CPU alone rather than half a dark bar.
 GPU_BUSY_GLOB = "/sys/class/drm/card*/device/gpu_busy_percent"
 
-# Faster than the temperature gauge and smoothed far less: load is what the
-# machine is doing right now, and a meter that lags a second behind the thing
-# you just started is not showing you the thing you just started.
+# How often the counters are read, and how hard the reading is damped. Faster
+# than the temperature gauge, because load is what the machine is doing right
+# now. Damped harder than the reading rate, because it is also the noisier of
+# the two: a game's frame pacing swings the counters far more than the bar
+# should follow.
 READ_INTERVAL = 0.25
-SMOOTHING_SECONDS = 0.6
+SMOOTHING_SECONDS = 1.0
 
 
 def _read_text(path):
@@ -105,9 +107,14 @@ class LoadSource:
         self.gpu_path = None
         self._resolved = False
         self._totals = None
+        # Where the counters last said we are, and where the bar has got to on
+        # its way there. Two things, because they move at different rates.
+        self._cpu_read = None
+        self._gpu_read = None
         self._cpu = None
         self._gpu = None
         self._taken = None
+        self._shown = None
         self._complained = False
 
     def resolve(self):
@@ -128,28 +135,35 @@ class LoadSource:
         Either entry may be None on its own: a machine can have a CPU counter
         and no GPU one, which is a gauge with something to say and half the
         detail, not a gauge that has failed.
+
+        Reading and showing run at different rates on purpose. The counters can
+        only be read every `interval` - the CPU's are running totals, and the
+        load between two of them needs both. But the value handed out moves a
+        little on every call, so the bar glides at whatever rate it is drawn
+        rather than stepping four times a second.
         """
         now = time.monotonic() if now is None else now
-        if self._taken is not None and now - self._taken < self.interval:
-            return self._pair()
+        if self._taken is None or now - self._taken >= self.interval:
+            self._taken = now
+            self._cpu_read = self._sample_cpu()
+            path = self.resolve()
+            self._gpu_read = read_gpu_percent(path) if path else None
 
-        elapsed = self.interval if self._taken is None else now - self._taken
-        self._taken = now
-        self._cpu = sampling.smooth(self._cpu, self._sample_cpu(), elapsed,
+            # Not "both values are None": on the first reading the CPU has no
+            # baseline to subtract from yet, which is a gauge warming up rather
+            # than a machine that cannot answer. _totals stays None only when
+            # /proc/stat itself could not be read.
+            if self._totals is None and path is None and not self._complained:
+                self._complained = True
+                LOG.warning("no CPU or GPU load to read - the gauge falls back "
+                            "to the rainbow")
+
+        step = self.interval if self._shown is None else now - self._shown
+        self._shown = now
+        self._cpu = sampling.smooth(self._cpu, self._cpu_read, step,
                                     self.smoothing)
-        path = self.resolve()
-        self._gpu = sampling.smooth(self._gpu,
-                                    read_gpu_percent(path) if path else None,
-                                    elapsed, self.smoothing)
-
-        # Not "both values are None": on the first reading the CPU has no
-        # baseline to subtract from yet, which is a gauge warming up rather
-        # than a machine that cannot answer. _totals stays None only when
-        # /proc/stat itself could not be read.
-        if self._totals is None and path is None and not self._complained:
-            self._complained = True
-            LOG.warning("no CPU or GPU load to read - the gauge falls back to "
-                        "the rainbow")
+        self._gpu = sampling.smooth(self._gpu, self._gpu_read, step,
+                                    self.smoothing)
         return self._pair()
 
     def _pair(self):

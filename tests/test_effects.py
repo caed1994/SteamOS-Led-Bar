@@ -112,28 +112,78 @@ class SlotTest(unittest.TestCase):
                          render.SHOWS_LOAD)
 
 
-class FrameRateTest(unittest.TestCase):
-    """The two gauges are not animations, and the two animations are."""
+class Stepping(load.LoadSource):
+    """A real source whose counters jump from idle to a game and stay there.
 
-    def test_the_gauges_are_not_driven_at_the_frame_rate(self):
-        for kwargs in ({"temperature": FakeTemperature()},
-                       {"load": FakeLoad()}):
-            renderer = _renderer(**kwargs)
-            self.assertFalse(renderer.is_animated(_rainbow_snapshot()), kwargs)
+    Real enough to carry the smoothing, which is the thing under test - a fake
+    that just hands back a number would be testing the fake.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(stat_path="/nonexistent", gpu_pattern="/nonexistent/*",
+                         **kwargs)
+        self._resolved = True           # do not go looking at the real /sys
+
+    def _sample_cpu(self):
+        return 0.05 if (self._taken or 0.0) < 0.5 else 0.85
+
+
+class FrameRateTest(unittest.TestCase):
+    """Which scenes have something new to draw on the next frame."""
+
+    def test_the_temperature_gauge_is_not_driven_at_the_frame_rate(self):
+        # It redraws when the sensor moves, which is far slower than a frame.
+        renderer = _renderer(temperature=FakeTemperature())
+        self.assertFalse(renderer.is_animated(_rainbow_snapshot()))
+
+    def test_the_load_gauge_is(self):
+        # It glides towards each reading instead of stepping onto it, so at
+        # the idle rate the glide would be four jumps a second.
+        renderer = _renderer(load=Stepping())
+        self.assertTrue(renderer.is_animated(_rainbow_snapshot()))
 
     def test_fire_and_aurora_are(self):
         for name in (render.SHOWS_FIRE, render.SHOWS_AURORA):
             renderer = _renderer(rainbow_shows=name)
             self.assertTrue(renderer.is_animated(_rainbow_snapshot()), name)
 
-    def test_a_second_of_load_frames_is_one_picture(self):
-        # The source holds its reading between intervals, so every frame in
-        # between is the same bytes rendered and sent again.
-        renderer = _renderer(load=FakeLoad(0.4, 0.7))
-        snapshot = _rainbow_snapshot()
-        frames = {bytes(renderer.render(snapshot, tick / 60.0))
-                  for tick in range(60)}
-        self.assertEqual(len(frames), 1)
+
+class LoadGlideTest(unittest.TestCase):
+    """The bar walks to a new reading rather than jumping onto it."""
+
+    HALF = shim.LOGICAL_LEDS // 2
+
+    def _walk(self, fps):
+        """How far the CPU bar sits along its half, frame by frame, in LEDs."""
+        source = Stepping()
+        return [(source.fractions(now=tick / float(fps))[0] or 0.0) * self.HALF
+                for tick in range(int(2.0 * fps))]
+
+    def _biggest_step(self, walk):
+        return max(abs(b - a) for a, b in zip(walk, walk[1:]))
+
+    def test_no_frame_moves_the_bar_more_than_a_fifth_of_an_LED(self):
+        # The whole complaint: at the idle rate one reading moved it nearly
+        # two and a half LEDs at once, which reads as a jump rather than a
+        # meter.
+        self.assertLess(self._biggest_step(self._walk(60)), 0.2)
+
+    def test_drawing_it_faster_does_not_make_it_arrive_later(self):
+        # Only the granularity changed, not the pace. Drawn at four frames a
+        # second or at sixty, the bar is within a quarter of an LED of the
+        # same place two seconds in.
+        self.assertAlmostEqual(self._walk(4)[-1], self._walk(60)[-1], delta=0.25)
+
+    def test_it_gets_most_of_the_way_there_in_two_seconds(self):
+        # Softer, not slower: a meter that lags behind the thing you just
+        # started is not showing you the thing you just started.
+        self.assertGreater(self._walk(60)[-1], 0.85 * self.HALF * 0.7)
+
+    def test_every_frame_of_the_glide_has_something_new_to_draw(self):
+        # Which is what earns it the full frame rate. Sampled while it is
+        # actually moving - once arrived it holds still, as it should.
+        gliding = self._walk(60)[31:71]
+        self.assertTrue(all(b > a for a, b in zip(gliding, gliding[1:])))
 
 
 class LoadGaugeTest(unittest.TestCase):

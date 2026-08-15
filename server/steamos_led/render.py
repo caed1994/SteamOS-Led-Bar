@@ -487,17 +487,19 @@ class Renderer:
     def is_animated(self, snapshot):
         """Whether this scene changes from frame to frame.
 
-        The two gauges do not: they redraw when their sensor moves, which is
-        orders of magnitude slower than a frame, so driving them at the full
-        rate sends the same bytes sixty times a second. With nothing to read
-        they fall back to the rainbow, which does animate - and fire and
-        aurora are animations like any other.
+        The temperature gauge does not: it redraws when the sensor moves,
+        which is orders of magnitude slower than a frame, so driving it at the
+        full rate would send the same bytes sixty times a second. With nothing
+        to read it falls back to the rainbow, which does animate.
+
+        The load gauge is the other way round. Its value glides towards each
+        new reading instead of stepping onto it, so it has something new to
+        draw every frame - and at the idle rate that glide would be four jumps
+        a second, which is exactly what it exists to avoid.
         """
         effect = self._substitute(snapshot)
         if effect is _temperature:
             return self.temperature.celsius() is None
-        if effect is _load:
-            return self.load.fractions() is None
         if effect is not None:
             return True
         return snapshot.is_animated

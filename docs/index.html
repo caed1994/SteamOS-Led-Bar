@@ -542,10 +542,10 @@
             body: [
               "Two bars grow out of the middle: CPU to the left in amber, GPU to the right in blue. Here the <em>length</em> carries the value rather than the colour &ndash; load has a real zero and a real full, temperature has neither.",
               "Out of the middle because the two readings are peers. Stacked end to end, one of them would sit at the far end of the strip, which is where you look last. The innermost LED of each side never goes fully dark, or an idle machine looks like a strip somebody switched off.",
-              "Shown here is a run from idle through a menu into a game and back."
+              "The bar glides towards each reading rather than stepping onto it, and is redrawn every frame so the walk is smooth. Shown here is a run from idle through a menu into a game and back."
             ],
             facts: [["CPU", "/proc/stat"], ["GPU", "amdgpu gpu_busy_percent"],
-                    ["Reading", "4× a second, smoothed over 0.6 s"],
+                    ["Counters read", "4× a second"], ["Bar follows over", "about 1 s"],
                     ["With no GPU counter", "CPU on both halves"],
                     ["Middle LED", "stays dark, as the divider"]]
           },

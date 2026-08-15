@@ -317,8 +317,9 @@ twitch. A machine that reports no temperature at all gets the rainbow.
 ### Load
 
 Two bars grow out of the middle: the CPU to the left in amber, the GPU to the
-right in blue. Nothing to set beyond `RAINBOW_SHOWS=load`. Read four times a
-second and averaged over about half of one.
+right in blue. Nothing to set beyond `RAINBOW_SHOWS=load`. The counters are
+read four times a second, but the bar glides towards each reading over about a
+second and is redrawn every frame, so it walks rather than stepping.
 
 ```bash
 /var/lib/steamos-led-serial/steamos-led-serial --load
@@ -329,8 +330,8 @@ CPU: counters in /proc/stat
 GPU: /sys/class/drm/card0/device/gpu_busy_percent
 
 Over 0.50 s: CPU 23%, GPU 61%
-Two bars grow out of the middle: CPU to the left in amber, GPU to the right
-in blue. Read every 0.25 s, averaged over 0.6 s.
+Two bars grow out of the middle: CPU to the left in amber, GPU to the
+right in blue. Read every 0.25 s, averaged over 1 s.
 ```
 
 **The GPU half depends on your driver.** amdgpu publishes `gpu_busy_percent`,
