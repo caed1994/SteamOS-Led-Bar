@@ -4,6 +4,8 @@ Mirrors the Steam Machine's LED bar onto a WS2812 strip driven by an **ESP
 connected over USB**. Colour, brightness and effects come straight from the
 Personalization menu in SteamOS Game Mode, download progress included.
 
+![the rainbow effect on a 17 LED strip](docs/previews/rainbow.png)
+
 This is the USB variant of
 [rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release),
 which connects the ESP over Wi-Fi. Same kernel module, different transport: no
@@ -234,6 +236,19 @@ exactly as it runs on the microcontroller of a real Steam Machine.
 | 6 | factory | red, green, blue, white in turn |
 | 7 | demo | rainbow with a breathing envelope |
 
+Rendered here by the same code that drives the strip, on seventeen LEDs:
+
+| | |
+| --- | --- |
+| **rainbow** | ![rainbow](docs/previews/rainbow.png) |
+| **breath** | ![breath](docs/previews/breath.png) |
+| **patrol** | ![patrol](docs/previews/patrol.png) |
+| **factory** | ![factory](docs/previews/factory.png) |
+
+Every animation on this page is drawn by `render.py` and `notify.py` and
+recorded frame by frame &ndash; nothing here is an impression of the effect.
+Rebuild them with `python3 tools/make-previews.py`.
+
 ### Effect speed
 
 `delay` is not a duration but a slider: the kernel module advertises `0-20` and
@@ -259,6 +274,11 @@ counts up when something writes to it, so until Game Mode is running the
 truthful frame is black. The service leaves the strip to the ESP for that
 stretch rather than sending darkness.
 
+![the startup breath](docs/previews/startup.png)
+
+Dim on purpose, like the standby one &ndash; that is the whole animation, not a
+broken image.
+
 On a machine that boots to the desktop and never starts Game Mode, the bar
 therefore keeps breathing. That is the same statement: Steam has not said
 anything yet.
@@ -267,6 +287,11 @@ anything yet.
 
 Suspend the machine and the strip keeps a slow white breath going instead of
 falling dark. Wake it and the normal effect comes back.
+
+![the standby breath](docs/previews/standby.png)
+
+It really is that dim &ndash; 30 of 255 at its brightest. "The machine is off
+but alive" should not light the room.
 
 **The ESP draws this one itself.** During a suspend no process runs, so no
 frame can be rendered. A systemd sleep hook tells the service just before the
@@ -312,6 +337,11 @@ what stands in it:
 | `load` | [how busy the CPU and GPU are](#load-gauge), as two bars out of the middle |
 | `fire` | flame drifting along the strip |
 | `aurora` | slow curtains of green and violet |
+
+| | |
+| --- | --- |
+| **fire** | ![fire](docs/previews/fire.png) |
+| **aurora** | ![aurora](docs/previews/aurora.png) |
 
 Set it, then pick **Rainbow** in Steam's LED menu:
 
@@ -365,6 +395,10 @@ least 5 degrees apart, or there is no room left to fade through.
 The bar always fills the whole strip. The length of a part-filled bar was only
 ever saying the same thing as its colour, twice.
 
+A warm-up from 25 to 95 degrees and back, at the default 40/80 marks:
+
+![the temperature gauge warming up](docs/previews/temperature.png)
+
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `RAINBOW_SHOWS` | `rainbow` | set to `temperature` to put the gauge in the [rainbow slot](#the-rainbow-slot) |
@@ -408,11 +442,9 @@ With `RAINBOW_SHOWS=load` the bar shows how busy the two big chips are. Two
 bars grow **out of the middle**: the CPU to the left in amber, the GPU to the
 right in blue.
 
-```
-idle          |        ..*.*..        |
-in a menu     |     ...***.***..      |
-in a game     | ..*********.********. |
-```
+Idle, then a menu, then a game, then idle again:
+
+![the load gauge through a session](docs/previews/load.png)
 
 Length rather than colour, and this is the one place that is right: load has a
 real zero and a real full, so how far a bar has come *is* the reading.
@@ -506,14 +538,17 @@ echo alternate:achievement > /run/steamos-led-serial/notify
 
 ### The shapes
 
-| Shape | What it looks like |
-| ----- | ------------------ |
-| `bloom` | grows out of the middle, breathes once, retracts |
-| `pulse` | the whole bar swells three times and fades |
-| `double_flash` | two short blinks, a pause, and again |
-| `comet` | a bright head with a fading tail, once across the bar |
-| `alternate` | the two halves flash in turn |
-| `sparkle` | grains of light flicker on and die out all over the bar |
+| Shape | What it looks like | |
+| ----- | ------------------ | --- |
+| `bloom` | grows out of the middle, breathes once, retracts | ![bloom](docs/previews/shape-bloom.png) |
+| `pulse` | the whole bar swells three times and fades | ![pulse](docs/previews/shape-pulse.png) |
+| `double_flash` | two short blinks, a pause, and again | ![double flash](docs/previews/shape-double-flash.png) |
+| `comet` | a bright head with a fading tail, once across the bar | ![comet](docs/previews/shape-comet.png) |
+| `alternate` | the two halves flash in turn | ![alternate](docs/previews/shape-alternate.png) |
+| `sparkle` | grains of light flicker on and die out all over the bar | ![sparkle](docs/previews/shape-sparkle.png) |
+
+Shown in Steam blue, except `alternate`: a warning is always red, so that is
+what it looks like.
 
 `comet` is the only shape with a direction, and the only one `REVERSE` applies
 to. `double_flash` and `sparkle` are timed in seconds rather than in fractions
