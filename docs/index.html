@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LED-Bar Effektkatalog</title>
+<meta name="description" content="Alle Effekte der SteamOS-LED-Leiste, abgespielt aus echten Frames des Renderers.">
+<style>
+  /* One committed visual world: an LED strip is judged in a dim room, and a
+     white page would misrepresent every colour on it. The chrome is kept
+     achromatic on purpose - all colour here comes from the light the strip is
+     actually emitting. */
+  :root {
+    --ground:      #131417;
+    --ground-deep: #0d0e11;
+    --panel:       #1a1c21;
+    --panel-lift:  #202329;
+    --edge:        #2b2e36;
+    --edge-soft:   #23262d;
+    --ink:         #e7e4df;
+    --ink-dim:     #a0a3ac;
+    --ink-faint:   #767a85;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+    --step-0: 0.9375rem;
+    --step-1: 1.0625rem;
+    --step-2: 1.375rem;
+    --micro:  0.75rem;
+    --small:  0.8125rem;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--step-0);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 66rem;
+    margin: 0 auto;
+    padding: clamp(1.75rem, 4vw, 3.5rem) clamp(1.1rem, 3vw, 2rem) 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(1.75rem, 3.5vw, 2.75rem);
+  }
+
+  code, .mono {
+    font-family: var(--mono);
+    font-size: 0.95em;
+    color: var(--ink-dim);
+  }
+
+  /* -- masthead ------------------------------------------------------ */
+
+  .masthead { display: flex; flex-direction: column; gap: 0.75rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: var(--micro);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.75rem, 5vw, 2.4rem);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--ink-dim);
+    font-size: var(--step-1);
+  }
+
+  /* -- the stage ----------------------------------------------------- */
+
+  .stage {
+    background: linear-gradient(180deg, var(--ground-deep), #0a0b0d);
+    border: 1px solid var(--edge-soft);
+    border-radius: 4px;
+    padding: clamp(2.5rem, 7vw, 4.5rem) clamp(1rem, 4vw, 3rem) clamp(1rem, 3vw, 2rem);
+    overflow: hidden;
+  }
+
+  .bar {
+    display: flex;
+    gap: clamp(3px, 0.8vw, 7px);
+    justify-content: center;
+    align-items: stretch;
+    height: clamp(30px, 6vw, 46px);
+  }
+
+  .bar i, .spill i {
+    flex: 1 1 0;
+    max-width: 46px;
+    border-radius: 2px;
+    background: #000;
+    display: block;
+  }
+
+  /* The light falling on whatever the strip is mounted above. Mirrored,
+     blurred and faded out - the same trick a real strip plays on a desk. */
+  .spill {
+    display: flex;
+    gap: clamp(3px, 0.8vw, 7px);
+    justify-content: center;
+    height: clamp(40px, 9vw, 70px);
+    margin-top: clamp(6px, 1.5vw, 10px);
+    filter: blur(7px);
+    opacity: 0.34;
+    transform: scaleY(-1);
+    -webkit-mask-image: linear-gradient(to top, transparent, #000 85%);
+    mask-image: linear-gradient(to top, transparent, #000 85%);
+    pointer-events: none;
+  }
+
+  .readout {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-top: clamp(0.75rem, 2vw, 1.25rem);
+    font-family: var(--mono);
+    font-size: var(--micro);
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* -- controls ------------------------------------------------------ */
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: -0.75rem;
+  }
+
+  .chip {
+    appearance: none;
+    font-family: var(--mono);
+    font-size: var(--micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    padding: 0.4rem 0.85rem;
+    cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  }
+
+  .chip:hover { color: var(--ink); border-color: var(--ink-faint); }
+  .chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  .chip[aria-pressed="true"] {
+    color: var(--ground);
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+
+  /* Not the play/pause button: its label already says what it does, and
+     filling it in as well makes it the loudest thing on the page. */
+  #playpause[aria-pressed="true"] {
+    color: var(--ink);
+    background: transparent;
+    border-color: var(--edge);
+  }
+
+  .variants { display: flex; gap: 0.4rem; align-items: center; }
+  .variants[hidden] { display: none; }
+
+  .variants .label {
+    font-family: var(--mono);
+    font-size: var(--micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-left: 0.4rem;
+  }
+
+  /* -- the catalogue ------------------------------------------------- */
+
+  .catalogue {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+    gap: clamp(1.25rem, 3vw, 2rem);
+    border-top: 1px solid var(--edge-soft);
+    padding-top: clamp(1.5rem, 3vw, 2rem);
+  }
+
+  .group { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+
+  .group h2 {
+    font-family: var(--mono);
+    font-size: var(--micro);
+    font-weight: 400;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0;
+  }
+
+  .group .why {
+    margin: -0.35rem 0 0.35rem;
+    font-size: var(--small);
+    color: var(--ink-faint);
+    line-height: 1.45;
+  }
+
+  .group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+  .entry {
+    appearance: none;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 0;
+    border-left: 2px solid var(--edge-soft);
+    padding: 0.45rem 0.6rem 0.5rem 0.75rem;
+    cursor: pointer;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+  }
+
+  .entry:hover { background: var(--panel); color: var(--ink); }
+  .entry:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+  .entry[aria-pressed="true"] {
+    background: var(--panel-lift);
+    color: var(--ink);
+    border-left-color: transparent;
+  }
+
+  /* The rail is lit in the effect's own colour - the one place the chrome
+     borrows from the content, because that is the whole subject. */
+  .entry[aria-pressed="true"]::before {
+    content: "";
+    position: absolute;
+    left: -2px; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--lit, var(--ink));
+  }
+
+  .entry .name { font-family: var(--mono); font-size: var(--step-0); }
+  .entry .gloss { font-size: var(--small); color: var(--ink-faint); line-height: 1.4; }
+
+  /* -- the explanation ----------------------------------------------- */
+
+  .sheet {
+    border-top: 1px solid var(--edge-soft);
+    padding-top: clamp(1.5rem, 3vw, 2rem);
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+    gap: clamp(1.5rem, 4vw, 3rem);
+    align-items: start;
+  }
+
+  @media (max-width: 44rem) {
+    .sheet { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .prose { display: flex; flex-direction: column; gap: 1rem; }
+
+  .prose h2 {
+    font-family: var(--mono);
+    font-size: var(--step-2);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  .prose p { margin: 0; max-width: 62ch; }
+  .prose em { color: var(--ink); font-style: normal; border-bottom: 1px solid var(--edge); }
+
+  .facts {
+    font-family: var(--mono);
+    font-size: var(--small);
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .facts caption {
+    text-align: left;
+    font-size: var(--micro);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-bottom: 0.6rem;
+  }
+
+  .facts th, .facts td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--edge-soft);
+  }
+
+  .facts th { font-weight: 400; color: var(--ink-faint); padding-right: 1rem; }
+  .facts td { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+  .foot {
+    font-size: var(--small);
+    color: var(--ink-faint);
+    border-top: 1px solid var(--edge-soft);
+    padding-top: 1.25rem;
+    max-width: 66ch;
+    margin: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .entry, .chip { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow"><a href="https://github.com/caed1994/SteamOS-Led-Bar">SteamOS LED Bar</a> &middot; 17 LEDs &middot; echte Frames aus dem Renderer</p>
+    <h1>LED-Bar Effektkatalog</h1>
+    <p class="standfirst">Alles, was die Leiste zeigen kann &ndash; Steams eigene Effekte, was wir
+      in den Rainbow-Slot stellen k&ouml;nnen, die Blitzformen f&uuml;r Benachrichtigungen und
+      das, was der ESP allein zeichnet. Kein Nachbau: die Bilder kommen Frame f&uuml;r Frame
+      aus <code>render.py</code> und <code>notify.py</code>, so wie sie auch &uuml;ber USB gehen.</p>
+  </header>
+
+  <section class="stage" aria-label="Vorschau der LED-Leiste">
+    <div class="bar" id="bar" role="img" aria-label="Simulierte LED-Leiste mit 17 Dioden"></div>
+    <div class="spill" id="spill" aria-hidden="true"></div>
+    <div class="readout">
+      <span id="clock">0.0 s</span>
+      <span id="mode"></span>
+    </div>
+  </section>
+
+  <div class="controls">
+    <button class="chip" id="playpause" aria-pressed="true">Pause</button>
+    <button class="chip" id="slowmo" aria-pressed="false">Zeitlupe 4&times;</button>
+    <div class="variants" id="variants" hidden>
+      <span class="label" id="variant-label"></span>
+      <div class="chip-row" id="variant-chips" style="display:flex;gap:0.4rem"></div>
+    </div>
+  </div>
+
+  <nav class="catalogue" id="catalogue" aria-label="Effekt w&auml;hlen"></nav>
+
+  <section class="sheet">
+    <div class="prose" id="prose"></div>
+    <table class="facts">
+      <caption>Wie es gebaut ist</caption>
+      <tbody id="facts"></tbody>
+    </table>
+  </section>
+
+  <p class="foot">Ein Bildschirm ist kein WS2812: echte Dioden sind deutlich greller und ihr
+    Streulicht ist st&auml;rker, vor allem bei Fire. Die beiden Atemanimationen unten sind
+    dagegen wirklich so dunkel, wie sie hier aussehen &ndash; deswegen gibt es dort einen
+    Knopf zum Aufhellen. Zum Anschauen auf der echten Leiste:
+    <code>steamos-led-serial --simulate rainbow</code> zeigt, was
+    <code>RAINBOW_SHOWS</code> gerade sagt, und der Formen-Tester im Test-Tab der GUI
+    feuert jede Blitzform einmal ab.</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  function run(DATA) {
+
+    var LEDS = DATA.leds;
+    var FPS = DATA.fps;
+
+    var STEAM_BLUE = [26, 159, 255];
+    var GOLD = [255, 215, 0];
+    var PURPLE = [128, 0, 255];
+    var RED = [255, 0, 0];
+
+    // Clips of notification shapes hold one byte per LED, not three: a shape is
+    // brightness over time and the colour is a multiplier on top, so they can be
+    // retinted here without a capture per colour.
+    var parsed = {};
+    function clip(name) {
+      if (parsed[name]) { return parsed[name]; }
+      var raw = DATA.clips[name];
+      var mono = raw[0].length === LEDS * 2;
+      parsed[name] = raw.map(function (hex) {
+        var frame = [];
+        for (var i = 0; i < LEDS; i++) {
+          frame.push(mono
+            ? parseInt(hex.substr(i * 2, 2), 16)
+            : [parseInt(hex.substr(i * 6, 2), 16),
+               parseInt(hex.substr(i * 6 + 2, 2), 16),
+               parseInt(hex.substr(i * 6 + 4, 2), 16)]);
+        }
+        return frame;
+      });
+      parsed[name].mono = mono;
+      return parsed[name];
+    }
+
+    var SHAPE_COLOURS = {
+      label: "Farbe",
+      options: [
+        { label: "Steam-Blau", tint: STEAM_BLUE },
+        { label: "Achievement", tint: GOLD },
+        { label: "Nachricht", tint: PURPLE }
+      ]
+    };
+
+    var BOOST = {
+      label: "Anzeige",
+      options: [
+        { label: "Original", gain: 1 },
+        { label: "6\u00d7 heller", gain: 6 }
+      ]
+    };
+
+    var CATALOGUE = [
+      {
+        group: "Steam-Effekte",
+        why: "Was Steams Personalization-Men\u00fc anbietet. Farbe und Tempo kommen von dort.",
+        items: [
+          {
+            id: "static", name: "Statisch", gloss: "Eine Farbe, so wie gew\u00e4hlt",
+            clip: "static", lit: "#1a9fff",
+            body: [
+              "Steam schreibt hier nicht <em>eine</em> Farbe, sondern alle siebzehn LEDs einzeln \u2013 jede mit eigener Helligkeit. Die Leiste kann also auch einen Verlauf zeigen, wenn Steam einen schickt; meistens schickt es \u00fcberall dasselbe.",
+              "Das ist der einzige Effekt, bei dem sich nichts bewegt. Der Dienst merkt das und f\u00e4llt auf die Leerlauf-Bildrate zur\u00fcck, statt viermal pro Sekunde dasselbe Bild \u00fcber USB zu schieben."
+            ],
+            facts: [["Steam-Effekt", "manual / normal"], ["Bewegung", "keine"],
+                    ["Bildrate", "IDLE_FPS, 4 fps"], ["Aufl\u00f6sung", "17 LEDs einzeln"]]
+          },
+          {
+            id: "rainbow", name: "Rainbow", gloss: "Der Farbkreis, einmal rundherum",
+            clip: "rainbow", lit: "linear-gradient(180deg,#ff0040,#ffd000,#00e05a,#00a2ff,#a26bff)",
+            body: [
+              "Der Farbkreis einmal \u00fcber die Leiste verteilt und dann durchgedreht. Bei Steams Standard-Tempo dauert ein Umlauf 3,5 Sekunden; der Verz\u00f6gerungsregler in Steam streckt ihn bis auf das Zweieinhalbfache.",
+              "Das ist auch der Eintrag, den wir \u00fcbernehmen, wenn wir etwas Eigenes zeigen wollen \u2013 Steams Men\u00fc l\u00e4sst sich nicht erweitern, und der Regenbogen ist der Effekt, auf den die meisten am ehesten verzichten."
+            ],
+            facts: [["Zyklus", "3,5 s"], ["Steam-Farbregler", "verschiebt den Startpunkt"],
+                    ["S\u00e4ttigung", "voll"], ["Wird ersetzt von", "RAINBOW_SHOWS"]]
+          },
+          {
+            id: "breath", name: "Breath", gloss: "Ein- und ausatmen",
+            clip: "breath", lit: "#1a9fff",
+            body: [
+              "Eine Farbe, die ein- und ausatmet: ein angehobener Kosinus \u00fcber einen Zyklus. Angehoben, weil ein Atem, der auf null geht, kein Atem mehr ist, sondern ein Blinken \u2013 die dunkelste Stelle liegt bei 6 Prozent.",
+              "Dieselbe Kurve zeichnet auch die Bootanimation und den Standby-Puls weiter unten. Ein Atemzug soll \u00fcberall gleich aussehen, egal wer ihn gerade malt."
+            ],
+            facts: [["Zyklus", "1,6 s"], ["Dunkelste Stelle", "6 %"],
+                    ["Kurve", "angehobener Kosinus"], ["Farbe", "aus Steam"]]
+          },
+          {
+            id: "patrol", name: "Patrol", gloss: "Punkte laufen hin und her",
+            clip: "patrol_1", lit: "#1a9fff",
+            variants: {
+              label: "Punkte",
+              options: [
+                { label: "1", clip: "patrol_1" },
+                { label: "2", clip: "patrol_2" },
+                { label: "3", clip: "patrol_3" }
+              ]
+            },
+            body: [
+              "Punkte, die von einem Ende zum anderen und zur\u00fcck laufen. Kein harter Punkt, sondern eine Glockenkurve \u00fcber gut zwei LEDs \u2013 auf siebzehn Dioden w\u00e4re ein einzelner leuchtender Pixel eher ein Defekt als ein Effekt.",
+              "Mehrere Punkte werden <em>zeitlich</em> versetzt, nicht r\u00e4umlich. Versch\u00f6be man sie im Raum, m\u00fcsste ein Punkt am Streifenende f\u00fcr ein Bild auf LED 0 springen. So starten sie einfach zu verschiedenen Momenten dieselbe Bahn."
+            ],
+            facts: [["Zyklus", "2,5 s hin und zur\u00fcck"], ["Punktbreite", "\u2248 2,2 LEDs"],
+                    ["Anzahl", "PATROL_DOTS, 1 \u2013 3"], ["Versatz", "in der Zeit"]]
+          },
+          {
+            id: "demo", name: "Demo", gloss: "Regenbogen unter einer Atemh\u00fclle",
+            clip: "demo", lit: "linear-gradient(180deg,#ffd000,#00a2ff,#a26bff)",
+            body: [
+              "Der Regenbogen, \u00fcber den eine zweite, langsamere Atemkurve gelegt wird. Zwei Zyklen laufen gegeneinander \u2013 3,5 Sekunden f\u00fcr die Farbe, 3,2 f\u00fcr die Helligkeit \u2013, also wiederholt sich das Bild praktisch nie.",
+              "Valve hat den Effekt f\u00fcr die Auslage gebaut: er zeigt in wenigen Sekunden alles, was die Leiste kann."
+            ],
+            facts: [["Farbzyklus", "3,5 s"], ["Atemzyklus", "3,2 s"],
+                    ["Dunkelste Stelle", "6 %"]]
+          },
+          {
+            id: "factory", name: "Factory", gloss: "Rot, Gr\u00fcn, Blau, Wei\u00df",
+            clip: "factory", lit: "linear-gradient(180deg,#ff0000,#00ff00,#0000ff,#ffffff)",
+            body: [
+              "Valves Pr\u00fcfbild: jede Grundfarbe eine Sekunde lang \u00fcber die ganze Leiste, dann Wei\u00df. Kein Effekt zum Anschauen, sondern einer zum Nachsehen.",
+              "Wenn ein Kanal nicht schaltet oder eine Diode tot ist, sieht man es hier sofort \u2013 bei Wei\u00df f\u00e4llt eine fehlende Farbe als Farbstich auf, bei den drei Einzelfarben als dunkle L\u00fccke."
+            ],
+            facts: [["Je Farbe", "1,0 s"], ["Reihenfolge", "rot, gr\u00fcn, blau, wei\u00df"],
+                    ["Zweck", "Kanal- und Diodentest"]]
+          }
+        ]
+      },
+      {
+        group: "Im Rainbow-Slot",
+        why: "Der eine Eintrag, den wir \u00fcbernehmen k\u00f6nnen. RAINBOW_SHOWS entscheidet, was drinsteht.",
+        items: [
+          {
+            id: "temperature", name: "Temperature", gloss: "Farbe tr\u00e4gt die W\u00e4rme",
+            clip: "temperature", lit: "linear-gradient(180deg,#00ff00,#ffff00,#ff0000)",
+            body: [
+              "Die ganze Leiste in einer Farbe, und die Farbe ist die Ablesung: gr\u00fcn solange es k\u00fchl ist, rot wenn es hei\u00df wird, dazwischen gemischt. Kein Balken, der sich f\u00fcllt \u2013 eine teilweise dunkle Leiste sagt zwei Dinge gleichzeitig, ihre L\u00e4nge und ihre Farbe, und nur eines davon war je die Antwort.",
+              "Wo die Skala sitzt, bestimmen zwei Regler: <em>TEMPERATURE_MIN</em> ist, wo Gr\u00fcn endet, <em>TEMPERATURE_MAX</em>, wo Rot beginnt. Gelb landet automatisch in der Mitte. Hier l\u00e4uft ein simulierter Anstieg von 25 auf 95 Grad und zur\u00fcck."
+            ],
+            facts: [["Skala", "TEMPERATURE_MIN / MAX"], ["Standard", "40 / 80 \u00b0C"],
+                    ["Gelb", "genau dazwischen"], ["Sensor", "1\u00d7 pro Sekunde, \u00fcber 6 s gegl\u00e4ttet"],
+                    ["Hier gezeigt", "simulierter Sweep 25 \u2192 95 \u00b0C"]]
+          },
+          {
+            id: "load", name: "Load", gloss: "CPU und GPU, aus der Mitte heraus",
+            clip: "load", lit: "linear-gradient(180deg,#ff6e00,#1a9fff)",
+            body: [
+              "Zwei Balken wachsen aus der Mitte: CPU nach links in Bernstein, GPU nach rechts in Blau. Hier tr\u00e4gt die <em>L\u00e4nge</em> den Wert, nicht die Farbe \u2013 Auslastung hat eine echte Null und ein echtes Voll, Temperatur hat weder noch.",
+              "Aus der Mitte heraus, weil die beiden Werte gleichrangig sind. Hintereinander gestapelt l\u00e4ge einer am Streifenende, und dort schaut man zuletzt hin. Die innerste LED jeder Seite geht nie ganz aus, sonst s\u00e4he ein ruhiger Rechner aus wie ein abgeschalteter Streifen.",
+              "Gezeigt wird hier ein Durchlauf vom Leerlauf \u00fcber ein Men\u00fc bis ins Spiel und zur\u00fcck."
+            ],
+            facts: [["CPU", "/proc/stat"], ["GPU", "amdgpu gpu_busy_percent"],
+                    ["Ablesung", "4\u00d7 pro Sekunde, \u00fcber 0,6 s gegl\u00e4ttet"],
+                    ["Ohne GPU-Z\u00e4hler", "CPU auf beiden H\u00e4lften"],
+                    ["Mittlere LED", "bleibt als Trenner dunkel"]]
+          },
+          {
+            id: "fire", name: "Fire", gloss: "Flamme, die \u00fcber den Streifen zieht",
+            clip: "fire", lit: "#ff8a2b",
+            body: [
+              "Kein Flackern einzelner Dioden \u2013 das s\u00e4he nach Wackelkontakt aus, nicht nach Feuer. Was das Auge als Flamme liest, ist <em>wandernde Hitze</em>: drei Wellen laufen unterschiedlich schnell \u00fcber den Streifen und werden addiert.",
+              "Ihre Geschwindigkeiten stehen in keinem ganzzahligen Verh\u00e4ltnis zueinander, die Summe wiederholt sich also nie. Deswegen findest du keinen Takt, an dem du dich festhalten kannst \u2013 genau das unterscheidet Feuer von einer Animation.",
+              "Die Farben laufen von dunkler Glut \u00fcber Orange bis fast Wei\u00df an den hei\u00dfesten Stellen. Ein Feuer wechselt beim Hei\u00dferwerden nicht die Farbe, es <em>entf\u00e4rbt</em> sich \u2013 darum sieht ein Regenbogen nie aus wie eine Flamme."
+            ],
+            facts: [["Grundzyklus", "4,0 s"], ["Wellen", "3, Tempo 1,00 / \u22121,71 / 2,53"],
+                    ["Farbskala", "5 St\u00fctzstellen, #280000 \u2192 #ffe696"],
+                    ["Steam-Farbregler", "wirkt nicht"], ["Steam-Tempo", "wirkt"]]
+          },
+          {
+            id: "aurora", name: "Aurora", gloss: "Langsame Vorh\u00e4nge, Gr\u00fcn bis Violett",
+            clip: "aurora", lit: "linear-gradient(180deg,#3ee08f,#46a6ff,#a26bff)",
+            body: [
+              "Der ruhige Gegenentwurf zum Regenbogen. Zwei Wellen verschieben den Farbton, eine dritte die Helligkeit \u2013 und alle drei laufen unterschiedlich schnell. Dadurch driften die farbigen B\u00e4nder und die hellen B\u00e4nder <em>auseinander</em>, statt sich als ein leuchtender Block zu bewegen.",
+              "Der Farbton bleibt dabei bewusst in einem schmalen Fenster: Gr\u00fcn \u00fcber T\u00fcrkis und Blau bis Violett. Die warme H\u00e4lfte des Farbkreises ist gesperrt. L\u00e4sst man sie zu, wird daraus ein langsamer Regenbogen \u2013 und den gibt es schon.",
+              "Der Vorhang wird d\u00fcnner, geht aber nie ganz aus. Steams Farbregler verschiebt das ganze Fenster, du entscheidest also, wo der Vorhang steht."
+            ],
+            facts: [["Grundzyklus", "9,0 s"], ["Farbfenster", "Hue 0,33 \u2013 0,71"],
+                    ["Wellen", "2 f\u00fcr Farbe, 1 f\u00fcr Helligkeit"],
+                    ["Dunkelste Stelle", "35 %"], ["Steam-Farbregler", "verschiebt das Fenster"]]
+          }
+        ]
+      },
+      {
+        group: "Benachrichtigungen",
+        why: "Blitzformen. Sie legen sich f\u00fcr ein paar Sekunden \u00fcber alles andere und geben die Leiste dann zur\u00fcck.",
+        items: [
+          {
+            id: "bloom", name: "Bloom", gloss: "Aus der Mitte auf, einmal atmen, zur\u00fcck",
+            clip: "shape_bloom", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
+            body: [
+              "Der Standard. W\u00e4chst aus der Mitte nach beiden Seiten heraus, atmet einmal in voller Breite und zieht sich wieder zur\u00fcck \u2013 ein Anfang, eine Mitte und ein Ende, in dieser Reihenfolge.",
+              "Die Kante ist weich gefedert statt hart. Ohne diese Federung springt die Front auf siebzehn LEDs von Diode zu Diode und sieht klobig aus."
+            ],
+            facts: [["Ausgefahren nach", "28 % der Dauer"], ["Zieht zur\u00fcck ab", "64 %"],
+                    ["Federung", "0,18 halbe Leiste"], ["Atem-Boden", "8 %"]]
+          },
+          {
+            id: "pulse", name: "Pulse", gloss: "Die ganze Leiste schwillt an",
+            clip: "shape_pulse", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
+            body: [
+              "Die ganze Leiste schwillt dreimal an und blendet am Ende aus. Die einfachste Form und die, die am wenigsten Aufmerksamkeit verlangt: kein Ort, keine Richtung, nur Helligkeit.",
+              "Weil sie in Anteilen der Dauer getaktet ist, bleiben es immer drei Schwellungen \u2013 eine l\u00e4ngere Benachrichtigung macht sie langsamer, nicht zahlreicher."
+            ],
+            facts: [["Schwellungen", "3, immer"], ["Ausblenden", "letzte 25 %"],
+                    ["Takt", "in Anteilen der Dauer"]]
+          },
+          {
+            id: "double_flash", name: "Double flash", gloss: "Blink, blink, Pause \u2013 und wieder",
+            clip: "shape_double_flash", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
+            body: [
+              "Zwei kurze Blitze, eine Pause, und wieder. Ganze Leiste, harte Kanten \u2013 hier ist die Sch\u00e4rfe die Botschaft, das genaue Gegenteil dessen, was Bloom will.",
+              "In Sekunden getaktet, nicht in Anteilen: was einen Blitz zum Blitz macht, ist dass er <em>kurz</em> ist. Eine l\u00e4ngere Benachrichtigung gibt also mehr Paare, nicht langsamere. Angeschnittene Paare gibt es nicht \u2013 lieber ein gestauchtes als ein halbes."
+            ],
+            facts: [["Blitz", "0,08 s"], ["L\u00fccke im Paar", "0,08 s"],
+                    ["Von Paar zu Paar", "1,0 s"], ["Takt", "in Sekunden"]]
+          },
+          {
+            id: "comet", name: "Comet", gloss: "Kopf mit Schweif, einmal quer",
+            clip: "shape_comet", lit: "#1a9fff", tint: STEAM_BLUE, variants: SHAPE_COLOURS,
+            body: [
+              "Ein heller Kopf zieht einmal \u00fcber die Leiste und l\u00e4sst einen Schweif hinter sich. Die einzige Form mit einem <em>Ort</em> \u2013 die anderen unterscheiden sich in der Zeit, diese im Raum, und das f\u00e4ngt das Auge auch dann, wenn man nicht hinsieht.",
+              "Sie startet vor der ersten LED und endet hinter der letzten, damit an keinem Ende ein Komet aus dem Nichts auftaucht oder auf der Kante stirbt. Die einzige Form, auf die REVERSE wirkt."
+            ],
+            facts: [["Kopf", "6 % der Leiste"], ["Schweif", "33 %"],
+                    ["Helligkeit im Schweif", "quadratisch abfallend"],
+                    ["REVERSE", "dreht sie um"]]
+          },
+          {
+            id: "alternate", name: "Alternate", gloss: "Zwei H\u00e4lften im Gegentakt \u2013 die Warnung",
+            clip: "shape_alternate", lit: "#ff0000", tint: RED,
+            body: [
+              "Links, rechts, links. Zwei Seiten im Gegentakt ist das, was ein Einsatzfahrzeug macht, und nichts sonst auf dieser Leiste sieht auch nur entfernt so aus. Die einzige Form, die \u201eetwas stimmt nicht\u201c sagt statt \u201eetwas ist passiert\u201c.",
+              "Deswegen ist sie die Warnung, und deswegen ist sie <em>festgenagelt</em>: immer diese Form, immer Rot. Eine Warnung ist die eine Benachrichtigung, die man nicht erkennen k\u00f6nnen muss. NOTIFY_WARNING sagt nur, ob sie \u00fcberhaupt kommt.",
+              "Auf ungerader Leiste bleibt die mittlere LED dunkel \u2013 erst das l\u00e4sst die zwei Seiten als zwei lesen."
+            ],
+            facts: [["Periode", "0,5 s, beide Seiten"], ["Einschaltdauer je Seite", "45 %"],
+                    ["Farbe", "#ff0000, fest"], ["Mittlere LED", "bleibt dunkel"],
+                    ["Ausl\u00f6ser", "Sensor 5 \u00b0C unter seinem Limit, 60 s lang"]]
+          },
+          {
+            id: "sparkle", name: "Sparkle", gloss: "K\u00f6rner glitzern auf und klingen ab",
+            clip: "shape_sparkle", lit: "#ffd700", tint: GOLD, variants: SHAPE_COLOURS,
+            body: [
+              "Die einzige Blitzform <em>ohne Richtung und ohne Reihenfolge</em>. Die anderen f\u00fcnf sagen alle \u201ehier passiert etwas, schau hin\u201c \u2013 diese glitzert einfach.",
+              "Jede LED l\u00e4uft auf ihrer eigenen kleinen Uhr, mit eigener Periode zwischen 0,6 und 1,7 Sekunden und eigenem Vorlauf. Nichts marschiert, nichts trifft sich. Ein Korn geht sofort auf volle Helligkeit und klingt dann ab \u2013 Glitzer ist reiner Anschlag, ohne Anlauf.",
+              "Am Ende blendet der ganze Effekt aus, statt einfach zu stoppen: ein Korn, das mitten im Leben abgeschnitten wird, liest sich als Fehler und nicht als Schluss."
+            ],
+            facts: [["Lebensdauer je Korn", "0,33 s"], ["Periode je LED", "0,60 \u2013 1,70 s"],
+                    ["Belegung", "\u2248 5 von 17 LEDs"], ["Ausblenden", "letzte 25 %"],
+                    ["Takt", "in Sekunden"]]
+          }
+        ]
+      },
+      {
+        group: "Systemzust\u00e4nde",
+        why: "Zeichnet der ESP selbst \u2013 genau dann, wenn vom Rechner kein Bild kommt.",
+        items: [
+          {
+            id: "startup", name: "Bootanimation", gloss: "Bernstein, bis Steam \u00fcbernimmt",
+            clip: "startup", lit: "#ff8a2b", variants: BOOST,
+            body: [
+              "Nach dem Einschalten meldet das Kernelmodul \u201eaus\u201c, bis Steam die LEDs zum ersten Mal anfasst \u2013 und das dauert den gr\u00f6\u00dften Teil eines Bootvorgangs. Das getreu zu zeichnen w\u00e4re ein schwarzer Streifen.",
+              "Also atmet die Leiste stattdessen in Bernstein weiter, im Rhythmus der Firmware. Geschickt wird das vom Rechner aus, nicht der Firmware \u00fcberlassen: die Verbindung steht zu dem Zeitpunkt schon, und sie sp\u00e4ter aufzubauen w\u00fcrde das Board genau in dem Moment zur\u00fccksetzen, in dem Steam \u00fcbernimmt."
+            ],
+            facts: [["Periode", "3,0 s"], ["Farbe", "#281000"], ["Dunkelste Stelle", "5 %"],
+                    ["Endet", "sobald Steam schreibt"]]
+          },
+          {
+            id: "standby", name: "Standby-Puls", gloss: "Wei\u00df, w\u00e4hrend die Kiste schl\u00e4ft",
+            clip: "standby", lit: "#cfd3da", variants: BOOST,
+            body: [
+              "Im Suspend l\u00e4uft kein Prozess, es kann also kein Bild gerendert werden. Ein systemd-Sleep-Hook sagt dem Dienst kurz vorher Bescheid, der Dienst reicht dem ESP eine Farbe und eine Ateml\u00e4nge, und der <em>ESP atmet allein weiter</em>, bis das erste Bild wieder ankommt.",
+              "Absichtlich sehr dunkel \u2013 der Maximalwert liegt bei 30 von 255. Das soll \u201edie Maschine ist aus, aber am Leben\u201c sagen und nicht das Zimmer beleuchten. Auf dem Bildschirm ist es kaum zu sehen; der Knopf oben hellt es nur f\u00fcr die Vorschau auf.",
+              "Bleibt der Resume aus, holt sich der Dienst die Leiste nach einer halben Minute <em>Laufzeit</em> zur\u00fcck. Die monotone Uhr steht im Suspend still, eine drei Tage schlafende Maschine wacht also an einer atmenden Leiste auf."
+            ],
+            facts: [["Periode", "6,0 s"], ["Farbe", "(30, 30, 30)"], ["Dunkelste Stelle", "5 %"],
+                    ["Gezeichnet von", "dem ESP"], ["Notbremse", "30 s Laufzeit"]]
+          }
+        ]
+      }
+    ];
+
+    var INDEX = {};
+    CATALOGUE.forEach(function (group) {
+      group.items.forEach(function (item) { INDEX[item.id] = item; });
+    });
+
+    var bar = document.getElementById("bar");
+    var spill = document.getElementById("spill");
+    var clock = document.getElementById("clock");
+    var mode = document.getElementById("mode");
+    var prose = document.getElementById("prose");
+    var facts = document.getElementById("facts");
+    var variants = document.getElementById("variants");
+    var variantLabel = document.getElementById("variant-label");
+    var variantChips = document.getElementById("variant-chips");
+    var playpause = document.getElementById("playpause");
+    var slowmo = document.getElementById("slowmo");
+
+    var dots = [], spills = [];
+    for (var i = 0; i < LEDS; i++) {
+      dots.push(bar.appendChild(document.createElement("i")));
+      spills.push(spill.appendChild(document.createElement("i")));
+    }
+
+    var current = null;
+    var chosen = 0;             // index into the current item's variants
+    var speed = 1;
+    var playing = true;
+    var frame = 0;
+    var carried = 0;
+    var last = 0;
+
+    function option() {
+      return current.variants ? current.variants.options[chosen] : {};
+    }
+
+    function frames() { return clip(option().clip || current.clip); }
+
+    function tint() { return option().tint || current.tint || null; }
+
+    function gain() { return option().gain || 1; }
+
+    function paint(pixels) {
+      var colour = tint();
+      var amount = gain();
+      for (var i = 0; i < LEDS; i++) {
+        var px = pixels[i], r, g, b;
+        if (typeof px === "number") {
+          r = colour[0] * px / 255;
+          g = colour[1] * px / 255;
+          b = colour[2] * px / 255;
+        } else {
+          r = px[0]; g = px[1]; b = px[2];
+        }
+        r = Math.min(255, Math.round(r * amount));
+        g = Math.min(255, Math.round(g * amount));
+        b = Math.min(255, Math.round(b * amount));
+        var rgb = "rgb(" + r + "," + g + "," + b + ")";
+        // A brighter diode throws a wider glow, the way a real one does.
+        var level = Math.max(r, g, b) / 255;
+        dots[i].style.background = rgb;
+        dots[i].style.boxShadow =
+          "0 0 " + (7 + level * 13).toFixed(1) + "px " + (level * 3).toFixed(1) +
+          "px rgba(" + r + "," + g + "," + b + "," + (0.75 * level).toFixed(3) + ")," +
+          "0 0 " + (14 + level * 34).toFixed(1) + "px rgba(" + r + "," + g + "," + b +
+          "," + (0.4 * level).toFixed(3) + ")";
+        spills[i].style.background = rgb;
+      }
+    }
+
+    function stamp() {
+      var total = frames().length;
+      clock.textContent = (frame / FPS).toFixed(1) + " s / " + (total / FPS).toFixed(1) + " s";
+      mode.textContent = current.name + " \u00b7 " + (speed === 1 ? "1\u00d7" : "\u00bc\u00d7");
+    }
+
+    function showVariants() {
+      variantChips.textContent = "";
+      if (!current.variants) { variants.hidden = true; return; }
+      variants.hidden = false;
+      variantLabel.textContent = current.variants.label;
+      current.variants.options.forEach(function (entry, index) {
+        var button = document.createElement("button");
+        button.className = "chip";
+        button.textContent = entry.label;
+        button.setAttribute("aria-pressed", String(index === chosen));
+        button.addEventListener("click", function () {
+          chosen = index;
+          frame = 0;
+          carried = 0;
+          showVariants();
+          paint(frames()[0]);
+          stamp();
+        });
+        variantChips.appendChild(button);
+      });
+    }
+
+    function show(id) {
+      current = INDEX[id];
+      chosen = 0;
+      frame = 0;
+      carried = 0;
+
+      document.querySelectorAll(".entry").forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.id === id));
+      });
+
+      prose.innerHTML = "<h2>" + current.name + "</h2>" +
+        current.body.map(function (para) { return "<p>" + para + "</p>"; }).join("");
+      facts.innerHTML = current.facts.map(function (row) {
+        return "<tr><th scope=\"row\">" + row[0] + "</th><td>" + row[1] + "</td></tr>";
+      }).join("");
+
+      showVariants();
+      paint(frames()[0]);
+      stamp();
+    }
+
+    function tick(now) {
+      requestAnimationFrame(tick);
+      if (!playing) { last = now; return; }
+      if (!last) { last = now; }
+      carried += (now - last) / 1000 * FPS * speed;
+      last = now;
+      if (carried < 1) { return; }
+
+      var all = frames();
+      frame = (frame + Math.floor(carried)) % all.length;
+      carried -= Math.floor(carried);
+      paint(all[frame]);
+      stamp();
+    }
+
+    // -- build the index -----------------------------------------------
+
+    var catalogue = document.getElementById("catalogue");
+    CATALOGUE.forEach(function (group) {
+      var section = document.createElement("section");
+      section.className = "group";
+
+      var heading = document.createElement("h2");
+      heading.textContent = group.group;
+      section.appendChild(heading);
+
+      var why = document.createElement("p");
+      why.className = "why";
+      why.textContent = group.why;
+      section.appendChild(why);
+
+      var list = document.createElement("ul");
+      group.items.forEach(function (item) {
+        var row = document.createElement("li");
+        var button = document.createElement("button");
+        button.className = "entry";
+        button.dataset.id = item.id;
+        button.setAttribute("aria-pressed", "false");
+        button.style.setProperty("--lit", item.lit);
+        button.innerHTML = "<span class=\"name\"></span><span class=\"gloss\"></span>";
+        button.querySelector(".name").textContent = item.name;
+        button.querySelector(".gloss").textContent = item.gloss;
+        button.addEventListener("click", function () { show(item.id); });
+        row.appendChild(button);
+        list.appendChild(row);
+      });
+      section.appendChild(list);
+      catalogue.appendChild(section);
+    });
+
+    playpause.addEventListener("click", function () {
+      playing = !playing;
+      playpause.textContent = playing ? "Pause" : "Abspielen";
+      playpause.setAttribute("aria-pressed", String(playing));
+      last = 0;
+    });
+
+    slowmo.addEventListener("click", function () {
+      speed = speed === 1 ? 0.25 : 1;
+      slowmo.setAttribute("aria-pressed", String(speed !== 1));
+      stamp();
+    });
+
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      playing = false;
+      playpause.textContent = "Abspielen";
+      playpause.setAttribute("aria-pressed", "false");
+    }
+
+    show("rainbow");
+    requestAnimationFrame(tick);
+  }
+
+  // Loaded rather than inlined, so tools/make-previews.py can rewrite
+  // the frames without touching a line of this page.
+  fetch("effects.json").then(function (answer) {
+    if (!answer.ok) { throw new Error("HTTP " + answer.status); }
+    return answer.json();
+  }).then(run).catch(function (problem) {
+    document.getElementById("prose").innerHTML =
+      "<h2>Keine Daten</h2><p>effects.json wurde nicht geladen (" +
+      problem.message + "). Beim \u00d6ffnen als lokale Datei "  +
+      "verbietet der Browser das \u2013 <code>python3 -m http.server</code> "  +
+      "im Ordner <code>docs/</code> starten und die Seite dar\u00fcber aufrufen.</p>";
+  });
+})();
+</script>
+</body>
+</html>

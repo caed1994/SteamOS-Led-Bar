@@ -17,6 +17,7 @@ drawn by render.py and notify.py as the service uses them.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import struct
 import sys
@@ -209,7 +210,13 @@ def firmware_breath(colour, period_ms):
     return frames
 
 
-def build(out):
+def scripted():
+    """A sensor, and the two runs the gauges are shown going through.
+
+    Neither gauge has anything to show standing still, and a machine does not
+    warm from 25 to 95 degrees on cue. Both walks end where they started, so
+    the clip loops without a jump.
+    """
     sensor = Scripted()
 
     def warm(fraction):
@@ -228,6 +235,12 @@ def build(out):
                             + (steps[first + 1][axis] - steps[first][axis]) * blend
                             for axis in (0, 1))
 
+    return sensor, warm, busy
+
+
+def build_previews(out):
+    """The README's animations: a curated few, short, and small enough."""
+    sensor, warm, busy = scripted()
     previews = {
         "rainbow": lambda: steam_effect(shim.EFFECT_RAINBOW,
                                         render.RAINBOW_CYCLE),
@@ -264,12 +277,120 @@ def build(out):
     print("%d previews, %.0f KB" % (len(previews), total / 1024.0))
 
 
+# -- the same effects, for the page that can animate them properly ---------
+#
+# docs/index.html plays these instead of a picture per effect: it can switch
+# clips, run them slowly and retint a flash shape, none of which an image in a
+# README can do. Same frames underneath, so the two can never disagree.
+
+PAGE_FPS = 25
+
+
+def page_pixels(seconds, produce):
+    """Hex RGB per frame, three bytes an LED, at the page's frame rate."""
+    return ["".join("%02x%02x%02x" % tuple(min(255, int(channel))
+                                           for channel in pixel)
+                    for pixel in frame)
+            for frame in produce(seconds, PAGE_FPS)]
+
+
+def page_levels(shape, duration=3.5, tail=0.5):
+    """One flash as brightness only, one byte an LED.
+
+    A shape is brightness over time and its colour is a multiplier on top, so
+    the page can offer the colour as a choice instead of the capture having to
+    guess which one anyone wants to see.
+    """
+    overlay = notify.NotificationOverlay(duration=duration, led_count=LEDS,
+                                         style=shape)
+    overlay.trigger("#ffffff", 0.0)
+    frames = []
+    for index in range(round((duration + tail) * PAGE_FPS)):
+        payload = overlay.frame(index / float(PAGE_FPS))
+        frames.append("".join("%02x" % payload[led * 3] for led in range(LEDS))
+                      if payload else "00" * LEDS)
+    return frames
+
+
+def build_catalogue(path):
+    sensor, warm, busy = scripted()
+
+    def steam(effect, colour=STEAM_COLOUR, **kwargs):
+        def produce(seconds, fps):
+            snapshot = shim.make_snapshot(effect, colour)
+            engine = renderer(**kwargs)
+            count = max(1, round(seconds * fps))
+            return [engine.render_logical(snapshot, index * seconds / count)
+                    for index in range(count)]
+        return produce
+
+    def gauge(engine, walk):
+        def produce(seconds, fps):
+            snapshot = shim.make_snapshot(shim.EFFECT_RAINBOW)
+            count = round(seconds * fps)
+            frames = []
+            for index in range(count):
+                walk(index / float(count))
+                frames.append(engine.render_logical(snapshot, 0.0))
+            return frames
+        return produce
+
+    def breath(colour, period_ms):
+        def produce(_seconds, fps):
+            count = round(period_ms / 1000.0 * fps)
+            return [[tuple(channel * render.breath_envelope(index / float(count),
+                                                            0.05)
+                           for channel in colour)] * LEDS
+                    for index in range(count)]
+        return produce
+
+    clips = {
+        "static": page_pixels(1.0 / PAGE_FPS, steam(shim.EFFECT_MANUAL)),
+        "rainbow": page_pixels(render.RAINBOW_CYCLE, steam(shim.EFFECT_RAINBOW)),
+        "breath": page_pixels(render.BREATH_CYCLE, steam(shim.EFFECT_BREATH)),
+        "factory": page_pixels(render.FACTORY_INTERVAL * 4,
+                               steam(shim.EFFECT_FACTORY)),
+        "demo": page_pixels(12.0, steam(shim.EFFECT_DEMO)),
+        "fire": page_pixels(20.0, steam(shim.EFFECT_RAINBOW,
+                                        rainbow_shows=render.SHOWS_FIRE)),
+        "aurora": page_pixels(27.0, steam(shim.EFFECT_RAINBOW,
+                                          rainbow_shows=render.SHOWS_AURORA)),
+        "temperature": page_pixels(16.0, gauge(renderer(temperature=sensor),
+                                               warm)),
+        "load": page_pixels(14.0, gauge(renderer(load=sensor), busy)),
+        "startup": page_pixels(0, breath(service.STARTUP_COLOR,
+                                         service.STARTUP_PERIOD_MS)),
+        "standby": page_pixels(0, breath(service.STANDBY_COLOR,
+                                         service.STANDBY_PERIOD_MS)),
+    }
+    for dots in (1, 2, 3):
+        clips["patrol_%d" % dots] = page_pixels(
+            render.PATROL_CYCLE, steam(shim.EFFECT_PATROL, patrol_dots=dots))
+    for shape in notify.STYLES:
+        clips["shape_" + shape] = page_levels(shape)
+
+    directory = os.path.dirname(path)
+    if directory and not os.path.isdir(directory):
+        os.makedirs(directory)
+    with open(path, "w") as handle:
+        json.dump({"fps": PAGE_FPS, "leds": LEDS, "clips": clips}, handle,
+                  separators=(",", ":"))
+    print("%s: %d clips, %.0f KB"
+          % (os.path.basename(path), len(clips),
+             os.path.getsize(path) / 1024.0))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out",
                         default=os.path.join(HERE, "..", "docs", "previews"),
                         help="where to write the animations")
-    build(parser.parse_args(argv).out)
+    parser.add_argument("--catalogue",
+                        default=os.path.join(HERE, "..", "docs", "effects.json"),
+                        help="where to write the data docs/index.html plays")
+    args = parser.parse_args(argv)
+    build_previews(args.out)
+    build_catalogue(args.catalogue)
     return 0
 
 

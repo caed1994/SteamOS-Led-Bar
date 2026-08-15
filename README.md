@@ -6,6 +6,10 @@ Personalization menu in SteamOS Game Mode, download progress included.
 
 ![the rainbow effect on a 17 LED strip](docs/previews/rainbow.png)
 
+**[Every effect, playing &rarr;](https://caed1994.github.io/SteamOS-Led-Bar/)**
+&mdash; all twenty of them on a simulated strip, with the explanation beside
+each. The pictures further down are stills from the same frames.
+
 This is the USB variant of
 [rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release),
 which connects the ESP over Wi-Fi. Same kernel module, different transport: no
@@ -247,7 +251,10 @@ Rendered here by the same code that drives the strip, on seventeen LEDs:
 
 Every animation on this page is drawn by `render.py` and `notify.py` and
 recorded frame by frame &ndash; nothing here is an impression of the effect.
-Rebuild them with `python3 tools/make-previews.py`.
+`python3 tools/make-previews.py` rebuilds them, and the same command writes
+the data behind the [interactive catalogue](https://caed1994.github.io/SteamOS-Led-Bar/),
+which has the rest: `demo`, `static`, patrol with two and three dots, and both
+gauges.
 
 ### Effect speed
 
