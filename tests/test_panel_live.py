@@ -298,6 +298,53 @@ class LiveWindowTest(unittest.TestCase):
         self.assertLessEqual(self.root.winfo_height(),
                              self.root.winfo_screenheight())
 
+    def _apply_button(self):
+        return self.panel._apply_buttons[0][1]
+
+    def _is_dead(self):
+        return "disabled" in self._apply_button().state()
+
+    def test_apply_is_dead_while_the_window_and_the_file_agree(self):
+        # A button that is always pressable says nothing about whether
+        # pressing it would do anything - which is also the answer to "did I
+        # already apply that?", the question the window could not answer.
+        self.assertTrue(self._is_dead())
+        self.assertEqual(self.panel.unsaved.cget("text"), "")
+
+    def test_the_count_says_how_many_settings_differ(self):
+        self.panel.vars["SPEED"][0].set(2.5)
+        self.root.update()
+        self.assertFalse(self._is_dead())
+        self.assertEqual(self.panel.unsaved.cget("text"), "1 unsaved change")
+        self.panel.vars["NOTIFY"][0].set(False)
+        self.root.update()
+        self.assertEqual(self.panel.unsaved.cget("text"), "2 unsaved changes")
+
+    def test_putting_a_setting_back_settles_it_again(self):
+        was = self.panel.vars["SPEED"][0].get()
+        self.panel.vars["SPEED"][0].set(2.5)
+        self.root.update()
+        self.assertFalse(self._is_dead())
+        self.panel.vars["SPEED"][0].set(was)
+        self.root.update()
+        self.assertTrue(self._is_dead(), "a setting put back still counts")
+
+    def test_a_slider_counts_as_well_as_a_switch(self):
+        # Sliders were not followed at all before: only the controls another
+        # row could hang off were, so dragging one changed nothing visible.
+        self.panel.vars["GAMMA"][0].set(2.0)
+        self.root.update()
+        self.assertIn("GAMMA", self.panel._differences())
+
+    def test_a_colour_the_file_spells_in_capitals_is_not_a_change(self):
+        # The menus hold what a value looks like, and the file may hold the
+        # same colour in another case. Comparing the raw strings made the
+        # window claim an unsaved change nobody had made.
+        self.panel.config["ACHIEVEMENT_COLOR"] = "#FFD700"
+        self.panel._refresh_unsaved()
+        self.root.update()
+        self.assertNotIn("ACHIEVEMENT_COLOR", self.panel._differences())
+
     def _log_order(self):
         """Which of "grow the window" and "fill it" happened first."""
         order = []

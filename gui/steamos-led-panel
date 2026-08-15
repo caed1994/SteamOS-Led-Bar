@@ -858,7 +858,7 @@ class Panel:
         self.status_tab = self._page(notebook, self._build_status)
         notebook.add(self.status_tab, text="Status & repair")
         self._build_rail()
-        self._refresh_enabled()
+        self._settings_changed()
 
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             root.bind_all(wheel, self._wheel)
@@ -1190,6 +1190,7 @@ class Panel:
             control.grid(row=row, column=1, sticky="w",
                          pady=(ROW_PAD + lead, ROW_PAD))
             controls.append(control)
+            self._follow(variable)
         elif kind in ("sensor", "named"):
             # Entries that are labels for something else - see the menu
             # helpers in ledpanel.
@@ -1207,19 +1208,72 @@ class Panel:
             scale, readout = self._scale(grid, row, variable, low, high, step,
                                          lead=ROW_PAD + lead)
             controls.append(scale)
+            self._follow(variable)
             labels.append(readout)
 
         self.vars[key] = (variable, kind)
         self._rows[key] = (labels, controls)
 
     def _follow(self, variable):
-        """Re-grey the dependent rows whenever this control changes.
+        """Watch a control, so the window can keep up with it.
 
         Anything can be the setting another row hangs off - a switch or a
-        menu - and following one costs nothing, so every candidate is
-        followed rather than DEPENDS_ON having to be kept in step by hand.
+        menu - and following one costs nothing, so every candidate is followed
+        rather than DEPENDS_ON having to be kept in step by hand. Every kind
+        is followed and not only those: the count of what is unsaved has to
+        move when any control does, sliders included.
         """
-        variable.trace_add("write", lambda *_args: self._refresh_enabled())
+        variable.trace_add("write", self._settings_changed)
+
+    def _settings_changed(self, *_args):
+        self._refresh_enabled()
+        self._refresh_unsaved()
+
+    def _differences(self):
+        """Which settings in the window are not what the file holds.
+
+        Read leniently, the way the preview reads them - this runs on every
+        step of a drag, and a value being half-entered is not the moment to
+        complain about it.
+        """
+        changed = []
+        for key, (variable, kind) in self.vars.items():
+            saved = self.config.get(key, config_module.DEFAULTS[key])
+            try:
+                raw = variable.get()
+            except (ValueError, tk.TclError):        # pragma: no cover
+                continue
+            if kind == "bool":
+                same = bool(raw) == bool(saved)
+            elif kind in ("sensor", "named"):
+                # What is shown against what the file's value would show, so a
+                # colour written in capitals in the file is not a change.
+                same = raw == self._label_for(key, str(saved))
+            elif kind in ("int", "float"):
+                try:
+                    same = abs(float(raw) - float(saved)) < 1e-9
+                except (TypeError, ValueError):      # pragma: no cover
+                    same = False
+            else:
+                same = str(raw) == str(saved)
+            if not same:
+                changed.append(key)
+        return changed
+
+    def _refresh_unsaved(self):
+        """Say what is in the window and not in the file, and gate Apply on it.
+
+        A button that is always pressable says nothing about whether pressing
+        it would do anything. This one goes dead when the window and the file
+        agree, which is also the answer to "did I already apply that?".
+        """
+        count = len(self._differences())
+        self.unsaved.configure(
+            text="" if not count
+            else "1 unsaved change" if count == 1
+            else "%d unsaved changes" % count)
+        apply_button = self._apply_buttons[0][1]
+        apply_button.state(["!disabled"] if count else ["disabled"])
 
     def _refresh_enabled(self):
         """Grey out every setting whose switch is off."""
@@ -1340,7 +1394,13 @@ class Panel:
                                  style="Outlined.TButton",
                                  command=self.save_profile)),
         ]
+        # What is in the window but not yet in the file. A settings window that
+        # does not say whether it has been saved is asking you to remember, and
+        # nobody does - so Apply goes dead when there is nothing to apply, and
+        # this says how much there is when there is.
+        self.unsaved = ttk.Label(self.apply_row, style="Muted.TLabel")
         self._show_apply(True)
+        self._refresh_unsaved()
 
     def _show_apply(self, show):
         self._apply_shown = show
@@ -1349,6 +1409,9 @@ class Panel:
             for side, button in self._apply_buttons:
                 button.pack(side=side, padx=(0, ROW_GAP) if side == "left"
                             else (ROW_GAP, 0))
+            # In the gap the two pairs leave between them, which is where the
+            # eye already goes to read the row.
+            self.unsaved.pack(side="left", padx=GROUP_GAP)
             return
         # Hold the height the buttons had, then take them out: with the row
         # free to shrink, the rest of the window slides up to meet it.
@@ -1358,6 +1421,7 @@ class Panel:
             self.apply_row.pack_propagate(False)
         for _side, button in self._apply_buttons:
             button.pack_forget()
+        self.unsaved.pack_forget()
 
     def _tab_changed(self, _event=None):
         """Only show Apply where there is something to apply."""
@@ -1493,6 +1557,7 @@ class Panel:
                 self.refresh_status()
                 return
             self.config.update(values)
+            self._refresh_unsaved()
             # The helper restarted the service, but the watcher reads the
             # same file and is a user unit, out of its reach - without this a
             # changed flash setting waits for the next game to end.
@@ -1516,7 +1581,7 @@ class Panel:
                          else str(value) if kind == "choice"
                          else float(value))
             shown += 1
-        self._refresh_enabled()
+        self._settings_changed()
         return shown
 
     def reload_settings(self):
