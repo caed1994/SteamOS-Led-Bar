@@ -268,6 +268,9 @@ DETAILS_GAP = 10            # under the checklist, and part of what it costs
 # deciding how tall the window may open.
 SCREEN_ALLOWANCE = 120
 
+# How thick the line under the title is while a command runs.
+PROGRESS_HEIGHT = 4
+
 # Everything else a control measures is worked out from the desktop's own font
 # - see material.control_sizes, and the note there on why a fixed size is
 # wrong. Sized for fingers and a trackpad rather than a mouse on a desk: this
@@ -759,10 +762,13 @@ class Runner:
     posts lines into a queue and the UI drains it on a timer.
     """
 
-    def __init__(self, widget, sink):
+    def __init__(self, widget, sink, on_state=None):
         # sink(text, tag=None) - the tag is optional so a plain writer works.
+        # on_state(busy, code) - what the window shows while something runs,
+        # and how it ended. Optional, so a Runner works on its own.
         self.widget = widget
         self.sink = sink
+        self.on_state = on_state or (lambda _busy, _code: None)
         self.queue = queue.Queue()
         self.busy = False
         self.transcript = []
@@ -786,6 +792,7 @@ class Runner:
             return False
         self.busy = True
         self.transcript = []
+        self.on_state(True, None)
         self.sink("$ %s\n" % " ".join(command), "command")
         threading.Thread(target=self._work, args=(command, done),
                          daemon=True).start()
@@ -816,6 +823,7 @@ class Runner:
                     code, done = payload
                     self.busy = False
                     self.sink("[exit %d]\n" % code, "command")
+                    self.on_state(False, code)
                     # pkexec's own complaint explains nothing to anyone who
                     # has not met it before; say what it means instead.
                     if ledpanel.looks_like_no_auth_agent(
@@ -827,6 +835,57 @@ class Runner:
         except queue.Empty:
             pass
         self._job = self.widget.after(120, self._drain)
+
+
+class Progress:
+    """The line under the title while a command runs.
+
+    Drawn rather than left to ttk.Progressbar: clam has no say over how thick
+    one is - the option belongs to another theme - and its own eighteen pixels
+    are a bar, not the four pixel rule Material asks for. Squeezing it into a
+    shorter frame clips the moving part out of sight instead of resizing it,
+    so it is a canvas with two rectangles on it.
+    """
+
+    SEGMENT = 0.28              # how much of the width the moving part covers
+    STEP = 0.011                # and how far along it goes each frame
+    FRAME = 16
+
+    def __init__(self, parent, roles, height):
+        self.height = height
+        self.canvas = tk.Canvas(parent, height=height, highlightthickness=0,
+                                borderwidth=0, background=roles["surface"])
+        self.track = self.canvas.create_rectangle(
+            0, 0, 1, height, width=0,
+            fill=roles["surface_container_highest"])
+        self.bar = self.canvas.create_rectangle(0, 0, 1, height, width=0,
+                                                fill=roles["primary"])
+        self.at = 0.0
+        self.job = None
+        self.canvas.bind("<Configure>", lambda _event: self._place())
+
+    def _place(self):
+        width = self.canvas.winfo_width()
+        self.canvas.coords(self.track, 0, 0, width, self.height)
+        span = width * self.SEGMENT
+        # It runs off one end as it comes on at the other, so the loop has no
+        # seam in it.
+        left = (width + span) * self.at - span
+        self.canvas.coords(self.bar, left, 0, left + span, self.height)
+
+    def start(self):
+        if self.job is None:
+            self._step()
+
+    def _step(self):
+        self.at = (self.at + self.STEP) % 1.0
+        self._place()
+        self.job = self.canvas.after(self.FRAME, self._step)
+
+    def stop(self):
+        if self.job is not None:
+            self.canvas.after_cancel(self.job)
+            self.job = None
 
 
 class Panel:
@@ -856,13 +915,19 @@ class Panel:
         self._wrapped = []
         self._wrap_width = 0
 
-        header = ttk.Frame(root)
+        header = self.header = ttk.Frame(root)
         header.pack(fill="x", padx=SIDE_MARGIN + SIDE_MARGIN // 2,
                     pady=(GROUP_GAP, 0))
         ttk.Label(header, text="SteamOS LED bar",
                   style="Heading.TLabel").pack(anchor="w")
         self.headline = ttk.Label(header, text="", style="Muted.TLabel")
         self.headline.pack(anchor="w", pady=(2, 0))
+
+        # A line under the title while a command runs, packed and unpacked
+        # rather than left there greyed: at rest it would be a rule across the
+        # window that means nothing.
+        #
+        self.progress = Progress(root, self.roles, PROGRESS_HEIGHT)
 
         # With the rail the pages have no tab row of their own: the list down
         # the left side is what picks them, and the notebook is only the stack
@@ -881,7 +946,7 @@ class Panel:
         #
         # Under the pages, not inside them: one file, one Apply.
         self.output = self._build_output(root)
-        self.runner = Runner(root, self._write)
+        self.runner = Runner(root, self._write, self._set_busy)
         self._build_apply(root)
         body.pack(fill="both", expand=True,
                   padx=SIDE_MARGIN // 2, pady=(GROUP_GAP, 0))
@@ -902,6 +967,11 @@ class Panel:
         self._build_rail()
         self._settings_changed()
 
+        # Closing goes through here so what is booked is dropped first. The
+        # <Destroy> binding is the backstop; by the time it runs, some of the
+        # widgets holding those bookings have already gone.
+        root.protocol("WM_DELETE_WINDOW", self._close)
+
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             root.bind_all(wheel, self._wheel)
 
@@ -916,6 +986,7 @@ class Panel:
                 "need administrator rights,\nwhich only Desktop Mode can ask "
                 "for.\n\n")
 
+        self._register_buttons()
         self.refresh_status()
         # Open at the height the content needs, so the first thing anyone does
         # is not what resizes the window.
@@ -1013,6 +1084,55 @@ class Panel:
 
     # -- helpers ----------------------------------------------------------
 
+    def _set_busy(self, busy, code=None):
+        """What the window does while a command runs, and when it ends.
+
+        Three things at once, because they are one thought: a bar under the
+        title so something visibly happens, every button that starts a command
+        gone dead so a second one cannot be started - Runner refused it before,
+        but only by writing a line into a log that may well be folded away -
+        and, when it ends badly, the log opened at the reason.
+        """
+        if busy:
+            self.progress.canvas.pack(side="top", fill="x",
+                                      padx=SIDE_MARGIN + SIDE_MARGIN // 2,
+                                      pady=(GROUP_GAP, 0), after=self.header)
+            self.progress.start()
+        else:
+            self.progress.stop()
+            self.progress.canvas.pack_forget()
+        for button in self._busy_buttons:
+            button.state(["disabled"] if busy else ["!disabled"])
+        if not busy:
+            # Apply has its own reason to be dead, which outlives the command.
+            self._refresh_unsaved()
+            if code:
+                self._show_output(True)
+
+    def _close(self):
+        self._stop_timers()
+        self.root.destroy()
+
+    def _register_buttons(self):
+        """Every button that would start a command, to grey while one runs.
+
+        Collected by walking rather than listed: a button added later would be
+        left pressable, and the failure - two pkexec prompts stacked on each
+        other - is not one anybody would connect back to a list here. The two
+        that only fold something away stay live, since watching the log is the
+        one thing worth doing while a command runs.
+        """
+        folds = {str(self.output_toggle), str(self.details)}
+        self._busy_buttons = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.Button) and str(child) not in folds:
+                    self._busy_buttons.append(child)
+                walk(child)
+
+        walk(self.root)
+
     def _set_window_icon(self):
         """The same icon the menu entry uses, in the titlebar and task bar.
 
@@ -1044,11 +1164,14 @@ class Panel:
         self.output.insert("end", text, tag or ())
         self.output.see("end")
         self.output.configure(state="disabled")
-        # Nobody opens a log to find out that something happened; the log says
-        # so itself. Only on the way in, so it can be folded away again while a
-        # long command is still running.
-        if not self._output_open:
-            self._show_output(True)
+        # It does not open itself for this. The bar under the title says that
+        # something is running, so the log opening as well would be the window
+        # rearranging itself to tell you what you can already see. It opens
+        # when a command *fails* - see _set_busy - and until then it puts a
+        # mark on its own handle to say there is something in it.
+        if not self._output_open and not self._output_unread:
+            self._output_unread = True
+            self._label_output()
 
     def _build_output(self, parent):
         """The command log, folded away until there is something in it.
@@ -1060,10 +1183,13 @@ class Panel:
         holder = ttk.Frame(parent)
         holder.pack(side="bottom", fill="x",
                     padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, ROW_GAP))
-        self.output_toggle = ttk.Button(holder, text="Output ▾",
-                                        style="Text.TButton",
+        # Both flags before the handle is named: naming it reads them.
+        self._output_open = False
+        self._output_unread = False
+        self.output_toggle = ttk.Button(holder, style="Text.TButton",
                                         command=self.toggle_output)
         self.output_toggle.pack(anchor="w")
+        self._label_output()
 
         # One of the two raised panels in the window: the content is a tk.Text
         # rather than a themed widget, so it cannot take a background of its
@@ -1085,8 +1211,13 @@ class Panel:
         scroll.pack(side="right", fill="y")
         text.tag_configure("command",
                            foreground=self.roles["on_surface_variant"])
-        self._output_open = False
         return text
+
+    def _label_output(self):
+        """Name the handle, with a mark when there is something unread in it."""
+        self.output_toggle.configure(
+            text="Output %s%s" % ("\u2022 " if self._output_unread else "",
+                                  "\u25b4" if self._output_open else "\u25be"))
 
     def toggle_output(self):
         self._show_output(not self._output_open)
@@ -1121,7 +1252,9 @@ class Panel:
             self.root.update_idletasks()
             self.root.geometry("%dx%d" % (
                 width, max(1, self.root.winfo_height() - change)))
-        self.output_toggle.configure(text="Output ▴" if show else "Output ▾")
+        if show:
+            self._output_unread = False
+        self._label_output()
         # Arithmetic gets it right to the pixel or it does not; this settles
         # the difference afterwards, and shows nothing when there is none.
         self._fit_window()
@@ -1847,10 +1980,11 @@ class Panel:
     def _stop_timers(self, event=None):
         """Drop what is booked, so nothing fires at a window that has gone.
 
-        Both of these have something pending most of the time - the preview
-        while its page is up, the resize between a fold and the layout pass
-        that follows it - and Tk reports a callback that outlives its window
-        as an invalid command name.
+        All three have something pending most of the time - the preview while
+        its page is up, the resize between a fold and the layout pass that
+        follows it, and the progress bar which books its own next step for as
+        long as it is running - and Tk reports a callback that outlives its
+        window as an invalid command name.
         """
         if event is not None and event.widget is not self.root:
             return                              # a child of ours, not the window
@@ -1858,6 +1992,10 @@ class Panel:
             if job is not None:
                 self.root.after_cancel(job)
         self._preview_job = self._refit_job = None
+        try:
+            self.progress.stop()
+        except tk.TclError:                                 # pragma: no cover
+            pass                                # already torn down
 
     def _preview_chosen(self):
         """Restart the clock, so a shape is seen from its beginning."""

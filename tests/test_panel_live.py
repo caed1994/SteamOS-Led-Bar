@@ -421,12 +421,60 @@ class LiveWindowTest(unittest.TestCase):
                          "the window shrinks before the log has gone")
         self.assertFalse(self.panel._output_open)
 
-    def test_the_log_folds_away_until_something_writes_to_it(self):
+    def test_the_log_stays_folded_and_marks_its_own_handle(self):
+        # It used to open itself on anything written to it. The bar under the
+        # title now says that something is running, so opening as well would
+        # be the window rearranging itself to tell you what you can see - it
+        # marks its handle instead.
         self.assertFalse(self.panel._output_open)
         self.assertFalse(self.panel.output_box.winfo_ismapped())
+        self.assertNotIn("•", self.panel.output_toggle.cget("text"))
         self.panel._write("something happened\n")
         self.root.update_idletasks()
+        self.assertFalse(self.panel._output_open, "the log opened by itself")
+        self.assertIn("•", self.panel.output_toggle.cget("text"))
+
+    def test_opening_the_log_clears_the_mark(self):
+        self.panel._write("something happened\n")
+        self.panel._show_output(True)
+        self.root.update_idletasks()
+        self.assertNotIn("•", self.panel.output_toggle.cget("text"))
+
+    def test_a_command_that_fails_opens_the_log_at_the_reason(self):
+        # The one thing worth interrupting you for. A command that worked has
+        # nothing to say that the bar under the title did not already.
+        self.panel._set_busy(False, 0)
+        self.root.update_idletasks()
+        self.assertFalse(self.panel._output_open)
+        self.panel._set_busy(False, 1)
+        self.root.update_idletasks()
         self.assertTrue(self.panel._output_open)
+
+    def test_a_running_command_shows_a_bar_and_deadens_the_buttons(self):
+        self.assertFalse(self.panel.progress.canvas.winfo_ismapped())
+        self.panel._set_busy(True)
+        self.root.update()
+        self.assertTrue(self.panel.progress.canvas.winfo_ismapped(),
+                        "nothing says a command is running")
+        for button in self.panel._busy_buttons:
+            self.assertIn("disabled", button.state(), button.cget("text"))
+        # The two that only fold something away stay live: watching the log is
+        # the one thing worth doing while a command runs.
+        self.assertNotIn("disabled", self.panel.output_toggle.state())
+        self.assertNotIn("disabled", self.panel.details.state())
+        self.panel._set_busy(False, 0)          # the bar books its own next step
+
+    def test_apply_keeps_its_own_reason_to_be_dead_afterwards(self):
+        # Everything comes back when a command ends - except Apply, which has
+        # a reason of its own that outlives it.
+        self.panel._set_busy(True)
+        self.root.update()
+        self.panel._set_busy(False, 0)
+        self.root.update()
+        self.assertTrue(self._is_dead(), "Apply came back with nothing to do")
+        self.panel.vars["SPEED"][0].set(2.5)
+        self.root.update()
+        self.assertFalse(self._is_dead())
 
     def test_a_setting_that_hangs_off_a_switch_is_greyed_with_it(self):
         variable, _kind = self.panel.vars["NOTIFY"]
