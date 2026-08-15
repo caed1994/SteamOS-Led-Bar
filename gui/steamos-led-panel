@@ -237,10 +237,11 @@ BUTTON_HEIGHT = 36
 CARD_RADIUS = material.SHAPE_MEDIUM
 FIELD_RADIUS = material.SHAPE_EXTRA_SMALL
 
-# Primary tabs: a label, and a bar under the one you are on. No box, no chip -
-# the tab row sits on the same surface as the page under it.
-TAB_INDICATOR = 3
-TAB_HEIGHT = 42
+# The pages are picked from a list down the left rather than a row of tabs
+# along the top, which is what Material suggests once there are more
+# destinations than a row wants to carry - and six is over that line. The
+# height of one entry, which is also the diameter of the pill behind it.
+RAIL_HEIGHT = 40
 
 # Sized for fingers and a trackpad, not a mouse on a desk: this runs on a
 # machine people also use handheld. Everything here is comfortably above the
@@ -316,33 +317,30 @@ def dress(style, roles):
         except tk.TclError as exc:                          # pragma: no cover
             print("could not draw %s: %s" % (what, exc), file=sys.stderr)
 
-    def tabs():
-        def picture(indicator, ground):
-            width = TAB_INDICATOR * 2 + 4
-            rows = [[ground] * width for _ in range(TAB_HEIGHT)]
-            if indicator:
-                # Round on top, square where it meets the page - the bar marks
-                # the tab, it is not a shape in its own right.
-                bar = roundrect.rows(
-                    width, TAB_INDICATOR,
-                    (TAB_INDICATOR, TAB_INDICATOR, 0, 0), indicator, ground,
-                    border_width=0)
-                rows[TAB_HEIGHT - TAB_INDICATOR:] = bar
-            return _photo(rows)
+    def rail():
+        """The list down the left that picks a page.
 
-        hovered = wash("surface", "on_surface", material.STATE_HOVER)
+        Which one is open is said by a filled pill behind its name - the same
+        tone a raised container would take, in the shape a button would take.
+        """
+        radius = RAIL_HEIGHT // 2
+
         style.element_create(
-            "Material.Tab", "image", picture(None, surface),
-            # Selected and hovered first, or a tab you are pointing at loses
-            # its bar while the pointer is over it.
-            ("selected", "active", picture(roles["primary"], hovered)),
-            ("selected", picture(roles["primary"], surface)),
-            ("active", picture(None, hovered)),
-            border=(TAB_INDICATOR, 0, TAB_INDICATOR, 0), sticky="nsew",
-            padding=(20, 10, 20, 10 + TAB_INDICATOR))
-        style.layout("TNotebook.Tab", [
-            ("Material.Tab", {"sticky": "nsew", "children": [
-                ("Notebook.label", {"side": "top", "sticky": ""})]})])
+            "Material.Rail", "image", _slice(radius, surface, surface),
+            ("selected", "active",
+             _slice(radius, material.blend(roles["secondary_container"],
+                                           roles["on_surface"],
+                                           material.STATE_HOVER), surface)),
+            ("selected", _slice(radius, roles["secondary_container"], surface)),
+            ("active", _slice(radius, wash("surface", "on_surface",
+                                           material.STATE_HOVER), surface)),
+            border=radius, sticky="nsew", padding=(18, 10))
+        style.layout("Rail.TRadiobutton", [
+            ("Material.Rail", {"sticky": "nsew", "children": [
+                ("Radiobutton.label", {"side": "left", "sticky": "w"})]})])
+        # An empty layout is what takes the notebook's own tab row out: the
+        # pages stay, the events stay, only the row nobody is using goes.
+        style.layout("TNotebook.Tab", [])
 
     def panels():
         # The one raised surface in the window: a tone up from the page, no
@@ -535,7 +533,7 @@ def dress(style, roles):
                                           ("Combobox.textarea",
                                            {"sticky": "nsew"})]})]})])
 
-    attempt("the tabs", tabs)
+    attempt("the rail", rail)
     attempt("the panels", panels)
     attempt("the buttons", buttons)
     attempt("the switches", switches)
@@ -625,10 +623,11 @@ def apply_theme(root):
     style.configure("TNotebook", background=surface, borderwidth=0,
                     bordercolor=surface, lightcolor=surface,
                     darkcolor=surface, tabmargins=(0, 4, 0, 0))
-    style.configure("TNotebook.Tab", background=surface, foreground=variant,
-                    focuscolor=surface)
-    style.map("TNotebook.Tab",
-              foreground=[("selected", roles["primary"])])
+    style.configure("Rail.TRadiobutton", background=surface,
+                    foreground=variant, focuscolor=surface, anchor="w")
+    style.map("Rail.TRadiobutton",
+              background=[("active", surface)],
+              foreground=[("selected", roles["on_secondary_container"])])
 
     style.configure("TCheckbutton", background=surface, foreground=on_surface,
                     focuscolor=surface)
@@ -692,7 +691,19 @@ class Runner:
         self.queue = queue.Queue()
         self.busy = False
         self.transcript = []
+        self._job = None
+        # The timer outlives the window otherwise: closing it leaves one drain
+        # already booked, which then fires at a callback that no longer exists
+        # and Tk reports as an invalid command name.
+        widget.bind("<Destroy>", self._stop, add="+")
         self._drain()
+
+    def _stop(self, event=None):
+        if event is not None and event.widget is not self.widget:
+            return                          # a child of ours, not the window
+        if self._job is not None:
+            self.widget.after_cancel(self._job)
+            self._job = None
 
     def start(self, command, done=None):
         if self.busy:
@@ -740,14 +751,14 @@ class Runner:
                         done(code)
         except queue.Empty:
             pass
-        self.widget.after(120, self._drain)
+        self._job = self.widget.after(120, self._drain)
 
 
 class Panel:
     def __init__(self, root):
         self.root = root
         root.title("SteamOS LED bar")
-        root.minsize(720, 640)
+        root.minsize(820, 640)
         self._set_window_icon()
 
         self.roles = apply_theme(root)
@@ -771,9 +782,16 @@ class Panel:
         self.headline = ttk.Label(header, text="", style="Muted.TLabel")
         self.headline.pack(anchor="w", pady=(2, 0))
 
-        notebook = self.notebook = ttk.Notebook(root)
-        notebook.pack(fill="both", expand=True,
-                      padx=SIDE_MARGIN // 2, pady=(GROUP_GAP, 0))
+        # With the rail the pages have no tab row of their own: the list down
+        # the left side is what picks them, and the notebook is only the stack
+        # of pages underneath.
+        body = ttk.Frame(root)
+        body.pack(fill="both", expand=True,
+                  padx=SIDE_MARGIN // 2, pady=(GROUP_GAP, 0))
+        self.rail = ttk.Frame(body)
+        self.rail.pack(side="left", fill="y", padx=(SIDE_MARGIN, GROUP_GAP))
+        notebook = self.notebook = ttk.Notebook(body)
+        notebook.pack(side="left", fill="both", expand=True)
 
         # Under the tabs, not inside them: one file, one Apply.
         self._build_apply(root)
@@ -792,6 +810,7 @@ class Panel:
         notebook.add(self._build_tests(notebook), text="Test")
         self.status_tab = self._build_status(notebook)
         notebook.add(self.status_tab, text="Status & repair")
+        self._build_rail()
         self._refresh_enabled()
 
         notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
@@ -809,6 +828,26 @@ class Panel:
         # Open at the height the content needs, so the first thing anyone does
         # is not what resizes the window.
         self._fit_window()
+
+    def _build_rail(self):
+        """Fill the rail, once the notebook knows what pages it has.
+
+        A rail rather than a row of tabs is what Material suggests once there
+        are more than a handful of destinations, and six is over that line. It
+        also buys back the vertical space the tab row was using, which on a
+        window this tall is worth having.
+
+        The notebook keeps its pages and its events - only its own tab row is
+        taken out of the layout - so everything that watches for a page change
+        goes on working, and the rail is what drives it.
+        """
+        self._rail_choice = tk.StringVar(value=self.notebook.tabs()[0])
+        for name in self.notebook.tabs():
+            ttk.Radiobutton(
+                self.rail, text=self.notebook.tab(name, "text"), value=name,
+                variable=self._rail_choice, style="Rail.TRadiobutton",
+                command=lambda page=name: self.notebook.select(page)).pack(
+                    fill="x", pady=(0, 2))
 
     # -- helpers ----------------------------------------------------------
 
@@ -1124,6 +1163,10 @@ class Panel:
 
     def _tab_changed(self, _event=None):
         """Only show Apply where there is something to apply."""
+        # The rail follows the notebook rather than the other way round, so a
+        # page selected in code - or by a keyboard shortcut - is still the one
+        # the rail says is open.
+        self._rail_choice.set(self.notebook.select())
         show = self.notebook.select() in self._settings_tabs
         if show != self._apply_shown:
             self._show_apply(show)

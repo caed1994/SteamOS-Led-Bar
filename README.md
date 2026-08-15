@@ -488,8 +488,10 @@ the application menu as **SteamOS LED bar**.
 ./gui/steamos-led-panel
 ```
 
-| Tab | What is on it |
-| --- | ------------- |
+Six pages, picked from the list down the left side.
+
+| Page | What is on it |
+| ---- | ------------- |
 | **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
 | **Notifications** | what flashes, in which colour and shape, and for how long |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
@@ -498,7 +500,7 @@ the application menu as **SteamOS LED bar**.
 | **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating-and-removing), flashing the firmware |
 
 **Apply and Reload sit under all of them**, because there is one config file.
-Apply writes every setting from every tab, keeps the comments in the file, and
+Apply writes every setting from every page, keeps the comments in the file, and
 restarts both the service and the watcher. **After a SteamOS update, press
 *Rebuild and reinstall***: a system update brings a new kernel and the module was
 built for the old one, so it is gone and `/dev/valve-leds-shim` with it. Your
