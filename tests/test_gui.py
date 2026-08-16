@@ -352,6 +352,48 @@ class FlashPaletteTest(unittest.TestCase):
                       [value for _label, value in self.palette])
 
 
+class ProfileListingTest(unittest.TestCase):
+    """What the profile dialog offers, and where a name ends up."""
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.directory)
+
+    def _write(self, *names):
+        for name in names:
+            with open(os.path.join(self.directory, name), "w") as handle:
+                handle.write("# a profile\n")
+
+    def test_profiles_are_listed_by_name_without_the_suffix(self):
+        self._write("evening.conf", "bright.conf")
+        self.assertEqual(ledpanel.profiles(self.directory),
+                         ("bright", "evening"))
+
+    def test_anything_that_is_not_a_profile_is_left_out(self):
+        self._write("evening.conf", "notes.txt", ".conf")
+        self.assertEqual(ledpanel.profiles(self.directory), ("evening",))
+
+    def test_a_directory_that_is_not_there_yet_is_simply_empty(self):
+        self.assertEqual(
+            ledpanel.profiles(os.path.join(self.directory, "nope")), ())
+
+    def test_a_name_becomes_a_path_with_the_suffix_on_it(self):
+        # People name a profile; they do not name a file.
+        self.assertEqual(ledpanel.profile_path(self.directory, "evening"),
+                         os.path.join(self.directory, "evening.conf"))
+
+    def test_the_suffix_is_never_doubled(self):
+        self.assertEqual(ledpanel.profile_path(self.directory, "evening.conf"),
+                         os.path.join(self.directory, "evening.conf"))
+
+    def test_an_unnamed_profile_has_nowhere_to_go(self):
+        self.assertIsNone(ledpanel.profile_path(self.directory, "   "))
+
+    def test_a_name_cannot_climb_out_of_the_profiles_directory(self):
+        path = ledpanel.profile_path(self.directory, "../../etc/passwd")
+        self.assertEqual(os.path.dirname(path), self.directory)
+
+
 class DialogTest(unittest.TestCase):
     """Nothing in the window is drawn by the platform any more.
 
@@ -372,10 +414,12 @@ class DialogTest(unittest.TestCase):
         self.assertNotIn("colorchooser", self.source)
         self.assertIn("class ColourDialog", self.source)
 
-    def test_choosing_a_file_is_still_the_desktops_job(self):
-        # The one dialog worth keeping: people know their own file browser,
-        # and a hand-drawn one would be worse at the job in every way.
-        self.assertIn("filedialog", self.source)
+    def test_no_file_browser_is_left_either(self):
+        # Tk's file chooser is Tk's own and not the desktop's, which is what
+        # it looked like. A browser is the wrong shape for the job as well:
+        # profiles live in one directory and are named rather than filed.
+        self.assertNotIn("filedialog", self.source)
+        self.assertIn("class ProfileDialog", self.source)
 
 
 class ShapeTestButtonTest(unittest.TestCase):

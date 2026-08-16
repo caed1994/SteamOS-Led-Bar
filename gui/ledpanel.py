@@ -179,6 +179,35 @@ def profiles_dir(source_dir):
     return os.path.join(source_dir, PROFILE_DIR)
 
 
+def profiles(directory):
+    """The profiles in that directory, by name and without the suffix.
+
+    A missing directory is not a problem worth reporting: it means none have
+    been saved yet, which is what an empty list already says.
+    """
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return ()
+    return tuple(sorted(
+        name[:-len(PROFILE_SUFFIX)] for name in names
+        if name.endswith(PROFILE_SUFFIX) and len(name) > len(PROFILE_SUFFIX)))
+
+
+def profile_path(directory, name):
+    """Where a profile of that name goes, whatever the user typed.
+
+    The suffix is not the user's business - they name a profile, they do not
+    name a file - so it is added when it is missing and never twice.
+    """
+    name = name.strip()
+    if not name:
+        return None
+    if not name.endswith(PROFILE_SUFFIX):
+        name += PROFILE_SUFFIX
+    return os.path.join(directory, os.path.basename(name))
+
+
 def profile_text(values):
     """A profile file, ready to write."""
     lines = [

@@ -31,7 +31,7 @@ sys.path.insert(0, HERE)
 
 try:
     import tkinter as tk
-    from tkinter import ttk, filedialog
+    from tkinter import ttk
     from tkinter import font as tkfont
 except ImportError:                                         # pragma: no cover
     sys.exit(
@@ -742,10 +742,14 @@ def apply_theme(root):
     root.option_add("*TCombobox*Listbox.selectForeground",
                     roles["on_secondary_container"])
 
+    # No selection colours here: clam pins an entry's and will not have them
+    # configured away - measured, style.lookup gives clam's own grey back
+    # whatever is set, on the base style or a derived one, and the option
+    # database does not reach it either. So nothing selects text on anyone's
+    # behalf in this window; a selection the user made is theirs, in whatever
+    # colour Tk gives it.
     style.configure("Material.TEntry", fieldbackground=surface,
                     foreground=on_surface, insertcolor=on_surface,
-                    selectbackground=roles["secondary_container"],
-                    selectforeground=roles["on_secondary_container"],
                     padding=(10, sizes["field_padding"]))
 
     style.configure("Field.TMenubutton", background=surface,
@@ -973,6 +977,81 @@ class ColourDialog(Dialog):
         super()._confirm()
 
 
+class ProfileDialog(Dialog):
+    """Save or load one of your own profiles, without a file browser.
+
+    Tk's file chooser is Tk's own and not the desktop's, which is exactly what
+    it looks like next to this window. A browser is the wrong shape for the
+    job as well: profiles live in one directory beside the clone, they are
+    named rather than filed, and what anybody wants here is the list of the
+    ones they have.
+    """
+
+    def __init__(self, parent, directory, roles, saving):
+        self.directory = directory
+        self.roles = roles
+        self.saving = saving
+        self.names = ledpanel.profiles(directory)
+        self.chosen = None
+        super().__init__(
+            parent, "Save profile" if saving else "Load profile",
+            "Saved beside the clone, in %s." % directory if saving
+            else "Loaded into this window; nothing is written until you press "
+                 "Apply.",
+            confirm="Save" if saving else "Load")
+
+    def build(self, body):
+        self.listing = tk.Listbox(
+            body, height=min(8, max(3, len(self.names))), activestyle="none",
+            borderwidth=0, highlightthickness=0, exportselection=False,
+            background=self.roles["surface_container_low"],
+            foreground=self.roles["on_surface"],
+            selectbackground=self.roles["secondary_container"],
+            selectforeground=self.roles["on_secondary_container"])
+        for name in self.names:
+            self.listing.insert("end", name)
+        self.listing.pack(fill="x", pady=(GROUP_GAP, 0))
+        self.listing.bind("<<ListboxSelect>>", self._picked)
+        self.listing.bind("<Double-Button-1>", lambda _event: self._confirm())
+        if not self.names:
+            self.listing.insert("end", " nothing saved yet")
+            self.listing.configure(foreground=self.roles["on_surface_variant"],
+                                   state="disabled")
+
+        if not self.saving:
+            return
+        typed = ttk.Frame(body)
+        typed.pack(fill="x", pady=(GROUP_GAP, 0))
+        ttk.Label(typed, text="Call it").pack(anchor="w")
+        self.entry = ttk.Entry(typed, style="Material.TEntry")
+        self.entry.pack(fill="x", pady=(ROW_GAP, 0))
+        self.entry.focus_set()
+        ttk.Label(typed, text="A profile of the same name is replaced.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(ROW_GAP, 0))
+
+    def _picked(self, _event=None):
+        """Clicking one fills the name in, so overwriting is a click away."""
+        picked = self.listing.curselection()
+        if picked and self.saving:
+            self.entry.delete(0, "end")
+            self.entry.insert(0, self.names[picked[0]])
+
+    def _confirm(self):
+        if self.saving:
+            self.chosen = ledpanel.profile_path(self.directory,
+                                                self.entry.get())
+            if self.chosen is None:
+                self.entry.focus_set()
+                return                          # unnamed; say nothing, wait
+        else:
+            picked = self.listing.curselection()
+            if not picked or not self.names:
+                return                          # nothing chosen yet
+            self.chosen = ledpanel.profile_path(self.directory,
+                                                self.names[picked[0]])
+        super()._confirm()
+
+
 class Progress:
     """The line under the title while a command runs.
 
@@ -1107,6 +1186,8 @@ class Panel:
         # <Destroy> binding is the backstop; by the time it runs, some of the
         # widgets holding those bookings have already gone.
         root.protocol("WM_DELETE_WINDOW", self._close)
+        # Minimising or hiding the window leaves a posted menu on screen too.
+        root.bind("<Unmap>", self._dismiss_menus, add="+")
 
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             root.bind_all(wheel, self._wheel)
@@ -1764,12 +1845,22 @@ class Panel:
         self._menus[key] = list(choices)
         button = ttk.Menubutton(grid, textvariable=variable, width=width,
                                 style="Field.TMenubutton", compound="left")
+        # A tk.Menu is not a ttk widget and inherits none of the theme, so
+        # every colour, the font and the trim are set by hand. It cannot have
+        # rounded corners - a menu is an override-redirect window and Tk draws
+        # it square - but everything else can be made to match.
         menu = tk.Menu(button, tearoff=0, borderwidth=0, activeborderwidth=0,
+                       relief="flat", font=self.roles["_font"],
                        background=self.roles["surface_container"],
                        foreground=self.roles["on_surface"],
                        activebackground=self.roles["secondary_container"],
                        activeforeground=self.roles["on_secondary_container"],
+                       selectcolor=self.roles["primary"],
                        disabledforeground=self.roles["on_surface_variant"])
+        # A menu left posted floats over whatever comes next - measured, it
+        # stayed on top of a file manager that had taken the focus. Tk gives
+        # it no say in that, so it is told to go when it loses the focus.
+        menu.bind("<FocusOut>", self._dismiss_menus)
         button.configure(menu=menu)
         button.grid(row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
         self._widgets[key] = button
@@ -1805,10 +1896,21 @@ class Panel:
 
     def _add_entry(self, key, label, value):
         menu, variable = self._menu_parts[key]
+        # The indicator stays: it is what marks the entry you are on, and
+        # its margin is what gives every entry the same left edge whether it
+        # carries a colour or not.
         menu.add_radiobutton(label=label, value=label, variable=variable,
                              image=self._swatch(value, "surface_container"),
-                             compound="left", indicatoron=False,
-                             hidemargin=True)
+                             compound="left")
+
+    def _dismiss_menus(self, _event=None):
+        """Take down any drop-down that is still standing open."""
+        for menu, _variable in self._menu_parts.values():
+            try:
+                if menu.winfo_ismapped():
+                    menu.unpost()
+            except tk.TclError:                             # pragma: no cover
+                pass                                        # already gone
 
     def _show_swatch(self, key):
         """Put the chosen colour on the button, where it can be seen."""
@@ -1975,12 +2077,8 @@ class Panel:
             self._say("Profiles", str(exc))
             return
 
-        path = filedialog.asksaveasfilename(
-            parent=self.root, title="Save profile",
-            initialdir=directory, initialfile="my-profile",
-            defaultextension=ledpanel.PROFILE_SUFFIX,
-            filetypes=[("Profile", "*" + ledpanel.PROFILE_SUFFIX),
-                       ("All files", "*")])
+        path = ProfileDialog(self.root, directory, self.roles,
+                             saving=True).chosen
         if not path:
             return
         try:
@@ -1998,11 +2096,8 @@ class Panel:
         does, so you see what arrived before anything is written to /etc.
         """
         directory = ledpanel.profiles_dir(SOURCE_DIR)
-        path = filedialog.askopenfilename(
-            parent=self.root, title="Load profile",
-            initialdir=directory if os.path.isdir(directory) else SOURCE_DIR,
-            filetypes=[("Profile", "*" + ledpanel.PROFILE_SUFFIX),
-                       ("All files", "*")])
+        path = ProfileDialog(self.root, directory, self.roles,
+                             saving=False).chosen
         if not path:
             return
         try:

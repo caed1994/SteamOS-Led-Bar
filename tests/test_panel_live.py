@@ -397,6 +397,33 @@ class LiveWindowTest(unittest.TestCase):
         for left, right in zip(boxes, boxes[1:]):
             self.assertLess(left[2], right[0], "the LEDs overlap")
 
+    def test_an_open_menu_can_be_taken_down(self):
+        # Measured on a real desktop: a posted menu floated over a file
+        # manager that had taken the focus. Tk gives the menu no say in that,
+        # so it is told to go.
+        menu, _variable = self.panel._menu_parts["ACHIEVEMENT_COLOR"]
+        button = self.panel._widgets["ACHIEVEMENT_COLOR"]
+        menu.post(button.winfo_rootx(), button.winfo_rooty())
+        self.root.update()
+        self.assertTrue(menu.winfo_ismapped(), "the menu did not open")
+        self.panel._dismiss_menus()
+        self.root.update()
+        self.assertFalse(menu.winfo_ismapped(), "the menu stayed up")
+
+    def test_every_menu_knows_to_take_itself_down(self):
+        for key, (menu, _variable) in self.panel._menu_parts.items():
+            self.assertTrue(menu.bind("<FocusOut>"), key)
+
+    def test_a_menu_wears_the_window_s_own_colours(self):
+        # A tk.Menu is not a ttk widget and inherits none of the theme.
+        # cget gives these back as Tcl border objects, not strings.
+        menu, _variable = self.panel._menu_parts["ACHIEVEMENT_COLOR"]
+        self.assertEqual(str(menu.cget("background")),
+                         self.panel.roles["surface_container"])
+        self.assertEqual(str(menu.cget("activebackground")),
+                         self.panel.roles["secondary_container"])
+        self.assertEqual(int(str(menu.cget("borderwidth"))), 0)
+
     def _log_order(self):
         """Which of "grow the window" and "fill it" happened first."""
         order = []
