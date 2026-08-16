@@ -52,6 +52,11 @@ DESKTOP_SERVICE = "org.freedesktop.Notifications"
 KDECONNECT_MEMBER = "notificationPosted"
 DESKTOP_MEMBER = "Notify"
 
+# One notification, as an object of its own. KDE Connect's signal carries only
+# an id - measured on a real machine, its own counter rather than the Android
+# key - so the app it came from is a property to be read off this.
+NOTIFICATION_INTERFACE = "org.kde.kdeconnect.device.notifications.notification"
+
 # Which arguments of org.freedesktop.Notifications.Notify carry what. Fixed by
 # the specification, so they are named here rather than counted at the call.
 DESKTOP_APP = 0
@@ -65,10 +70,18 @@ RULE_SEPARATOR = ","
 FIELD_SEPARATOR = ":"
 
 
-class Sighting(collections.namedtuple("Sighting", "app title body")):
-    """One notification, as much of it as the bus was willing to say."""
+class Sighting(collections.namedtuple("Sighting", "app title body where")):
+    """One notification, as much of it as the bus was willing to say.
+
+    `where` is the object it can be asked about, and only KDE Connect's bus
+    sets it: that one announces a notification by an id and keeps the rest -
+    the app it came from included - as properties of an object of its own.
+    """
 
     __slots__ = ()
+
+    def __new__(cls, app, title="", body="", where=""):
+        return super().__new__(cls, app, title, body, where)
 
     def describe(self):
         line = self.app or "(no app)"
@@ -242,11 +255,13 @@ def read_line(line, source):
         key = _as_string(arguments[0])
         if not key:
             return None
-        # The key and nothing else. Reading the notification's own appName
-        # means a second call, on an object path built out of a key that
-        # contains characters a path cannot hold - so the one thing that is
-        # certainly here is used, and --print shows what it came to.
-        return Sighting(app_from_key(key), "", "")
+        # What arrives here is an id and nothing else, and on a real machine
+        # that id turned out to be KDE Connect's own counter - "3" - rather
+        # than the Android key with the package name in it. So the app is
+        # asked for separately, off the object the id names; app_from_key is
+        # what is left when that cannot be reached, and is right for the
+        # machines whose ids are the Android spelling.
+        return Sighting(app_from_key(key), where=_notification_path(line, key))
 
     arguments = _arguments(line, DESKTOP_MEMBER)
     if not arguments or len(arguments) <= DESKTOP_BODY:
@@ -254,9 +269,80 @@ def read_line(line, source):
     app = _as_string(arguments[DESKTOP_APP])
     if app is None:
         return None
+    # Everything in the one signal, which is why this bus is the fallback that
+    # always works: nothing else has to be asked.
     return Sighting(app,
                     _as_string(arguments[DESKTOP_SUMMARY]) or "",
                     _as_string(arguments[DESKTOP_BODY]) or "")
+
+
+def _notification_path(line, key):
+    """Where to ask about this notification: the plugin's object, then the id.
+
+    gdbus prints the object the signal came from at the front of the line, so
+    the device is read off it rather than guessed - there may be more than one
+    phone paired, and only one of them sent this.
+    """
+    path = line.split(":", 1)[0].strip()
+    if not path.startswith("/"):
+        return ""
+    return "%s/%s" % (path.rstrip("/"), key)
+
+
+def details_command(path):
+    """Everything KDE Connect knows about one notification, in one call."""
+    return ["gdbus", "call", "--session", "--dest", KDECONNECT_SERVICE,
+            "--object-path", path, "--method",
+            "org.freedesktop.DBus.Properties.GetAll", NOTIFICATION_INTERFACE]
+
+
+def read_details(text, fallback):
+    """A GetAll reply as a Sighting, or `fallback` if it says nothing useful.
+
+    The reply is a dictionary of variants - {'appName': <'WhatsApp'>, ...} -
+    and only three of its entries matter here.
+    """
+    opening = (text or "").find("{")
+    closing = text.rfind("}") if opening >= 0 else -1
+    if closing <= opening:
+        return fallback
+    properties = {}
+    for entry in _split_arguments(text[opening + 1:closing]):
+        name, _, value = _split_pair(entry)
+        if name is not None:
+            properties[name] = _as_string(value) or ""
+    app = properties.get("appName") or fallback.app
+    return Sighting(app, properties.get("title", ""),
+                    properties.get("text", ""), fallback.where)
+
+
+def _split_pair(entry):
+    """"'key': <value>" into its two halves, on the colon that separates them.
+
+    Found by scanning rather than by partition: a title with a colon in it -
+    "Anna: bist du da?" - is exactly the message somebody sends.
+    """
+    depth = 0
+    quote = ""
+    index = 0
+    while index < len(entry):
+        char = entry[index]
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char in "([{<":
+            depth += 1
+        elif char in ")]}>":
+            depth -= 1
+        elif char == ":" and depth == 0:
+            return _as_string(entry[:index]), ":", entry[index + 1:].strip()
+        index += 1
+    return None, "", entry
 
 
 # -- deciding what it should look like ---------------------------------------
@@ -334,13 +420,16 @@ class Bridge:
     """
 
     def __init__(self, source, rules, kind=notify.KIND_PHONE,
-                 listed_only=False, send=None, report=None):
+                 listed_only=False, send=None, report=None, details=None):
         self.source = source
         self.rules = rules
         self.kind = kind
         self.listed_only = listed_only
         self.send = send
         self.report = report
+        # Given rather than called for: it is the one step that talks to the
+        # bus, so a test drives the whole loop by handing over a function.
+        self.details = details
         self.seen = 0
         self.flashed = 0
 
@@ -349,6 +438,8 @@ class Bridge:
         sighting = read_line(text, self.source)
         if sighting is None:
             return None
+        if sighting.where and self.details is not None:
+            sighting = self.details(sighting)
         self.seen += 1
         trigger = trigger_for(sighting, self.rules, self.kind,
                               self.listed_only)
@@ -381,8 +472,25 @@ def open_monitor(source):
 
 def bus_names():
     """Everything on the session bus, as one blob of text, or "" if unknown."""
+    return _ask(names_command())
+
+
+def look_up(sighting):
+    """Fill in what KDE Connect keeps beside the id, if it will say.
+
+    Never fatal: an id that cannot be asked about still flashes, under
+    whatever app_from_key made of it. A notification that arrives while the
+    phone is being answered is gone by the time this asks, and that is a race
+    nobody can win - it just flashes the general colour.
+    """
+    reply = _ask(details_command(sighting.where))
+    return read_details(reply, sighting)
+
+
+def _ask(command):
+    """Run one short gdbus call; "" when it fails, however it fails."""
     try:
-        done = subprocess.run(names_command(), stdout=subprocess.PIPE,
+        done = subprocess.run(command, stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return ""

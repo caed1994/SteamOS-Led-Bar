@@ -1058,11 +1058,19 @@ def run_watch_phone(config, print_only=False):
     def report(sighting, trigger):
         print("  %-40s -> %s" % (sighting.describe(), trigger or "ignored"),
               flush=True)
+        if sighting.where and not (sighting.title or sighting.body):
+            # The id was all this bus gave, and asking about it added nothing.
+            # Said here rather than swallowed: it is the difference between a
+            # rule that can name the app and one that cannot, and the path is
+            # what anybody looking into it would need next.
+            print("     (no app name at %s - try PHONE_SOURCE=desktop)"
+                  % sighting.where, flush=True)
 
     bridge = phone.Bridge(
         source, rules, listed_only=config["PHONE_APPS_ONLY"],
         send=None if print_only else lambda trigger: notify.send(fifo, trigger),
-        report=report if print_only else None)
+        report=report if print_only else None,
+        details=phone.look_up)
 
     # flush, because this runs as a service: Python block-buffers a piped
     # stdout, so these lines would sit in it until the process stopped.

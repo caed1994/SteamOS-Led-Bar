@@ -39,8 +39,8 @@ The installer unlocks the read-only rootfs and locks it again when it is done,
 installs `base-devel` and the kernel headers matching your exact kernel,
 builds and loads the kernel module, installs the service, config file, udev
 rule and suspend hook, offers PlatformIO and the ESP firmware, puts the
-control panel in the application menu, installs the achievement watcher as a
-user service and starts everything.
+control panel in the application menu and `steamos-led-serial` on your PATH,
+installs the desktop-session watchers as user services and starts everything.
 
 It asks four questions: LED count, serial port, baud rate, firmware. All have
 defaults, so pressing Enter four times is a complete install. Firmware defaults
@@ -501,7 +501,8 @@ It is **off until you switch it on**, in the panel under *Notifications* >
 steamos-led-serial --watch-phone --print
 ```
 
-That flashes nothing. It reports every notification it sees, what your machine
+As yourself, not with `sudo`: the notifications are on your session bus and
+root cannot read it. That flashes nothing. It reports every notification it sees, what your machine
 calls the app it came from, and what it would have flashed &mdash; which is how
 you find the names to write rules with:
 

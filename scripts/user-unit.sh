@@ -1,16 +1,21 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Shared shell helpers for the units that run in the desktop session.
+# What install.sh and uninstall.sh have to agree on.
 #
-# Both are *user* systemd units - one talks to the logged-in user's Steam
-# client, the other reads that user's session bus - while install.sh and
-# uninstall.sh both run as root. Deriving "which user, which directory, which
-# session" twice is how the two scripts drift apart, and the failure mode is
-# quiet: a dangling enable symlink left behind in somebody's ~/.config. So it
-# is derived once, here.
+# Mostly the units that run in the desktop session. Both are *user* systemd
+# units - one talks to the logged-in user's Steam client, the other reads that
+# user's session bus - while install.sh and uninstall.sh both run as root.
+# Deriving "which user, which directory, which session" twice is how the two
+# scripts drift apart, and the failure mode is quiet: a dangling enable symlink
+# left behind in somebody's ~/.config. So it is derived once, here.
 #
 # Sourced, not executed.
+
+# The name you can type. Everything this project installs lives in /var/lib so
+# it survives a SteamOS update, and nothing there is on anybody's PATH - so
+# without this, every command in the README is one you can read and not run.
+COMMAND_LINK="/usr/local/bin/steamos-led-serial"
 
 WATCHER_UNIT="steamos-led-achievements.service"
 PHONE_UNIT="steamos-led-phone.service"

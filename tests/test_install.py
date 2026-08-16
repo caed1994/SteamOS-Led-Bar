@@ -14,11 +14,15 @@ touch the system is left to the machine it runs on.
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 INSTALLER = os.path.join(HERE, "..", "install.sh")
+
+from shellvalues import shell_value                   # noqa: E402
 
 
 def _function(name):
@@ -127,6 +131,47 @@ class InstallerShapeTest(unittest.TestCase):
         done = subprocess.run(["bash", "-n", INSTALLER],
                               capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_the_command_the_readme_names_is_one_you_can_type(self):
+        """The README says "steamos-led-serial --x" fourteen times.
+
+        Everything installs into /var/lib, which is on nobody's PATH, so for a
+        long time every one of those was a command you could read and not run:
+        the answer was "command not found" and no way to tell from the page
+        what the real name was. The link is what makes the documentation true,
+        so the two are checked against each other rather than against a memory
+        of having fixed it.
+        """
+        link = shell_value("COMMAND_LINK")
+        name = os.path.basename(link)
+        # In a directory a shell actually searches. Naming the file correctly
+        # somewhere nobody looks is exactly the bug this is about: it lived in
+        # /var/lib, which is right for surviving a SteamOS update and useless
+        # for typing.
+        self.assertIn(os.path.dirname(link),
+                      ("/usr/local/bin", "/usr/bin", "/bin"),
+                      "%s is not on anybody's PATH" % link)
+
+        with open(os.path.join(HERE, "..", "README.md")) as handle:
+            readme = handle.read()
+        # This project's own commands only - the page is full of git, pacman
+        # and systemctl, and none of those are ours to install. An allow-list
+        # of other people's tools would need extending every time one is
+        # mentioned, which is a test that eventually gets edited rather than
+        # read.
+        typed = set(re.findall(r"^\s*(?:sudo )?(steamos-led-[a-z-]+)\b",
+                               readme, re.M))
+        self.assertIn(name, typed, "the README names no such command")
+        self.assertEqual(typed - {name, "steamos-led-serial.conf"}, set(),
+                         "the README names a command nothing installs")
+
+    def test_the_uninstaller_takes_back_the_same_link(self):
+        # And only when it is still ours: somebody who put their own there is
+        # entitled to keep it.
+        with open(os.path.join(HERE, "..", "uninstall.sh")) as handle:
+            text = handle.read()
+        self.assertIn("$COMMAND_LINK", text)
+        self.assertIn("readlink", text)
 
     def test_platformio_is_installed_the_way_steamos_allows(self):
         # pip cannot write to a read-only rootfs, and --user lands in a

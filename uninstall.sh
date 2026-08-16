@@ -69,6 +69,14 @@ rm -f "$UDEV_PATH"
 rm -f "$SLEEP_HOOK_PATH"
 udevadm control --reload >/dev/null 2>&1 || true
 
+# Only if it is still ours. Somebody who put their own steamos-led-serial
+# there is entitled to keep it, and a link pointing somewhere else is not
+# something this script installed.
+if [[ -L "$COMMAND_LINK" \
+      && "$(readlink "$COMMAND_LINK")" == "$INSTALL_DIR/steamos-led-serial" ]]; then
+    rm -f "$COMMAND_LINK"
+fi
+
 rm -rf "${INSTALL_DIR:?}"
 
 if [[ $PURGE -eq 1 ]]; then

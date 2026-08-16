@@ -13,15 +13,16 @@ no test can, and that is what `--watch-phone --print` is for.
 """
 
 import os
-import subprocess
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
 from steamos_led import config as config_module      # noqa: E402
 from steamos_led import notify, phone                # noqa: E402
+from shellvalues import shell_value                  # noqa: E402
 
 # What the two buses put out, recorded rather than invented. The desktop one
 # is the freedesktop specification's own argument order; the KDE Connect one
@@ -47,6 +48,18 @@ KDECONNECT_LINES = [
     "org.kde.kdeconnect.device.notifications.notificationRemoved "
     "('0|com.whatsapp|1|null|10123',)",
 ]
+
+# And what a Steam Machine actually sent, which is not the same thing: the id
+# is KDE Connect's own counter, and everything worth knowing is a property of
+# the object it names.
+COUNTED_LINE = ("/modules/kdeconnect/devices/d33f/notifications: "
+                "org.kde.kdeconnect.device.notifications.notificationPosted "
+                "('3',)")
+
+COUNTED_DETAILS = (
+    "({'id': <'3'>, 'appName': <'WhatsApp'>, 'ticker': <'Anna: bist du da?'>,"
+    " 'title': <'Anna'>, 'text': <'bist du da?'>, 'dismissable': <true>,"
+    " 'hasIcon': <true>, 'silent': <false>},)\n")
 
 
 class ReadingTheBusTest(unittest.TestCase):
@@ -75,6 +88,26 @@ class ReadingTheBusTest(unittest.TestCase):
         seen = self._sightings(KDECONNECT_LINES, phone.SOURCE_KDECONNECT)
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0].app, "com.whatsapp")
+
+    def test_an_id_that_is_only_a_number_says_where_to_ask(self):
+        # What a real machine sent: KDE Connect's own counter, with the app
+        # kept as a property of an object of its own. Reading the id as the
+        # app was this bridge's first mistake, and it printed "3 -> phone".
+        seen = phone.read_line(COUNTED_LINE, phone.SOURCE_KDECONNECT)
+        self.assertEqual(seen.app, "3")
+        self.assertEqual(seen.where,
+                         "/modules/kdeconnect/devices/d33f/notifications/3")
+
+    def test_the_device_is_read_off_the_signal_rather_than_assumed(self):
+        # More than one phone can be paired, and only one of them sent this.
+        line = COUNTED_LINE.replace("d33f", "0ther")
+        self.assertIn("/devices/0ther/",
+                      phone.read_line(line, phone.SOURCE_KDECONNECT).where)
+
+    def test_the_desktop_bus_needs_nothing_asked(self):
+        # Which is why it is the fallback that always works.
+        for seen in self._sightings(DESKTOP_LINES, phone.SOURCE_DESKTOP):
+            self.assertEqual(seen.where, "")
 
     def test_the_two_sources_do_not_read_each_other_s_lines(self):
         self.assertEqual(self._sightings(KDECONNECT_LINES,
@@ -115,6 +148,50 @@ class ReadingTheBusTest(unittest.TestCase):
     def test_a_key_that_names_no_package_is_still_something_to_match_on(self):
         # Better a rule the reader can see in --print than a blank.
         self.assertEqual(phone.app_from_key("weird-key"), "weird-key")
+
+
+class AskingAboutOneTest(unittest.TestCase):
+    """The second call, which is what turns "3" into "WhatsApp"."""
+
+    def setUp(self):
+        self.seen = phone.read_line(COUNTED_LINE, phone.SOURCE_KDECONNECT)
+
+    def test_it_asks_the_object_the_id_names(self):
+        command = phone.details_command(self.seen.where)
+        self.assertEqual(command[:2], ["gdbus", "call"])
+        self.assertIn(self.seen.where, command)
+        self.assertIn(phone.NOTIFICATION_INTERFACE, command)
+
+    def test_the_reply_carries_the_app_and_the_message(self):
+        full = phone.read_details(COUNTED_DETAILS, self.seen)
+        self.assertEqual(full.app, "WhatsApp")
+        self.assertEqual(full.title, "Anna")
+        self.assertEqual(full.body, "bist du da?")
+
+    def test_a_colon_in_the_message_does_not_split_the_wrong_way(self):
+        # "Bob: re: dinner" is a perfectly ordinary title, and the colon is
+        # also what separates a property from its value.
+        reply = ("({'appName': <'Signal'>, 'title': <'Bob: re: dinner'>,"
+                 " 'text': <'8pm?'>},)")
+        full = phone.read_details(reply, self.seen)
+        self.assertEqual(full.app, "Signal")
+        self.assertEqual(full.title, "Bob: re: dinner")
+
+    def test_nothing_to_say_leaves_the_sighting_as_it_was(self):
+        # A notification dismissed on the phone before this asked is gone by
+        # then, and that race is nobody's fault. It still flashes.
+        for reply in ("", "()", "nonsense", None):
+            self.assertEqual(phone.read_details(reply, self.seen), self.seen)
+
+    def test_an_answer_without_a_name_does_not_erase_the_one_there_is(self):
+        reply = "({'title': <'Anna'>},)"
+        self.assertEqual(phone.read_details(reply, self.seen).app, "3")
+
+    def test_a_bus_that_does_name_the_app_in_the_id_needs_no_lookup(self):
+        # The two spellings coexist; app_from_key is right for one of them and
+        # the lookup only improves on it.
+        seen = phone.read_line(KDECONNECT_LINES[1], phone.SOURCE_KDECONNECT)
+        self.assertEqual(seen.app, "com.whatsapp")
 
 
 class SourceTest(unittest.TestCase):
@@ -284,6 +361,28 @@ class BridgeTest(unittest.TestCase):
         bridge.run(DESKTOP_LINES)
         self.assertEqual(told, ["double_flash:#25d366", None, None])
 
+    def test_the_lookup_reaches_the_rule_that_matches_on_it(self):
+        # The whole point of the second call: without it this is "3", which
+        # matches no rule anybody would write.
+        rules = phone.parse_rules("WhatsApp:#25d366:double_flash")
+        sent = []
+        bridge = phone.Bridge(
+            phone.SOURCE_KDECONNECT, rules, send=sent.append,
+            details=lambda seen: phone.read_details(COUNTED_DETAILS, seen))
+        bridge.run([COUNTED_LINE])
+        self.assertEqual(sent, ["double_flash:#25d366"])
+
+    def test_it_is_only_asked_where_there_is_something_to_ask(self):
+        # The desktop bus said everything already; a call per notification
+        # there would be one subprocess for nothing.
+        asked = []
+        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
+                              send=self.sent.append,
+                              details=lambda seen: asked.append(seen) or seen)
+        bridge.run(DESKTOP_LINES)
+        self.assertEqual(asked, [])
+        self.assertEqual(bridge.flashed, 3)
+
     def test_a_notification_describes_itself_for_the_dry_run(self):
         seen = phone.read_line(DESKTOP_LINES[2], phone.SOURCE_DESKTOP)
         self.assertEqual(seen.describe(), "WhatsApp: Anna - Bist du da?")
@@ -442,26 +541,15 @@ class UnitFileTest(unittest.TestCase):
         self.assertIn("Restart=always", self._directives())
 
     def test_it_is_enabled_where_the_installer_writes_the_symlink(self):
-        wants = _shell_value("WATCHER_WANTS").replace(".wants", "")
+        wants = shell_value("WATCHER_WANTS").replace(".wants", "")
         self.assertIn("WantedBy=%s" % wants, self.text)
-
-
-def _shell_value(name):
-    """One variable out of scripts/user-unit.sh, as the shell sees it."""
-    path = os.path.join(HERE, "..", "scripts", "user-unit.sh")
-    done = subprocess.run(
-        ["bash", "-c", 'source "$1"; printf "%%s\\n" "${%s[@]}"' % name,
-         "_", path],
-        stdout=subprocess.PIPE, text=True, check=True)
-    lines = done.stdout.split("\n")
-    return lines[0] if len(lines) <= 2 else [line for line in lines if line]
 
 
 class InstallerTest(unittest.TestCase):
     """Both user units are installed and removed by the same walk."""
 
     def test_every_unit_the_scripts_know_about_exists(self):
-        for unit in _shell_value("WATCHER_UNITS"):
+        for unit in shell_value("WATCHER_UNITS"):
             path = os.path.join(HERE, "..", "server", unit)
             self.assertTrue(os.path.exists(path), unit)
 
@@ -469,7 +557,7 @@ class InstallerTest(unittest.TestCase):
         # Installed but not started by anything until NOTIFY_PHONE goes on,
         # which is what the unit's own exit code 3 is for.
         self.assertIn("steamos-led-phone.service",
-                      _shell_value("WATCHER_UNITS"))
+                      shell_value("WATCHER_UNITS"))
 
     def test_the_installer_and_the_uninstaller_walk_the_same_list(self):
         # The failure this prevents is quiet: a unit installed by one script

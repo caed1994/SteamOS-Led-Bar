@@ -198,6 +198,26 @@ cp -r "$SOURCE_DIR/server/steamos_led" "$INSTALL_DIR/"
 install -m 0755 "$SOURCE_DIR/server/steamos-led-serial" "$INSTALL_DIR/steamos-led-serial"
 find "$INSTALL_DIR/steamos_led" -type f -exec chmod 0644 {} +
 
+# A name to type. Everything lives in /var/lib so it survives a SteamOS
+# update, and nothing there is on anybody's PATH - so every command in the
+# README was one people could read and not run. A symlink costs nothing and
+# makes the documentation true.
+#
+# On the read-only rootfs, so a SteamOS update takes it away again along with
+# the kernel module - and the same re-run of this script puts both back. Not
+# fatal either way: the full path works whether this exists or not.
+# COMMAND_LINK is in scripts/user-unit.sh, so the uninstaller removes the same
+# one this creates.
+COMMAND_STATUS="$INSTALL_DIR/steamos-led-serial"
+
+if install -d -m 0755 "$(dirname "$COMMAND_LINK")" 2>/dev/null \
+   && ln -sfn "$INSTALL_DIR/steamos-led-serial" "$COMMAND_LINK" 2>/dev/null; then
+    say "Linking $COMMAND_LINK"
+    COMMAND_STATUS="steamos-led-serial"
+else
+    warn "could not write $COMMAND_LINK - run it by its full path instead"
+fi
+
 if [[ -f "$CONFIG_PATH" ]]; then
     say "Keeping existing $CONFIG_PATH"
     warn "check that LED_COUNT/SERIAL_PORT/BAUD there still match your setup"
@@ -840,24 +860,25 @@ Done.
 
   Panel:    $PANEL_STATUS
   Firmware: $FIRMWARE_STATUS
+  Command:  $COMMAND_STATUS
   Config:   $CONFIG_PATH
   Logs:     journalctl -u steamos-led-serial -f
   Restart:  sudo systemctl restart steamos-led-serial
 
 Desktop-session services: $WATCHER_STATUS
   Achievements, messages and friends
-  Check:    $INSTALL_DIR/steamos-led-serial --steam-check   (with a game running)
+  Check:    $COMMAND_STATUS --steam-check   (with a game running)
   Log:      journalctl --user -u steamos-led-achievements -f
 
   Phone notifications over KDE Connect - off until you switch it on in the
   panel, under Notifications
-  Try it:   $INSTALL_DIR/steamos-led-serial --watch-phone --print
+  Try it:   $COMMAND_STATUS --watch-phone --print   (as yourself, not with sudo)
   Log:      journalctl --user -u steamos-led-phone -f
 
 Test the strip without Steam (stop the service first so the port is free):
 
   sudo systemctl stop steamos-led-serial
-  sudo $INSTALL_DIR/steamos-led-serial --self-test
+  sudo $COMMAND_STATUS --self-test
   sudo systemctl start steamos-led-serial
 
 EOF
