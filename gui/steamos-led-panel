@@ -875,12 +875,14 @@ class Popup:
     PAD_X = 14
     PAD_Y = 8
 
-    def __init__(self, button, roles, choices, variable, swatch, on_close):
+    def __init__(self, button, key, roles, choices, variable, swatch, on_close):
         self.roles = roles
         self.variable = variable
         self.on_close = on_close
         self.rows = []
 
+        self.owner = button
+        self.key = key
         self.window = window = tk.Toplevel(button)
         window.withdraw()
         window.overrideredirect(True)
@@ -927,33 +929,15 @@ class Popup:
         window.bind("<Button-1>", lambda _e: self.close())
         self._place(button)
         window.deiconify()
-        window.focus_set()
-        self._hold()
 
-    def _hold(self, tries=10):
-        """Take the screen, which is what a menu does and what Tk's own do.
-
-        Without it a click in another application never reaches this window at
-        all, so the list stays up over whatever was clicked - and no amount of
-        asking for the focus back would have found out. The click that
-        dismisses it is swallowed, which is how every menu on the desktop
-        behaves.
-
-        Retried, because the grab is refused while another is held - and one
-        is, for a moment, by the button that opened this. Tk's own menus do
-        the same thing for the same reason; asking once and giving up left the
-        list with no grab at all, which is the state it was reported in.
-
-        The grab goes when the window is destroyed, so nothing can leave the
-        screen held.
-        """
-        try:
-            self.window.grab_set_global()
-        except tk.TclError:
-            if tries:
-                self.window.after(20, lambda: self._hold(tries - 1))
-            else:                                           # pragma: no cover
-                self.window.grab_set()          # local is better than none
+    # No grab, and that is the point rather than an omission. Measured under a
+    # window manager, with another application raised over the panel: with a
+    # grab of either kind the list stayed up, without one it goes. A grab
+    # swallows the focus change that says the application is no longer the one
+    # being used, and that notice is the only thing an override-redirect
+    # window - which is what an undecorated list has to be - ever gets. So the
+    # grab went, and the clicks it used to catch are caught by the panel
+    # instead: see Panel._panel_click.
 
     def _left(self):
         """The list lost the focus: gone, unless it went to our own window."""
@@ -1022,14 +1006,12 @@ class Popup:
         self.close()
 
     def close(self):
-        for what, sequence in ((self._watching, "<FocusOut>"),
-                               (self._watching, "<Unmap>")):
+        for sequence in ("<FocusOut>", "<Unmap>"):
             try:
-                what.unbind(sequence)
+                self._watching.unbind(sequence)
             except tk.TclError:                             # pragma: no cover
                 pass
         try:
-            self.window.grab_release()
             self.window.destroy()
         except tk.TclError:                                 # pragma: no cover
             pass                                            # already gone
@@ -1370,6 +1352,7 @@ class Panel:
         root.protocol("WM_DELETE_WINDOW", self._close)
         # Minimising or hiding the window leaves a posted menu on screen too.
         root.bind("<Unmap>", self._dismiss_menus, add="+")
+        root.bind("<Button-1>", self._panel_click, add="+")
 
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             root.bind_all(wheel, self._wheel)
@@ -1455,6 +1438,7 @@ class Panel:
         which is a mercy - a readonly combobox changes the setting it holds
         when the wheel turns over it, whether or not it was open.
         """
+        self._dismiss_menus()                   # a list is not scrolled past
         canvas = self._scrollers.get(self.notebook.select())
         if canvas is None or not canvas.winfo_ismapped():
             return
@@ -2038,10 +2022,18 @@ class Panel:
         self._show_swatch(key)
 
     def _open_menu(self, key):
-        """Drop this one down, having taken down whatever else was open."""
+        """Drop this one down, having taken down whatever else was open.
+
+        Pressing the field a second time closes the list rather than opening
+        it again: the press already took it down - see _panel_click - and this
+        is the release that follows.
+        """
+        showing = self._popup.key if self._popup is not None else None
         self._dismiss_menus()
-        self._popup = Popup(self._widgets[key], self.roles, self._menus[key],
-                            self._menu_parts[key],
+        if showing == key:
+            return
+        self._popup = Popup(self._widgets[key], key, self.roles,
+                            self._menus[key], self._menu_parts[key],
                             self._swatch, self._menu_closed)
 
     def _swatch_image(self, value):
@@ -2064,6 +2056,18 @@ class Panel:
         # gap between the colour and its name is part of the picture.
         blank = [self.roles[ground]] * SWATCH_GAP
         return _photo([row + blank for row in square])
+
+    def _panel_click(self, event):
+        """A click anywhere in the panel takes an open drop-down down.
+
+        What the grab used to do, done where it can be done without one. A
+        click inside the list itself does not come here: a toplevel is in the
+        bindtags of its own children only, and the list is a toplevel of its
+        own.
+        """
+        if self._popup is None or event.widget is self._popup.owner:
+            return                              # the field toggles itself
+        self._dismiss_menus()
 
     def _menu_closed(self):
         self._popup = None

@@ -463,23 +463,36 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertIsNone(self.panel._popup)
 
-    def test_a_click_in_another_window_takes_the_list_down(self):
-        # The complaint this is here for, twice over: the list went on
-        # floating above whatever was clicked next. A menu holds the screen
-        # while it is open, which is what makes the click that dismisses it
-        # arrive here at all.
+    def test_nothing_grabs_while_a_list_is_open(self):
+        # Measured under a window manager, with another application raised
+        # over the panel: with a grab of either kind the list stayed up,
+        # without one it goes. A grab swallows the focus change that says this
+        # application is no longer the one being used, and for an
+        # override-redirect window - which is what an undecorated list has to
+        # be - that notice is the only thing it ever gets.
         popup = self._drop("ACHIEVEMENT_COLOR")
-        self.assertIs(self.root.grab_current(), popup.window,
-                      "the list does not hold the screen")
-        other = tk.Toplevel(self.root)
-        other.geometry("200x150+900+100")
-        for _ in range(4):
-            self.root.update()
-        other.event_generate("<Button-1>", x=10, y=10, warp=True)
-        for _ in range(4):
-            self.root.update()
+        self.assertIsNone(self.root.grab_current(),
+                          "a grab would swallow the notice that closes it")
+        popup.close()
+
+    def test_a_click_in_the_panel_takes_the_list_down(self):
+        # What the grab used to do, done where it can be done without one.
+        self._drop("ACHIEVEMENT_COLOR")
+        self.panel._panel_click(
+            type("Click", (), {"widget": self.panel.notebook})())
+        self.root.update()
         self.assertIsNone(self.panel._popup, "the list stayed up")
-        other.destroy()
+
+    def test_pressing_the_field_again_closes_its_own_list(self):
+        # The press took it down already; this is the release that follows,
+        # and it must not put it straight back up.
+        button = self.panel._widgets["ACHIEVEMENT_COLOR"]
+        button.invoke()
+        self.root.update()
+        self.assertIsNotNone(self.panel._popup)
+        button.invoke()
+        self.root.update()
+        self.assertIsNone(self.panel._popup, "the field re-opened its list")
 
     def test_opening_one_takes_down_the_last(self):
         first = self._drop("ACHIEVEMENT_COLOR")
