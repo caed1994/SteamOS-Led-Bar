@@ -587,9 +587,11 @@ Follow the log with `journalctl -u steamos-led-serial -f`.
 ## Updating and removing
 
 From the control panel: *Status & repair* > *Update*, pick a branch, **Check for
-updates**, then **Update and install**. It refuses rather than resolves, so
-local edits or commits of your own stop it with a message naming them.
-Untracked files are fine, and the kernel module is only rebuilt when
+updates**, then **Update and install**. The check answers underneath the two
+buttons - up to date, or how many commits are waiting - and greys out **Update
+and install** when there is nothing to install. It refuses rather than
+resolves, so local edits or commits of your own stop it with a message naming
+them. Untracked files are fine, and the kernel module is only rebuilt when
 `leds-valve-shim/` actually changed.
 
 The same thing from the terminal:

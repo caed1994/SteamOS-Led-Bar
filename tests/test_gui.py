@@ -352,6 +352,66 @@ class FlashPaletteTest(unittest.TestCase):
                       [value for _label, value in self.palette])
 
 
+class UpdateVerdictTest(unittest.TestCase):
+    """What a --check run said, read back out of what it printed.
+
+    The wording is the script's, so these are the script's own sentences
+    rather than invented ones - a rewording there that this did not follow
+    would show up here as an "unknown" where an answer was expected.
+    """
+
+    def test_nothing_waiting_is_up_to_date(self):
+        state, said = ledpanel.update_verdict(
+            "Already up to date with origin/main.\n")
+        self.assertEqual(state, ledpanel.UPDATE_CURRENT)
+        self.assertTrue(said)
+
+    def test_commits_waiting_are_counted(self):
+        state, said = ledpanel.update_verdict(
+            "3 commit(s) waiting on origin/main:\n  abc one\n  def two\n")
+        self.assertEqual(state, ledpanel.UPDATE_AVAILABLE)
+        self.assertIn("3", said)
+
+    def test_one_waiting_is_not_called_one_updates(self):
+        _state, said = ledpanel.update_verdict(
+            "1 commit(s) waiting on origin/main:\n  abc one\n")
+        self.assertIn("1 update waiting", said)
+
+    def test_a_run_that_would_be_stopped_says_so_before_it_is_pressed(self):
+        state, said = ledpanel.update_verdict(
+            "7 commit(s) waiting on origin/main:\n  abc one\n\n"
+            "Note: there are local changes; updating would stop and list "
+            "them.\n")
+        self.assertEqual(state, ledpanel.UPDATE_AVAILABLE)
+        self.assertIn("stop", said)
+
+    def test_an_install_that_worked_leaves_it_up_to_date(self):
+        state, _said = ledpanel.update_verdict(
+            "\nUpdated addfeature to 05f1b42:\n  abc one\n")
+        self.assertEqual(state, ledpanel.UPDATE_CURRENT)
+
+    def test_a_run_that_failed_answers_neither_way(self):
+        # The log has the reason; guessing over it would be worse than saying
+        # the answer is not known.
+        state, said = ledpanel.update_verdict(
+            "origin has no branch called nope. It has:\n", code=1)
+        self.assertEqual(state, ledpanel.UPDATE_UNKNOWN)
+        self.assertEqual(said, "")
+
+    def test_output_nobody_planned_for_is_not_read_as_an_answer(self):
+        state, _said = ledpanel.update_verdict("something unexpected\n")
+        self.assertEqual(state, ledpanel.UPDATE_UNKNOWN)
+
+    def test_the_script_still_says_what_this_reads(self):
+        # The two have to be kept in step, and this is the cheap half of it.
+        path = os.path.join(HERE, "..", "scripts", "update.sh")
+        with open(path) as handle:
+            script = handle.read()
+        self.assertIn("Already up to date with", script)
+        self.assertIn("commit(s) waiting on", script)
+        self.assertIn("would stop", script)
+
+
 class ProfileListingTest(unittest.TestCase):
     """What the profile dialog offers, and where a name ends up."""
 

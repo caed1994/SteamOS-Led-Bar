@@ -1283,6 +1283,9 @@ class Panel:
         self._menu_parts = {}
         # The one drop-down standing open, if any
         self._popup = None
+        # What the last update check found; see _say_update
+        self._update_state = ledpanel.UPDATE_UNKNOWN
+        self.update_button = None
         # key -> (labels, controls), so a setting can be greyed out whole
         self._rows = {}
         # page -> the canvas that scrolls it, for the wheel to find
@@ -1487,8 +1490,10 @@ class Panel:
         for button in self._busy_buttons:
             button.state(["disabled"] if busy else ["!disabled"])
         if not busy:
-            # Apply has its own reason to be dead, which outlives the command.
+            # These two have reasons of their own to be dead, which outlive
+            # the command that greyed everything.
             self._refresh_unsaved()
+            self._refresh_update()
             if code:
                 self._show_output(True)
 
@@ -2792,13 +2797,48 @@ class Panel:
         ttk.Button(row, text="Check for updates", style="Outlined.TButton",
                    command=self.check_for_updates).pack(side="left",
                                                         padx=(0, ROW_GAP))
-        ttk.Button(row, text="Update and install", style="Filled.TButton",
-                   command=self.update_now).pack(side="left")
+        self.update_button = ttk.Button(row, text="Update and install",
+                                        style="Filled.TButton",
+                                        command=self.update_now)
+        self.update_button.pack(side="left")
+        # What the last check found, where it can be read without unfolding
+        # the log - which is folded nearly always now, and was the only place
+        # the answer ever appeared.
+        self.update_state = ttk.Label(frame)
+        self.update_state.pack(anchor="w", pady=(ROW_GAP, 0))
         self._note(frame,
                    "Fetches into the clone and installs it. Local changes or "
                    "commits of your own stop it, with a message.").pack(
                        anchor="w", pady=(ROW_GAP, 0))
+        self._say_update(ledpanel.UPDATE_UNKNOWN, "")
+        # A different branch is a different question, and the old answer is
+        # not one about it.
+        self.branch.trace_add("write", lambda *_a: self._say_update(
+            ledpanel.UPDATE_UNKNOWN, ""))
         return frame
+
+    def _say_update(self, state, sentence):
+        """Show what the last check found, and gate the install button on it."""
+        self._update_state = state
+        self.update_state.configure(
+            text=sentence,
+            style="Good.TLabel" if state == ledpanel.UPDATE_CURRENT
+            else "Section.TLabel" if state == ledpanel.UPDATE_AVAILABLE
+            else "Muted.TLabel")
+        self._refresh_update()
+
+    def _refresh_update(self):
+        """Nothing to install is a button that says so by not being pressable.
+
+        Only after a check has actually said there is nothing: never having
+        asked is not the same answer, and a button dead before anyone has
+        looked would be the window refusing to do something it can do.
+        """
+        if getattr(self, "update_button", None) is None:
+            return                              # not a clone; there is no row
+        self.update_button.state(
+            ["disabled"] if self._update_state == ledpanel.UPDATE_CURRENT
+            else ["!disabled"])
 
     def _refresh_branches(self):
         """Fill the menu from what the clone knows, keeping the selection."""
@@ -2809,9 +2849,14 @@ class Panel:
         self.branch_menu.configure(values=branches)
 
     def check_for_updates(self):
+        def checked(code):
+            self._refresh_branches()
+            self._say_update(*ledpanel.update_verdict(
+                "".join(self.runner.transcript), code))
+
         self.runner.start(
             ledpanel.update_command(SOURCE_DIR, self.branch.get(), check=True),
-            lambda _code: self._refresh_branches())
+            checked)
 
     def update_now(self):
         wanted = self.branch.get()
@@ -2828,6 +2873,8 @@ class Panel:
             self._refresh_branches()
             if code != 0:
                 return                      # the script said why
+            self._say_update(*ledpanel.update_verdict(
+                "".join(self.runner.transcript), code))
             if ledpanel.head_commit(SOURCE_DIR) == before:
                 self._write("Nothing new, so nothing to install.\n\n")
                 return

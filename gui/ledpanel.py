@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import subprocess
 
 from steamos_led import config as config_module
@@ -307,6 +308,46 @@ def update_command(source_dir, branch=None, check=False):
     if branch:
         command.append(branch)
     return command
+
+
+# What a --check run found. The window needs it to say so somewhere the log
+# does not have to be unfolded for, and to know whether installing would do
+# anything at all.
+UPDATE_CURRENT = "current"
+UPDATE_AVAILABLE = "available"
+UPDATE_UNKNOWN = "unknown"
+
+_ALREADY = re.compile(r"^Already up to date with ", re.MULTILINE)
+_WAITING = re.compile(r"^(\d+) commit\(s\) waiting on ", re.MULTILINE)
+_UPDATED = re.compile(r"^Updated \S+ to ", re.MULTILINE)
+_STOPPER = re.compile(r"^Note: .*would stop", re.MULTILINE)
+
+
+def update_verdict(text, code=0):
+    """What an update run said, as (state, sentence) the window can act on.
+
+    Read back out of the output rather than asked for a second time: the
+    script is the thing that knows, and running it twice to be told the same
+    thing is how the two answers start to disagree.
+
+    A run that failed says nothing either way - the log has the reason, and
+    guessing over it would be worse than admitting the answer is not known.
+    """
+    if code != 0:
+        return UPDATE_UNKNOWN, ""
+    if _ALREADY.search(text) or _UPDATED.search(text):
+        return UPDATE_CURRENT, "Up to date."
+    waiting = _WAITING.search(text)
+    if not waiting:
+        return UPDATE_UNKNOWN, ""
+    count = int(waiting.group(1))
+    sentence = ("1 update waiting." if count == 1
+                else "%d updates waiting." % count)
+    if _STOPPER.search(text):
+        # The script says what it would refuse over; better here than after
+        # pressing the button and having it stop.
+        sentence += " Installing would stop - see the log."
+    return UPDATE_AVAILABLE, sentence
 
 
 def _git(source_dir, *args):

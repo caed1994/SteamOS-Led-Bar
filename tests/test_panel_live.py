@@ -531,6 +531,56 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(variable.get(), labels[0])
         popup.close()
 
+    def test_a_check_says_what_it_found_where_it_can_be_read(self):
+        # The log is folded nearly always now, and it was the only place the
+        # answer ever appeared.
+        self.panel._say_update(*self.panel_module.ledpanel.update_verdict(
+            "Already up to date with origin/main.\n"))
+        self.root.update()
+        self.assertIn("Up to date", self.panel.update_state.cget("text"))
+        self.panel._say_update(*self.panel_module.ledpanel.update_verdict(
+            "2 commit(s) waiting on origin/main:\n  abc one\n"))
+        self.root.update()
+        self.assertIn("2 updates waiting",
+                      self.panel.update_state.cget("text"))
+
+    def test_nothing_to_install_is_a_button_that_cannot_be_pressed(self):
+        ledpanel = self.panel_module.ledpanel
+        self.panel._say_update(ledpanel.UPDATE_CURRENT, "Up to date.")
+        self.root.update()
+        self.assertIn("disabled", self.panel.update_button.state())
+        self.panel._say_update(ledpanel.UPDATE_AVAILABLE, "2 updates waiting.")
+        self.root.update()
+        self.assertNotIn("disabled", self.panel.update_button.state())
+
+    def test_never_having_asked_is_not_the_same_as_nothing_waiting(self):
+        # A button dead before anyone has looked would be the window refusing
+        # to do something it can perfectly well do.
+        self.assertEqual(self.panel._update_state,
+                         self.panel_module.ledpanel.UPDATE_UNKNOWN)
+        self.assertNotIn("disabled", self.panel.update_button.state())
+
+    def test_choosing_another_branch_drops_the_old_answer(self):
+        ledpanel = self.panel_module.ledpanel
+        self.panel._say_update(ledpanel.UPDATE_CURRENT, "Up to date.")
+        self.root.update()
+        self.panel.branch.set("some-other-branch")
+        self.root.update()
+        self.assertEqual(self.panel._update_state, ledpanel.UPDATE_UNKNOWN)
+        self.assertEqual(self.panel.update_state.cget("text"), "")
+        self.assertNotIn("disabled", self.panel.update_button.state())
+
+    def test_the_install_button_stays_dead_after_a_command_ends(self):
+        # Everything comes back when a command ends; this one has a reason of
+        # its own that outlives it, the way Apply has.
+        ledpanel = self.panel_module.ledpanel
+        self.panel._say_update(ledpanel.UPDATE_CURRENT, "Up to date.")
+        self.panel._set_busy(True)
+        self.root.update()
+        self.panel._set_busy(False, 0)
+        self.root.update()
+        self.assertIn("disabled", self.panel.update_button.state())
+
     def _log_order(self):
         """Which of "grow the window" and "fill it" happened first."""
         order = []
