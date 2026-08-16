@@ -390,6 +390,42 @@ class BridgeTest(unittest.TestCase):
                          "com.whatsapp")
 
 
+class ObstacleTest(unittest.TestCase):
+    """Why the bar stayed dark although every line looked right.
+
+    Reported from a real machine: --print read the notifications perfectly,
+    named the app, named the trigger - and nothing lit, because the feature
+    was still switched off. The dry run has to read the bus whether or not it
+    is on, or you could never look before committing; so it says instead.
+    """
+
+    def test_nothing_in_the_way_is_nothing_to_say(self):
+        self.assertEqual(phone.obstacles(True, True, True), [])
+
+    def test_the_switch_being_off_is_the_first_thing_to_hear(self):
+        said = phone.obstacles(True, False, True)
+        self.assertEqual(len(said), 1)
+        self.assertIn("NOTIFY_PHONE", said[0])
+        # And what to do about it, not only what is wrong.
+        self.assertIn("systemctl --user restart steamos-led-phone", said[0])
+
+    def test_the_master_switch_is_mentioned_before_the_one_under_it(self):
+        # Turning NOTIFY_PHONE on while NOTIFY is off changes nothing, so
+        # being told about the inner switch first would send you round twice.
+        said = phone.obstacles(False, False, True)
+        self.assertIn("NOTIFY is off", said[0])
+        self.assertIn("NOTIFY_PHONE", said[1])
+
+    def test_a_service_that_is_not_listening_is_worth_saying_too(self):
+        said = phone.obstacles(True, True, False)
+        self.assertEqual(len(said), 1)
+        self.assertIn("steamos-led-serial", said[0])
+
+    def test_every_complaint_names_something_to_run_or_press(self):
+        for said in phone.obstacles(False, False, False):
+            self.assertTrue(said.endswith(".") or ":" in said, said)
+
+
 class ConfigurationTest(unittest.TestCase):
     """The settings this adds, and what the service will not accept."""
 

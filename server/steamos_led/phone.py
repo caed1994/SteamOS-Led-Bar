@@ -464,6 +464,32 @@ class Bridge:
         return self
 
 
+def obstacles(notify_on, phone_on, fifo_ready):
+    """What stands between a notification and a lit bar, in plain sentences.
+
+    Empty when nothing does. The dry run flashes nothing by design and reads
+    the bus whether or not the feature is switched on - which is right, you
+    have to be able to look before you commit to it, but on its own it is a
+    trap: a machine where every line comes out perfectly and the bar stays
+    dark, with nothing anywhere connecting the two. So it says.
+    """
+    complaints = []
+    if not notify_on:
+        complaints.append(
+            "NOTIFY is off, so nothing flashes at all - it is the master "
+            "switch, at the top of the panel's Notifications page.")
+    if not phone_on:
+        complaints.append(
+            "NOTIFY_PHONE is off, so the bar will not do this for real yet. "
+            "Switch on 'Flash on phone notifications' in the panel, press "
+            "Apply, then: systemctl --user restart steamos-led-phone")
+    if not fifo_ready:
+        complaints.append(
+            "the service is not listening - no notification pipe. Check it "
+            "with: systemctl status steamos-led-serial")
+    return complaints
+
+
 def open_monitor(source):
     """Start `gdbus monitor` on the chosen bus."""
     return subprocess.Popen(monitor_command(source), stdout=subprocess.PIPE,

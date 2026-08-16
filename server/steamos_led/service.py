@@ -9,6 +9,7 @@ import argparse
 import errno
 import itertools
 import logging
+import os
 import select
 import signal
 import subprocess
@@ -1085,6 +1086,11 @@ def run_watch_phone(config, print_only=False):
     print("Watching. %s" % ("Nothing will flash - this is --print."
                             if print_only else "Flashes go to %s" % fifo),
           flush=True)
+    # Whatever would stop the real thing from lighting the bar, said here
+    # rather than left to be discovered by it not happening.
+    for complaint in phone.obstacles(config["NOTIFY"], config["NOTIFY_PHONE"],
+                                     os.path.exists(fifo)):
+        print("  note: %s" % complaint, flush=True)
 
     try:
         monitor = phone.open_monitor(source)

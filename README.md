@@ -513,6 +513,15 @@ Reading notifications from the kdeconnect bus (chosen automatically)
   com.android.calendar         -> phone
 ```
 
+It also says what would stop the real run from lighting anything &mdash; the
+dry run reads the bus whether or not the feature is switched on, so a machine
+where every line looks right and the bar stays dark is exactly the case it
+has to explain:
+
+```
+  note: NOTIFY_PHONE is off, so the bar will not do this for real yet.
+```
+
 Then in the config file, a colour and optionally a shape per app:
 
 ```ini
@@ -538,9 +547,20 @@ carries only what the phone sent, while the desktop's carries everything &mdash;
 so a chat app running on the Steam Machine itself flashes the bar under
 `desktop` and does not under `kdeconnect`.
 
+Switching it on in the panel writes the setting; the bridge picks it up when
+it is restarted, which Apply does not do for a *user* service:
+
 ```bash
+systemctl --user restart steamos-led-phone
 systemctl --user status steamos-led-phone
 journalctl --user -u steamos-led-phone -f
+```
+
+To check the other half on its own &mdash; the pipe, the service and the strip,
+without involving the phone at all:
+
+```bash
+steamos-led-serial --notify phone
 ```
 
 It needs `gdbus`, which comes with glib and is on any machine with a desktop;
