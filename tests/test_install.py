@@ -165,6 +165,32 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertEqual(typed - {name, "steamos-led-serial.conf"}, set(),
                          "the README names a command nothing installs")
 
+    def test_the_user_units_are_installed_before_anything_that_can_fail(self):
+        """Order, not presence - and this one was reported, not imagined.
+
+        They used to be installed at the very end, after pacman, the kernel
+        module and the firmware flash. Under set -e any of those ends the run,
+        and then the units are simply not there: "Unit steamos-led-phone.
+        service not found", on a machine where everything else had worked.
+        They depend on none of it, so they go on disk first.
+        """
+        installed = self.text.index("\ninstall_user_units || true")
+        for marker, what in (("pacman -S --needed", "installing packages"),
+                             ('"$dir/install.sh"', "the kernel module"),
+                             ("flash_firmware", "the firmware flash"),
+                             ("install_control_panel ||", "the panel entry")):
+            self.assertLess(installed, self.text.index(marker),
+                            "%s runs before the user units are installed"
+                            % what)
+
+    def test_starting_them_stays_after_the_service_is_up(self):
+        # The achievement watcher wants the service running and the bridge
+        # wants its pipe, so starting early would only make both retry.
+        started = self.text.index("\nstart_user_units || true")
+        self.assertLess(self.text.index("systemctl restart steamos-led-serial"),
+                        started)
+        self.assertLess(self.text.index("\ninstall_user_units || true"), started)
+
     def test_the_uninstaller_takes_back_the_same_link(self):
         # And only when it is still ours: somebody who put their own there is
         # entitled to keep it.

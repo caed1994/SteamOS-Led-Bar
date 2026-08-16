@@ -252,6 +252,110 @@ sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     "$SOURCE_DIR/server/steamos-led-serial.service" > "$UNIT_PATH"
 chmod 0644 "$UNIT_PATH"
 
+# --- the units that run in the desktop session ------------------------------
+
+# Set by install_user_units for the summary at the end, so the outcome is
+# decided once where it is known rather than reconstructed later.
+WATCHER_STATUS="not attempted"
+
+# One unit into the user's systemd. Says nothing: the caller owns the summary,
+# because it is the one that knows whether a failure here is the whole story.
+install_one_user_unit() {
+    local unit="$1"
+    local source="$SOURCE_DIR/server/$unit"
+    local wants="$WATCHER_DIR/$WATCHER_WANTS"
+
+    [[ -f "$source" ]] || return 1
+    # Same @INSTALL_DIR@ substitution as the system unit, so moving the
+    # install directory keeps them all pointing at the real binary.
+    sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" "$source" > "$WATCHER_DIR/$unit" \
+        || return 1
+    chown "$WATCHER_USER:$WATCHER_USER" "$WATCHER_DIR/$unit"
+    chmod 0644 "$WATCHER_DIR/$unit"
+
+    # Enable by writing the symlink systemctl would create. Doing it directly
+    # avoids needing the user's session bus, which root cannot reach reliably.
+    ln -sfn "../$unit" "$wants/$unit"
+    chown -h "$WATCHER_USER:$WATCHER_USER" "$wants/$unit"
+    return 0
+}
+
+install_user_units() {
+    if [[ $SKIP_WATCHER -eq 1 ]]; then
+        say "Skipping the desktop-session services (--skip-watcher)"
+        WATCHER_STATUS="skipped (--skip-watcher)"
+        return 0
+    fi
+
+    local unit
+    for unit in "${WATCHER_UNITS[@]}"; do
+        if [[ ! -f "$SOURCE_DIR/server/$unit" ]]; then
+            warn "$unit not found in the repository"
+            WATCHER_STATUS="NOT installed - unit missing from the repository"
+            return 1
+        fi
+    done
+
+    # They have to run in the desktop session: Steamworks talks to the Steam
+    # client of the logged-in user and the notification bus is that user's,
+    # while this script runs as root.
+    if ! watcher_user_dirs; then
+        warn "cannot tell which desktop user to install the watchers for."
+        warn "Run the installer with sudo from your normal account, or start"
+        warn "them yourself - see \"Achievements, messages and friends\" in the README."
+        WATCHER_STATUS="NOT installed - run the installer with sudo from your account"
+        return 1
+    fi
+
+    say "Installing the desktop-session services for $WATCHER_USER"
+    # Create the directories as the user: "install -d" would leave any missing
+    # parent (~/.config on a fresh account) owned by root, which quietly breaks
+    # everything else that writes there.
+    if ! runuser -u "$WATCHER_USER" -- mkdir -p "$WATCHER_DIR/$WATCHER_WANTS"; then
+        warn "cannot create $WATCHER_DIR/$WATCHER_WANTS"
+        WATCHER_STATUS="NOT installed - could not write to $WATCHER_DIR"
+        return 1
+    fi
+    for unit in "${WATCHER_UNITS[@]}"; do
+        if ! install_one_user_unit "$unit"; then
+            warn "could not install $unit"
+            WATCHER_STATUS="NOT installed - could not write $unit"
+            return 1
+        fi
+    done
+
+    user_systemctl daemon-reload || true
+    WATCHER_STATUS="enabled for $WATCHER_USER, starts at next login"
+    return 0
+}
+
+# Starting them is separate from installing them, and deliberately later: the
+# achievement watcher wants the service up, and the bridge wants its pipe. The
+# files, though, have to be on disk before anything that can fail - see where
+# this is called from.
+start_user_units() {
+    if [[ $SKIP_WATCHER -eq 1 || -z "${WATCHER_USER:-}" ]]; then
+        return 0                        # nothing was installed to start
+    fi
+
+    # The achievement watcher decides the summary line: the phone bridge exits
+    # straight away while NOTIFY_PHONE is off, which is the shipped default and
+    # not something to report as a failure.
+    user_systemctl restart "$PHONE_UNIT" || true
+    if user_systemctl restart "$WATCHER_UNIT"; then
+        say "Watchers running now"
+        WATCHER_STATUS="running for $WATCHER_USER"
+    fi
+    return 0
+}
+
+# Here, before anything that can fail. Everything after this point - pacman,
+# the kernel module, the firmware flash - can end the run under set -e, and
+# these files depend on none of it. Installed at the end, as they were, they
+# were simply absent on a machine where an earlier step went wrong, and
+# nothing anywhere said so. Starting them is separate and stays late.
+install_user_units || true
+
 # --- build prerequisites ----------------------------------------------------
 #
 # On a machine that has never built anything, getting the module compiled is
@@ -455,94 +559,6 @@ if [[ $MODULE_OK -eq 0 ]]; then
     warn "$SHIM_DEVICE is not available."
     warn "The service will still be installed and waits for the device to appear."
 fi
-
-# --- the units that run in the desktop session ------------------------------
-
-# Set by install_user_units for the summary at the end, so the outcome is
-# decided once where it is known rather than reconstructed later.
-WATCHER_STATUS="not attempted"
-
-# One unit into the user's systemd. Says nothing: the caller owns the summary,
-# because it is the one that knows whether a failure here is the whole story.
-install_one_user_unit() {
-    local unit="$1"
-    local source="$SOURCE_DIR/server/$unit"
-    local wants="$WATCHER_DIR/$WATCHER_WANTS"
-
-    [[ -f "$source" ]] || return 1
-    # Same @INSTALL_DIR@ substitution as the system unit, so moving the
-    # install directory keeps them all pointing at the real binary.
-    sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" "$source" > "$WATCHER_DIR/$unit" \
-        || return 1
-    chown "$WATCHER_USER:$WATCHER_USER" "$WATCHER_DIR/$unit"
-    chmod 0644 "$WATCHER_DIR/$unit"
-
-    # Enable by writing the symlink systemctl would create. Doing it directly
-    # avoids needing the user's session bus, which root cannot reach reliably.
-    ln -sfn "../$unit" "$wants/$unit"
-    chown -h "$WATCHER_USER:$WATCHER_USER" "$wants/$unit"
-    return 0
-}
-
-install_user_units() {
-    if [[ $SKIP_WATCHER -eq 1 ]]; then
-        say "Skipping the desktop-session services (--skip-watcher)"
-        WATCHER_STATUS="skipped (--skip-watcher)"
-        return 0
-    fi
-
-    local unit
-    for unit in "${WATCHER_UNITS[@]}"; do
-        if [[ ! -f "$SOURCE_DIR/server/$unit" ]]; then
-            warn "$unit not found in the repository"
-            WATCHER_STATUS="NOT installed - unit missing from the repository"
-            return 1
-        fi
-    done
-
-    # They have to run in the desktop session: Steamworks talks to the Steam
-    # client of the logged-in user and the notification bus is that user's,
-    # while this script runs as root.
-    if ! watcher_user_dirs; then
-        warn "cannot tell which desktop user to install the watchers for."
-        warn "Run the installer with sudo from your normal account, or start"
-        warn "them yourself - see \"Achievements, messages and friends\" in the README."
-        WATCHER_STATUS="NOT installed - run the installer with sudo from your account"
-        return 1
-    fi
-
-    say "Installing the desktop-session services for $WATCHER_USER"
-    # Create the directories as the user: "install -d" would leave any missing
-    # parent (~/.config on a fresh account) owned by root, which quietly breaks
-    # everything else that writes there.
-    if ! runuser -u "$WATCHER_USER" -- mkdir -p "$WATCHER_DIR/$WATCHER_WANTS"; then
-        warn "cannot create $WATCHER_DIR/$WATCHER_WANTS"
-        WATCHER_STATUS="NOT installed - could not write to $WATCHER_DIR"
-        return 1
-    fi
-    for unit in "${WATCHER_UNITS[@]}"; do
-        if ! install_one_user_unit "$unit"; then
-            warn "could not install $unit"
-            WATCHER_STATUS="NOT installed - could not write $unit"
-            return 1
-        fi
-    done
-
-    # If the user has a live session, pick them up now instead of at next login.
-    user_systemctl daemon-reload || true
-    # The achievement watcher decides the summary line: the phone bridge exits
-    # straight away while NOTIFY_PHONE is off, which is the shipped default and
-    # not something to report as a failure.
-    user_systemctl restart "$PHONE_UNIT" || true
-    if user_systemctl restart "$WATCHER_UNIT"; then
-        say "Watchers running now"
-        WATCHER_STATUS="running for $WATCHER_USER"
-    else
-        say "Watchers enabled; they start with your next login"
-        WATCHER_STATUS="enabled for $WATCHER_USER, starts at next login"
-    fi
-    return 0
-}
 
 # --- firmware ---------------------------------------------------------------
 
@@ -847,7 +863,7 @@ if [[ "$(notify_setting NOTIFY 1)" =~ ^(1|true|yes|on)$ ]]; then
     fi
 fi
 
-install_user_units || true
+start_user_units || true
 
 # Everything that needed a writable / has been written by now. Do it here
 # rather than leaving it to the exit trap, so the last thing on screen is the
