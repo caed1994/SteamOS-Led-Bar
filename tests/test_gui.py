@@ -320,24 +320,7 @@ class NotificationColourTest(unittest.TestCase):
 
 
 class PhoneMenuTest(unittest.TestCase):
-    """The panel's phone menus, against the service's own tables.
-
-    The labels are written for people and cannot be derived, so the two lists
-    are kept honest here instead: a source added to the service and missed in
-    the panel is a setting nobody can reach from the window, and one offered
-    by the panel that the service does not know is a setting that stops the
-    service the next time it starts.
-    """
-
-    def test_every_source_the_service_has_can_be_picked(self):
-        offered = [value for _label, value in ledpanel.PHONE_SOURCES]
-        self.assertEqual(sorted(offered),
-                         sorted(config_module.PHONE_SOURCES))
-
-    def test_each_one_is_named_in_a_way_that_says_what_it_costs(self):
-        for label, value in ledpanel.PHONE_SOURCES:
-            self.assertTrue(label, value)
-            self.assertNotEqual(label, value, "the raw name is not a label")
+    """What the panel offers for the phone, and what it deliberately does not."""
 
     def test_the_phone_colours_are_ones_the_service_accepts(self):
         from steamos_led import notify
@@ -953,6 +936,21 @@ class PanelSettingsTest(unittest.TestCase):
         shown = self._settings()
         for key in ("SERIAL_PORT", "BAUD", "DEVICE", "STEAM_LIBRARY",
                     "STEAM_ROUTE"):
+            self.assertNotIn(key, shown, key)
+
+    def test_the_two_written_by_hand_are_left_out(self):
+        """Absent on purpose, both of them, and for the same reason.
+
+        PHONE_APPS is a list you add rows to, which is a control this window
+        does not have. PHONE_SOURCE picks which bus to read: "auto" decides it
+        correctly, and anybody overriding that knows exactly why - it was one
+        more menu whose label could not explain itself, and it was asked about
+        the first time it was seen. Both stay settings of the file, where the
+        comments have room to say what they do.
+        """
+        shown = self._settings()
+        for key in ("PHONE_APPS", "PHONE_SOURCE"):
+            self.assertIn(key, config_module.DEFAULTS, key)
             self.assertNotIn(key, shown, key)
 
     def test_the_panel_never_writes_a_value_the_service_would_reject(self):

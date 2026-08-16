@@ -534,16 +534,6 @@ PHONE_COLOURS = (
 )
 
 
-# Where the phone bridge reads its notifications, in the order the menu offers
-# them. The labels say what each one costs, since the difference is not
-# something you can see until it flashes at the wrong thing.
-PHONE_SOURCES = (
-    ("Automatic", "auto"),
-    ("KDE Connect only", "kdeconnect"),
-    ("Every desktop notification", "desktop"),
-)
-
-
 def palette():
     """Colours to offer when one is being picked outright, in a sensible order.
 

@@ -533,19 +533,28 @@ The app is matched loosely and without case, so `whatsapp` finds both
 not named there flashes `PHONE_COLOR` in `PHONE_STYLE`, so the panel goes on
 being where the general look is set; `PHONE_APPS_ONLY=1` ignores it instead.
 
-| Option | Default | Meaning |
-| ------ | ------- | ------- |
-| `NOTIFY_PHONE` | `0` | flash on the phone's notifications at all |
-| `PHONE_COLOR` / `PHONE_STYLE` | `#00b0ff` / `default` | what one looks like unless a rule says otherwise |
-| `PHONE_SOURCE` | `auto` | `kdeconnect` for the phone only, `desktop` for every notification on this desktop, `auto` to prefer the first |
-| `PHONE_APPS` | *(empty)* | `App:colour` or `App:colour:shape`, separated by commas |
-| `PHONE_APPS_ONLY` | `0` | ignore apps the list does not name |
+| Option | Panel | Meaning |
+| ------ | ----- | ------- |
+| `NOTIFY_PHONE` | yes | flash on the phone's notifications at all (default `0`) |
+| `PHONE_COLOR` / `PHONE_STYLE` | yes | what one looks like unless a rule says otherwise (`#00b0ff` / `default`) |
+| `PHONE_APPS_ONLY` | yes | ignore apps the list does not name (default `0`) |
+| `PHONE_APPS` | file only | `App:colour` or `App:colour:shape`, separated by commas |
+| `PHONE_SOURCE` | file only | which bus to read: `auto`, `kdeconnect`, `desktop` |
 
-`auto` reads KDE Connect's own signals when it is on the bus and the desktop's
-notifications otherwise. The difference is worth knowing: KDE Connect's bus
-carries only what the phone sent, while the desktop's carries everything &mdash;
-so a chat app running on the Steam Machine itself flashes the bar under
-`desktop` and does not under `kdeconnect`.
+The last two are settings of the file rather than rows in the window. A list
+you add entries to is a control the panel does not have, and `PHONE_SOURCE`
+is one `auto` gets right on its own &mdash; but when it does not, this is the
+knob:
+
+`kdeconnect` reads KDE Connect's own signals, which carry only what the phone
+sent. `desktop` reads the desktop's notification bus, which carries
+everything &mdash; the phone's notifications among them, but a chat app running
+on the Steam Machine itself too. `auto` takes the first when KDE Connect is
+on the bus and the second otherwise.
+
+So `desktop` is worth knowing about twice over: it is what to try if the dry
+run reports an id where an app name should be, and it is how to make the bar
+flash for this machine's own notifications as well.
 
 Switching it on in the panel writes the setting; the bridge picks it up when
 it is restarted, which Apply does not do for a *user* service:
