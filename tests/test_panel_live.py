@@ -406,7 +406,7 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_drop_down_opens_a_list_of_what_it_offers(self):
         popup = self._drop("ACHIEVEMENT_COLOR")
         self.assertIsNotNone(popup)
-        self.assertEqual([label for _row, label in popup.rows],
+        self.assertEqual([label for _row, label, _value in popup.rows],
                          [label for label, _value
                           in self.panel._menus["ACHIEVEMENT_COLOR"]])
         popup.close()
@@ -417,16 +417,37 @@ class LiveWindowTest(unittest.TestCase):
         # fills the row.
         popup = self._drop("ACHIEVEMENT_COLOR")
         chosen = self.panel.vars["ACHIEVEMENT_COLOR"][0].get()
-        for row, label in popup.rows:
+        for row, label, _value in popup.rows:
             wanted = ("secondary_container" if label == chosen
                       else "surface_container")
             self.assertEqual(str(row.cget("background")),
                              self.panel.roles[wanted], label)
         popup.close()
 
+    def test_a_swatch_is_drawn_against_the_shade_it_lands_on(self):
+        # A swatch has no alpha: it carries its background in its rounded
+        # corners and in the gap beside it. One baked against the plain shade
+        # sat on the filled row as a patch of the wrong colour, which is what
+        # showed up behind the colours.
+        plain = self.panel._swatch("#ffd700", "surface_container")
+        filled = self.panel._swatch("#ffd700", "secondary_container")
+        edge = plain.width() - 1                # the gap, which is all ground
+        self.assertNotEqual(plain.get(edge, 0), filled.get(edge, 0))
+
+    def test_the_filled_row_carries_a_swatch_of_its_own(self):
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        chosen = self.panel.vars["ACHIEVEMENT_COLOR"][0].get()
+        images = {label: str(row.cget("image"))
+                  for row, label, _value in popup.rows}
+        self.assertNotIn(images[chosen],
+                         [name for label, name in images.items()
+                          if label != chosen],
+                         "the filled row reuses the plain row\'s swatch")
+        popup.close()
+
     def test_picking_a_row_takes_the_value_and_closes(self):
         popup = self._drop("ACHIEVEMENT_COLOR")
-        row, label = popup.rows[1]
+        row, label, _value = popup.rows[1]
         row.event_generate("<Button-1>")
         self.root.update()
         self.assertEqual(self.panel.vars["ACHIEVEMENT_COLOR"][0].get(), label)
@@ -474,7 +495,7 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(str(popup.window.cget("background")),
                          self.panel.roles["outline_variant"])
         chosen = self.panel.vars["ACHIEVEMENT_STYLE"][0].get()
-        for row, label in popup.rows:
+        for row, label, _value in popup.rows:
             if label == chosen:
                 continue                        # the filled one, checked above
             self.assertEqual(str(row.cget("foreground")),
@@ -485,7 +506,7 @@ class LiveWindowTest(unittest.TestCase):
 
     def test_the_arrow_keys_walk_the_list(self):
         popup = self._drop("ACHIEVEMENT_COLOR")
-        labels = [label for _row, label in popup.rows]
+        labels = [label for _row, label, _value in popup.rows]
         variable = self.panel.vars["ACHIEVEMENT_COLOR"][0]
         variable.set(labels[0])
         popup._step(1)
