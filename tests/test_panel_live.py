@@ -143,26 +143,70 @@ class LiveWindowTest(unittest.TestCase):
             heights[key] = controls[0].winfo_height()
         self.assertEqual(len(set(heights.values())), 1, heights)
 
-    def test_a_switch_has_the_same_room_either_side_of_it(self):
-        # A switch that opens a block stands clear of both what is above it
-        # and what it governs; the rows it governs sit close together under it.
-        # Equal gaps either side are what stop the switch reading as glued to
-        # the drop-down beneath it.
+    def test_a_row_that_governs_others_has_the_same_room_either_side_of_it(self):
+        # A row that opens a block stands clear of both what is above it and
+        # what it governs; the rows it governs sit close together under it.
+        # Equal gaps either side are what stop it reading as glued to the row
+        # beneath it.
+        #
+        # Measured on the Strip page, where the pattern still is one: the
+        # notification blocks used to be the example and are now one line each
+        # - see the flash rows - so the rainbow choice with the temperature
+        # marks stepped in under it is what is left of the shape.
+        self.panel.notebook.select(self._pages()[0])
+        self.root.update()
+        rows = ("STANDBY_PULSE", "RAINBOW_SHOWS", "TEMPERATURE_MIN",
+                "TEMPERATURE_MAX")
+        # Measured on the name labels rather than on the controls. All of them
+        # are plain labels of one height, where a switch, a menu and a slider
+        # are three heights - and a control shorter than its row sits centred
+        # in it, so control to control reports the widgets as much as the
+        # spacing. The rows are what this is about.
+        tops = [self.panel._rows[key][0][0].winfo_rooty() for key in rows]
+        above, below, tight = (tops[index + 1] - tops[index]
+                               for index in range(3))
+        self.assertEqual(above, below,
+                         "the row is not the same distance from the row above "
+                         "it as from the one it governs")
+        self.assertLess(tight, below,
+                        "the rows it governs are no closer to each other than "
+                        "it is to them")
+
+    def test_a_notification_keeps_its_switch_colour_and_shape_on_one_line(self):
+        # What the page is now: four notifications as four lines you can
+        # compare down a column, rather than twelve near-identical rows you
+        # had to scroll between. Three controls at the same height is the
+        # whole of that claim.
         self.panel.notebook.select(self._pages()[1])
         self.root.update()
-        rows = ("NOTIFY", "NOTIFY_ACHIEVEMENTS", "ACHIEVEMENT_COLOR",
-                "ACHIEVEMENT_STYLE", "NOTIFY_MESSAGES")
-        tops = [self.panel._rows[key][1][0].winfo_rooty() for key in rows]
-        above, below, tight, closing = (tops[index + 1] - tops[index]
-                                        for index in range(4))
-        self.assertEqual(above, below,
-                         "the switch is not the same distance from the row "
-                         "above it as from the one it governs")
-        self.assertLess(tight, below,
-                        "the rows a switch governs are no closer to each "
-                        "other than the switch is to them")
-        self.assertEqual(closing, above,
-                         "a block does not close the way it opened")
+        for prefix, switch in (("ACHIEVEMENT", "NOTIFY_ACHIEVEMENTS"),
+                               ("MESSAGE", "NOTIFY_MESSAGES"),
+                               ("FRIEND", "NOTIFY_FRIEND_ONLINE"),
+                               ("PHONE", "NOTIFY_PHONE")):
+            tops = {key: self.panel._rows[key][1][0].winfo_rooty()
+                    for key in (switch, prefix + "_COLOR", prefix + "_STYLE")}
+            self.assertEqual(len(set(tops.values())), 1,
+                             "%s is not on one line: %s" % (prefix, tops))
+
+    def test_a_notification_s_controls_stand_clear_of_each_other(self):
+        # Measured, because getting it wrong looks fine in the code: the slack
+        # was on the switch column at first, which pushed the colour menus far
+        # off to the right; moving it to the last column pulled them back so
+        # far that the switch and the menu touched. Neither reads as a row.
+        self.panel.notebook.select(self._pages()[1])
+        self.root.update()
+        for prefix, switch in (("ACHIEVEMENT", "NOTIFY_ACHIEVEMENTS"),
+                               ("PHONE", "NOTIFY_PHONE")):
+            parts = [self.panel._rows[key][1][0] for key in
+                     (switch, prefix + "_COLOR", prefix + "_STYLE")]
+            for left, right in zip(parts, parts[1:]):
+                room = right.winfo_rootx() - (left.winfo_rootx()
+                                              + left.winfo_width())
+                self.assertGreaterEqual(room, self.panel_module.ROW_GAP,
+                                        "%s: %dpx between two controls"
+                                        % (prefix, room))
+                self.assertLess(room, self.panel_module.GROUP_GAP * 3,
+                                "%s: %dpx is a gap, not a row" % (prefix, room))
 
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
         # The rail takes a sixth of the width, so wrapping to the window laid

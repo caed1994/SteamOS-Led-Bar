@@ -109,46 +109,48 @@ STYLE_CHOICES = ledpanel.style_choices(config_module.NOTIFY_STYLES)
 KIND_STYLE_CHOICES = ledpanel.style_choices(config_module.NOTIFY_STYLES,
                                             inherit=notify.STYLE_INHERIT)
 
+# One notification per line: the switch, then the colour and the shape beside
+# it. Written as a switch with two stepped-in rows under it, which is what this
+# was, four of them came to twelve near-identical lines you had to scroll to
+# compare - and they are four answers to the same question, which is exactly
+# what a column is for. The two menus are found from the prefix rather than
+# named here, because a kind whose colour and shape are spelled one way in the
+# service and another way here is a menu that edits nothing.
+# Named here for the builder to compare against, spelled as words in the
+# tables below the way every other kind is: the tests read those tables
+# literally, and a name in one would hide the kind from them.
+FLASH = "flash"
+# A switch whose look is not anybody's to arrange; the text says why instead.
+FIXED = "fixed"
+
 NOTIFICATIONS = [
-    ("What flashes", [
-        # The master switch: with this off nothing flashes at all, not even
-        # --notify, because the trigger pipe is never opened.
+    # The master switch, alone and first: with this off nothing flashes at all,
+    # not even --notify, because the trigger pipe is never opened. Above the
+    # headings because it governs every group under it rather than belonging
+    # to one.
+    (None, [
         ("NOTIFY", "Flash on notifications", "bool", None, None, None),
-        # Then one block per thing worth watching for - switch, colour, shape -
-        # so everything that makes up one notification stands together.
-        ("NOTIFY_ACHIEVEMENTS", "Flash on achievements", "bool",
-         None, None, None),
-        ("ACHIEVEMENT_COLOR", "Achievement colour", "named",
-         ledpanel.ACHIEVEMENT_COLOURS, None, None),
-        ("ACHIEVEMENT_STYLE", "Achievement shape", "named",
-         KIND_STYLE_CHOICES, None, None),
-        ("NOTIFY_MESSAGES", "Flash on friend messages", "bool",
-         None, None, None),
-        ("MESSAGE_COLOR", "Friend message colour", "named",
-         ledpanel.MESSAGE_COLOURS, None, None),
-        ("MESSAGE_STYLE", "Friend message shape", "named",
-         KIND_STYLE_CHOICES, None, None),
-        ("NOTIFY_FRIEND_ONLINE", "Flash when a friend comes online", "bool",
-         None, None, None),
-        ("FRIEND_COLOR", "Friend online colour", "named",
-         ledpanel.FRIEND_COLOURS, None, None),
-        ("FRIEND_STYLE", "Friend online shape", "named",
-         KIND_STYLE_CHOICES, None, None),
-        # A switch and nothing else. A warning has to mean the same thing on
-        # every machine, so it is always red and always the alarm shape -
-        # there is nothing here to arrange, only whether it fires.
-        ("NOTIFY_WARNING", "Flash on overheating", "bool", None, None, None),
     ]),
-    # Its own group: the other four are things this machine notices about
-    # itself, and this is the one that needs a phone paired with it before it
-    # can do anything at all.
+    # Grouped by where a notification comes from, which is also the order of
+    # how much has to be true before it can happen: Steam needs a game
+    # running, the machine needs nothing, the phone needs a phone.
+    ("From Steam", [
+        ("NOTIFY_ACHIEVEMENTS", "Achievements", "flash", "ACHIEVEMENT",
+         ledpanel.ACHIEVEMENT_COLOURS, None),
+        ("NOTIFY_MESSAGES", "Friend messages", "flash", "MESSAGE",
+         ledpanel.MESSAGE_COLOURS, None),
+        ("NOTIFY_FRIEND_ONLINE", "Friends coming online", "flash", "FRIEND",
+         ledpanel.FRIEND_COLOURS, None),
+    ]),
+    ("From this machine", [
+        # A warning has to mean the same thing on every machine, so there is
+        # nothing to arrange here - only whether it fires.
+        ("NOTIFY_WARNING", "Overheating", "fixed",
+         "always red, in the alarm shape", None, None),
+    ]),
     ("From your phone", [
-        ("NOTIFY_PHONE", "Flash on phone notifications", "bool",
-         None, None, None),
-        ("PHONE_COLOR", "Phone notification colour", "named",
-         ledpanel.PHONE_COLOURS, None, None),
-        ("PHONE_STYLE", "Phone notification shape", "named",
-         KIND_STYLE_CHOICES, None, None),
+        ("NOTIFY_PHONE", "Phone notifications", "flash", "PHONE",
+         ledpanel.PHONE_COLOURS, None),
         # PHONE_SOURCE is deliberately not here. "auto" makes the choice, and
         # overriding it is a thing you do knowing why - the same company as
         # PHONE_APPS, which lives in the file too. On the page it was one more
@@ -278,6 +280,24 @@ ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
 # being able to see which sensor was picked.
 MENU_WIDTH = 18
 SENSOR_WIDTH = 30
+# The columns of a settings grid: name, the control, and - for a notification -
+# the colour and shape beside it. The last one holds the slack, so the three
+# control columns stand together rather than being spread across the window.
+CONTROL_COLUMN = 1
+COLOUR_COLUMN = 2
+SHAPE_COLUMN = 3
+# A control standing on its own spans all three, so it neither widens the
+# switch column - which would push the colours away from the switches they
+# belong to - nor has to fit inside it.
+CONTROL_SPAN = 3
+# What separates a switch from the colour that belongs to it. On the colour
+# column rather than on the switch, so the tabs that have no such column are
+# untouched by it.
+LOOK_GAP = 24
+# Narrower than a settings menu: these two stand in a row of three controls
+# rather than alone, and their entries are short words.
+COLOUR_WIDTH = 15
+SHAPE_WIDTH = 16
 # The branch field, which stands in a row of buttons rather than a column of
 # settings. Wide enough for a long branch name without pushing the two update
 # buttons off a narrow window.
@@ -1682,14 +1702,31 @@ class Panel:
         outer = ttk.Frame(parent)
         grid = ttk.Frame(outer)
         grid.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
-        grid.columnconfigure(1, weight=1)
+        # The slack goes to the last of the control columns, not the first.
+        # On the first it would push the colour menus away from the switches
+        # they belong to; here a slider still has somewhere to stretch into,
+        # because a slider spans all three.
+        grid.columnconfigure(SHAPE_COLUMN, weight=1)
 
         row = 0
+        headed = False
         for index, (title, entries) in enumerate(groups):
             if title:
                 ttk.Label(grid, text=title, style="Section.TLabel").grid(
                     row=row, column=0, columnspan=2, sticky="w",
                     pady=(0 if index == 0 else GROUP_GAP, ROW_GAP))
+                row += 1
+            # Once, over the first group that has them. One grid for the whole
+            # tab means the columns line up all the way down, so a second set
+            # of headings further on would only be repeating itself.
+            if not headed and any(entry[2] == FLASH for entry in entries):
+                headed = True
+                for column, heading in ((COLOUR_COLUMN, "Colour"),
+                                        (SHAPE_COLUMN, "Shape")):
+                    ttk.Label(grid, text=heading, style="Muted.TLabel").grid(
+                        row=row, column=column, sticky="w", pady=(0, ROW_PAD),
+                        padx=(LOOK_GAP if column == COLOUR_COLUMN else 0,
+                              ROW_GAP))
                 row += 1
             # A block is a switch with stepped-in rows under it. The extra
             # space goes above the switch that opens one, above the first row
@@ -1739,13 +1776,21 @@ class Panel:
         value = self.config.get(key, config_module.DEFAULTS[key])
         labels, controls = [name], []
 
-        if kind == "bool":
+        if kind in ("bool", FLASH, FIXED):
             variable = tk.BooleanVar(value=bool(value))
             control = ttk.Checkbutton(grid, variable=variable)
-            control.grid(row=row, column=1, sticky="w",
+            control.grid(row=row, column=CONTROL_COLUMN, sticky="w",
                          pady=(ROW_PAD + lead, ROW_PAD))
             controls.append(control)
             self._follow(variable)
+            if kind == FLASH:
+                self._build_look(grid, row, low, high, lead=lead)
+            elif kind == FIXED:
+                # What the two menus would have said, where they would have
+                # been. A blank there reads as a setting that failed to draw.
+                ttk.Label(grid, text=low, style="Muted.TLabel").grid(
+                    row=row, column=COLOUR_COLUMN, columnspan=2, sticky="w",
+                    padx=(LOOK_GAP, 0), pady=(ROW_PAD + lead, ROW_PAD))
         elif kind in ("choice", "sensor", "named"):
             # Entries that are labels for something else - see the menu
             # helpers in ledpanel. A "choice" is the case where the label and
@@ -1769,8 +1814,46 @@ class Panel:
             self._follow(variable)
             labels.append(readout)
 
-        self.vars[key] = (variable, kind)
+        self.vars[key] = (variable, "bool" if kind in (FLASH, FIXED) else kind)
         self._rows[key] = (labels, controls)
+
+    def _build_look(self, grid, row, prefix, colours, lead=0):
+        """The colour and the shape of one notification, beside its switch.
+
+        Registered as settings of their own, under their own keys: that is
+        what lets DEPENDS_ON grey them with the switch they sit next to, and
+        what lets Apply collect them, without either knowing that the three
+        now share a line. The keys are built from the prefix, which is the
+        same one the service spells them under - see CONFIGURABLE_KINDS.
+        """
+        for column, key, choices, width in (
+                (COLOUR_COLUMN, prefix + "_COLOR", self._colours(colours),
+                 COLOUR_WIDTH),
+                (SHAPE_COLUMN, prefix + "_STYLE", KIND_STYLE_CHOICES,
+                 SHAPE_WIDTH)):
+            variable = tk.StringVar()
+            value = str(self.config.get(key, config_module.DEFAULTS[key]))
+            field = self._field(grid, key, variable, list(choices), value,
+                                width=width)
+            field.grid(row=row, column=column, sticky="w",
+                       padx=(LOOK_GAP if column == COLOUR_COLUMN else 0,
+                             ROW_GAP),
+                       pady=(ROW_PAD + lead, ROW_PAD))
+            self._follow(variable)
+            self.vars[key] = (variable, "named")
+            self._rows[key] = ([], [field])
+
+    def _colours(self, colours):
+        """The colours suggested for one kind, then the rest of the palette.
+
+        Its own first, because those are the ones chosen for it. The whole
+        palette after them, so a colour nobody thought of for achievements is
+        still two clicks away rather than a trip to the config file.
+        """
+        offered = list(colours)
+        had = {value.lower() for _label, value in offered}
+        return offered + [entry for entry in ledpanel.palette()
+                          if entry[1].lower() not in had]
 
     def _follow(self, variable):
         """Watch a control, so the window can keep up with it.
@@ -2031,7 +2114,8 @@ class Panel:
               lead=0):
         """One of those in a settings row, beside the name of the setting."""
         self._field(grid, key, variable, choices, current, width).grid(
-            row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
+            row=row, column=CONTROL_COLUMN, columnspan=CONTROL_SPAN,
+            sticky="w", pady=(lead, ROW_PAD))
 
     def _open_menu(self, key):
         """Drop this one down, having taken down whatever else was open.
@@ -2115,8 +2199,12 @@ class Panel:
         return ledpanel.menu_value(self._menus[key], label)
 
     def _scale(self, grid, row, variable, low, high, step, lead=0):
+        # Across the three control columns: a slider in the first of them
+        # would be as narrow as a switch, and its readout would land under
+        # somebody's colour menu.
         holder = ttk.Frame(grid)
-        holder.grid(row=row, column=1, sticky="ew", pady=(lead, ROW_PAD))
+        holder.grid(row=row, column=CONTROL_COLUMN, columnspan=CONTROL_SPAN,
+                    sticky="ew", pady=(lead, ROW_PAD))
         holder.columnconfigure(0, weight=1)
         readout = ttk.Label(holder, width=6)
         pattern = "%%.%df" % _decimals(step)

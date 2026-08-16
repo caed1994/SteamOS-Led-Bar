@@ -771,8 +771,21 @@ class PanelSettingsTest(unittest.TestCase):
                 for row in group.elts[1].elts]
 
     def _settings(self):
-        """Every key the panel offers, on whichever tab."""
-        return [row.elts[0].value for row in self._rows()]
+        """Every key the panel offers, on whichever tab.
+
+        A "flash" row carries three of them: the switch is what the row is
+        named after, and the colour and shape sit beside it under keys built
+        from the prefix in the row. They are settings like any other - Apply
+        collects them, DEPENDS_ON greys them - so a helper that only counted
+        the switch would quietly stop checking two thirds of that page.
+        """
+        keys = []
+        for row in self._rows():
+            keys.append(row.elts[0].value)
+            if row.elts[2].value == "flash":
+                prefix = row.elts[3].value
+                keys += [prefix + "_COLOR", prefix + "_STYLE"]
+        return keys
 
     def _tab_titles(self):
         """Every tab's label: the settings tabs come from their own table,

@@ -495,7 +495,8 @@ iOS does not let one app read another's notifications, so KDE Connect cannot
 forward them.
 
 It is **off until you switch it on**, in the panel under *Notifications* >
-*From your phone*, or with `NOTIFY_PHONE=1`. Start by watching it work:
+*From your phone* &mdash; the switch, its colour and its shape are all on that
+one line &mdash; or with `NOTIFY_PHONE=1`. Start by watching it work:
 
 ```bash
 steamos-led-serial --watch-phone --print
@@ -590,7 +591,7 @@ Six pages, picked from the list down the left side.
 | Page | What is on it |
 | ---- | ------------- |
 | **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
-| **Notifications** | what flashes, in which colour and shape, and for how long |
+| **Notifications** | one line per thing that can flash - switch, colour, shape - grouped by where it comes from, and how long a flash lasts |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
 | **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists |
