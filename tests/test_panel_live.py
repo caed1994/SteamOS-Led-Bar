@@ -23,8 +23,9 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
 try:
     import tkinter as tk
+    from tkinter import ttk
 except ImportError:                                         # pragma: no cover
-    tk = None
+    tk = ttk = None
 
 
 def _panel_module():
@@ -530,6 +531,48 @@ class LiveWindowTest(unittest.TestCase):
         popup._step(-1)
         self.assertEqual(variable.get(), labels[0])
         popup.close()
+
+    def test_no_drop_down_anywhere_is_one_of_tks(self):
+        # The two on Status & repair were left as comboboxes when the settings
+        # pages changed over, so that page still had the old list on it: Tk's
+        # own, posted under a grab it does not let go of, floating over
+        # whatever was raised next. Walked rather than listed, because the
+        # next one added would be the next one to go wrong this way.
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.Combobox):
+                    found.append(str(child))
+                walk(child)
+
+        walk(self.root)
+        self.assertEqual(found, [], "a Tk drop-down is still in the window")
+
+    def test_the_branch_and_the_firmware_drop_a_list_of_our_own(self):
+        for key in ("branch", "firmware"):
+            popup = self._drop(key)
+            self.assertIsNotNone(popup, key)
+            self.assertEqual([label for _row, label, _value in popup.rows],
+                             [label for label, _value
+                              in self.panel._menus[key]], key)
+            # The whole point of it being ours: nothing is grabbed, so the
+            # notice that another application took the focus still arrives.
+            self.assertIsNone(self.root.grab_current(), key)
+            popup.close()
+
+    def test_the_firmware_field_still_names_the_build_to_flash(self):
+        # It shows "ESP8266 - GPIO2"; the flasher is given "esp8266_gpio2".
+        for label, environment in self.panel_module.ledpanel.FIRMWARE_ENVS:
+            self.panel.firmware.set(label)
+            self.assertEqual(self.panel._value_for("firmware", label),
+                             environment)
+
+    def test_a_fetch_refills_the_branch_list_without_losing_the_choice(self):
+        self.panel.branch.set("a-branch-this-clone-does-not-have")
+        self.panel._refresh_branches()
+        self.assertIn(("a-branch-this-clone-does-not-have",) * 2,
+                      self.panel._menus["branch"])
 
     def test_a_check_says_what_it_found_where_it_can_be_read(self):
         # The log is folded nearly always now, and it was the only place the

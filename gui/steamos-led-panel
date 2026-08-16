@@ -257,6 +257,10 @@ ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
 # being able to see which sensor was picked.
 MENU_WIDTH = 18
 SENSOR_WIDTH = 30
+# The branch field, which stands in a row of buttons rather than a column of
+# settings. Wide enough for a long branch name without pushing the two update
+# buttons off a narrow window.
+BRANCH_WIDTH = 22
 
 # The square of colour a menu entry carries when what it holds is a colour.
 SWATCH_SIZE = 16
@@ -549,9 +553,9 @@ def dress(style, roles, sizes):
                 ("Material.slider", {"side": "left", "sticky": ""})]})])
 
     def arrows():
-        # One mark for every drop-down. clam draws the combobox a hairline and
-        # the menu button a filled triangle half the height of the field, and
-        # a page carrying both kinds looked like it had two of them.
+        # One mark for every drop-down, drawn rather than left to clam - whose
+        # own is a filled triangle half the height of the field, from the same
+        # decade as its 3D edges.
         def picture(colour):
             rows = [[surface] * ARROW_SIZE for _ in range(ARROW_SIZE)]
             roundrect.draw_chevron(rows, colour, thickness=1.9)
@@ -577,14 +581,7 @@ def dress(style, roles, sizes):
             ("focus", picture(roles["primary"], width=2)),
             ("hover", picture(roles["on_surface"])),
             border=FIELD_RADIUS, sticky="nsew")
-        style.layout("TCombobox", [
-            ("Material.Field", {"sticky": "nsew", "children": [
-                ("Material.Arrow", {"side": "right", "sticky": ""}),
-                ("Combobox.padding", {"expand": 1, "sticky": "nsew",
-                                      "children": [
-                                          ("Combobox.textarea",
-                                           {"sticky": "nsew"})]})]})])
-        # And the same field around a typed-in one.
+        # The same field around a typed-in one.
         style.layout("Material.TEntry", [
             ("Material.Field", {"sticky": "nsew", "children": [
                 ("Entry.padding", {"sticky": "nsew", "children": [
@@ -713,35 +710,11 @@ def apply_theme(root):
                     focuscolor=surface, padding=(0, 3))
     style.map("TRadiobutton", background=[("active", surface)])
 
-    # The field is a drawn element, so bordercolor and the two 3D shades reach
-    # only clam's own drop-down arrow - and setting all three to the surface is
-    # what flattens it. Left alone it is a raised grey button from 1995 sitting
-    # inside a Material field.
-    style.configure("TCombobox", fieldbackground=surface, background=surface,
-                    foreground=on_surface, arrowcolor=variant,
-                    bordercolor=surface, lightcolor=surface,
-                    darkcolor=surface,
-                    padding=(10, sizes["field_padding"]),
-                    arrowsize=ARROW_SIZE)
-    # A read-only combobox draws its text as a *selection*, so without these
-    # the label comes out pale grey on pale grey.
-    style.map("TCombobox",
-              fieldbackground=[("readonly", surface), ("disabled", surface)],
-              foreground=[("readonly", on_surface),
-                          ("disabled", material.disabled(roles, on_surface))],
-              selectbackground=[("readonly", surface), ("focus", surface)],
-              selectforeground=[("readonly", on_surface),
-                                ("focus", on_surface)],
-              arrowcolor=[("readonly", variant),
-                          ("disabled", material.disabled(roles, variant))],
-              background=[("active", surface), ("pressed", surface)])
-    root.option_add("*TCombobox*Listbox.background",
-                    roles["surface_container"])
-    root.option_add("*TCombobox*Listbox.foreground", on_surface)
-    root.option_add("*TCombobox*Listbox.selectBackground",
-                    roles["secondary_container"])
-    root.option_add("*TCombobox*Listbox.selectForeground",
-                    roles["on_secondary_container"])
+    # Nothing here dresses a ttk.Combobox, and that is deliberate: there is
+    # not one left in the window. Every drop-down is a Field.TButton opening a
+    # Popup of our own, because a combobox drops a Tk listbox - which cannot
+    # hold a swatch, cannot be made to look like the rest of this, and is
+    # posted under a grab that kept it floating over other applications.
 
     # No selection colours here: clam pins an entry's and will not have them
     # configured away - measured, style.lookup gives clam's own grey back
@@ -867,9 +840,10 @@ class Popup:
     gives the menu no say in when to go, so it went on floating over whatever
     took the focus next, which is what a menu must never do.
 
-    So it is a window of our own. Rows we draw, a grab we hold, and it closes
-    when the focus leaves it - by which time it is a plain Toplevel and the
-    focus is a thing we are told about.
+    So it is a window of our own. Rows we draw, and it closes when the focus
+    leaves it - by which time it is a plain Toplevel and the focus is a thing
+    we are told about. See the note below the constructor for why there is no
+    grab.
     """
 
     PAD_X = 14
@@ -1437,9 +1411,7 @@ class Panel:
         Bound to everything rather than to the canvas: an event goes to the
         widget under the pointer and then up its bindtags, not up its parents,
         so a wheel over a label in the middle of the page would never reach the
-        canvas underneath it. It also takes the wheel away from the drop-downs,
-        which is a mercy - a readonly combobox changes the setting it holds
-        when the wheel turns over it, whether or not it was open.
+        canvas underneath it.
         """
         self._dismiss_menus()                   # a list is not scrolled past
         canvas = self._scrollers.get(self.notebook.select())
@@ -2002,22 +1974,29 @@ class Panel:
             self._preview_started = time.monotonic()
             self._preview_tick()
 
-    def _menu(self, grid, row, key, variable, choices, current, width,
-              lead=0):
+    def _field(self, parent, key, variable, choices, current, width=None):
         """A drop-down of (label, value) pairs, showing labels.
 
-        A menu rather than a combobox, and for one reason: a combobox drops
-        down a Tk listbox, and a listbox holds text and nothing else. A menu
-        holds an image per entry - which is what lets a list of colours show
-        the colours. Picking "Hot Pink" out of a column of words was the one
-        place in a window about light where you could not see what you were
-        choosing.
+        A field of our own rather than a combobox, for two reasons. A combobox
+        drops down a Tk listbox: a listbox holds text and nothing else, so a
+        list of colours cannot show the colours - and picking "Hot Pink" out of
+        a column of words was the one place in a window about light where you
+        could not see what you were choosing. And Tk posts that listbox under a
+        grab it does not let go of, so it went on floating over whatever was
+        raised next. See Popup for both.
+
+        Returned unplaced: the settings grid and the rows on Status & repair
+        lay themselves out differently, and where it goes is not this
+        helper's business. `key` names it among the drop-downs - a setting's
+        own name for a setting, a lower-case word for the rest, which cannot
+        collide because config names are upper case.
         """
         self._menus[key] = list(choices)
-        button = ttk.Button(grid, textvariable=variable, width=width,
+        button = ttk.Button(parent, textvariable=variable,
                             style="Field.TButton", compound="left",
                             command=lambda: self._open_menu(key))
-        button.grid(row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
+        if width is not None:
+            button.configure(width=width)
         self._widgets[key] = button
         self._menu_parts[key] = variable
         # The button carries the swatch of whatever is chosen, so the colour is
@@ -2025,6 +2004,13 @@ class Panel:
         variable.trace_add("write", lambda *_a: self._show_swatch(key))
         variable.set(self._label_for(key, current))
         self._show_swatch(key)
+        return button
+
+    def _menu(self, grid, row, key, variable, choices, current, width,
+              lead=0):
+        """One of those in a settings row, beside the name of the setting."""
+        self._field(grid, key, variable, choices, current, width).grid(
+            row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
 
     def _open_menu(self, key):
         """Drop this one down, having taken down whatever else was open.
@@ -2746,13 +2732,13 @@ class Panel:
 
         row = ttk.Frame(frame)
         row.pack(fill="x")
-        self.firmware = tk.StringVar(value=ledpanel.FIRMWARE_ENVS[0][0])
+        self.firmware = tk.StringVar()
         # Grows with the window: at a fixed width the longest build name was
         # cut off mid-word, and which pin it drives is the whole point.
-        ttk.Combobox(row, textvariable=self.firmware, state="readonly",
-                     values=[label for label, _env in ledpanel.FIRMWARE_ENVS]
-                     ).pack(side="left", fill="x", expand=True,
-                            padx=(0, GROUP_GAP))
+        self._field(row, "firmware", self.firmware, ledpanel.FIRMWARE_ENVS,
+                    ledpanel.FIRMWARE_ENVS[0][1]).pack(
+                        side="left", fill="x", expand=True,
+                        padx=(0, GROUP_GAP))
         ttk.Button(row, text="Flash firmware", style="Tonal.TButton",
                    command=self.flash_firmware).pack(side="left")
         self._note(frame,
@@ -2760,8 +2746,7 @@ class Panel:
                    "while it runs.").pack(anchor="w", pady=(ROW_GAP, 0))
 
     def flash_firmware(self):
-        environment = ledpanel.menu_value(ledpanel.FIRMWARE_ENVS,
-                                          self.firmware.get())
+        environment = self._value_for("firmware", self.firmware.get())
         if not self._ask(
                 "Flash firmware",
                 "This writes the '%s' firmware to the ESP over USB.\n\n"
@@ -2789,10 +2774,13 @@ class Panel:
         row = ttk.Frame(frame)
         row.pack(fill="x")
         ttk.Label(row, text="Branch").pack(side="left", padx=(0, ROW_GAP))
-        self.branch = tk.StringVar(value=ledpanel.current_branch(SOURCE_DIR))
-        self.branch_menu = ttk.Combobox(row, textvariable=self.branch,
-                                        state="readonly", width=22)
-        self.branch_menu.pack(side="left", padx=(0, GROUP_GAP))
+        self.branch = tk.StringVar()
+        # Built with the branch that is checked out and nothing else, then
+        # filled: _refresh_branches is the one place that knows how the list
+        # is made, and it runs again after every fetch.
+        self._field(row, "branch", self.branch, [],
+                    ledpanel.current_branch(SOURCE_DIR),
+                    width=BRANCH_WIDTH).pack(side="left", padx=(0, GROUP_GAP))
         self._refresh_branches()
         ttk.Button(row, text="Check for updates", style="Outlined.TButton",
                    command=self.check_for_updates).pack(side="left",
@@ -2841,12 +2829,15 @@ class Panel:
             else ["!disabled"])
 
     def _refresh_branches(self):
-        """Fill the menu from what the clone knows, keeping the selection."""
+        """Fill the list from what the clone knows, keeping the selection."""
         branches = ledpanel.known_branches(SOURCE_DIR)
         current = self.branch.get()
+        # A branch the clone does not list - the detached head a fetch can
+        # leave, say - stays on rather than vanishing from under the
+        # selection.
         if current and current not in branches:
             branches = sorted(branches + [current])
-        self.branch_menu.configure(values=branches)
+        self._menus["branch"] = [(name, name) for name in branches]
 
     def check_for_updates(self):
         def checked(code):

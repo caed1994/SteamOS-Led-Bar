@@ -1332,54 +1332,42 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
 
 
 
-class ComboboxReadabilityTest(unittest.TestCase):
-    """A read-only combobox draws its text as a selection.
+class OwnDropDownTest(unittest.TestCase):
+    """Every drop-down in the window is one this project draws.
 
-    Without saying what the selection colours are, the label comes out in the
-    highlight colours over the field colour - which is how "stretch" and
-    "bloom" ended up pale grey on pale grey and all but unreadable on a real
-    screen.
+    A ttk.Combobox drops a Tk listbox, and that listbox is three problems at
+    once: it holds text and nothing else, so a list of colours cannot show the
+    colours; it cannot be made to look like the rest of the window - its text
+    is drawn as a *selection*, which is how "stretch" and "bloom" came out
+    pale grey on pale grey; and Tk posts it under a grab it does not let go
+    of, so it went on floating over whatever was raised over the panel.
+
+    The settings pages moved to a field of our own; the branch and firmware
+    fields on Status & repair were left behind and still had all three. So
+    this is checked by reading the source rather than by remembering: the next
+    combobox added would bring the same three back with it.
     """
 
     def setUp(self):
         path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
         with open(path) as handle:
-            self.source = handle.read()
-        self.tree = ast.parse(self.source)
+            self.tree = ast.parse(handle.read())
 
-    def _map_states(self, style_name):
-        """Which widget states style.map() names for this style."""
-        states = set()
-        for node in ast.walk(self.tree):
-            if not (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "map"
-                    and node.args
-                    and isinstance(node.args[0], ast.Constant)
-                    and node.args[0].value == style_name):
-                continue
-            for keyword in node.keywords:
-                for inner in ast.walk(keyword.value):
-                    if isinstance(inner, ast.Constant) and \
-                            isinstance(inner.value, str):
-                        states.add((keyword.arg, inner.value))
-        return states
+    def _built(self, widget):
+        """Every call in the panel that builds this kind of widget."""
+        return [node for node in ast.walk(self.tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == widget]
 
-    def test_the_readonly_state_is_given_its_own_colours(self):
-        states = self._map_states("TCombobox")
-        self.assertIn(("foreground", "readonly"), states)
-        self.assertIn(("fieldbackground", "readonly"), states)
+    def test_the_window_builds_no_combobox(self):
+        self.assertEqual(self._built("Combobox"), [])
 
-    def test_the_selection_colours_are_pinned_too(self):
-        # This is the actual fix: without it the text keeps the highlight
-        # colours even though nothing is really selected.
-        states = self._map_states("TCombobox")
-        self.assertIn(("selectforeground", "readonly"), states)
-        self.assertIn(("selectbackground", "readonly"), states)
-
-    def test_a_disabled_one_is_muted_rather_than_invisible(self):
-        states = self._map_states("TCombobox")
-        self.assertIn(("foreground", "disabled"), states)
+    def test_the_drop_downs_it_does_build_come_from_one_place(self):
+        # _field is where the button, the list and the swatch are wired
+        # together; a drop-down assembled anywhere else would be one that
+        # opens nothing.
+        self.assertTrue(self._built("_field"))
 
 
 
