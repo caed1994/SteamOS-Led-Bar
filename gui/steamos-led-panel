@@ -589,15 +589,16 @@ def dress(style, roles, sizes):
             ("Material.Field", {"sticky": "nsew", "children": [
                 ("Entry.padding", {"sticky": "nsew", "children": [
                     ("Entry.textarea", {"sticky": "nsew"})]})]})])
-        # The same field around a menu button, so a drop-down that carries
-        # images looks like one that does not.
-        style.layout("Field.TMenubutton", [
+        # The same field around the button a drop-down is: it opens a list of
+        # our own drawing rather than a tk.Menu - see Popup - so what is
+        # wanted here is a field with a label and an arrow in it.
+        style.layout("Field.TButton", [
             ("Material.Field", {"sticky": "nsew", "children": [
                 ("Material.Arrow", {"side": "right", "sticky": ""}),
-                ("Menubutton.padding", {"expand": 1, "sticky": "nsew",
-                                        "children": [
-                                            ("Menubutton.label",
-                                             {"sticky": "w"})]})]})])
+                ("Button.padding", {"expand": 1, "sticky": "nsew",
+                                    "children": [
+                                        ("Button.label",
+                                         {"sticky": "w"})]})]})])
 
     attempt("the rail", rail)
     attempt("the panels", panels)
@@ -752,11 +753,11 @@ def apply_theme(root):
                     foreground=on_surface, insertcolor=on_surface,
                     padding=(10, sizes["field_padding"]))
 
-    style.configure("Field.TMenubutton", background=surface,
+    style.configure("Field.TButton", background=surface,
                     foreground=on_surface, arrowcolor=variant,
                     padding=(10, sizes["field_padding"]),
                     arrowsize=ARROW_SIZE, anchor="w", compound="left")
-    style.map("Field.TMenubutton",
+    style.map("Field.TButton",
               foreground=[("disabled", material.disabled(roles, on_surface))],
               arrowcolor=[("disabled", material.disabled(roles, variant))],
               background=[("active", surface), ("pressed", surface)])
@@ -854,6 +855,134 @@ class Runner:
         except queue.Empty:
             pass
         self._job = self.widget.after(120, self._drain)
+
+
+class Popup:
+    """The list a drop-down drops down, drawn here rather than left to Tk.
+
+    A tk.Menu cannot be made to look like the rest of this window. The entry
+    you are on can only be marked with an indicator - never with the filled
+    row every other list on the desktop uses - and its trim is not ours to
+    set. It also outlives its moment: Tk posts it under a grab of its own and
+    gives the menu no say in when to go, so it went on floating over whatever
+    took the focus next, which is what a menu must never do.
+
+    So it is a window of our own. Rows we draw, a grab we hold, and it closes
+    when the focus leaves it - by which time it is a plain Toplevel and the
+    focus is a thing we are told about.
+    """
+
+    PAD_X = 14
+    PAD_Y = 8
+
+    def __init__(self, button, roles, choices, variable, swatch, on_close):
+        self.roles = roles
+        self.variable = variable
+        self.on_close = on_close
+        self.rows = []
+
+        self.window = window = tk.Toplevel(button)
+        window.withdraw()
+        window.overrideredirect(True)
+        # One pixel of edge, which is the Toplevel showing through: a window
+        # cannot be given a border of its own without a frame round everything.
+        window.configure(background=roles["outline_variant"])
+        inner = tk.Frame(window, background=roles["surface_container"],
+                         borderwidth=0, highlightthickness=0)
+        inner.pack(padx=1, pady=1, fill="both", expand=True)
+
+        for label, value in choices:
+            row = tk.Label(inner, text=label, image=swatch(value) or "",
+                           compound="left", anchor="w", font=roles["_font"],
+                           padx=self.PAD_X, pady=self.PAD_Y,
+                           borderwidth=0, highlightthickness=0)
+            row.pack(fill="x")
+            row.bind("<Enter>", lambda _e, name=label: self._hover(name))
+            row.bind("<Leave>", lambda _e: self._hover(None))
+            row.bind("<Button-1>", lambda _e, name=label: self._take(name))
+            self.rows.append((row, label))
+        self._paint(None)
+
+        window.bind("<Escape>", lambda _e: self.close())
+        window.bind("<FocusOut>", lambda _e: self.close())
+        window.bind("<Up>", lambda _e: self._step(-1))
+        window.bind("<Down>", lambda _e: self._step(1))
+        window.bind("<Return>", lambda _e: self.close())
+        # Under a local grab every click in this application arrives here; one
+        # that did not land on a row is a click away, which closes.
+        window.bind("<Button-1>", lambda _e: self.close())
+        self._place(button)
+        window.deiconify()
+        # A grab over the whole screen, which is what a menu is and what Tk's
+        # own take: without it a click in another application never reaches
+        # this window, so the list stayed up over whatever had been clicked -
+        # twice reported, and not fixed by asking politely for the focus. The
+        # click that dismisses it is swallowed, which is how every menu on the
+        # desktop behaves. It is released in close(), and destroying a window
+        # releases it anyway, so a crash cannot leave the screen grabbed.
+        try:
+            window.grab_set_global()
+        except tk.TclError:                                 # pragma: no cover
+            window.grab_set()                   # no global grab to be had
+        window.focus_set()
+
+    def _place(self, button):
+        """Below the field, and lined up so the chosen row sits on it.
+
+        Which is how every other drop-down on this desktop opens: the one you
+        are on does not move, and the rest unfolds around it.
+        """
+        window = self.window
+        window.update_idletasks()
+        height = window.winfo_reqheight()
+        width = max(button.winfo_width(), window.winfo_reqwidth())
+        step = self.rows[0][0].winfo_reqheight() if self.rows else 0
+        chosen = [index for index, (_row, label) in enumerate(self.rows)
+                  if label == self.variable.get()]
+        left = button.winfo_rootx()
+        top = button.winfo_rooty() - (chosen[0] * step if chosen else 0) - 1
+        # Never off the bottom or the top of the screen.
+        top = max(0, min(top, window.winfo_screenheight() - height))
+        left = max(0, min(left, window.winfo_screenwidth() - width))
+        window.geometry("%dx%d+%d+%d" % (width, height, left, top))
+
+    def _paint(self, hovered):
+        """Colour every row: the one chosen filled, the one under the pointer lit."""
+        for row, label in self.rows:
+            if label == self.variable.get():
+                fill, ink = "secondary_container", "on_secondary_container"
+            elif label == hovered:
+                fill, ink = "surface_container_high", "on_surface"
+            else:
+                fill, ink = "surface_container", "on_surface"
+            row.configure(background=self.roles[fill],
+                          foreground=self.roles[ink])
+
+    def _hover(self, label):
+        self._paint(label)
+
+    def _step(self, by):
+        labels = [label for _row, label in self.rows]
+        if not labels:
+            return
+        try:
+            at = labels.index(self.variable.get())
+        except ValueError:
+            at = 0
+        self.variable.set(labels[max(0, min(at + by, len(labels) - 1))])
+        self._paint(None)
+
+    def _take(self, label):
+        self.variable.set(label)
+        self.close()
+
+    def close(self):
+        try:
+            self.window.grab_release()
+            self.window.destroy()
+        except tk.TclError:                                 # pragma: no cover
+            pass                                            # already gone
+        self.on_close()
 
 
 class Dialog:
@@ -1117,8 +1246,10 @@ class Panel:
         # turns up later can be added to both.
         self._menus = {}
         self._widgets = {}
-        # key -> (the tk.Menu it drops down, the variable it writes)
+        # key -> the variable its drop-down writes
         self._menu_parts = {}
+        # The one drop-down standing open, if any
+        self._popup = None
         # key -> (labels, controls), so a setting can be greyed out whole
         self._rows = {}
         # page -> the canvas that scrolls it, for the wheel to find
@@ -1843,35 +1974,26 @@ class Panel:
         choosing.
         """
         self._menus[key] = list(choices)
-        button = ttk.Menubutton(grid, textvariable=variable, width=width,
-                                style="Field.TMenubutton", compound="left")
-        # A tk.Menu is not a ttk widget and inherits none of the theme, so
-        # every colour, the font and the trim are set by hand. It cannot have
-        # rounded corners - a menu is an override-redirect window and Tk draws
-        # it square - but everything else can be made to match.
-        menu = tk.Menu(button, tearoff=0, borderwidth=0, activeborderwidth=0,
-                       relief="flat", font=self.roles["_font"],
-                       background=self.roles["surface_container"],
-                       foreground=self.roles["on_surface"],
-                       activebackground=self.roles["secondary_container"],
-                       activeforeground=self.roles["on_secondary_container"],
-                       selectcolor=self.roles["primary"],
-                       disabledforeground=self.roles["on_surface_variant"])
-        # A menu left posted floats over whatever comes next - measured, it
-        # stayed on top of a file manager that had taken the focus. Tk gives
-        # it no say in that, so it is told to go when it loses the focus.
-        menu.bind("<FocusOut>", self._dismiss_menus)
-        button.configure(menu=menu)
+        button = ttk.Button(grid, textvariable=variable, width=width,
+                            style="Field.TButton", compound="left",
+                            command=lambda: self._open_menu(key))
         button.grid(row=row, column=1, sticky="w", pady=(lead, ROW_PAD))
         self._widgets[key] = button
-        self._menu_parts[key] = (menu, variable)
-        for label, value in list(choices):
-            self._add_entry(key, label, value)
+        self._menu_parts[key] = variable
         # The button carries the swatch of whatever is chosen, so the colour is
         # readable without opening anything.
         variable.trace_add("write", lambda *_a: self._show_swatch(key))
         variable.set(self._label_for(key, current))
         self._show_swatch(key)
+
+    def _open_menu(self, key):
+        """Drop this one down, having taken down whatever else was open."""
+        self._dismiss_menus()
+        self._popup = Popup(self._widgets[key], self.roles, self._menus[key],
+                            self._menu_parts[key],
+                            lambda value: self._swatch(value,
+                                                       "surface_container"),
+                            self._menu_closed)
 
     def _swatch_image(self, value):
         """A swatch on a button, which stands on the page rather than a menu."""
@@ -1894,23 +2016,13 @@ class Panel:
         blank = [self.roles[ground]] * SWATCH_GAP
         return _photo([row + blank for row in square])
 
-    def _add_entry(self, key, label, value):
-        menu, variable = self._menu_parts[key]
-        # The indicator stays: it is what marks the entry you are on, and
-        # its margin is what gives every entry the same left edge whether it
-        # carries a colour or not.
-        menu.add_radiobutton(label=label, value=label, variable=variable,
-                             image=self._swatch(value, "surface_container"),
-                             compound="left")
+    def _menu_closed(self):
+        self._popup = None
 
     def _dismiss_menus(self, _event=None):
-        """Take down any drop-down that is still standing open."""
-        for menu, _variable in self._menu_parts.values():
-            try:
-                if menu.winfo_ismapped():
-                    menu.unpost()
-            except tk.TclError:                             # pragma: no cover
-                pass                                        # already gone
+        """Take down the drop-down, if one is standing open."""
+        if self._popup is not None:
+            self._popup.close()
 
     def _show_swatch(self, key):
         """Put the chosen colour on the button, where it can be seen."""
@@ -1931,7 +2043,6 @@ class Panel:
         if label is not None:
             return label
         choices.append((value, value))
-        self._add_entry(key, value, value)
         return value
 
     def _value_for(self, key, label):

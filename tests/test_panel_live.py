@@ -397,32 +397,105 @@ class LiveWindowTest(unittest.TestCase):
         for left, right in zip(boxes, boxes[1:]):
             self.assertLess(left[2], right[0], "the LEDs overlap")
 
-    def test_an_open_menu_can_be_taken_down(self):
-        # Measured on a real desktop: a posted menu floated over a file
-        # manager that had taken the focus. Tk gives the menu no say in that,
-        # so it is told to go.
-        menu, _variable = self.panel._menu_parts["ACHIEVEMENT_COLOR"]
-        button = self.panel._widgets["ACHIEVEMENT_COLOR"]
-        menu.post(button.winfo_rootx(), button.winfo_rooty())
+    def _drop(self, key):
+        """Open one drop-down and hand back the list it dropped."""
+        self.panel._open_menu(key)
         self.root.update()
-        self.assertTrue(menu.winfo_ismapped(), "the menu did not open")
+        return self.panel._popup
+
+    def test_a_drop_down_opens_a_list_of_what_it_offers(self):
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        self.assertIsNotNone(popup)
+        self.assertEqual([label for _row, label in popup.rows],
+                         [label for label, _value
+                          in self.panel._menus["ACHIEVEMENT_COLOR"]])
+        popup.close()
+
+    def test_the_row_you_are_on_is_filled_rather_than_ticked(self):
+        # What a tk.Menu could not do: it marks the current entry with an
+        # indicator and nothing else, where every other list on the desktop
+        # fills the row.
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        chosen = self.panel.vars["ACHIEVEMENT_COLOR"][0].get()
+        for row, label in popup.rows:
+            wanted = ("secondary_container" if label == chosen
+                      else "surface_container")
+            self.assertEqual(str(row.cget("background")),
+                             self.panel.roles[wanted], label)
+        popup.close()
+
+    def test_picking_a_row_takes_the_value_and_closes(self):
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        row, label = popup.rows[1]
+        row.event_generate("<Button-1>")
+        self.root.update()
+        self.assertEqual(self.panel.vars["ACHIEVEMENT_COLOR"][0].get(), label)
+        self.assertIsNone(self.panel._popup, "the list stayed open")
+
+    def test_a_drop_down_can_be_taken_down_from_outside(self):
+        # Measured on a real desktop: a tk.Menu went on floating over a file
+        # manager that had taken the focus, and Tk gave it no say in that.
+        # This one is ours, so it can simply be told.
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        self.assertTrue(popup.window.winfo_ismapped())
         self.panel._dismiss_menus()
         self.root.update()
-        self.assertFalse(menu.winfo_ismapped(), "the menu stayed up")
+        self.assertIsNone(self.panel._popup)
 
-    def test_every_menu_knows_to_take_itself_down(self):
-        for key, (menu, _variable) in self.panel._menu_parts.items():
-            self.assertTrue(menu.bind("<FocusOut>"), key)
+    def test_a_click_in_another_window_takes_the_list_down(self):
+        # The complaint this is here for, twice over: the list went on
+        # floating above whatever was clicked next. A menu holds the screen
+        # while it is open, which is what makes the click that dismisses it
+        # arrive here at all.
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        self.assertIs(self.root.grab_current(), popup.window,
+                      "the list does not hold the screen")
+        other = tk.Toplevel(self.root)
+        other.geometry("200x150+900+100")
+        for _ in range(4):
+            self.root.update()
+        other.event_generate("<Button-1>", x=10, y=10, warp=True)
+        for _ in range(4):
+            self.root.update()
+        self.assertIsNone(self.panel._popup, "the list stayed up")
+        other.destroy()
 
-    def test_a_menu_wears_the_window_s_own_colours(self):
-        # A tk.Menu is not a ttk widget and inherits none of the theme.
-        # cget gives these back as Tcl border objects, not strings.
-        menu, _variable = self.panel._menu_parts["ACHIEVEMENT_COLOR"]
-        self.assertEqual(str(menu.cget("background")),
-                         self.panel.roles["surface_container"])
-        self.assertEqual(str(menu.cget("activebackground")),
-                         self.panel.roles["secondary_container"])
-        self.assertEqual(int(str(menu.cget("borderwidth"))), 0)
+    def test_opening_one_takes_down_the_last(self):
+        first = self._drop("ACHIEVEMENT_COLOR")
+        second = self._drop("MESSAGE_COLOR")
+        self.assertIsNot(first, second)
+        self.assertFalse(first.window.winfo_exists())
+        second.close()
+
+    def test_the_list_wears_the_window_s_own_colours(self):
+        popup = self._drop("ACHIEVEMENT_SHAPE"
+                           if "ACHIEVEMENT_SHAPE" in self.panel._menus
+                           else "ACHIEVEMENT_STYLE")
+        self.assertEqual(str(popup.window.cget("background")),
+                         self.panel.roles["outline_variant"])
+        chosen = self.panel.vars["ACHIEVEMENT_STYLE"][0].get()
+        for row, label in popup.rows:
+            if label == chosen:
+                continue                        # the filled one, checked above
+            self.assertEqual(str(row.cget("foreground")),
+                             self.panel.roles["on_surface"], label)
+            self.assertEqual(str(row.cget("background")),
+                             self.panel.roles["surface_container"], label)
+        popup.close()
+
+    def test_the_arrow_keys_walk_the_list(self):
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        labels = [label for _row, label in popup.rows]
+        variable = self.panel.vars["ACHIEVEMENT_COLOR"][0]
+        variable.set(labels[0])
+        popup._step(1)
+        self.assertEqual(variable.get(), labels[1])
+        popup._step(-1)
+        self.assertEqual(variable.get(), labels[0])
+        # And it stops at the ends rather than wrapping into a surprise.
+        popup._step(-1)
+        self.assertEqual(variable.get(), labels[0])
+        popup.close()
 
     def _log_order(self):
         """Which of "grow the window" and "fill it" happened first."""
