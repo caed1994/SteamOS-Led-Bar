@@ -37,20 +37,28 @@ done
 
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo ./uninstall.sh" >&2; exit 1; }
 
-# --- achievement watcher (a user service) ----------------------------------
+# --- the units that run in the desktop session ------------------------------
 
-remove_achievement_watcher() {
+remove_user_units() {
     watcher_user_dirs || return 0
-    [[ -f "$WATCHER_DIR/$WATCHER_UNIT" ]] || return 0
 
-    user_systemctl stop "$WATCHER_UNIT" || true
-    rm -f "$WATCHER_DIR/$WATCHER_UNIT" \
-          "$WATCHER_DIR/$WATCHER_WANTS/$WATCHER_UNIT"
+    local unit removed=0
+    # Every unit this project ever installs, not only the ones it installs
+    # today: walking the list is what stops an older install's file from being
+    # left behind in somebody's ~/.config with nothing to remove it.
+    for unit in "${WATCHER_UNITS[@]}"; do
+        [[ -f "$WATCHER_DIR/$unit" ]] || continue
+        user_systemctl stop "$unit" || true
+        rm -f "$WATCHER_DIR/$unit" "$WATCHER_DIR/$WATCHER_WANTS/$unit"
+        removed=1
+    done
+    [[ $removed -eq 1 ]] || return 0
+
     user_systemctl daemon-reload || true
-    echo "Removed the achievement watcher for $WATCHER_USER."
+    echo "Removed the desktop-session services for $WATCHER_USER."
 }
 
-remove_achievement_watcher
+remove_user_units
 
 # Stopping the service blanks the strip before the process exits.
 systemctl disable --now steamos-led-serial.service 2>/dev/null || true

@@ -13,6 +13,7 @@ import logging
 import os
 
 from . import notify
+from . import phone
 from . import render
 from .serialport import BAUD_CONSTANTS
 
@@ -68,14 +69,20 @@ DEFAULTS = {
     "NOTIFY_ACHIEVEMENTS": True,
     "NOTIFY_MESSAGES": True,
     "NOTIFY_FRIEND_ONLINE": True,
+    "NOTIFY_PHONE": False,
     "NOTIFY_WARNING": True,
     "STANDBY_PULSE": True,
     "ACHIEVEMENT_COLOR": "#ffd700",
     "MESSAGE_COLOR": "#8000ff",
     "FRIEND_COLOR": "#00c850",
+    "PHONE_COLOR": "#00b0ff",
     "ACHIEVEMENT_STYLE": notify.STYLE_INHERIT,
     "MESSAGE_STYLE": notify.STYLE_INHERIT,
     "FRIEND_STYLE": notify.STYLE_INHERIT,
+    "PHONE_STYLE": notify.STYLE_INHERIT,
+    "PHONE_SOURCE": phone.SOURCE_AUTO,
+    "PHONE_APPS": "",
+    "PHONE_APPS_ONLY": False,
     "RAINBOW_SHOWS": "rainbow",
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 80.0,
@@ -263,9 +270,12 @@ PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 # have to recognise, so it is always red and always the alarm shape - see
 # notify.FIXED_KINDS. NOTIFY_WARNING says whether it fires at all, nothing
 # more.
-CONFIGURABLE_KINDS = (("achievement", "ACHIEVEMENT"),
-                      ("message", "MESSAGE"),
-                      ("friend", "FRIEND"))
+CONFIGURABLE_KINDS = ((notify.KIND_ACHIEVEMENT, "ACHIEVEMENT"),
+                      (notify.KIND_MESSAGE, "MESSAGE"),
+                      (notify.KIND_FRIEND, "FRIEND"),
+                      (notify.KIND_PHONE, "PHONE"))
+
+PHONE_SOURCES = phone.SOURCES
 
 # Where the gauge's two marks may sit: below the first the bar is green, above
 # the second it is red. Wide, because people watch different sensors, but not
@@ -330,4 +340,11 @@ def validate(config):
             notify.parse_color(config[key])
         except ValueError as exc:
             raise ConfigError("%s: %s" % (key, exc))
+    if config["PHONE_SOURCE"] not in PHONE_SOURCES:
+        raise ConfigError("PHONE_SOURCE must be one of: %s"
+                          % ", ".join(PHONE_SOURCES))
+    try:
+        phone.parse_rules(config["PHONE_APPS"])
+    except ValueError as exc:
+        raise ConfigError("PHONE_APPS: %s" % exc)
     return config

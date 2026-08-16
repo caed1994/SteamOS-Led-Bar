@@ -319,6 +319,37 @@ class NotificationColourTest(unittest.TestCase):
             self.assertEqual(len(set(values)), len(values), key)
 
 
+class PhoneMenuTest(unittest.TestCase):
+    """The panel's phone menus, against the service's own tables.
+
+    The labels are written for people and cannot be derived, so the two lists
+    are kept honest here instead: a source added to the service and missed in
+    the panel is a setting nobody can reach from the window, and one offered
+    by the panel that the service does not know is a setting that stops the
+    service the next time it starts.
+    """
+
+    def test_every_source_the_service_has_can_be_picked(self):
+        offered = [value for _label, value in ledpanel.PHONE_SOURCES]
+        self.assertEqual(sorted(offered),
+                         sorted(config_module.PHONE_SOURCES))
+
+    def test_each_one_is_named_in_a_way_that_says_what_it_costs(self):
+        for label, value in ledpanel.PHONE_SOURCES:
+            self.assertTrue(label, value)
+            self.assertNotEqual(label, value, "the raw name is not a label")
+
+    def test_the_phone_colours_are_ones_the_service_accepts(self):
+        from steamos_led import notify
+        for label, value in ledpanel.PHONE_COLOURS:
+            self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
+            notify.parse_color(value)
+        # And the default is among them, or the menu opens on an entry it
+        # had to invent for a value it was already holding.
+        self.assertIn(config_module.DEFAULTS["PHONE_COLOR"],
+                      [value for _label, value in ledpanel.PHONE_COLOURS])
+
+
 class FlashPaletteTest(unittest.TestCase):
     """The colours offered when one is picked outright."""
 

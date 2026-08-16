@@ -523,6 +523,27 @@ FRIEND_COLOURS = (
 )
 
 
+PHONE_COLOURS = (
+    # Nothing on the machine is this blue, which is the point: a phone
+    # notification is the one that did not come from the machine in front of
+    # you. WhatsApp's own green is offered for anyone whose phone only ever
+    # flashes for that one app.
+    ("Sky", "#00b0ff"),
+    ("WhatsApp green", "#25d366"),
+    ("Signal blue", "#3a76f0"),
+)
+
+
+# Where the phone bridge reads its notifications, in the order the menu offers
+# them. The labels say what each one costs, since the difference is not
+# something you can see until it flashes at the wrong thing.
+PHONE_SOURCES = (
+    ("Automatic", "auto"),
+    ("KDE Connect only", "kdeconnect"),
+    ("Every desktop notification", "desktop"),
+)
+
+
 def palette():
     """Colours to offer when one is being picked outright, in a sensible order.
 
@@ -532,7 +553,8 @@ def palette():
     in: the config file takes any colour and so does the trigger.
     """
     offered = []
-    for group in (ACHIEVEMENT_COLOURS, MESSAGE_COLOURS, FRIEND_COLOURS):
+    for group in (ACHIEVEMENT_COLOURS, MESSAGE_COLOURS, FRIEND_COLOURS,
+                  PHONE_COLOURS):
         for label, value in group:
             if value.lower() not in {had.lower() for _n, had in offered}:
                 offered.append((label, value))

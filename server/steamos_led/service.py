@@ -11,11 +11,12 @@ import itertools
 import logging
 import select
 import signal
+import subprocess
 import sys
 import time
 
 from . import config as config_module
-from . import elf, load, notify, render, serialport, shim, steamworks
+from . import elf, load, notify, phone, render, serialport, shim, steamworks
 from . import temperature
 from .link import EspLink
 
@@ -1027,6 +1028,81 @@ def run_watch_achievements(config, interval=1.0):
     return 0
 
 
+MONITOR_MISSING_EXIT = 4
+
+
+def run_watch_phone(config, print_only=False):
+    """Flash the bar on your phone's notifications, by way of KDE Connect.
+
+    Runs as your normal user next to the desktop, not as the sandboxed
+    service: the notifications are on the session bus, which only the session
+    can read. Like the achievement watcher, all it ever does to this project
+    is write trigger words into the pipe.
+
+    `print_only` is the thing to run first. It reports every notification it
+    sees and what it would have flashed, and flashes nothing - so which bus
+    answers on this machine, and what the apps on it are actually called, are
+    things you find out by looking rather than by guessing at a rule.
+    """
+    _interrupt_on_sigterm()
+
+    if not print_only and not config["NOTIFY_PHONE"]:
+        print("NOTIFY_PHONE is off, so there is nothing to watch for.",
+              flush=True)
+        return NOTHING_TO_WATCH_EXIT
+
+    source = phone.pick_source(config["PHONE_SOURCE"], phone.bus_names())
+    rules = phone.parse_rules(config["PHONE_APPS"])
+    fifo = config["NOTIFY_FIFO"]
+
+    def report(sighting, trigger):
+        print("  %-40s -> %s" % (sighting.describe(), trigger or "ignored"),
+              flush=True)
+
+    bridge = phone.Bridge(
+        source, rules, listed_only=config["PHONE_APPS_ONLY"],
+        send=None if print_only else lambda trigger: notify.send(fifo, trigger),
+        report=report if print_only else None)
+
+    # flush, because this runs as a service: Python block-buffers a piped
+    # stdout, so these lines would sit in it until the process stopped.
+    print("Reading notifications from the %s bus%s" %
+          (source, "" if config["PHONE_SOURCE"] != phone.SOURCE_AUTO
+           else " (chosen automatically)"), flush=True)
+    if rules:
+        print("Apps with a look of their own: %s"
+              % ", ".join(rule.app for rule in rules), flush=True)
+    if config["PHONE_APPS_ONLY"]:
+        print("Only those apps flash; everything else is ignored.", flush=True)
+    print("Watching. %s" % ("Nothing will flash - this is --print."
+                            if print_only else "Flashes go to %s" % fifo),
+          flush=True)
+
+    try:
+        monitor = phone.open_monitor(source)
+    except OSError as exc:
+        # gdbus comes with glib, so this is a machine with no desktop stack at
+        # all - which no amount of restarting will change.
+        print("cannot start gdbus: %s" % exc, file=sys.stderr, flush=True)
+        return MONITOR_MISSING_EXIT
+
+    try:
+        bridge.run(monitor.stdout)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        monitor.terminate()
+        try:
+            monitor.wait(timeout=5)
+        except subprocess.TimeoutExpired:               # pragma: no cover
+            monitor.kill()
+    # Getting here means the monitor ended by itself - the bus went away with
+    # the session, most likely. systemd starts the next one.
+    LOG.info("the notification bus stopped talking (%d seen, %d flashed)",
+             bridge.seen, bridge.flashed)
+    return 0
+
+
 def run_notify(config, kind):
     """Fire a notification on a running service."""
     try:
@@ -1178,6 +1254,12 @@ def build_parser():
                         choices=("debug", "info", "warning", "error"))
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="shorthand for --log-level debug")
+    # Not a mode of its own: it changes what --watch-phone does with what it
+    # finds, which is why it sits with the options rather than below.
+    parser.add_argument("--print", action="store_true", dest="print_only",
+                        help="with --watch-phone: report what it sees and "
+                             "what it would flash, without flashing. Run this "
+                             "first, to see what the apps are called here")
 
     modes = parser.add_argument_group("modes")
     modes.add_argument("--list-ports", action="store_true",
@@ -1196,6 +1278,11 @@ def build_parser():
                        dest="watch_achievements",
                        help="flash on every achievement unlocked in the running "
                             "game (run as your normal user, not with sudo)")
+    modes.add_argument("--watch-phone", action="store_true",
+                       dest="watch_phone",
+                       help="flash on your phone's notifications, which KDE "
+                            "Connect brings to the desktop (run as your normal "
+                            "user, not with sudo)")
     modes.add_argument("--check-config", action="store_true",
                        dest="check_config",
                        help="load and validate the configuration and exit; "
@@ -1282,6 +1369,8 @@ def main(argv=None):
             return run_probe_messages(config, args.probe_messages or None)
         if args.watch_achievements:
             return run_watch_achievements(config)
+        if args.watch_phone:
+            return run_watch_phone(config, print_only=args.print_only)
         if args.simulate:
             return run_simulate(config, args.simulate.lower())
         return Runner(config).run()

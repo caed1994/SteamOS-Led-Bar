@@ -1,0 +1,28 @@
+[Unit]
+# A *user* unit, for the same reason as the achievement watcher: the
+# notifications live on the session bus, and only the session can read it. The
+# LED service stays sandboxed as root and only receives trigger words through
+# its FIFO.
+# Log: journalctl --user -u steamos-led-phone -f
+Description=Flash the LED bar on the phone notifications KDE Connect forwards
+# Ordering only, deliberately NOT PartOf=: that would stop this whenever the
+# desktop session goes away - which is what switching to Game Mode does, and
+# Game Mode never brings the target back.
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@INSTALL_DIR@/steamos-led-serial --watch-phone
+# The bus goes away with the session and comes back with the next one, and
+# gdbus ends when it does. Restarting is how this reconnects.
+Restart=always
+RestartSec=10
+# Exit 3 is "NOTIFY_PHONE is off" and exit 4 is "there is no gdbus on this
+# machine". Both are answers, not failures, and no amount of restarting will
+# change either. Without these the journal reports a failure for doing exactly
+# as it was told. See NOTHING_TO_WATCH_EXIT and MONITOR_MISSING_EXIT.
+RestartPreventExitStatus=3 4
+SuccessExitStatus=3 4
+
+[Install]
+WantedBy=default.target

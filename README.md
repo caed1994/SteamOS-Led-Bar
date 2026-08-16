@@ -362,8 +362,8 @@ steamos-led-serial --notify '#00ff88'
 
 That writes one word into a named pipe, `/run/steamos-led-serial/notify`.
 **Anything that can write a line can flash the bar**, no library and no API.
-Known words are `achievement`, `message`, `friend` and `warning`; anything else
-is read as a colour (`#rrggbb` or `r,g,b`). Either can carry a shape for that
+Known words are `achievement`, `message`, `friend`, `phone` and `warning`;
+anything else is read as a colour (`#rrggbb` or `r,g,b`). Either can carry a shape for that
 one flash:
 
 ```bash
@@ -378,13 +378,14 @@ steamos-led-serial --notify comet:#1a9fff
 | `NOTIFY_ACHIEVEMENTS` | `1` | watch for achievement unlocks |
 | `NOTIFY_MESSAGES` | `1` | watch for friend messages |
 | `NOTIFY_FRIEND_ONLINE` | `1` | watch for friends coming online |
+| `NOTIFY_PHONE` | `0` | watch the phone's notifications - see [Your phone](#your-phone) for the rest |
 | `NOTIFY_WARNING` | `1` | watch every sensor for overheating |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | default shape |
-| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` | `#ffd700` / `#8000ff` / `#00c850` | what each one flashes |
-| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` | `default` | shape for that one kind, or `default` to follow `NOTIFY_STYLE` |
+| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` / `PHONE_COLOR` | `#ffd700` / `#8000ff` / `#00c850` / `#00b0ff` | what each one flashes |
+| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` / `PHONE_STYLE` | `default` | shape for that one kind, or `default` to follow `NOTIFY_STYLE` |
 
 ### The shapes
 
@@ -478,6 +479,72 @@ same callbacks but ask Steam for less, so on a machine where chat will not work
 this one still can. Steam replays who is already online when the friend list
 loads, so the first 20 seconds are ignored, as is any burst of more than three
 at once.
+
+### Your phone
+
+The bar can flash for a WhatsApp message, or anything else your phone puts in
+its notification shade. **KDE Connect** is what carries it over: pair the phone
+in KDE Connect's settings and switch its notification sync on, and a second user
+service reads those notifications off the session bus and writes a trigger into
+the pipe.
+
+Nothing here talks to WhatsApp, or to any other app &mdash; there is no interface
+for that. What it reads is the *notification*, which is why an app you have
+silenced on the phone stays silent here too, and why this is Android only:
+iOS does not let one app read another's notifications, so KDE Connect cannot
+forward them.
+
+It is **off until you switch it on**, in the panel under *Notifications* >
+*From your phone*, or with `NOTIFY_PHONE=1`. Start by watching it work:
+
+```bash
+steamos-led-serial --watch-phone --print
+```
+
+That flashes nothing. It reports every notification it sees, what your machine
+calls the app it came from, and what it would have flashed &mdash; which is how
+you find the names to write rules with:
+
+```
+Reading notifications from the kdeconnect bus (chosen automatically)
+  com.whatsapp                 -> double_flash:#25d366
+  org.thoughtcrime.securesms   -> #3a76f0
+  com.android.calendar         -> phone
+```
+
+Then in the config file, a colour and optionally a shape per app:
+
+```ini
+PHONE_APPS=WhatsApp:#25d366:double_flash, Signal:#3a76f0
+```
+
+The app is matched loosely and without case, so `whatsapp` finds both
+`WhatsApp` and `com.whatsapp` &mdash; the two names the two sources use. Anything
+not named there flashes `PHONE_COLOR` in `PHONE_STYLE`, so the panel goes on
+being where the general look is set; `PHONE_APPS_ONLY=1` ignores it instead.
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `NOTIFY_PHONE` | `0` | flash on the phone's notifications at all |
+| `PHONE_COLOR` / `PHONE_STYLE` | `#00b0ff` / `default` | what one looks like unless a rule says otherwise |
+| `PHONE_SOURCE` | `auto` | `kdeconnect` for the phone only, `desktop` for every notification on this desktop, `auto` to prefer the first |
+| `PHONE_APPS` | *(empty)* | `App:colour` or `App:colour:shape`, separated by commas |
+| `PHONE_APPS_ONLY` | `0` | ignore apps the list does not name |
+
+`auto` reads KDE Connect's own signals when it is on the bus and the desktop's
+notifications otherwise. The difference is worth knowing: KDE Connect's bus
+carries only what the phone sent, while the desktop's carries everything &mdash;
+so a chat app running on the Steam Machine itself flashes the bar under
+`desktop` and does not under `kdeconnect`.
+
+```bash
+systemctl --user status steamos-led-phone
+journalctl --user -u steamos-led-phone -f
+```
+
+It needs `gdbus`, which comes with glib and is on any machine with a desktop;
+there is no D-Bus library to install. **Desktop Mode only for now** &mdash; the
+session bus is the desktop session's, and Game Mode does not start one.
 
 ## The control panel
 

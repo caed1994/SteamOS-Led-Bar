@@ -24,11 +24,18 @@ DEFAULT_FIFO = "/run/steamos-led-serial/notify"
 
 # Named triggers. Anything else is parsed as a colour, so a caller can flash an
 # arbitrary one with e.g. `--notify '#00ff88'`.
+KIND_ACHIEVEMENT = "achievement"
+KIND_MESSAGE = "message"
+KIND_FRIEND = "friend"
+KIND_PHONE = "phone"
+KIND_WARNING = "warning"
+
 KINDS = {
-    "achievement": (255, 215, 0),    # gold
-    "message": (128, 0, 255),        # purple
-    "friend": (0, 200, 80),          # green
-    "warning": (255, 0, 0),          # red
+    KIND_ACHIEVEMENT: (255, 215, 0),    # gold
+    KIND_MESSAGE: (128, 0, 255),        # purple
+    KIND_FRIEND: (0, 200, 80),          # green
+    KIND_PHONE: (0, 176, 255),          # sky blue: nothing on the machine
+    KIND_WARNING: (255, 0, 0),          # red
 }
 
 PULSES = 3          # how often the bar swells during one notification
@@ -299,7 +306,7 @@ STYLES = tuple(_STYLES)
 # is the one notification you must not have to recognise - it has to mean the
 # same thing on every machine, so red and the alarm shape are not offered as a
 # choice. Everything else is yours to arrange.
-FIXED_KINDS = {"warning": STYLE_ALTERNATE}
+FIXED_KINDS = {KIND_WARNING: STYLE_ALTERNATE}
 
 
 # A trigger may name the shape to use for that one flash: "comet:#1a9fff".
