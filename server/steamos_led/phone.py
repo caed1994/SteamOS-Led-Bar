@@ -529,14 +529,38 @@ def bus_names(activatable=False):
 
 
 def wake_kdeconnect():
-    """Make sure KDE Connect is up, and say whether it answered.
+    """Start KDE Connect if it is not up, and report what it knows.
 
     Called before the monitor starts, because a monitor attaches to a name
     rather than asking for it: with nothing running behind that name it would
     sit there quietly forever. In a desktop session this finds it already up
     and costs one call; in Game Mode it is what starts it.
+
+    Returns None when it did not answer at all, otherwise the phones it is
+    paired with - which is the difference between "KDE Connect is not
+    running" and "KDE Connect is running and your phone is not talking to
+    it". Both look identical from here otherwise: a bar that never flashes.
     """
-    return bool(_ask(wake_command()).strip())
+    reply = _ask(wake_command())
+    if not reply.strip():
+        return None
+    return device_names(reply)
+
+
+def device_names(reply):
+    """The phones out of a deviceNames reply.
+
+    Read as "every string in it", because the shape has changed between KDE
+    Connect versions - a list of names in some, a map of id to name in others
+    - and which it is does not matter to anybody reading the log.
+    """
+    found = []
+    for item in _split_arguments(reply.strip().lstrip("(").rstrip(")")):
+        for piece in _split_arguments(item.strip("[]{} ")):
+            name = _as_string(_split_pair(piece)[2] or piece)
+            if name:
+                found.append(name)
+    return found
 
 
 def look_up(sighting):

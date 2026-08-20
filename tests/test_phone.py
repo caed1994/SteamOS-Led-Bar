@@ -232,6 +232,25 @@ class SourceTest(unittest.TestCase):
         self.assertIn("org.freedesktop.DBus.ListNames", running)
         self.assertIn("org.freedesktop.DBus.ListActivatableNames", startable)
 
+    def test_the_phones_it_knows_are_read_out_of_the_reply(self):
+        """Which tells "not running" from "running and nobody is talking".
+
+        Both look the same from here otherwise - a bar that never flashes -
+        and they need opposite things done about them. Reported from a real
+        machine: the bridge said it was watching, and the phone said it had
+        no connection to the PC.
+        """
+        # Two shapes, because KDE Connect versions differ on which they send.
+        self.assertEqual(phone.device_names("(['Pixel 7'],)"), ["Pixel 7"])
+        self.assertEqual(
+            phone.device_names("({'d33f': 'Pixel 7', 'ab12': 'Tablet'},)"),
+            ["Pixel 7", "Tablet"])
+
+    def test_knowing_no_phone_is_not_the_same_as_saying_nothing(self):
+        # An empty list is an answer: KDE Connect is up and has nobody paired.
+        for empty in ("([],)", "({},)"):
+            self.assertEqual(phone.device_names(empty), [], empty)
+
     def test_waking_it_asks_something_that_changes_nothing(self):
         # Any call starts an activatable service, so the cheapest harmless
         # one is the right one - this must never be a call that does

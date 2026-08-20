@@ -1085,13 +1085,19 @@ def run_watch_phone(config, print_only=False):
     print("Reading notifications from the %s bus%s" %
           (source, "" if config["PHONE_SOURCE"] != phone.SOURCE_AUTO
            else " (chosen automatically)"), flush=True)
-    if woken is False:
-        # Said rather than left to be inferred from nothing ever flashing.
-        # This is also the line to look for in the journal after a spell in
-        # Game Mode, where there is no terminal to watch it live.
+    # Said rather than left to be inferred from nothing ever flashing. These
+    # are also the lines to look for in the journal after a spell in Game
+    # Mode, where there is no terminal to watch it live.
+    if woken is None:
         print("  note: KDE Connect did not answer. It is what carries the "
               "phone's notifications over, and in Game Mode nothing starts "
               "it for you - check it in Desktop Mode first.", flush=True)
+    elif woken == []:
+        print("  note: KDE Connect is running but is not paired with any "
+              "phone. Nothing will arrive until it is - pair them in KDE "
+              "Connect's own settings, in Desktop Mode.", flush=True)
+    elif woken:
+        print("  KDE Connect is paired with: %s" % ", ".join(woken), flush=True)
     if rules:
         print("Apps with a look of their own: %s"
               % ", ".join(rule.app for rule in rules), flush=True)
