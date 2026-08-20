@@ -1061,7 +1061,10 @@ def run_watch_phone(config, print_only=False):
     # rather than asking for it, so with nothing behind that name it waits in
     # silence - which is what Game Mode looks like, there being no desktop
     # session there to have started it.
-    woken = phone.wake_kdeconnect() if source == phone.SOURCE_KDECONNECT else None
+    # Never started from a dry run: --print reports on the machine, and a
+    # report that starts a daemon has changed the thing it was describing.
+    woken = (phone.wake_kdeconnect(revive=not print_only)
+             if source == phone.SOURCE_KDECONNECT else None)
 
     def report(sighting, trigger):
         print("  %-40s -> %s" % (sighting.describe(), trigger or "ignored"),
@@ -1089,9 +1092,16 @@ def run_watch_phone(config, print_only=False):
     # are also the lines to look for in the journal after a spell in Game
     # Mode, where there is no terminal to watch it live.
     if woken is None:
-        print("  note: KDE Connect did not answer. It is what carries the "
-              "phone's notifications over, and in Game Mode nothing starts "
-              "it for you - check it in Desktop Mode first.", flush=True)
+        found = phone.kdeconnectd_path()
+        print("  note: KDE Connect is not answering. It is what carries the "
+              "phone's notifications over, and the desktop session it "
+              "belongs to does not exist in Game Mode.", flush=True)
+        print("        %s" % ("This would have started %s; --print does not."
+                              % found if print_only and found
+                              else "It is not installed on this machine."
+                              if not found
+                              else "Started it; it should answer shortly."),
+              flush=True)
     elif woken == []:
         print("  note: KDE Connect is running but is not paired with any "
               "phone. Nothing will arrive until it is - pair them in KDE "

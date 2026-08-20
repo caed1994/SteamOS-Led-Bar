@@ -578,9 +578,14 @@ there is no D-Bus library to install.
 
 **Game Mode works too**, with one thing to know. The bridge is a user service
 that survives the switch, and the session bus belongs to your login rather
-than to Plasma, so both are still there. What is *not* there is anything to
-autostart KDE Connect &mdash; so the bridge asks the bus to start it, which
-works because KDE Connect can be activated on demand.
+than to Plasma, so both are still there. What is *not* there is KDE Connect:
+its daemon is started by the desktop session and dies with it.
+
+So the bridge starts it. It asks the bus first &mdash; on a machine where KDE
+Connect can be activated on demand, that is all it takes &mdash; and where the
+bus will not, it runs `kdeconnectd` itself, in a session of its own so the
+daemon outlives the bridge's own restarts. It checks again every minute, so a
+daemon that goes away mid-session comes back on its own.
 
 That only holds for `PHONE_SOURCE=kdeconnect` (which `auto` picks whenever
 KDE Connect can be had at all). The `desktop` source reads the notification

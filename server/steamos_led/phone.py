@@ -33,8 +33,11 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
 import select
+import shutil
 import subprocess
+import time
 
 from . import notify
 
@@ -75,6 +78,11 @@ FIELD_SEPARATOR = ":"
 # quickly - but not never, which is what checking only at startup amounts to
 # for a process built to outlive the session it started in.
 TICK_SECONDS = 60.0
+
+# How long to let a freshly started KDE Connect claim its name before
+# asking it anything. Short: getting it wrong costs one wasted question,
+# and the next tick asks again a minute later.
+SETTLE_SECONDS = 2.0
 
 
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
@@ -561,7 +569,58 @@ def bus_names(activatable=False):
     return _ask(names_command(activatable))
 
 
-def wake_kdeconnect():
+# Where kdeconnectd lives. Not on the PATH on most distributions - it is a
+# daemon nobody is meant to type - so the usual places are tried by hand.
+KDECONNECTD_PLACES = (
+    "/usr/lib/kdeconnectd",
+    "/usr/libexec/kdeconnectd",
+    "/usr/lib/kde4/libexec/kdeconnectd",
+    "/usr/bin/kdeconnectd",
+)
+
+
+def kdeconnectd_path():
+    """The daemon's own binary, or None if this machine has not got it."""
+    found = shutil.which("kdeconnectd")
+    if found:
+        return found
+    for place in KDECONNECTD_PLACES:
+        if os.path.isfile(place) and os.access(place, os.X_OK):
+            return place
+    return None
+
+
+def start_kdeconnectd(path=None):
+    """Start KDE Connect ourselves, because the bus would not.
+
+    Measured on a real machine: the daemon dies with the Plasma session that
+    started it, and asking the bus for it afterwards brings nothing back -
+    there is no activation file for it there. So in Game Mode it is simply
+    gone, and nothing else is going to start it.
+
+    Only ever called when the name is unowned, which is what keeps this from
+    being a second instance racing the first: whoever owns the name wins and
+    the loser exits, so starting one that is already running is at worst a
+    process that stops again.
+
+    In a session of its own, so it outlives the bridge - and it must: this
+    process restarts, and a daemon that went with it would be started afresh
+    every time, dropping the phone's connection each time it did.
+    """
+    path = path or kdeconnectd_path()
+    if path is None:
+        return None
+    try:
+        subprocess.Popen([path], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as exc:
+        LOG.warning("cannot start %s: %s", path, exc)
+        return None
+    LOG.info("started %s, which nothing else was going to", path)
+    return path
+
+
+def wake_kdeconnect(revive=True, settle=SETTLE_SECONDS):
     """Start KDE Connect if it is not up, and report what it knows.
 
     Called before the monitor starts, because a monitor attaches to a name
@@ -575,6 +634,13 @@ def wake_kdeconnect():
     it". Both look identical from here otherwise: a bar that never flashes.
     """
     reply = _ask(wake_command())
+    if not reply.strip() and revive and start_kdeconnectd() is not None:
+        # It has to finish claiming the name before it can be asked anything,
+        # and a daemon that is starting is not yet a daemon that answers. One
+        # short wait rather than a retry loop: if it is not up by then the
+        # next tick asks again anyway, a minute later.
+        time.sleep(settle)
+        reply = _ask(wake_command())
     if not reply.strip():
         return None
     return device_names(reply)

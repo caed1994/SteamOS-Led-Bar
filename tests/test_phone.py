@@ -15,6 +15,7 @@ no test can, and that is what `--watch-phone --print` is for.
 import os
 import sys
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -250,6 +251,69 @@ class SourceTest(unittest.TestCase):
         # An empty list is an answer: KDE Connect is up and has nobody paired.
         for empty in ("([],)", "({},)"):
             self.assertEqual(phone.device_names(empty), [], empty)
+
+    def test_the_daemon_is_looked_for_where_daemons_are_kept(self):
+        # Not on the PATH on most distributions - it is a daemon nobody is
+        # meant to type - so the usual libexec places are tried by hand.
+        for place in phone.KDECONNECTD_PLACES:
+            self.assertTrue(place.startswith("/"), place)
+            self.assertTrue(place.endswith("kdeconnectd"), place)
+
+    def test_a_machine_without_it_is_not_an_error(self):
+        # Plenty of them: this is somebody else's program, and the bridge has
+        # to be installable on a machine that has never heard of KDE Connect.
+        keep = phone.KDECONNECTD_PLACES
+        phone.KDECONNECTD_PLACES = ("/nowhere/kdeconnectd",)
+        self.addCleanup(setattr, phone, "KDECONNECTD_PLACES", keep)
+        with unittest.mock.patch.object(phone.shutil, "which",
+                                        return_value=None):
+            self.assertIsNone(phone.kdeconnectd_path())
+            self.assertIsNone(phone.start_kdeconnectd())
+
+    def test_something_that_is_there_but_not_runnable_is_not_it(self):
+        keep = phone.KDECONNECTD_PLACES
+        phone.KDECONNECTD_PLACES = (__file__,)      # a file, and not runnable
+        self.addCleanup(setattr, phone, "KDECONNECTD_PLACES", keep)
+        with unittest.mock.patch.object(phone.shutil, "which",
+                                        return_value=None):
+            self.assertIsNone(phone.kdeconnectd_path())
+
+    def test_it_is_started_in_a_session_of_its_own(self):
+        """So it outlives the bridge, which restarts.
+
+        A daemon that went down with this process would be started afresh on
+        every restart, and each fresh start drops the phone's connection.
+        """
+        started = {}
+
+        def remember(command, **kwargs):
+            started.update(kwargs, command=command)
+            return None
+
+        with unittest.mock.patch.object(phone.subprocess, "Popen", remember):
+            self.assertEqual(phone.start_kdeconnectd("/bin/true"), "/bin/true")
+        self.assertEqual(started["command"], ["/bin/true"])
+        self.assertTrue(started["start_new_session"])
+
+    def test_nothing_is_started_when_the_caller_says_not_to(self):
+        # --print must not have side effects on the machine it is reporting
+        # about, and neither must a test.
+        with unittest.mock.patch.object(phone, "_ask", return_value=""):
+            with unittest.mock.patch.object(phone, "start_kdeconnectd") as never:
+                self.assertIsNone(phone.wake_kdeconnect(revive=False))
+        never.assert_not_called()
+
+    def test_a_revived_daemon_is_asked_again_rather_than_assumed(self):
+        # Starting it is not the same as it answering, and the answer is what
+        # the caller wanted - "which phones", not "did something happen".
+        replies = ["", "({'d33f': 'Pixel 9 Pro'},)"]
+        with unittest.mock.patch.object(phone, "_ask",
+                                        side_effect=lambda _c: replies.pop(0)):
+            with unittest.mock.patch.object(phone, "start_kdeconnectd",
+                                            return_value="/usr/lib/kdeconnectd"):
+                found = phone.wake_kdeconnect(settle=0)
+        self.assertEqual(found, ["Pixel 9 Pro"])
+        self.assertEqual(replies, [], "it did not ask a second time")
 
     def test_waking_it_asks_something_that_changes_nothing(self):
         # Any call starts an activatable service, so the cheapest harmless
