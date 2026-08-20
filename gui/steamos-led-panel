@@ -934,7 +934,7 @@ class Popup:
         # somebody else's window.
         window.bind("<FocusOut>", lambda _e: self._left())
         self._watching = button.winfo_toplevel()
-        self._watching.bind("<FocusOut>", self._elsewhere, add="+")
+        self._watching.bind("<FocusOut>", lambda _e: self._left(), add="+")
         self._watching.bind("<Unmap>", lambda _e: self.close(), add="+")
         window.bind("<Up>", lambda _e: self._step(-1))
         window.bind("<Down>", lambda _e: self._step(1))
@@ -955,7 +955,15 @@ class Popup:
     # instead: see Panel._panel_click.
 
     def _left(self):
-        """The list lost the focus: gone, unless it went to our own window."""
+        """The focus moved: gone, unless it stayed in this application.
+
+        Never asked straight away, on either of the two bindings that get
+        here. A focus change arrives as it starts, and asking then can catch
+        the moment when the old window has let go and the new one has not yet
+        taken hold - which is exactly what pressing a second field while the
+        first list is open looks like. One turn of the idle loop later the
+        answer is settled.
+        """
         self.window.after_idle(self._elsewhere)
 
     def _elsewhere(self, _event=None):
@@ -966,22 +974,33 @@ class Popup:
             self.close()                        # focus is somewhere we cannot see
 
     def _place(self, button):
-        """Below the field, and lined up so the chosen row sits on it.
+        """Under the field, its top edge on the field's bottom one.
 
-        Which is how every other drop-down on this desktop opens: the one you
-        are on does not move, and the rest unfolds around it.
+        It used to open *over* the field, lined up so the chosen row covered
+        it - which is what a menu button does, and what several desktops do.
+        It also means the list lands in a different place depending on which
+        entry you happen to be on, and covers the thing you just pressed. Under
+        it, the field stays visible and the list is always in the same place.
+
+        Upwards instead when there is no room below, which is the one case
+        where a list that insisted on opening downwards would run off the
+        screen or be clamped back over the field it came from.
         """
         window = self.window
         window.update_idletasks()
         height = window.winfo_reqheight()
         width = max(button.winfo_width(), window.winfo_reqwidth())
-        step = self.rows[0][0].winfo_reqheight() if self.rows else 0
-        chosen = [index for index, (_row, label, _value) in enumerate(self.rows)
-                  if label == self.variable.get()]
+
         left = button.winfo_rootx()
-        top = button.winfo_rooty() - (chosen[0] * step if chosen else 0) - 1
-        # Never off the bottom or the top of the screen.
-        top = max(0, min(top, window.winfo_screenheight() - height))
+        below = button.winfo_rooty() + button.winfo_height()
+        if below + height <= window.winfo_screenheight():
+            top = below
+        else:
+            # Above, sitting on the field's top edge; and if it does not fit
+            # there either - a list longer than the screen - as far down as it
+            # can go, which is what the clamp does.
+            top = max(0, min(button.winfo_rooty() - height,
+                             window.winfo_screenheight() - height))
         left = max(0, min(left, window.winfo_screenwidth() - width))
         window.geometry("%dx%d+%d+%d" % (width, height, left, top))
 

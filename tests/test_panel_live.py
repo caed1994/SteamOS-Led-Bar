@@ -454,6 +454,53 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         return self.panel._popup
 
+    def test_a_list_opens_under_the_field_and_not_over_it(self):
+        # It used to open over the field, lined up so the row you were on
+        # covered it. That put the list somewhere different depending on which
+        # entry was chosen, and hid the thing you had just pressed.
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        field = self.panel._widgets["ACHIEVEMENT_COLOR"]
+        self.assertEqual(popup.window.winfo_rooty(),
+                         field.winfo_rooty() + field.winfo_height())
+        self.assertEqual(popup.window.winfo_rootx(), field.winfo_rootx())
+        popup.close()
+
+    def test_it_opens_in_the_same_place_whatever_is_chosen(self):
+        # The property the old placement did not have, and the reason this
+        # one is worth a test of its own.
+        variable = self.panel.vars["ACHIEVEMENT_COLOR"][0]
+        seen = set()
+        for label, _value in self.panel._menus["ACHIEVEMENT_COLOR"][:4]:
+            variable.set(label)
+            popup = self._drop("ACHIEVEMENT_COLOR")
+            seen.add(popup.window.winfo_rooty())
+            popup.close()
+            self.root.update()
+        self.assertEqual(len(seen), 1, seen)
+
+    def test_a_list_with_no_room_below_opens_upwards(self):
+        # Rather than off the bottom of the screen, or clamped back over the
+        # field it came from.
+        #
+        # The window is moved first and the list opened after: moving it while
+        # a list is open is a focus change, and a focus change is what takes a
+        # list down.
+        screen = self.root.winfo_screenheight()
+        self.root.geometry("+0+%d" % max(0, screen - 120))
+        self.root.update()
+
+        popup = self._drop("ACHIEVEMENT_COLOR")
+        field = self.panel._widgets["ACHIEVEMENT_COLOR"]
+        top = popup.window.winfo_rooty()
+        self.assertGreater(field.winfo_rooty() + field.winfo_height() +
+                           popup.window.winfo_height(), screen,
+                           "the field is not near enough the bottom to test")
+        self.assertLessEqual(top + popup.window.winfo_height(), screen,
+                             "it ran off the screen")
+        self.assertLessEqual(top, field.winfo_rooty(),
+                             "there was no room below, so it should go above")
+        popup.close()
+
     def test_a_drop_down_opens_a_list_of_what_it_offers(self):
         popup = self._drop("ACHIEVEMENT_COLOR")
         self.assertIsNotNone(popup)
