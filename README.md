@@ -372,15 +372,20 @@ echo alternate:achievement > /run/steamos-led-serial/notify
 steamos-led-serial --notify comet:#1a9fff
 ```
 
-A trigger may also say what makes it distinct, after an `@`. Nothing about the
-flash changes &mdash; it is only what `NOTIFY_REPEAT_GAP` is keyed on, so that
-two different messages are two flashes where two copies of one message are
-still one:
+A trigger may also say who it is from, after an `@`. Nothing about the flash
+changes &mdash; it is only what `NOTIFY_REPEAT_GAP` is keyed on, so that two
+people writing are two flashes where one person writing ten times is one:
 
 ```bash
-echo 'phone@anna-1' > /run/steamos-led-serial/notify
-echo 'phone@anna-2' > /run/steamos-led-serial/notify   # flashes again
+echo 'phone@anna' > /run/steamos-led-serial/notify
+echo 'phone@anna' > /run/steamos-led-serial/notify   # inside the gap: quiet
+echo 'phone@bob'  > /run/steamos-led-serial/notify   # somebody else: flashes
 ```
+
+The phone bridge tags every notification with its app and title &mdash; the
+conversation it belongs to &mdash; so a burst from one person is a single
+flash and somebody else reaching you in the same few seconds still gets
+through.
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
@@ -391,7 +396,7 @@ echo 'phone@anna-2' > /run/steamos-led-serial/notify   # flashes again
 | `NOTIFY_PHONE` | `0` | watch the phone's notifications - see [Your phone](#your-phone) for the rest |
 | `NOTIFY_WARNING` | `1` | watch every sensor for overheating |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
-| `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again. "The same" means the same `@` tag where a trigger carries one |
+| `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again. "The same" means the same `@` tag where a trigger carries one &mdash; for the phone, the same conversation |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | default shape |
 | `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` / `PHONE_COLOR` | `#ffff00` / `#8000ff` / `#00ff00` / `#00ffff` | what each one flashes. The panel offers eight hues and white; the file takes any colour |

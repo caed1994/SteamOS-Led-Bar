@@ -526,25 +526,39 @@ def trigger_for(sighting, rules, kind=notify.KIND_PHONE, listed_only=False):
         trigger = "%s%s%s" % (rule.style, FIELD_SEPARATOR, rule.color)
     else:
         trigger = rule.color
-    return trigger + notify.TAG_SEPARATOR + fingerprint(sighting)
+    return trigger + notify.TAG_SEPARATOR + whose(sighting)
 
 
 def fingerprint(sighting):
-    """What tells this notification from the last one, in a few characters.
-
-    The service will not flash the same trigger twice within its repeat gap,
-    and that is right - an app posting the same notification again has not
-    said anything new. But every phone notification is the word "phone", or
-    one colour if the app has a rule, so without something to tell them apart
-    the second message of a conversation was dropped as a repeat of the
-    first, and a WhatsApp message and a Signal one seconds apart collided.
+    """Everything about a notification, for "has this one changed at all".
 
     App, title and text, because those are what change when there is
-    something new to say. A notification quietly re-posted unchanged - which
-    is what the gap exists for - still comes out the same and is still only
-    one flash.
+    something new to say. Used by the bridge to tell a notification that was
+    re-announced because its neighbours moved from one that is actually
+    carrying a new message.
     """
-    said = "\\0".join((sighting.app, sighting.title, sighting.body))
+    return _digest(sighting.app, sighting.title, sighting.body)
+
+
+def whose(sighting):
+    """Who this is from, for the service's repeat gap to be keyed on.
+
+    The app and the title, which together are the conversation - not the
+    text, which is the message. That difference is the whole of it: the gap
+    exists so that somebody typing at you once a second does not hold the
+    bar, and keying it on the text made every message its own conversation,
+    so a burst of twenty flashed twenty times.
+
+    Not the trigger word either, which is what it used to be. Everything the
+    phone sends is the word "phone", so that made all of it one conversation
+    - a WhatsApp message and a Signal one seconds apart were a single flash.
+    Between those two mistakes is the thing worth keying on: who is talking.
+    """
+    return _digest(sighting.app, sighting.title)
+
+
+def _digest(*parts):
+    said = "\0".join(parts)
     return hashlib.sha1(said.encode("utf-8", "replace")).hexdigest()[:TAG_LENGTH]
 
 

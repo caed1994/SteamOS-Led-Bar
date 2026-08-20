@@ -500,22 +500,29 @@ class TriggerTest(unittest.TestCase):
         self.assertEqual(self._trigger("WhatsApp", listed_only=True),
                          "double_flash:#25d366")
 
-    def test_two_messages_from_one_app_are_two_flashes(self):
-        """Reported: only the first message of a conversation ever showed.
+    def test_a_burst_from_one_person_is_one_flash(self):
+        """What the repeat gap is for, keyed on who is talking.
 
-        The service will not flash the same trigger twice inside its repeat
-        gap, and everything the phone sends is the word "phone" - so the
-        second message was dropped as a repeat of the first, and stayed
-        dropped until the notification was cleared on the machine.
+        Keyed on the message instead, every message was its own conversation
+        and a burst of twenty flashed twenty times - which is the opposite
+        mistake to the one before it, where everything the phone sent was the
+        word "phone" and the whole of it was one conversation.
         """
         said = [phone.trigger_for(
-            phone.Sighting("Notification Test", "kekxnejd", body), ())
-            for body in ("fincu", "finctjfh", "finctjfhruxbfk")]
-        self.assertEqual(len(set(said)), 3, said)
-        # And all three still name the same kind, so the panel's colour and
-        # shape go on applying to every one of them.
-        for one in said:
-            self.assertEqual(notify.split_tag(one)[1], notify.KIND_PHONE)
+            phone.Sighting("WhatsApp", "Anna", body), ())
+            for body in ("eins", "zwei", "drei")]
+        self.assertEqual(len(set(said)), 1, said)
+        # And it still names the kind, so the panel's colour and shape go on
+        # applying to every one of them.
+        self.assertEqual(notify.split_tag(said[0])[1], notify.KIND_PHONE)
+
+    def test_somebody_else_writing_is_not_that_burst(self):
+        # Another person, or another app: different news, and a gap that
+        # swallowed it would be a gap that hides your messages.
+        anna = phone.trigger_for(phone.Sighting("WhatsApp", "Anna", "hi"), ())
+        bob = phone.trigger_for(phone.Sighting("WhatsApp", "Bob", "hi"), ())
+        signal = phone.trigger_for(phone.Sighting("Signal", "Anna", "hi"), ())
+        self.assertEqual(len({anna, bob, signal}), 3)
 
     def test_two_apps_seconds_apart_do_not_collide_either(self):
         # The same bug, and the one nobody would have noticed as a bug: a
@@ -535,18 +542,28 @@ class TriggerTest(unittest.TestCase):
     def test_the_overlay_keeps_them_apart_for_real(self):
         """The two ends of it, checked against each other.
 
-        A digest the service ignored would be a fix that changed nothing,
-        and this is the assertion that would have caught the bug.
+        A tag the service ignored would be a fix that changed nothing, and
+        this is the assertion that would have caught either mistake.
         """
         overlay = notify.NotificationOverlay(duration=3.5, led_count=17,
                                              repeat_gap=10)
         shown = []
-        for at, body in ((0.0, "fincu"), (2.0, "finctjfh"), (4.0, "later")):
-            trigger = phone.trigger_for(
-                phone.Sighting("Notification Test", "kekxnejd", body), ())
+
+        def told(at, app, who, text):
+            trigger = phone.trigger_for(phone.Sighting(app, who, text), ())
             shown.append(overlay.trigger(trigger, at))
             overlay.frame(at)
-        self.assertEqual(shown, [True, True, True])
+
+        # Ten in five seconds from one person: one flash. Two other people
+        # inside the same window: theirs get through.
+        for index in range(10):
+            told(index * 0.5, "WhatsApp", "Anna", "spam %d" % index)
+        told(2.0, "WhatsApp", "Bob", "hallo")
+        told(2.5, "Signal", "Chris", "hey")
+        # And once the gap has run out, she can reach you again.
+        told(20.0, "WhatsApp", "Anna", "noch da?")
+
+        self.assertEqual(shown, [True] + [False] * 9 + [True, True, True])
 
         # And the other way round: one notification posted three times over
         # is one flash, which is the behaviour this must not have broken.
@@ -768,7 +785,11 @@ class BridgeTest(unittest.TestCase):
         bridge, sent = self._conversation(
             ["rjxhenfbg", "zweite", "dritte", "vierte", "fuenfte", "sechste"])
         self.assertEqual(bridge.flashed, 6)
-        self.assertEqual(len(set(sent)), 6, sent)
+        # All six reach the pipe. They carry the same tag because they are
+        # one conversation, and what to do about that is the service's
+        # business - see the repeat gap. The bug was that five of them never
+        # got this far at all.
+        self.assertEqual(len(set(sent)), 1, sent)
 
     def test_the_same_notification_saying_the_same_thing_is_not(self):
         # A notification is announced again when its neighbours change. The
