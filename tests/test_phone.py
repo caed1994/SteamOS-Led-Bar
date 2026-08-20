@@ -57,6 +57,14 @@ COUNTED_LINE = ("/modules/kdeconnect/devices/d33f/notifications: "
                 "org.kde.kdeconnect.device.notifications.notificationPosted "
                 "('3',)")
 
+# And the third shape, which is the one that carries a conversation: the
+# signal arrives on the notification's own object, with no arguments at all.
+# Recorded from a Steam Deck.
+READY_PATH = ("/modules/kdeconnect/devices/"
+              "1506bc06374045619d0548f48af0c3c8/notifications/6")
+READY_LINE = ("%s: org.kde.kdeconnect.device.notifications.notification.ready "
+              "()" % READY_PATH)
+
 COUNTED_DETAILS = (
     "({'id': <'3'>, 'appName': <'WhatsApp'>, 'ticker': <'Anna: bist du da?'>,"
     " 'title': <'Anna'>, 'text': <'bist du da?'>, 'dismissable': <true>,"
@@ -132,6 +140,27 @@ class ReadingTheBusTest(unittest.TestCase):
             line = COUNTED_LINE.replace("notificationPosted", member)
             self.assertIsNone(phone.read_line(line, phone.SOURCE_KDECONNECT),
                               member)
+
+    def test_a_notification_saying_it_is_ready_is_that_notification(self):
+        """Recorded from a Steam Deck, and the plainest of the three shapes.
+
+        The signal arrives on the notification's own object -
+        ".../notifications/6" - so there is no id to read and nothing to
+        remember: what it is about is where it came from. This is the one
+        that carries the second message of a conversation, which is why six
+        messages had been coming out as one line.
+        """
+        seen = phone.read_line(READY_LINE, phone.SOURCE_KDECONNECT)
+        self.assertIsNotNone(seen)
+        self.assertEqual(seen.where, READY_PATH)
+        self.assertEqual(seen.app, "", "the object has to be asked")
+
+    def test_the_same_signal_elsewhere_is_not_a_notification(self):
+        # "ready" is not a rare name, and KDE Connect has more objects than
+        # notifications. The path is what tells them apart.
+        line = ("/modules/kdeconnect/devices/1506bc: "
+                "org.kde.kdeconnect.device.ready ()")
+        self.assertIsNone(phone.read_line(line, phone.SOURCE_KDECONNECT))
 
     def test_the_name_of_a_signal_can_be_read_off_a_line(self):
         self.assertEqual(phone.member_of(COUNTED_LINE), "notificationPosted")
@@ -709,54 +738,55 @@ class BridgeTest(unittest.TestCase):
         self.assertGreater(phone.TICK_SECONDS, 0)
 
     def _conversation(self, bodies):
-        """One notification whose text keeps changing, as a phone sends it.
+        """Six messages in one conversation, the way a phone really sends it.
 
-        The first message is posted; every one after it is the same
-        notification with new words in it, announced as "refreshed".
+        The first is posted; each one after it arrives as "ready" on a
+        notification object of its own. Recorded rather than invented - this
+        is the shape that had six messages coming out as one line.
         """
-        posted = COUNTED_LINE
-        refresh = ("/modules/kdeconnect/devices/d33f/notifications: "
-                   "org.kde.kdeconnect.device.notifications.refreshed ()")
-        saying = {"body": bodies[0]}
+        saying = {}
         sent = []
         bridge = phone.Bridge(
             phone.SOURCE_KDECONNECT, (), send=sent.append,
             details=lambda seen: phone.Sighting(
-                "Notification Test", "ufnrhd", saying["body"],
-                where=seen.where))
-        bridge.line(posted)
-        for body in bodies[1:]:
-            saying["body"] = body
-            bridge.line(refresh)
+                "Notification Test", "ufnrhdhgkfihh",
+                saying[seen.where], where=seen.where))
+
+        for index, body in enumerate(bodies):
+            where = "%s/%d" % (READY_PATH.rsplit("/", 1)[0], index)
+            saying[where] = body
+            bridge.line("%s: org.kde.kdeconnect.device.notifications."
+                        "notification.ready ()" % where)
         return bridge, sent
 
-    def test_a_refreshed_notification_is_re_read_for_what_changed(self):
+    def test_every_message_of_a_conversation_is_its_own_flash(self):
         """The last layer of the reported bug, and the measured shape of it.
 
-        This KDE Connect announces a changed notification as "refreshed",
-        which says that something moved and not what - so six messages in one
-        conversation came out as one line in the dry run. The notification
-        keeps the object it always had, though, so the objects lately seen
-        are what get asked.
+        Six messages came out as one line in the dry run, three times over,
+        because the signal that carries the second one was being passed over.
         """
         bridge, sent = self._conversation(
             ["rjxhenfbg", "zweite", "dritte", "vierte", "fuenfte", "sechste"])
         self.assertEqual(bridge.flashed, 6)
         self.assertEqual(len(set(sent)), 6, sent)
 
-    def test_a_refresh_with_nothing_new_in_it_is_not_a_message(self):
-        # Something else on the phone moved. The service would drop it as a
-        # repeat anyway, but a dry run printing a line for it would be
-        # describing an event that did not happen.
-        bridge, sent = self._conversation(["one", "one", "one"])
+    def test_the_same_notification_saying_the_same_thing_is_not(self):
+        # A notification is announced again when its neighbours change. The
+        # service would drop it as a repeat anyway, but a dry run printing a
+        # line for it would be describing an event that did not happen.
+        bridge, sent = self._conversation(["one"])
+        for _ in range(4):
+            bridge.line(READY_LINE.replace("/6:", "/0:"))
         self.assertEqual(bridge.flashed, 1, sent)
 
     def test_only_so_many_notifications_are_kept_to_re_read(self):
         # A phone left alone for a day should not leave a list of everything
         # it ever sent, and only the recent ones can still say anything new.
-        bridge, _sent = self._conversation(["a", "b", "c"])
-        for index in range(phone.RECENT_NOTIFICATIONS * 2):
-            bridge.line(COUNTED_LINE.replace("('3',)", "('%d',)" % index))
+        bridge, _sent = self._conversation(
+            ["message %d" % index
+             for index in range(phone.RECENT_NOTIFICATIONS * 2)])
+        self.assertEqual(bridge.flashed, phone.RECENT_NOTIFICATIONS * 2,
+                         "every one of them should still have flashed")
         self.assertLessEqual(len(bridge.recent), phone.RECENT_NOTIFICATIONS)
 
     def test_the_dry_run_names_a_signal_it_did_not_act_on(self):

@@ -70,6 +70,14 @@ KDECONNECT_GONE = ("notificationRemoved", "allNotificationsRemoved")
 # conversation - the notification keeps the object it always had and only its
 # text moves, so the answer is to re-read the objects lately seen.
 KDECONNECT_REFRESH = ("refreshed",)
+# And what one notification says on its own object when it has something to
+# show. Measured on a Steam Deck, and the plainest of the three: the signal
+# arrives on ".../notifications/6", so the notification it is about is the
+# object it came from - nothing has to be looked up or remembered.
+KDECONNECT_ON_OBJECT = ("ready",)
+# What such an object's path looks like, so a signal of the same name from
+# somewhere else in KDE Connect is not read as a notification.
+NOTIFICATION_PATH = "/notifications/"
 DESKTOP_MEMBER = "Notify"
 
 # One notification, as an object of its own. KDE Connect's signal carries only
@@ -330,6 +338,13 @@ def read_line(line, source):
     and the notification services carry traffic of their own.
     """
     if source == SOURCE_KDECONNECT:
+        if member_of(line) in KDECONNECT_ON_OBJECT:
+            where = line.split(":", 1)[0].strip()
+            if NOTIFICATION_PATH not in where:
+                return None             # some other part of KDE Connect
+            # No id to read: the object it arrived on is the notification,
+            # and everything about it is a property of that object.
+            return Sighting("", where=where)
         arguments = None
         for member in KDECONNECT_MEMBERS:
             arguments = _arguments(line, member)
@@ -598,16 +613,9 @@ class Bridge:
         if self.details is None:
             return None
         written = None
-        for where, said in list(self.recent.items()):
+        for where in list(self.recent):
             fresh = self.details(Sighting("", where=where))
             if fresh is None or not fresh.app:
-                continue
-            if fingerprint(fresh) == said:
-                # The notification is still saying what it said last time.
-                # Something else on that phone moved, and the service would
-                # drop this as a repeat anyway - but a dry run that printed a
-                # line for it would be describing an event that did not
-                # happen.
                 continue
             written = self._handle(fresh) or written
         return written
@@ -616,7 +624,19 @@ class Bridge:
         """One notification, however it came to light."""
         if sighting.where and self.details is not None and not sighting.title:
             sighting = self.details(sighting)
+        if sighting.where and not sighting.app:
+            # Asked about, and it had nothing to say - dismissed on the phone
+            # between the signal and the question, most likely. Not a
+            # notification, so not a line in the dry run either.
+            return None
         if sighting.where:
+            if self.recent.get(sighting.where) == fingerprint(sighting):
+                # Still saying what it said last time. Something else on the
+                # phone moved: the same notification is announced again when
+                # its neighbours change, and the service would drop this as a
+                # repeat anyway - but a dry run printing a line for it would
+                # be describing an event that did not happen.
+                return None
             self._remember(sighting)
         self.seen += 1
         trigger = trigger_for(sighting, self.rules, self.kind,
