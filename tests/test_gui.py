@@ -12,9 +12,11 @@ import ast
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
@@ -144,6 +146,29 @@ class LingeringTest(unittest.TestCase):
         probe.linger = False
         broken = ledpanel.broken(ledpanel.run_checks(probe=probe))[0]
         self.assertIn("enable-linger", broken.detail)
+
+    def test_the_question_names_the_user_it_is_about(self):
+        """Reported: the panel said no where the terminal said yes.
+
+        `loginctl show-user --property=Linger` without a user answers about
+        something else and never mentions Linger, which reads here as "no" -
+        and the machine it was wrong about was one where lingering was on.
+        """
+        seen = {}
+
+        def remember(command, **kwargs):
+            seen["command"] = command
+            return subprocess.CompletedProcess(command, 0, "Linger=yes\n", "")
+
+        with unittest.mock.patch.object(ledpanel.subprocess, "run", remember):
+            self.assertTrue(ledpanel.Probe().lingering())
+        self.assertEqual(seen["command"][:2], ["loginctl", "show-user"])
+        self.assertIn(str(os.getuid()), seen["command"])
+
+    def test_a_machine_without_loginctl_is_not_lingering(self):
+        with unittest.mock.patch.object(ledpanel.subprocess, "run",
+                                        side_effect=OSError):
+            self.assertFalse(ledpanel.Probe().lingering())
 
     def test_the_installer_turns_it_on(self):
         with open(os.path.join(HERE, "..", "install.sh")) as handle:

@@ -91,10 +91,14 @@ class Probe:
         Without it, switching to Game Mode ends the session and every user
         service goes with it - including the two this project installs, both
         of which are written to survive exactly that.
+
+        Asked about a *particular* user, by number. Without one loginctl
+        answers about something else entirely and never mentions Linger at
+        all - so this reported "no" on a machine where the same question,
+        asked with the user named, said yes.
         """
-        command = ["loginctl", "show-user", "--property=Linger"]
-        if user:
-            command.append(user)
+        who = str(os.getuid() if user is None else user)
+        command = ["loginctl", "show-user", who, "--property=Linger"]
         try:
             done = subprocess.run(command, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, text=True)
