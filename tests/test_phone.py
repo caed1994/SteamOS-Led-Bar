@@ -439,6 +439,57 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(asked, [])
         self.assertEqual(bridge.flashed, 3)
 
+    def test_it_looks_up_from_the_stream_between_lines(self):
+        """Because a quiet phone sends nothing for hours.
+
+        A loop that only wakes on a line never wakes at all, and this is the
+        process that has to notice KDE Connect going away underneath it -
+        which is what Game Mode looks like from here, the session it started
+        in having been replaced.
+        """
+        import os
+
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, (DESKTOP_LINES[2] + "\n").encode())
+        stream = os.fdopen(read_fd)
+        self.addCleanup(stream.close)
+        self.addCleanup(os.close, write_fd)
+
+        # The line first, then nothing - so the read succeeds once and then
+        # times out, which is the silence being tested. Ended by the tick
+        # itself rather than by closing the pipe, so it cannot hang.
+        ticks = []
+
+        def tick():
+            ticks.append(1)
+            if len(ticks) >= 3:
+                raise KeyboardInterrupt
+
+        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
+                              send=self.sent.append)
+        with self.assertRaises(KeyboardInterrupt):
+            bridge.watch(stream, tick, every=0.01)
+        self.assertEqual(bridge.flashed, 1, "the line was missed")
+        self.assertEqual(len(ticks), 3)
+
+    def test_a_monitor_that_ends_ends_the_watch(self):
+        # The bus going away with the session, which is the other thing that
+        # can happen while nothing is being said.
+        import os
+
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        stream = os.fdopen(read_fd)
+        self.addCleanup(stream.close)
+        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
+                              send=self.sent.append)
+        self.assertIs(bridge.watch(stream, every=0.01), bridge)
+
+    def test_the_interval_is_read_when_it_is_used(self):
+        # It was a default argument, which binds once at import - so a test
+        # could not shorten it, and neither could anything else.
+        self.assertGreater(phone.TICK_SECONDS, 0)
+
     def test_a_notification_describes_itself_for_the_dry_run(self):
         seen = phone.read_line(DESKTOP_LINES[2], phone.SOURCE_DESKTOP)
         self.assertEqual(seen.describe(), "WhatsApp: Anna - Bist du da?")

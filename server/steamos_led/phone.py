@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import select
 import subprocess
 
 from . import notify
@@ -68,6 +69,12 @@ DESKTOP_BODY = 4
 # is what anybody writes there anyway, and the validator says so plainly.
 RULE_SEPARATOR = ","
 FIELD_SEPARATOR = ":"
+
+# How often to look up from the stream and check that KDE Connect is still
+# there. Long, because it is one cheap call and nothing depends on noticing
+# quickly - but not never, which is what checking only at startup amounts to
+# for a process built to outlive the session it started in.
+TICK_SECONDS = 60.0
 
 
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
@@ -489,6 +496,32 @@ class Bridge:
         for text in lines:
             self.line(text.rstrip("\n"))
         return self
+
+    def watch(self, stream, tick=None, every=None):
+        """Read a monitor's output, and let something happen between lines.
+
+        A phone that is quiet sends nothing for hours, so a loop that only
+        wakes on a line never wakes at all - and this is the process that has
+        to notice KDE Connect going away underneath it. Hence the timeout:
+        every so often the read gives up for a moment and `tick` runs.
+
+        select() rather than a thread. There is one thing to wait on and one
+        thing to do about it, and a thread would need a way to be stopped
+        that this loop already has by ending.
+        """
+        # Read when it is called rather than when this was defined, so the
+        # interval is one a test can shorten.
+        every = TICK_SECONDS if every is None else every
+        while True:
+            ready, _write, _bad = select.select([stream], [], [], every)
+            if not ready:
+                if tick is not None:
+                    tick()
+                continue
+            text = stream.readline()
+            if not text:
+                return self                     # the monitor ended
+            self.line(text.rstrip("\n"))
 
 
 def obstacles(notify_on, phone_on, fifo_ready):

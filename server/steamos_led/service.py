@@ -1120,8 +1120,33 @@ def run_watch_phone(config, print_only=False):
         print("cannot start gdbus: %s" % exc, file=sys.stderr, flush=True)
         return MONITOR_MISSING_EXIT
 
+    known = [woken]
+
+    def look_again():
+        """Every so often: is KDE Connect still there, and still paired?
+
+        Because this process is built to outlive the session it started in.
+        Checking once at startup says nothing about what happens twenty
+        minutes later in Game Mode - and asking is also what starts KDE
+        Connect again if it has gone away, the bus activating it exactly as
+        it did the first time.
+        """
+        now = phone.wake_kdeconnect()
+        if now == known[0]:
+            return
+        known[0] = now
+        if now is None:
+            LOG.warning("KDE Connect has stopped answering")
+        elif not now:
+            LOG.warning("KDE Connect is no longer paired with any phone")
+        else:
+            LOG.info("KDE Connect is paired with: %s", ", ".join(now))
+
     try:
-        bridge.run(monitor.stdout)
+        if source == phone.SOURCE_KDECONNECT:
+            bridge.watch(monitor.stdout, look_again)
+        else:
+            bridge.run(monitor.stdout)
     except KeyboardInterrupt:
         pass
     finally:
