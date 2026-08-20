@@ -110,6 +110,34 @@ class ReadingTheBusTest(unittest.TestCase):
         for seen in self._sightings(DESKTOP_LINES, phone.SOURCE_DESKTOP):
             self.assertEqual(seen.where, "")
 
+    def test_a_notification_being_updated_is_a_new_message(self):
+        """Reported, and the last of this bug's three layers.
+
+        Android does not post a second notification for the second message of
+        a conversation - it updates the first. Listening only for "posted"
+        meant one flash per conversation and nothing again until it was
+        cleared off the machine, at which point the next message counted as
+        new. The dry run showed one line where six messages had been sent.
+        """
+        updated = COUNTED_LINE.replace("notificationPosted",
+                                       "notificationUpdated")
+        seen = phone.read_line(updated, phone.SOURCE_KDECONNECT)
+        self.assertIsNotNone(seen)
+        self.assertEqual(seen.where,
+                         "/modules/kdeconnect/devices/d33f/notifications/3")
+
+    def test_a_notification_going_away_is_still_not_one(self):
+        # Both spellings of it: one notification dismissed, or the lot.
+        for member in phone.KDECONNECT_GONE:
+            line = COUNTED_LINE.replace("notificationPosted", member)
+            self.assertIsNone(phone.read_line(line, phone.SOURCE_KDECONNECT),
+                              member)
+
+    def test_the_name_of_a_signal_can_be_read_off_a_line(self):
+        self.assertEqual(phone.member_of(COUNTED_LINE), "notificationPosted")
+        self.assertEqual(phone.member_of("Monitoring signals from all"), "")
+        self.assertEqual(phone.member_of(""), "")
+
     def test_the_two_sources_do_not_read_each_other_s_lines(self):
         self.assertEqual(self._sightings(KDECONNECT_LINES,
                                          phone.SOURCE_DESKTOP), [])
@@ -679,6 +707,41 @@ class BridgeTest(unittest.TestCase):
         # It was a default argument, which binds once at import - so a test
         # could not shorten it, and neither could anything else.
         self.assertGreater(phone.TICK_SECONDS, 0)
+
+    def test_the_dry_run_names_a_signal_it_did_not_act_on(self):
+        """Because the names differ between KDE Connect versions.
+
+        A bridge that quietly ignores the one carrying the messages looks
+        exactly like a phone that has stopped sending them - which is how
+        this bug read for two rounds. Saying what was passed over turns the
+        next report into an answer.
+        """
+        odd = COUNTED_LINE.replace("notificationPosted", "notificationTicker")
+        told = []
+        bridge = phone.Bridge(phone.SOURCE_KDECONNECT, (), send=None,
+                              report=lambda seen, _t: told.append(seen.app))
+        bridge.run([odd, odd, odd])
+        self.assertEqual(told, ["(not acted on: notificationTicker)"],
+                         "said once, not once a line")
+
+    def test_the_ones_it_knows_about_are_not_worth_mentioning(self):
+        # Arrivals are acted on and removals are meant to be ignored; neither
+        # is news, and a dry run full of them would bury the notifications.
+        told = []
+        bridge = phone.Bridge(phone.SOURCE_KDECONNECT, (), send=None,
+                              details=lambda seen: seen,
+                              report=lambda seen, _t: told.append(seen.app))
+        bridge.run([COUNTED_LINE.replace("notificationPosted", member)
+                    for member in phone.KDECONNECT_GONE])
+        self.assertEqual(told, [])
+
+    def test_nothing_is_said_about_it_outside_a_dry_run(self):
+        # The journal is for what happened, not for a survey of the bus.
+        odd = COUNTED_LINE.replace("notificationPosted", "notificationTicker")
+        bridge = phone.Bridge(phone.SOURCE_KDECONNECT, (),
+                              send=self.sent.append)
+        bridge.run([odd])
+        self.assertEqual(self.sent, [])
 
     def test_a_notification_describes_itself_for_the_dry_run(self):
         seen = phone.read_line(DESKTOP_LINES[2], phone.SOURCE_DESKTOP)

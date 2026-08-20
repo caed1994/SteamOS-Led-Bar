@@ -514,7 +514,10 @@ steamos-led-serial --watch-phone --print
 
 As yourself, not with `sudo`: the notifications are on your session bus and
 root cannot read it. That flashes nothing. It reports every notification it sees, what your machine
-calls the app it came from, and what it would have flashed &mdash; which is how
+calls the app it came from, what it would have flashed, and any signal on the
+bus it did *not* act on &mdash; the names differ between KDE Connect versions,
+and a bridge quietly ignoring the one that carries your messages looks exactly
+like a phone that has stopped sending them &mdash; which is how
 you find the names to write rules with:
 
 ```

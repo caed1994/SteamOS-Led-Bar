@@ -52,9 +52,19 @@ SOURCES = (SOURCE_AUTO, SOURCE_KDECONNECT, SOURCE_DESKTOP)
 KDECONNECT_SERVICE = "org.kde.kdeconnect"
 DESKTOP_SERVICE = "org.freedesktop.Notifications"
 
-# The one member on each bus that means "a notification has just arrived".
-# Everything else on those services is somebody else's business.
-KDECONNECT_MEMBER = "notificationPosted"
+# What each bus says when there is a notification to look at. Everything else
+# on those services is somebody else's business.
+#
+# Two on KDE Connect's, because Android does not post a second notification
+# for the second message of a conversation - it updates the first. Listening
+# only for "posted" meant exactly one flash per conversation, and none again
+# until the notification was cleared off the machine, at which point the next
+# message was new again. Which is precisely what was reported.
+KDECONNECT_MEMBERS = ("notificationPosted", "notificationUpdated")
+# And what it says when one goes away, which is not an arrival: it arrives for
+# every notification dismissed on the phone, and flashing at those would light
+# the bar a second time for every message, as you picked the phone up.
+KDECONNECT_GONE = ("notificationRemoved", "allNotificationsRemoved")
 DESKTOP_MEMBER = "Notify"
 
 # One notification, as an object of its own. KDE Connect's signal carries only
@@ -310,7 +320,11 @@ def read_line(line, source):
     and the notification services carry traffic of their own.
     """
     if source == SOURCE_KDECONNECT:
-        arguments = _arguments(line, KDECONNECT_MEMBER)
+        arguments = None
+        for member in KDECONNECT_MEMBERS:
+            arguments = _arguments(line, member)
+            if arguments:
+                break
         if not arguments:
             return None
         key = _as_string(arguments[0])
@@ -335,6 +349,22 @@ def read_line(line, source):
     return Sighting(app,
                     _as_string(arguments[DESKTOP_SUMMARY]) or "",
                     _as_string(arguments[DESKTOP_BODY]) or "")
+
+
+def member_of(line):
+    """The signal's name, without its interface. "" if this is not one.
+
+    Only for saying what was passed over. The names differ between KDE
+    Connect versions, and a bridge that silently ignores the one carrying the
+    messages looks exactly like a phone that has stopped sending them - so
+    the dry run lists what it did not act on rather than leaving that to be
+    guessed at.
+    """
+    head, separator, rest = line.partition(": ")
+    if not separator or not head.startswith("/"):
+        return ""
+    name = rest.split("(")[0].strip()
+    return name.rsplit(".", 1)[-1] if "." in name else ""
 
 
 def _notification_path(line, key):
@@ -516,11 +546,15 @@ class Bridge:
         self.details = details
         self.seen = 0
         self.flashed = 0
+        # Signal names already mentioned, so a busy bus does not repeat one
+        # line a hundred times.
+        self.passed_over = set()
 
     def line(self, text):
         """Handle one line; returns the trigger written, if any."""
         sighting = read_line(text, self.source)
         if sighting is None:
+            self._passed_over(text)
             return None
         if sighting.where and self.details is not None:
             sighting = self.details(sighting)
@@ -541,6 +575,21 @@ class Bridge:
             return trigger
         self.flashed += 1
         return trigger
+
+    def _passed_over(self, text):
+        """Mention a signal this did not act on, once per name.
+
+        Only in a dry run - `report` is what a dry run sets - because this is
+        for finding out what a bus calls things, not for the journal.
+        """
+        if self.report is None or self.source != SOURCE_KDECONNECT:
+            return
+        member = member_of(text)
+        if (not member or member in KDECONNECT_MEMBERS
+                or member in KDECONNECT_GONE or member in self.passed_over):
+            return
+        self.passed_over.add(member)
+        self.report(Sighting("(not acted on: %s)" % member), None)
 
     def run(self, lines):
         for text in lines:
