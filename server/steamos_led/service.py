@@ -1052,9 +1052,16 @@ def run_watch_phone(config, print_only=False):
               flush=True)
         return NOTHING_TO_WATCH_EXIT
 
-    source = phone.pick_source(config["PHONE_SOURCE"], phone.bus_names())
+    source = phone.pick_source(config["PHONE_SOURCE"], phone.bus_names(),
+                               phone.bus_names(activatable=True))
     rules = phone.parse_rules(config["PHONE_APPS"])
     fifo = config["NOTIFY_FIFO"]
+
+    # Ask for KDE Connect before listening to it. A monitor attaches to a name
+    # rather than asking for it, so with nothing behind that name it waits in
+    # silence - which is what Game Mode looks like, there being no desktop
+    # session there to have started it.
+    woken = phone.wake_kdeconnect() if source == phone.SOURCE_KDECONNECT else None
 
     def report(sighting, trigger):
         print("  %-40s -> %s" % (sighting.describe(), trigger or "ignored"),
@@ -1078,6 +1085,13 @@ def run_watch_phone(config, print_only=False):
     print("Reading notifications from the %s bus%s" %
           (source, "" if config["PHONE_SOURCE"] != phone.SOURCE_AUTO
            else " (chosen automatically)"), flush=True)
+    if woken is False:
+        # Said rather than left to be inferred from nothing ever flashing.
+        # This is also the line to look for in the journal after a spell in
+        # Game Mode, where there is no terminal to watch it live.
+        print("  note: KDE Connect did not answer. It is what carries the "
+              "phone's notifications over, and in Game Mode nothing starts "
+              "it for you - check it in Desktop Mode first.", flush=True)
     if rules:
         print("Apps with a look of their own: %s"
               % ", ".join(rule.app for rule in rules), flush=True)

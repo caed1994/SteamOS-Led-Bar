@@ -204,6 +204,43 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(phone.pick_source(phone.SOURCE_AUTO, "('org.kde.kwin',)"),
                          phone.SOURCE_DESKTOP)
 
+    def test_a_kde_connect_that_is_only_activatable_still_counts(self):
+        """Which is the whole of Game Mode.
+
+        There is no desktop session there to autostart KDE Connect, so it is
+        not on the bus - but it is installed, the bus can start it, and one
+        call does. The other source cannot help there at all: it reads the
+        notification daemon, and Game Mode has not got one either.
+        """
+        running = "('org.freedesktop.DBus', 'org.freedesktop.systemd1')"
+        can_start = "('org.freedesktop.DBus', 'org.kde.kdeconnect')"
+        self.assertEqual(
+            phone.pick_source(phone.SOURCE_AUTO, running, can_start),
+            phone.SOURCE_KDECONNECT)
+
+    def test_with_neither_it_still_falls_back(self):
+        self.assertEqual(
+            phone.pick_source(phone.SOURCE_AUTO, "('org.kde.kwin',)", "()"),
+            phone.SOURCE_DESKTOP)
+
+    def test_the_two_questions_are_different_questions(self):
+        # Who is running, and who the bus would start if asked. Asking the
+        # first one twice would report Game Mode as having nothing at all.
+        running = phone.names_command()
+        startable = phone.names_command(activatable=True)
+        self.assertNotEqual(running, startable)
+        self.assertIn("org.freedesktop.DBus.ListNames", running)
+        self.assertIn("org.freedesktop.DBus.ListActivatableNames", startable)
+
+    def test_waking_it_asks_something_that_changes_nothing(self):
+        # Any call starts an activatable service, so the cheapest harmless
+        # one is the right one - this must never be a call that does
+        # something to somebody's phone.
+        command = phone.wake_command()
+        self.assertIn(phone.KDECONNECT_SERVICE, command)
+        self.assertTrue(any(part.endswith("deviceNames") for part in command),
+                        command)
+
     def test_naming_one_is_an_instruction_rather_than_a_suggestion(self):
         # Including the case where the other one is right there on the bus.
         names = "('org.kde.kdeconnect',)"

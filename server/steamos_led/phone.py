@@ -107,22 +107,49 @@ def monitor_command(source):
     return ["gdbus", "monitor", "--session", "--dest", service]
 
 
-def names_command():
-    """Ask the bus who is on it, to settle `auto`."""
+def names_command(activatable=False):
+    """Ask the bus who is on it, to settle `auto`.
+
+    Two questions, not one. ListNames is who is running; ListActivatableNames
+    is who the bus would start if somebody asked for them. The difference is
+    the whole of Game Mode: there is no Plasma there to autostart KDE
+    Connect, so it is not running - but it is still installed, still
+    activatable, and one call brings it up.
+    """
     return ["gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
-            "--object-path", "/org/freedesktop/DBus",
-            "--method", "org.freedesktop.DBus.ListNames"]
+            "--object-path", "/org/freedesktop/DBus", "--method",
+            "org.freedesktop.DBus.ListActivatableNames" if activatable
+            else "org.freedesktop.DBus.ListNames"]
 
 
-def pick_source(configured, names_text):
-    """Which bus to read, given the setting and who is on the bus.
+def wake_command():
+    """A harmless question, asked of KDE Connect to make the bus start it.
+
+    Any call to a name the bus can activate starts the service behind it, so
+    what the call actually asks does not matter - only that it is cheap and
+    cannot change anything. Listing the paired devices is both.
+    """
+    return ["gdbus", "call", "--session", "--dest", KDECONNECT_SERVICE,
+            "--object-path", "/modules/kdeconnect", "--method",
+            "org.kde.kdeconnect.daemon.deviceNames"]
+
+
+def pick_source(configured, names_text, activatable_text=""):
+    """Which bus to read, given the setting and what the bus can offer.
 
     Only `auto` looks: naming a source is an instruction, and answering it
     with the other one would be this deciding it knows better.
+
+    A KDE Connect that is merely activatable counts. It is the only one of
+    the two that can work outside a desktop session - the other reads the
+    notification daemon, and in Game Mode there is not one - so where it can
+    be had at all, it is the one to have.
     """
     if configured != SOURCE_AUTO:
         return configured
     if KDECONNECT_SERVICE in (names_text or ""):
+        return SOURCE_KDECONNECT
+    if KDECONNECT_SERVICE in (activatable_text or ""):
         return SOURCE_KDECONNECT
     return SOURCE_DESKTOP
 
@@ -496,9 +523,20 @@ def open_monitor(source):
                             stderr=subprocess.DEVNULL, text=True, bufsize=1)
 
 
-def bus_names():
+def bus_names(activatable=False):
     """Everything on the session bus, as one blob of text, or "" if unknown."""
-    return _ask(names_command())
+    return _ask(names_command(activatable))
+
+
+def wake_kdeconnect():
+    """Make sure KDE Connect is up, and say whether it answered.
+
+    Called before the monitor starts, because a monitor attaches to a name
+    rather than asking for it: with nothing running behind that name it would
+    sit there quietly forever. In a desktop session this finds it already up
+    and costs one call; in Game Mode it is what starts it.
+    """
+    return bool(_ask(wake_command()).strip())
 
 
 def look_up(sighting):

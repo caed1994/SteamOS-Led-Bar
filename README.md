@@ -574,8 +574,28 @@ steamos-led-serial --notify phone
 ```
 
 It needs `gdbus`, which comes with glib and is on any machine with a desktop;
-there is no D-Bus library to install. **Desktop Mode only for now** &mdash; the
-session bus is the desktop session's, and Game Mode does not start one.
+there is no D-Bus library to install.
+
+**Game Mode works too**, with one thing to know. The bridge is a user service
+that survives the switch, and the session bus belongs to your login rather
+than to Plasma, so both are still there. What is *not* there is anything to
+autostart KDE Connect &mdash; so the bridge asks the bus to start it, which
+works because KDE Connect can be activated on demand.
+
+That only holds for `PHONE_SOURCE=kdeconnect` (which `auto` picks whenever
+KDE Connect can be had at all). The `desktop` source reads the notification
+daemon, and Game Mode does not run one, so it can find nothing there however
+it is set. If Game Mode matters to you, leave the source alone.
+
+There is no terminal in Game Mode, so the bridge says what it found in the
+journal instead. After a session, back in Desktop Mode:
+
+```bash
+journalctl --user -u steamos-led-phone --since "1 hour ago"
+```
+
+A line saying KDE Connect did not answer is the one to look for: it means the
+bus could not start it, and it is worth checking in Desktop Mode first.
 
 ## The control panel
 
