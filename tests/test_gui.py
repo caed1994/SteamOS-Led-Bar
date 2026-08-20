@@ -1024,15 +1024,17 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_two_written_by_hand_are_left_out(self):
         """Absent on purpose, both of them, and for the same reason.
 
-        PHONE_APPS is a list you add rows to, which is a control this window
-        does not have. PHONE_SOURCE picks which bus to read: "auto" decides it
-        correctly, and anybody overriding that knows exactly why - it was one
-        more menu whose label could not explain itself, and it was asked about
-        the first time it was seen. Both stay settings of the file, where the
-        comments have room to say what they do.
+        PHONE_APPS gives one app a look of its own, which is a list you add
+        rows to - a control this window does not have. PHONE_APPS_ONLY
+        silences every app that list does not name, so on its own, with no
+        list written, it switches the phone off by another name: a label that
+        could not explain itself without describing a file you had to edit
+        elsewhere. Every phone notification looks the same from the window,
+        and both of these stay settings of the file, where the comments have
+        room to say what they do.
         """
         shown = self._settings()
-        for key in ("PHONE_APPS", "PHONE_SOURCE"):
+        for key in ("PHONE_APPS", "PHONE_APPS_ONLY"):
             self.assertIn(key, config_module.DEFAULTS, key)
             self.assertNotIn(key, shown, key)
 

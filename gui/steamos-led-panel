@@ -149,14 +149,15 @@ NOTIFICATIONS = [
          "always red, in the alarm shape", None, None),
     ]),
     ("From your phone", [
+        # One row, and on purpose: every notification the phone sends flashes
+        # the same, and that is the whole of the setting. PHONE_APPS gives an
+        # app a look of its own and PHONE_APPS_ONLY silences the rest, but
+        # both are lists you write by hand, and a switch here that only meant
+        # something once you had edited the file elsewhere was a switch whose
+        # label could not explain itself. They stay settings of the file,
+        # where the comments have room to say what they do.
         ("NOTIFY_PHONE", "Phone notifications", "flash", "PHONE",
          None, None),
-        # PHONE_SOURCE is deliberately not here. "auto" makes the choice, and
-        # overriding it is a thing you do knowing why - the same company as
-        # PHONE_APPS, which lives in the file too. On the page it was one more
-        # menu nobody could tell the meaning of from its label.
-        ("PHONE_APPS_ONLY", "Only the apps listed in the config file", "bool",
-         None, None, None),
     ]),
     ("How it looks", [
         # One to ten seconds. Below that every shape has something to do -
@@ -226,7 +227,6 @@ DEPENDS_ON = {
     "NOTIFY_PHONE": ("NOTIFY",),
     "PHONE_COLOR": ("NOTIFY", "NOTIFY_PHONE"),
     "PHONE_STYLE": ("NOTIFY", "NOTIFY_PHONE"),
-    "PHONE_APPS_ONLY": ("NOTIFY", "NOTIFY_PHONE"),
     "ACHIEVEMENT_STYLE": ("NOTIFY", "NOTIFY_ACHIEVEMENTS"),
     "MESSAGE_STYLE": ("NOTIFY", "NOTIFY_MESSAGES"),
     "FRIEND_STYLE": ("NOTIFY", "NOTIFY_FRIEND_ONLINE"),

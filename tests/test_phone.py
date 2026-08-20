@@ -14,6 +14,7 @@ no test can, and that is what `--watch-phone --print` is for.
 
 import os
 import sys
+import tempfile
 import unittest
 import unittest.mock
 
@@ -25,21 +26,6 @@ from steamos_led import config as config_module      # noqa: E402
 from steamos_led import notify, phone                # noqa: E402
 from shellvalues import shell_value                  # noqa: E402
 
-# What the two buses put out, recorded rather than invented. The desktop one
-# is the freedesktop specification's own argument order; the KDE Connect one
-# carries an Android notification key and nothing else.
-DESKTOP_LINES = [
-    "Monitoring signals from all objects owned by org.freedesktop.Notifications",
-    "The name org.freedesktop.Notifications is owned by :1.42",
-    "/org/freedesktop/Notifications: org.freedesktop.Notifications.Notify "
-    "('WhatsApp', uint32 0, 'kdeconnect', 'Anna', 'Bist du da?', @as [], "
-    "{'x-kde-eventId': <'a-b-c'>}, int32 -1)",
-    "/org/freedesktop/Notifications: org.freedesktop.Notifications.Notify "
-    "('Signal', uint32 0, '', 'Bob', 'yo', @as [], @a{sv} {}, int32 -1)",
-    "/org/freedesktop/Notifications: org.freedesktop.Notifications.Notify "
-    "('Discord', uint32 0, '', 'guild', 'ping', @as [], @a{sv} {}, int32 -1)",
-]
-
 KDECONNECT_LINES = [
     "Monitoring signals from all objects owned by org.kde.kdeconnect",
     "/modules/kdeconnect/devices/d33f/notifications: "
@@ -49,6 +35,30 @@ KDECONNECT_LINES = [
     "org.kde.kdeconnect.device.notifications.notificationRemoved "
     "('0|com.whatsapp|1|null|10123',)",
 ]
+
+
+def _posted(key):
+    return ("/modules/kdeconnect/devices/d33f/notifications: "
+            "org.kde.kdeconnect.device.notifications.notificationPosted "
+            "('%s',)" % key)
+
+
+# Three notifications arriving, with the two lines gdbus opens with in front of
+# them. The ids are the Android spelling, so the app is in the line itself -
+# which is what lets these drive the loop without a lookup standing in for the
+# bus at every step.
+POSTED_LINES = [
+    "Monitoring signals from all objects owned by org.kde.kdeconnect",
+    "The name org.kde.kdeconnect is owned by :1.42",
+    _posted("0|com.whatsapp|1|null|10123"),
+    _posted("0|org.thoughtcrime.securesms|2|null|10124"),
+    _posted("0|com.android.calendar|3|null|10125"),
+]
+
+# What KDE Connect says when something moved and it will not say what. The
+# answer is to re-read the notifications lately seen.
+REFRESHED_LINE = ("/modules/kdeconnect/devices/d33f/notifications: "
+                  "org.kde.kdeconnect.device.notifications.refreshed ()")
 
 # And what a Steam Machine actually sent, which is not the same thing: the id
 # is KDE Connect's own counter, and everything worth knowing is a property of
@@ -74,27 +84,20 @@ COUNTED_DETAILS = (
 class ReadingTheBusTest(unittest.TestCase):
     """One line of monitor output into "an app said something", or nothing."""
 
-    def _sightings(self, lines, source):
-        seen = [phone.read_line(line, source) for line in lines]
+    def _sightings(self, lines):
+        seen = [phone.read_line(line) for line in lines]
         return [one for one in seen if one is not None]
-
-    def test_a_desktop_notification_carries_its_app_and_its_words(self):
-        first = self._sightings(DESKTOP_LINES, phone.SOURCE_DESKTOP)[0]
-        self.assertEqual(first.app, "WhatsApp")
-        self.assertEqual(first.title, "Anna")
-        self.assertEqual(first.body, "Bist du da?")
 
     def test_gdbus_own_chatter_is_not_a_notification(self):
         # It opens with two lines about what it is monitoring, and a machine
         # that flashed at those would flash once at every restart.
-        self.assertEqual(len(self._sightings(DESKTOP_LINES,
-                                             phone.SOURCE_DESKTOP)), 3)
+        self.assertEqual(len(self._sightings(POSTED_LINES)), 3)
 
     def test_a_notification_going_away_is_not_a_new_one(self):
         # notificationRemoved arrives for every notification that is dismissed,
         # so reading it as an arrival would flash twice for one message - the
         # second time when you picked the phone up.
-        seen = self._sightings(KDECONNECT_LINES, phone.SOURCE_KDECONNECT)
+        seen = self._sightings(KDECONNECT_LINES)
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0].app, "com.whatsapp")
 
@@ -102,7 +105,7 @@ class ReadingTheBusTest(unittest.TestCase):
         # What a real machine sent: KDE Connect's own counter, with the app
         # kept as a property of an object of its own. Reading the id as the
         # app was this bridge's first mistake, and it printed "3 -> phone".
-        seen = phone.read_line(COUNTED_LINE, phone.SOURCE_KDECONNECT)
+        seen = phone.read_line(COUNTED_LINE)
         self.assertEqual(seen.app, "3")
         self.assertEqual(seen.where,
                          "/modules/kdeconnect/devices/d33f/notifications/3")
@@ -110,13 +113,22 @@ class ReadingTheBusTest(unittest.TestCase):
     def test_the_device_is_read_off_the_signal_rather_than_assumed(self):
         # More than one phone can be paired, and only one of them sent this.
         line = COUNTED_LINE.replace("d33f", "0ther")
-        self.assertIn("/devices/0ther/",
-                      phone.read_line(line, phone.SOURCE_KDECONNECT).where)
+        self.assertIn("/devices/0ther/", phone.read_line(line).where)
 
-    def test_the_desktop_bus_needs_nothing_asked(self):
-        # Which is why it is the fallback that always works.
-        for seen in self._sightings(DESKTOP_LINES, phone.SOURCE_DESKTOP):
-            self.assertEqual(seen.where, "")
+    def test_this_machine_s_own_notifications_are_not_the_phone_s(self):
+        """The withdrawn fallback, kept as an assertion.
+
+        There used to be a second source that read the desktop's own
+        notification bus, for a machine where KDE Connect answered nothing.
+        It carries everything, so a chat app on the Steam Machine itself
+        flashed exactly like a message from the phone - and in Game Mode,
+        where there is no notification daemon at all, it carried nothing.
+        Only KDE Connect's own signals are read now.
+        """
+        line = ("/org/freedesktop/Notifications: "
+                "org.freedesktop.Notifications.Notify ('Discord', uint32 0, "
+                "'', 'guild', 'ping', @as [], @a{sv} {}, int32 -1)")
+        self.assertIsNone(phone.read_line(line))
 
     def test_a_notification_being_updated_is_a_new_message(self):
         """Reported, and the last of this bug's three layers.
@@ -129,7 +141,7 @@ class ReadingTheBusTest(unittest.TestCase):
         """
         updated = COUNTED_LINE.replace("notificationPosted",
                                        "notificationUpdated")
-        seen = phone.read_line(updated, phone.SOURCE_KDECONNECT)
+        seen = phone.read_line(updated)
         self.assertIsNotNone(seen)
         self.assertEqual(seen.where,
                          "/modules/kdeconnect/devices/d33f/notifications/3")
@@ -138,8 +150,7 @@ class ReadingTheBusTest(unittest.TestCase):
         # Both spellings of it: one notification dismissed, or the lot.
         for member in phone.KDECONNECT_GONE:
             line = COUNTED_LINE.replace("notificationPosted", member)
-            self.assertIsNone(phone.read_line(line, phone.SOURCE_KDECONNECT),
-                              member)
+            self.assertIsNone(phone.read_line(line), member)
 
     def test_a_notification_saying_it_is_ready_is_that_notification(self):
         """Recorded from a Steam Deck, and the plainest of the three shapes.
@@ -150,7 +161,7 @@ class ReadingTheBusTest(unittest.TestCase):
         that carries the second message of a conversation, which is why six
         messages had been coming out as one line.
         """
-        seen = phone.read_line(READY_LINE, phone.SOURCE_KDECONNECT)
+        seen = phone.read_line(READY_LINE)
         self.assertIsNotNone(seen)
         self.assertEqual(seen.where, READY_PATH)
         self.assertEqual(seen.app, "", "the object has to be asked")
@@ -160,42 +171,20 @@ class ReadingTheBusTest(unittest.TestCase):
         # notifications. The path is what tells them apart.
         line = ("/modules/kdeconnect/devices/1506bc: "
                 "org.kde.kdeconnect.device.ready ()")
-        self.assertIsNone(phone.read_line(line, phone.SOURCE_KDECONNECT))
+        self.assertIsNone(phone.read_line(line))
 
     def test_the_name_of_a_signal_can_be_read_off_a_line(self):
         self.assertEqual(phone.member_of(COUNTED_LINE), "notificationPosted")
         self.assertEqual(phone.member_of("Monitoring signals from all"), "")
         self.assertEqual(phone.member_of(""), "")
 
-    def test_the_two_sources_do_not_read_each_other_s_lines(self):
-        self.assertEqual(self._sightings(KDECONNECT_LINES,
-                                         phone.SOURCE_DESKTOP), [])
-        self.assertEqual(self._sightings(DESKTOP_LINES,
-                                         phone.SOURCE_KDECONNECT), [])
-
-    def test_an_app_name_with_a_quote_in_it_survives(self):
-        line = ("/org/freedesktop/Notifications: "
-                "org.freedesktop.Notifications.Notify ('Bob\\'s app', uint32 0,"
-                " '', 'hi', 'there', @as [], @a{sv} {}, int32 -1)")
-        seen = phone.read_line(line, phone.SOURCE_DESKTOP)
-        self.assertEqual(seen.app, "Bob's app")
-
-    def test_a_comma_in_the_message_does_not_shift_the_arguments(self):
-        # The arguments are split on commas, so a message containing one is
-        # exactly the case that would read the body as the timeout.
-        line = ("/org/freedesktop/Notifications: "
-                "org.freedesktop.Notifications.Notify ('WhatsApp', uint32 0, "
-                "'', 'Anna', 'ja, gleich', @as [], @a{sv} {}, int32 -1)")
-        seen = phone.read_line(line, phone.SOURCE_DESKTOP)
-        self.assertEqual(seen.app, "WhatsApp")
-        self.assertEqual(seen.body, "ja, gleich")
-
     def test_a_truncated_line_is_dropped_rather_than_guessed_at(self):
         for line in ("", "nonsense",
-                     "/x: org.freedesktop.Notifications.Notify ('only-one')",
-                     "/x: org.freedesktop.Notifications.Notify ("):
-            self.assertIsNone(phone.read_line(line, phone.SOURCE_DESKTOP),
-                              line)
+                     "/x: org.kde.kdeconnect.device.notifications."
+                     "notificationPosted ()",
+                     "/x: org.kde.kdeconnect.device.notifications."
+                     "notificationPosted ("):
+            self.assertIsNone(phone.read_line(line), line)
 
     def test_the_app_is_found_in_either_android_key_spelling(self):
         self.assertEqual(phone.app_from_key("0|com.whatsapp|1|null|10123"),
@@ -212,7 +201,7 @@ class AskingAboutOneTest(unittest.TestCase):
     """The second call, which is what turns "3" into "WhatsApp"."""
 
     def setUp(self):
-        self.seen = phone.read_line(COUNTED_LINE, phone.SOURCE_KDECONNECT)
+        self.seen = phone.read_line(COUNTED_LINE)
 
     def test_it_asks_the_object_the_id_names(self):
         command = phone.details_command(self.seen.where)
@@ -235,6 +224,21 @@ class AskingAboutOneTest(unittest.TestCase):
         self.assertEqual(full.app, "Signal")
         self.assertEqual(full.title, "Bob: re: dinner")
 
+    def test_an_app_name_with_a_quote_in_it_survives(self):
+        # The reply is one long quoted string after another, so an apostrophe
+        # inside one of them is exactly what ends it in the wrong place.
+        reply = "({'appName': <'Bob\\'s app'>, 'title': <'hi'>},)"
+        self.assertEqual(phone.read_details(reply, self.seen).app, "Bob's app")
+
+    def test_a_comma_in_the_message_does_not_shift_the_properties(self):
+        # The entries are split on commas, so a message containing one is the
+        # case that would read half a sentence as the next property.
+        reply = ("({'appName': <'WhatsApp'>, 'title': <'Anna'>,"
+                 " 'text': <'ja, gleich'>},)")
+        full = phone.read_details(reply, self.seen)
+        self.assertEqual(full.app, "WhatsApp")
+        self.assertEqual(full.body, "ja, gleich")
+
     def test_nothing_to_say_leaves_the_sighting_as_it_was(self):
         # A notification dismissed on the phone before this asked is gone by
         # then, and that race is nobody's fault. It still flashes.
@@ -248,47 +252,12 @@ class AskingAboutOneTest(unittest.TestCase):
     def test_a_bus_that_does_name_the_app_in_the_id_needs_no_lookup(self):
         # The two spellings coexist; app_from_key is right for one of them and
         # the lookup only improves on it.
-        seen = phone.read_line(KDECONNECT_LINES[1], phone.SOURCE_KDECONNECT)
+        seen = phone.read_line(KDECONNECT_LINES[1])
         self.assertEqual(seen.app, "com.whatsapp")
 
 
-class SourceTest(unittest.TestCase):
-    def test_automatic_prefers_the_phone_only_bus(self):
-        names = "('org.freedesktop.DBus', 'org.kde.kdeconnect', ':1.7')"
-        self.assertEqual(phone.pick_source(phone.SOURCE_AUTO, names),
-                         phone.SOURCE_KDECONNECT)
-
-    def test_automatic_falls_back_to_the_desktop_s_own(self):
-        self.assertEqual(phone.pick_source(phone.SOURCE_AUTO, "('org.kde.kwin',)"),
-                         phone.SOURCE_DESKTOP)
-
-    def test_a_kde_connect_that_is_only_activatable_still_counts(self):
-        """Which is the whole of Game Mode.
-
-        There is no desktop session there to autostart KDE Connect, so it is
-        not on the bus - but it is installed, the bus can start it, and one
-        call does. The other source cannot help there at all: it reads the
-        notification daemon, and Game Mode has not got one either.
-        """
-        running = "('org.freedesktop.DBus', 'org.freedesktop.systemd1')"
-        can_start = "('org.freedesktop.DBus', 'org.kde.kdeconnect')"
-        self.assertEqual(
-            phone.pick_source(phone.SOURCE_AUTO, running, can_start),
-            phone.SOURCE_KDECONNECT)
-
-    def test_with_neither_it_still_falls_back(self):
-        self.assertEqual(
-            phone.pick_source(phone.SOURCE_AUTO, "('org.kde.kwin',)", "()"),
-            phone.SOURCE_DESKTOP)
-
-    def test_the_two_questions_are_different_questions(self):
-        # Who is running, and who the bus would start if asked. Asking the
-        # first one twice would report Game Mode as having nothing at all.
-        running = phone.names_command()
-        startable = phone.names_command(activatable=True)
-        self.assertNotEqual(running, startable)
-        self.assertIn("org.freedesktop.DBus.ListNames", running)
-        self.assertIn("org.freedesktop.DBus.ListActivatableNames", startable)
+class KdeConnectTest(unittest.TestCase):
+    """Finding it, starting it, and asking it what it is paired with."""
 
     def test_the_phones_it_knows_are_read_out_of_the_reply(self):
         """Which tells "not running" from "running and nobody is talking".
@@ -404,17 +373,14 @@ class SourceTest(unittest.TestCase):
         self.assertTrue(any(part.endswith("deviceNames") for part in command),
                         command)
 
-    def test_naming_one_is_an_instruction_rather_than_a_suggestion(self):
-        # Including the case where the other one is right there on the bus.
-        names = "('org.kde.kdeconnect',)"
-        self.assertEqual(phone.pick_source(phone.SOURCE_DESKTOP, names),
-                         phone.SOURCE_DESKTOP)
-
-    def test_every_source_has_a_bus_to_read(self):
-        for source in (phone.SOURCE_KDECONNECT, phone.SOURCE_DESKTOP):
-            command = phone.monitor_command(source)
-            self.assertEqual(command[:3], ["gdbus", "monitor", "--session"])
-            self.assertIn("--dest", command)
+    def test_the_monitor_reads_kde_connect_and_nothing_else(self):
+        # Naming the service is what keeps this machine's own notifications
+        # out: the session bus carries those too, and a monitor without a
+        # --dest would read the lot.
+        command = phone.monitor_command()
+        self.assertEqual(command[:3], ["gdbus", "monitor", "--session"])
+        self.assertIn("--dest", command)
+        self.assertIn(phone.KDECONNECT_SERVICE, command)
 
 
 class RulesTest(unittest.TestCase):
@@ -597,11 +563,10 @@ class BridgeTest(unittest.TestCase):
         self.sent = []
 
     def _bridge(self, **kwargs):
-        return phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
-                            send=self.sent.append, **kwargs)
+        return phone.Bridge(self.rules, send=self.sent.append, **kwargs)
 
     def test_it_flashes_once_per_notification_and_not_per_line(self):
-        bridge = self._bridge().run(DESKTOP_LINES)
+        bridge = self._bridge().run(POSTED_LINES)
         self.assertEqual(bridge.seen, 3)
         self.assertEqual(bridge.flashed, 3)
         self.assertEqual([notify.split_tag(one)[1] for one in self.sent],
@@ -614,9 +579,9 @@ class BridgeTest(unittest.TestCase):
         def refuse(_trigger):
             raise OSError("no such file")
 
-        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules, send=refuse)
+        bridge = phone.Bridge(self.rules, send=refuse)
         with self.assertLogs("steamos_led.phone", "WARNING") as caught:
-            bridge.run(DESKTOP_LINES)
+            bridge.run(POSTED_LINES)
         self.assertEqual(bridge.seen, 3)
         self.assertEqual(bridge.flashed, 0)
         # And it says so, once per notification: silence here would look
@@ -625,24 +590,23 @@ class BridgeTest(unittest.TestCase):
 
     def test_the_dry_run_reports_everything_and_writes_nothing(self):
         told = []
-        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules, send=None,
+        bridge = phone.Bridge(self.rules, send=None,
                               report=lambda seen, trigger: told.append(
                                   (seen.app, trigger)))
-        bridge.run(DESKTOP_LINES)
+        bridge.run(POSTED_LINES)
         self.assertEqual([(app, notify.split_tag(one)[1]) for app, one in told],
-                         [("WhatsApp", "double_flash:#25d366"),
-                          ("Signal", notify.KIND_PHONE),
-                          ("Discord", notify.KIND_PHONE)])
+                         [("com.whatsapp", "double_flash:#25d366"),
+                          ("org.thoughtcrime.securesms", notify.KIND_PHONE),
+                          ("com.android.calendar", notify.KIND_PHONE)])
         self.assertEqual(self.sent, [])
 
     def test_it_says_what_it_ignored_as_well_as_what_it_flashed(self):
         # A dry run that only mentioned the apps it liked would be no help at
         # all in working out why the others do nothing.
         told = []
-        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules, send=None,
-                              listed_only=True,
+        bridge = phone.Bridge(self.rules, send=None, listed_only=True,
                               report=lambda seen, trigger: told.append(trigger))
-        bridge.run(DESKTOP_LINES)
+        bridge.run(POSTED_LINES)
         self.assertEqual([one if one is None else notify.split_tag(one)[1]
                           for one in told],
                          ["double_flash:#25d366", None, None])
@@ -653,22 +617,29 @@ class BridgeTest(unittest.TestCase):
         rules = phone.parse_rules("WhatsApp:#25d366:double_flash")
         sent = []
         bridge = phone.Bridge(
-            phone.SOURCE_KDECONNECT, rules, send=sent.append,
+            rules, send=sent.append,
             details=lambda seen: phone.read_details(COUNTED_DETAILS, seen))
         bridge.run([COUNTED_LINE])
         self.assertEqual([notify.split_tag(one)[1] for one in sent],
                          ["double_flash:#25d366"])
 
-    def test_it_is_only_asked_where_there_is_something_to_ask(self):
-        # The desktop bus said everything already; a call per notification
-        # there would be one subprocess for nothing.
+    def test_what_has_just_been_read_is_not_read_again(self):
+        # A refresh asks the objects lately seen and hands the answers to the
+        # same code an arriving signal goes through. Asking about an answer
+        # would be one subprocess per notification per refresh, for nothing.
         asked = []
-        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
-                              send=self.sent.append,
-                              details=lambda seen: asked.append(seen) or seen)
-        bridge.run(DESKTOP_LINES)
-        self.assertEqual(asked, [])
-        self.assertEqual(bridge.flashed, 3)
+
+        def ask(seen):
+            asked.append(seen.where)
+            return phone.read_details(COUNTED_DETAILS, seen)
+
+        bridge = phone.Bridge(self.rules, send=self.sent.append, details=ask)
+        bridge.run([COUNTED_LINE])
+        self.assertEqual(len(asked), 1)
+        bridge.line(REFRESHED_LINE)
+        self.assertEqual(len(asked), 2, "the refresh has to ask once")
+        # And it said the same thing, so nothing flashed a second time.
+        self.assertEqual(bridge.flashed, 1)
 
     def test_it_looks_up_from_the_stream_between_lines(self):
         """Because a quiet phone sends nothing for hours.
@@ -681,7 +652,7 @@ class BridgeTest(unittest.TestCase):
         import os
 
         read_fd, write_fd = os.pipe()
-        os.write(write_fd, (DESKTOP_LINES[2] + "\n").encode())
+        os.write(write_fd, (POSTED_LINES[2] + "\n").encode())
         stream = os.fdopen(read_fd)
         self.addCleanup(stream.close)
         self.addCleanup(os.close, write_fd)
@@ -696,8 +667,7 @@ class BridgeTest(unittest.TestCase):
             if len(ticks) >= 3:
                 raise KeyboardInterrupt
 
-        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
-                              send=self.sent.append)
+        bridge = phone.Bridge(self.rules, send=self.sent.append)
         with self.assertRaises(KeyboardInterrupt):
             bridge.watch(stream, tick, every=0.01)
         self.assertEqual(bridge.flashed, 1, "the line was missed")
@@ -725,8 +695,7 @@ class BridgeTest(unittest.TestCase):
                 raise KeyboardInterrupt
             return 0.01
 
-        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
-                              send=self.sent.append)
+        bridge = phone.Bridge(self.rules, send=self.sent.append)
         with self.assertRaises(KeyboardInterrupt):
             bridge.watch(stream, lambda: None, interval)
         self.assertEqual(len(asked), 3, "it was asked once and remembered")
@@ -745,8 +714,7 @@ class BridgeTest(unittest.TestCase):
         os.close(write_fd)
         stream = os.fdopen(read_fd)
         self.addCleanup(stream.close)
-        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
-                              send=self.sent.append)
+        bridge = phone.Bridge(self.rules, send=self.sent.append)
         self.assertIs(bridge.watch(stream, every=0.01), bridge)
 
     def test_the_interval_is_read_when_it_is_used(self):
@@ -764,7 +732,7 @@ class BridgeTest(unittest.TestCase):
         saying = {}
         sent = []
         bridge = phone.Bridge(
-            phone.SOURCE_KDECONNECT, (), send=sent.append,
+            (), send=sent.append,
             details=lambda seen: phone.Sighting(
                 "Notification Test", "ufnrhdhgkfihh",
                 saying[seen.where], where=seen.where))
@@ -820,7 +788,7 @@ class BridgeTest(unittest.TestCase):
         """
         odd = COUNTED_LINE.replace("notificationPosted", "notificationTicker")
         told = []
-        bridge = phone.Bridge(phone.SOURCE_KDECONNECT, (), send=None,
+        bridge = phone.Bridge((), send=None,
                               report=lambda seen, _t: told.append(seen.app))
         bridge.run([odd, odd, odd])
         self.assertEqual(len(told), 1, "said once, not once a line")
@@ -834,7 +802,7 @@ class BridgeTest(unittest.TestCase):
         # Arrivals are acted on and removals are meant to be ignored; neither
         # is news, and a dry run full of them would bury the notifications.
         told = []
-        bridge = phone.Bridge(phone.SOURCE_KDECONNECT, (), send=None,
+        bridge = phone.Bridge((), send=None,
                               details=lambda seen: seen,
                               report=lambda seen, _t: told.append(seen.app))
         bridge.run([COUNTED_LINE.replace("notificationPosted", member)
@@ -844,14 +812,13 @@ class BridgeTest(unittest.TestCase):
     def test_nothing_is_said_about_it_outside_a_dry_run(self):
         # The journal is for what happened, not for a survey of the bus.
         odd = COUNTED_LINE.replace("notificationPosted", "notificationTicker")
-        bridge = phone.Bridge(phone.SOURCE_KDECONNECT, (),
-                              send=self.sent.append)
+        bridge = phone.Bridge((), send=self.sent.append)
         bridge.run([odd])
         self.assertEqual(self.sent, [])
 
     def test_a_notification_describes_itself_for_the_dry_run(self):
-        seen = phone.read_line(DESKTOP_LINES[2], phone.SOURCE_DESKTOP)
-        self.assertEqual(seen.describe(), "WhatsApp: Anna - Bist du da?")
+        seen = phone.read_details(COUNTED_DETAILS, phone.read_line(COUNTED_LINE))
+        self.assertEqual(seen.describe(), "WhatsApp: Anna - bist du da?")
         self.assertEqual(phone.Sighting("com.whatsapp", "", "").describe(),
                          "com.whatsapp")
 
@@ -895,6 +862,11 @@ class ObstacleTest(unittest.TestCase):
 class ConfigurationTest(unittest.TestCase):
     """The settings this adds, and what the service will not accept."""
 
+    def setUp(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.stale = holder.name
+
     def _config(self, **overrides):
         settings = dict(config_module.DEFAULTS)
         settings.update(overrides)
@@ -916,13 +888,29 @@ class ConfigurationTest(unittest.TestCase):
         colours = [notify.KINDS[kind] for kind in notify.KINDS]
         self.assertEqual(len(set(colours)), len(colours))
 
-    def test_a_source_that_does_not_exist_is_refused(self):
-        with self.assertRaises(config_module.ConfigError):
-            config_module.validate(self._config(PHONE_SOURCE="carrier-pigeon"))
+    def test_the_withdrawn_source_setting_does_not_stop_the_service(self):
+        """Because it is sitting in every config file already installed.
 
-    def test_every_offered_source_is_accepted(self):
-        for source in phone.SOURCES:
-            config_module.validate(self._config(PHONE_SOURCE=source))
+        PHONE_SOURCE chose between KDE Connect and the desktop's own
+        notification bus, and there is only the one source now. An unknown
+        key is fatal on purpose - LED_COUTN=60 must not be ignored - but a
+        key *we* withdrew is not the reader's mistake, and a service that
+        refused to start over one would be this change breaking every machine
+        that had the feature working.
+        """
+        self.assertIn("PHONE_SOURCE", config_module.RETIRED)
+        self.assertNotIn("PHONE_SOURCE", config_module.DEFAULTS)
+        path = os.path.join(self.stale, "steamos-led-serial.conf")
+        with open(path, "w") as handle:
+            handle.write("NOTIFY_PHONE=1\nPHONE_SOURCE=auto\n")
+        with self.assertLogs("steamos_led.config", "WARNING"):
+            settings = config_module.load(path)
+        self.assertTrue(settings["NOTIFY_PHONE"], "the rest of it still read")
+        # And the panel takes the line out the next time it saves, or every
+        # start would log the same complaint forever.
+        with open(path) as handle:
+            self.assertNotIn("PHONE_SOURCE",
+                             config_module.update_text(handle.read(), settings))
 
     def test_a_broken_app_list_is_refused_at_load_rather_than_at_flash_time(self):
         # Otherwise the mistake surfaces as "it just does not flash", hours
@@ -942,8 +930,12 @@ class ConfigurationTest(unittest.TestCase):
         with open(path) as handle:
             text = handle.read()
         for key in ("NOTIFY_PHONE", "PHONE_COLOR", "PHONE_STYLE",
-                    "PHONE_SOURCE", "PHONE_APPS", "PHONE_APPS_ONLY"):
+                    "PHONE_APPS", "PHONE_APPS_ONLY"):
             self.assertIn("\n%s=" % key, text, key)
+        # And nothing it no longer accepts: a shipped file that sets a
+        # withdrawn option would log a complaint on every fresh install.
+        for key in config_module.RETIRED:
+            self.assertNotIn("\n%s=" % key, text, key)
 
 
 class EndToEndTest(unittest.TestCase):

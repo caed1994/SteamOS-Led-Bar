@@ -33,6 +33,11 @@ RETIRED = {
     "WARNING_STYLE": "a warning always uses the alternate shape now",
     "TEMPERATURE_GAUGE": "the rainbow slot now picks which of several "
                          "effects it shows, and RAINBOW_SHOWS says which",
+    "PHONE_SOURCE": "the phone's notifications only ever come from KDE "
+                    "Connect now. The other setting read the desktop's own "
+                    "notification bus, which carries this machine's "
+                    "notifications as well as the phone's - and carries "
+                    "nothing at all in Game Mode",
 }
 
 # Withdrawn options that still carry a setting worth keeping, and what to make
@@ -80,7 +85,6 @@ DEFAULTS = {
     "MESSAGE_STYLE": notify.STYLE_INHERIT,
     "FRIEND_STYLE": notify.STYLE_INHERIT,
     "PHONE_STYLE": notify.STYLE_INHERIT,
-    "PHONE_SOURCE": phone.SOURCE_AUTO,
     "PHONE_APPS": "",
     "PHONE_APPS_ONLY": False,
     "RAINBOW_SHOWS": "rainbow",
@@ -275,8 +279,6 @@ CONFIGURABLE_KINDS = ((notify.KIND_ACHIEVEMENT, "ACHIEVEMENT"),
                       (notify.KIND_FRIEND, "FRIEND"),
                       (notify.KIND_PHONE, "PHONE"))
 
-PHONE_SOURCES = phone.SOURCES
-
 # Where the gauge's two marks may sit: below the first the bar is green, above
 # the second it is red. Wide, because people watch different sensors, but not
 # unbounded - outside this is a unit mix-up, not an intention.
@@ -340,9 +342,6 @@ def validate(config):
             notify.parse_color(config[key])
         except ValueError as exc:
             raise ConfigError("%s: %s" % (key, exc))
-    if config["PHONE_SOURCE"] not in PHONE_SOURCES:
-        raise ConfigError("PHONE_SOURCE must be one of: %s"
-                          % ", ".join(PHONE_SOURCES))
     try:
         phone.parse_rules(config["PHONE_APPS"])
     except ValueError as exc:

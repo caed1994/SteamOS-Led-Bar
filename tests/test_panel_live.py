@@ -449,7 +449,19 @@ class LiveWindowTest(unittest.TestCase):
             self.assertLess(left[2], right[0], "the LEDs overlap")
 
     def _drop(self, key):
-        """Open one drop-down and hand back the list it dropped."""
+        """Open one drop-down and hand back the list it dropped.
+
+        With the pointer moved out of the way first. A row under the pointer
+        fills as a hover the moment the list maps, so a test asking which row
+        is filled would otherwise be asking where the mouse happens to be -
+        and on a bare X server that is the middle of the screen, which is
+        roughly where these lists open.
+        """
+        self.root.event_generate(
+            "<Motion>", warp=True,
+            x=self.root.winfo_screenwidth() - self.root.winfo_rootx() - 1,
+            y=self.root.winfo_screenheight() - self.root.winfo_rooty() - 1)
+        self.root.update()
         self.panel._open_menu(key)
         self.root.update()
         return self.panel._popup

@@ -15,18 +15,16 @@ some parsing. The parsing is the testable part anyway: everything below the
 subprocess is a pure function from a line of text to "what to flash", and the
 tests drive it with recorded lines rather than with a phone.
 
-Two places the notifications can be read from, because the two fail
-differently:
-
-  kdeconnect  KDE Connect's own signals. Only the phone, which is the point -
-              a Discord ping on the desktop is not a phone notification and
-              should not pretend to be one.
-  desktop     The desktop's notification bus. Broader, and the net for a
-              machine where the first one answers nothing: KDE Connect shows
-              its notifications there too, along with everything else.
-
-`auto` takes the first if KDE Connect is on the bus and the second otherwise,
-which is what somebody who has not thought about it wants.
+One place the notifications are read from: KDE Connect's own signals, which
+carry what the phone sent and nothing else. There used to be a second - the
+desktop's own notification bus - as a net for a machine where KDE Connect
+answered nothing. It was withdrawn once KDE Connect was working, because it
+was never really the same feature: that bus carries every notification on the
+machine, so "your phone buzzed" and "a chat app on the Steam Machine buzzed"
+came out as the same flash, and in Game Mode - where there is no notification
+daemon at all - it could find nothing either way. A fallback that flashes at
+the wrong things in Desktop Mode and at nothing in Game Mode is not a
+fallback.
 """
 
 from __future__ import annotations
@@ -44,16 +42,10 @@ from . import notify
 
 LOG = logging.getLogger(__name__)
 
-SOURCE_AUTO = "auto"
-SOURCE_KDECONNECT = "kdeconnect"
-SOURCE_DESKTOP = "desktop"
-SOURCES = (SOURCE_AUTO, SOURCE_KDECONNECT, SOURCE_DESKTOP)
-
 KDECONNECT_SERVICE = "org.kde.kdeconnect"
-DESKTOP_SERVICE = "org.freedesktop.Notifications"
 
-# What each bus says when there is a notification to look at. Everything else
-# on those services is somebody else's business.
+# What the bus says when there is a notification to look at. Everything else
+# on that service is somebody else's business.
 #
 # Two on KDE Connect's, because Android does not post a second notification
 # for the second message of a conversation - it updates the first. Listening
@@ -78,18 +70,11 @@ KDECONNECT_ON_OBJECT = ("ready",)
 # What such an object's path looks like, so a signal of the same name from
 # somewhere else in KDE Connect is not read as a notification.
 NOTIFICATION_PATH = "/notifications/"
-DESKTOP_MEMBER = "Notify"
 
 # One notification, as an object of its own. KDE Connect's signal carries only
 # an id - measured on a real machine, its own counter rather than the Android
 # key - so the app it came from is a property to be read off this.
 NOTIFICATION_INTERFACE = "org.kde.kdeconnect.device.notifications.notification"
-
-# Which arguments of org.freedesktop.Notifications.Notify carry what. Fixed by
-# the specification, so they are named here rather than counted at the call.
-DESKTOP_APP = 0
-DESKTOP_SUMMARY = 3
-DESKTOP_BODY = 4
 
 # What separates one rule from the next in PHONE_APPS, and the fields inside
 # one. The comma costs the "r,g,b" spelling of a colour inside a rule; #rrggbb
@@ -135,9 +120,10 @@ RECENT_NOTIFICATIONS = 8
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
     """One notification, as much of it as the bus was willing to say.
 
-    `where` is the object it can be asked about, and only KDE Connect's bus
-    sets it: that one announces a notification by an id and keeps the rest -
-    the app it came from included - as properties of an object of its own.
+    `where` is the object it can be asked about. The bus announces a
+    notification by an id and keeps the rest - the app it came from included -
+    as properties of an object of its own, so a sighting straight off a signal
+    is mostly a place to go and ask.
     """
 
     __slots__ = ()
@@ -162,26 +148,9 @@ Rule = collections.namedtuple("Rule", "app color style")
 # Three commands, none of them run from here: the caller owns the subprocess,
 # so a test can drive the whole bridge from a list of strings.
 
-def monitor_command(source):
-    """`gdbus` reading one bus, as an argv."""
-    service = (KDECONNECT_SERVICE if source == SOURCE_KDECONNECT
-               else DESKTOP_SERVICE)
-    return ["gdbus", "monitor", "--session", "--dest", service]
-
-
-def names_command(activatable=False):
-    """Ask the bus who is on it, to settle `auto`.
-
-    Two questions, not one. ListNames is who is running; ListActivatableNames
-    is who the bus would start if somebody asked for them. The difference is
-    the whole of Game Mode: there is no Plasma there to autostart KDE
-    Connect, so it is not running - but it is still installed, still
-    activatable, and one call brings it up.
-    """
-    return ["gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
-            "--object-path", "/org/freedesktop/DBus", "--method",
-            "org.freedesktop.DBus.ListActivatableNames" if activatable
-            else "org.freedesktop.DBus.ListNames"]
+def monitor_command():
+    """`gdbus` reading KDE Connect's signals, as an argv."""
+    return ["gdbus", "monitor", "--session", "--dest", KDECONNECT_SERVICE]
 
 
 def wake_command():
@@ -194,26 +163,6 @@ def wake_command():
     return ["gdbus", "call", "--session", "--dest", KDECONNECT_SERVICE,
             "--object-path", "/modules/kdeconnect", "--method",
             "org.kde.kdeconnect.daemon.deviceNames"]
-
-
-def pick_source(configured, names_text, activatable_text=""):
-    """Which bus to read, given the setting and what the bus can offer.
-
-    Only `auto` looks: naming a source is an instruction, and answering it
-    with the other one would be this deciding it knows better.
-
-    A KDE Connect that is merely activatable counts. It is the only one of
-    the two that can work outside a desktop session - the other reads the
-    notification daemon, and in Game Mode there is not one - so where it can
-    be had at all, it is the one to have.
-    """
-    if configured != SOURCE_AUTO:
-        return configured
-    if KDECONNECT_SERVICE in (names_text or ""):
-        return SOURCE_KDECONNECT
-    if KDECONNECT_SERVICE in (activatable_text or ""):
-        return SOURCE_KDECONNECT
-    return SOURCE_DESKTOP
 
 
 # -- reading what it says ----------------------------------------------------
@@ -331,49 +280,36 @@ def app_from_key(key):
     return pieces[0] if pieces else key
 
 
-def read_line(line, source):
+def read_line(line):
     """One line of `gdbus monitor` as a Sighting, or None if it is not one.
 
     Most lines are not: gdbus opens with a couple about what it is monitoring,
-    and the notification services carry traffic of their own.
+    and KDE Connect carries traffic of its own.
     """
-    if source == SOURCE_KDECONNECT:
-        if member_of(line) in KDECONNECT_ON_OBJECT:
-            where = line.split(":", 1)[0].strip()
-            if NOTIFICATION_PATH not in where:
-                return None             # some other part of KDE Connect
-            # No id to read: the object it arrived on is the notification,
-            # and everything about it is a property of that object.
-            return Sighting("", where=where)
-        arguments = None
-        for member in KDECONNECT_MEMBERS:
-            arguments = _arguments(line, member)
-            if arguments:
-                break
-        if not arguments:
-            return None
-        key = _as_string(arguments[0])
-        if not key:
-            return None
-        # What arrives here is an id and nothing else, and on a real machine
-        # that id turned out to be KDE Connect's own counter - "3" - rather
-        # than the Android key with the package name in it. So the app is
-        # asked for separately, off the object the id names; app_from_key is
-        # what is left when that cannot be reached, and is right for the
-        # machines whose ids are the Android spelling.
-        return Sighting(app_from_key(key), where=_notification_path(line, key))
-
-    arguments = _arguments(line, DESKTOP_MEMBER)
-    if not arguments or len(arguments) <= DESKTOP_BODY:
+    if member_of(line) in KDECONNECT_ON_OBJECT:
+        where = line.split(":", 1)[0].strip()
+        if NOTIFICATION_PATH not in where:
+            return None                 # some other part of KDE Connect
+        # No id to read: the object it arrived on is the notification, and
+        # everything about it is a property of that object.
+        return Sighting("", where=where)
+    arguments = None
+    for member in KDECONNECT_MEMBERS:
+        arguments = _arguments(line, member)
+        if arguments:
+            break
+    if not arguments:
         return None
-    app = _as_string(arguments[DESKTOP_APP])
-    if app is None:
+    key = _as_string(arguments[0])
+    if not key:
         return None
-    # Everything in the one signal, which is why this bus is the fallback that
-    # always works: nothing else has to be asked.
-    return Sighting(app,
-                    _as_string(arguments[DESKTOP_SUMMARY]) or "",
-                    _as_string(arguments[DESKTOP_BODY]) or "")
+    # What arrives here is an id and nothing else, and on a real machine that
+    # id turned out to be KDE Connect's own counter - "3" - rather than the
+    # Android key with the package name in it. So the app is asked for
+    # separately, off the object the id names; app_from_key is what is left
+    # when that cannot be reached, and is right for the machines whose ids are
+    # the Android spelling.
+    return Sighting(app_from_key(key), where=_notification_path(line, key))
 
 
 def member_of(line):
@@ -494,10 +430,10 @@ def parse_rules(text):
 def match(rules, app):
     """The rule for this app, or None.
 
-    Either way round and either case: the bus may name an app "WhatsApp" or
-    "com.whatsapp" depending on which of the two sources it came from, and a
-    rule that only worked on one of them would be a rule that worked on the
-    machine it was written on.
+    Either way round and either case: KDE Connect may name an app "WhatsApp"
+    or "com.whatsapp" depending on its version and on whether the object could
+    be asked, and a rule that only worked on one of those spellings would be a
+    rule that worked on the machine it was written on.
     """
     wanted = (app or "").strip().lower()
     if not wanted:
@@ -572,9 +508,8 @@ class Bridge:
     strings, and the process is only how the service gets one.
     """
 
-    def __init__(self, source, rules, kind=notify.KIND_PHONE,
+    def __init__(self, rules, kind=notify.KIND_PHONE,
                  listed_only=False, send=None, report=None, details=None):
-        self.source = source
         self.rules = rules
         self.kind = kind
         self.listed_only = listed_only
@@ -594,7 +529,7 @@ class Bridge:
 
     def line(self, text):
         """Handle one line; returns the trigger written, if any."""
-        sighting = read_line(text, self.source)
+        sighting = read_line(text)
         if sighting is None:
             if member_of(text) in KDECONNECT_REFRESH:
                 return self._look_again()
@@ -676,7 +611,7 @@ class Bridge:
         Only in a dry run - `report` is what a dry run sets - because this is
         for finding out what a bus calls things, not for the journal.
         """
-        if self.report is None or self.source != SOURCE_KDECONNECT:
+        if self.report is None:
             return
         member = member_of(text)
         if (not member or member in KDECONNECT_MEMBERS
@@ -753,15 +688,10 @@ def obstacles(notify_on, phone_on, fifo_ready):
     return complaints
 
 
-def open_monitor(source):
-    """Start `gdbus monitor` on the chosen bus."""
-    return subprocess.Popen(monitor_command(source), stdout=subprocess.PIPE,
+def open_monitor():
+    """Start `gdbus monitor` on KDE Connect's signals."""
+    return subprocess.Popen(monitor_command(), stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, text=True, bufsize=1)
-
-
-def bus_names(activatable=False):
-    """Everything on the session bus, as one blob of text, or "" if unknown."""
-    return _ask(names_command(activatable))
 
 
 # Where kdeconnectd lives. Not on the PATH on most distributions - it is a

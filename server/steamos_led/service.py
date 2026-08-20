@@ -1041,9 +1041,10 @@ def run_watch_phone(config, print_only=False):
     is write trigger words into the pipe.
 
     `print_only` is the thing to run first. It reports every notification it
-    sees and what it would have flashed, and flashes nothing - so which bus
-    answers on this machine, and what the apps on it are actually called, are
-    things you find out by looking rather than by guessing at a rule.
+    sees and what it would have flashed, and flashes nothing - so whether KDE
+    Connect answers on this machine, and what the apps on it are actually
+    called, are things you find out by looking rather than by guessing at a
+    rule.
     """
     _interrupt_on_sigterm()
 
@@ -1052,8 +1053,6 @@ def run_watch_phone(config, print_only=False):
               flush=True)
         return NOTHING_TO_WATCH_EXIT
 
-    source = phone.pick_source(config["PHONE_SOURCE"], phone.bus_names(),
-                               phone.bus_names(activatable=True))
     rules = phone.parse_rules(config["PHONE_APPS"])
     fifo = config["NOTIFY_FIFO"]
 
@@ -1063,31 +1062,28 @@ def run_watch_phone(config, print_only=False):
     # session there to have started it.
     # Never started from a dry run: --print reports on the machine, and a
     # report that starts a daemon has changed the thing it was describing.
-    woken = (phone.wake_kdeconnect(revive=not print_only)
-             if source == phone.SOURCE_KDECONNECT else None)
+    woken = phone.wake_kdeconnect(revive=not print_only)
 
     def report(sighting, trigger):
         print("  %-40s -> %s" % (sighting.describe(), trigger or "ignored"),
               flush=True)
         if sighting.where and not (sighting.title or sighting.body):
-            # The id was all this bus gave, and asking about it added nothing.
-            # Said here rather than swallowed: it is the difference between a
-            # rule that can name the app and one that cannot, and the path is
-            # what anybody looking into it would need next.
-            print("     (no app name at %s - try PHONE_SOURCE=desktop)"
-                  % sighting.where, flush=True)
+            # The id was all the signal gave, and asking the object about it
+            # added nothing. Said here rather than swallowed: it is the
+            # difference between a rule that can name the app and one that
+            # cannot, and the path is what anybody looking into it would need
+            # next.
+            print("     (no app name at %s)" % sighting.where, flush=True)
 
     bridge = phone.Bridge(
-        source, rules, listed_only=config["PHONE_APPS_ONLY"],
+        rules, listed_only=config["PHONE_APPS_ONLY"],
         send=None if print_only else lambda trigger: notify.send(fifo, trigger),
         report=report if print_only else None,
         details=phone.look_up)
 
     # flush, because this runs as a service: Python block-buffers a piped
     # stdout, so these lines would sit in it until the process stopped.
-    print("Reading notifications from the %s bus%s" %
-          (source, "" if config["PHONE_SOURCE"] != phone.SOURCE_AUTO
-           else " (chosen automatically)"), flush=True)
+    print("Reading the phone's notifications from KDE Connect", flush=True)
     # Said rather than left to be inferred from nothing ever flashing. These
     # are also the lines to look for in the journal after a spell in Game
     # Mode, where there is no terminal to watch it live.
@@ -1123,7 +1119,7 @@ def run_watch_phone(config, print_only=False):
         print("  note: %s" % complaint, flush=True)
 
     try:
-        monitor = phone.open_monitor(source)
+        monitor = phone.open_monitor()
     except OSError as exc:
         # gdbus comes with glib, so this is a machine with no desktop stack at
         # all - which no amount of restarting will change.
@@ -1173,10 +1169,7 @@ def run_watch_phone(config, print_only=False):
                 else phone.TICK_SECONDS)
 
     try:
-        if source == phone.SOURCE_KDECONNECT:
-            bridge.watch(monitor.stdout, look_again, how_soon)
-        else:
-            bridge.run(monitor.stdout)
+        bridge.watch(monitor.stdout, look_again, how_soon)
     except KeyboardInterrupt:
         pass
     finally:

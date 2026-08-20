@@ -526,7 +526,7 @@ like a phone that has stopped sending them &mdash; which is how
 you find the names to write rules with:
 
 ```
-Reading notifications from the kdeconnect bus (chosen automatically)
+Reading the phone's notifications from KDE Connect
   com.whatsapp                 -> double_flash:#25d366
   org.thoughtcrime.securesms   -> #3a76f0
   com.android.calendar         -> phone
@@ -541,39 +541,30 @@ has to explain:
   note: NOTIFY_PHONE is off, so the bar will not do this for real yet.
 ```
 
-Then in the config file, a colour and optionally a shape per app:
+Everything the phone sends flashes the same by default, and the panel is where
+that look is set. To give one app a colour and optionally a shape of its own,
+in the config file:
 
 ```ini
 PHONE_APPS=WhatsApp:#25d366:double_flash, Signal:#3a76f0
 ```
 
 The app is matched loosely and without case, so `whatsapp` finds both
-`WhatsApp` and `com.whatsapp` &mdash; the two names the two sources use. Anything
-not named there flashes `PHONE_COLOR` in `PHONE_STYLE`, so the panel goes on
-being where the general look is set; `PHONE_APPS_ONLY=1` ignores it instead.
+`WhatsApp` and `com.whatsapp` &mdash; the two spellings KDE Connect uses.
+Anything not named there flashes `PHONE_COLOR` in `PHONE_STYLE`;
+`PHONE_APPS_ONLY=1` silences it instead, so only the listed apps flash at all.
 
 | Option | Panel | Meaning |
 | ------ | ----- | ------- |
 | `NOTIFY_PHONE` | yes | flash on the phone's notifications at all (default `0`) |
 | `PHONE_COLOR` / `PHONE_STYLE` | yes | what one looks like unless a rule says otherwise (`#00ffff` / `default`) |
-| `PHONE_APPS_ONLY` | yes | ignore apps the list does not name (default `0`) |
 | `PHONE_APPS` | file only | `App:colour` or `App:colour:shape`, separated by commas |
-| `PHONE_SOURCE` | file only | which bus to read: `auto`, `kdeconnect`, `desktop` |
+| `PHONE_APPS_ONLY` | file only | ignore apps the list does not name (default `0`) |
 
 The last two are settings of the file rather than rows in the window. A list
-you add entries to is a control the panel does not have, and `PHONE_SOURCE`
-is one `auto` gets right on its own &mdash; but when it does not, this is the
-knob:
-
-`kdeconnect` reads KDE Connect's own signals, which carry only what the phone
-sent. `desktop` reads the desktop's notification bus, which carries
-everything &mdash; the phone's notifications among them, but a chat app running
-on the Steam Machine itself too. `auto` takes the first when KDE Connect is
-on the bus and the second otherwise.
-
-So `desktop` is worth knowing about twice over: it is what to try if the dry
-run reports an id where an app name should be, and it is how to make the bar
-flash for this machine's own notifications as well.
+you add entries to is a control the panel does not have, and a switch that
+only means something once you have written that list is a switch whose label
+cannot explain itself &mdash; so both live here, where the comments have room.
 
 Switching it on in the panel writes the setting; the bridge picks it up when
 it is restarted, which Apply does not do for a *user* service:
@@ -623,11 +614,6 @@ loginctl show-user $USER --property=Linger      # Linger=yes
 Without it the symptom is not an error but a silence: nothing flashes, and
 the journal has nothing to say about why, because the thing that would have
 said it was not running either.
-
-That only holds for `PHONE_SOURCE=kdeconnect` (which `auto` picks whenever
-KDE Connect can be had at all). The `desktop` source reads the notification
-daemon, and Game Mode does not run one, so it can find nothing there however
-it is set. If Game Mode matters to you, leave the source alone.
 
 There is no terminal in Game Mode, so the bridge says what it found in the
 journal instead. After a session, back in Desktop Mode:
