@@ -85,6 +85,23 @@ class Probe:
         except OSError:
             return False
 
+    def lingering(self, user=None):
+        """Whether this user's systemd keeps running with no session open.
+
+        Without it, switching to Game Mode ends the session and every user
+        service goes with it - including the two this project installs, both
+        of which are written to survive exactly that.
+        """
+        command = ["loginctl", "show-user", "--property=Linger"]
+        if user:
+            command.append(user)
+        try:
+            done = subprocess.run(command, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, text=True)
+        except OSError:
+            return False
+        return "Linger=yes" in done.stdout
+
     def kernel_release(self):
         return platform.uname().release
 
@@ -141,6 +158,13 @@ def run_checks(probe=None, config=None):
     checks.append(Check(
         "Achievement watcher running", probe.unit_active(WATCHER, user=True),
         "journalctl --user -u %s says why" % WATCHER, repairable=True))
+
+    # Last, because it is the one that explains the others going quiet rather
+    # than failing: without it they are not running to fail.
+    checks.append(Check(
+        "Services survive Game Mode", probe.lingering(),
+        "your systemd stops when the desktop session ends, and both watchers "
+        "with it - sudo loginctl enable-linger $USER", repairable=True))
 
     return checks
 

@@ -587,6 +587,20 @@ bus will not, it runs `kdeconnectd` itself, in a session of its own so the
 daemon outlives the bridge's own restarts. It checks again every minute, so a
 daemon that goes away mid-session comes back on its own.
 
+One thing has to be true for any of that: **your systemd has to keep running
+when no session is open.** It does not by default &mdash; it stops with your
+last session, and switching to Game Mode ends one, so every user service goes
+with it. `install.sh` turns that on, and *Status & repair* checks it:
+
+```bash
+sudo loginctl enable-linger $USER
+loginctl show-user $USER --property=Linger      # Linger=yes
+```
+
+Without it the symptom is not an error but a silence: nothing flashes, and
+the journal has nothing to say about why, because the thing that would have
+said it was not running either.
+
 That only holds for `PHONE_SOURCE=kdeconnect` (which `auto` picks whenever
 KDE Connect can be had at all). The `desktop` source reads the notification
 daemon, and Game Mode does not run one, so it can find nothing there however

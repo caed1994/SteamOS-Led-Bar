@@ -324,6 +324,22 @@ install_user_units() {
         fi
     done
 
+    # Keep the user's systemd running when no session is open. Without this it
+    # stops with the last session, taking every user unit with it - and
+    # switching between Desktop Mode and Game Mode ends a session. Both
+    # watchers are written to outlive that switch, and neither can while the
+    # thing that runs them does not.
+    #
+    # Measured on a Steam Deck: in Game Mode the bridge was not running at
+    # all, which is why it never even reported that KDE Connect had gone.
+    if loginctl enable-linger "$WATCHER_USER" >/dev/null 2>&1; then
+        say "Keeping $WATCHER_USER's services running across Game Mode"
+    else
+        warn "could not enable lingering for $WATCHER_USER. The watchers will"
+        warn "stop when you switch to Game Mode; turn it on by hand with:"
+        warn "  sudo loginctl enable-linger $WATCHER_USER"
+    fi
+
     user_systemctl daemon-reload || true
     WATCHER_STATUS="enabled for $WATCHER_USER, starts at next login"
     return 0

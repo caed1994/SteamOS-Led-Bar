@@ -30,12 +30,13 @@ class FakeProbe:
     """Answers about a machine, without being one."""
 
     def __init__(self, present=(), fifos=(), active=(), user_active=(),
-                 release="6.11.11-valve"):
+                 release="6.11.11-valve", linger=False):
         self.present = set(present)
         self.fifos = set(fifos)
         self.active = set(active)
         self.user_active = set(user_active)
         self.release = release
+        self.linger = linger
 
     def exists(self, path):
         return path in self.present
@@ -45,6 +46,9 @@ class FakeProbe:
 
     def unit_active(self, unit, user=False):
         return unit in (self.user_active if user else self.active)
+
+    def lingering(self, user=None):
+        return self.linger
 
     def kernel_release(self):
         return self.release
@@ -58,7 +62,7 @@ def healthy(release="6.11.11-valve"):
         fifos=("/run/steamos-led-serial/notify",),
         active=(ledpanel.SERVICE,),
         user_active=(ledpanel.WATCHER,),
-        release=release)
+        release=release, linger=True)
 
 
 class HealthyInstallationTest(unittest.TestCase):
@@ -115,6 +119,36 @@ class AfterASteamUpdateTest(unittest.TestCase):
     def test_all_of_it_is_repairable(self):
         self.assertTrue(all(check.repairable
                             for check in ledpanel.broken(self.checks)))
+
+
+class LingeringTest(unittest.TestCase):
+    """The one that explains the others going quiet rather than failing.
+
+    Measured on a Steam Deck: in Game Mode the phone bridge was not running
+    at all, and so never reported anything wrong. systemd stops a user's
+    services when their last session ends, and switching to Game Mode ends
+    one - so both watchers, written to survive that switch, were not there to.
+    """
+
+    def test_it_is_reported_when_the_services_would_not_survive(self):
+        checks = ledpanel.run_checks(probe=healthy())
+        self.assertEqual(ledpanel.broken(checks), [])
+        probe = healthy()
+        probe.linger = False
+        broken = ledpanel.broken(ledpanel.run_checks(probe=probe))
+        self.assertEqual(len(broken), 1)
+        self.assertIn("Game Mode", broken[0].name)
+
+    def test_it_says_the_command_that_puts_it_right(self):
+        probe = healthy()
+        probe.linger = False
+        broken = ledpanel.broken(ledpanel.run_checks(probe=probe))[0]
+        self.assertIn("enable-linger", broken.detail)
+
+    def test_the_installer_turns_it_on(self):
+        with open(os.path.join(HERE, "..", "install.sh")) as handle:
+            text = handle.read()
+        self.assertIn("loginctl enable-linger", text)
 
 
 class NotInstalledTest(unittest.TestCase):
