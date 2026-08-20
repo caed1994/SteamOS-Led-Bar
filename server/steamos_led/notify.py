@@ -30,12 +30,15 @@ KIND_FRIEND = "friend"
 KIND_PHONE = "phone"
 KIND_WARNING = "warning"
 
+# Four hues off the wheel, as far apart as four can be while leaving red to
+# the warning. They match what the panel offers - a default it does not offer
+# would open every colour menu on an entry it had to invent for itself.
 KINDS = {
-    KIND_ACHIEVEMENT: (255, 215, 0),    # gold
+    KIND_ACHIEVEMENT: (255, 255, 0),    # yellow
     KIND_MESSAGE: (128, 0, 255),        # purple
-    KIND_FRIEND: (0, 200, 80),          # green
-    KIND_PHONE: (0, 176, 255),          # sky blue: nothing on the machine
-    KIND_WARNING: (255, 0, 0),          # red
+    KIND_FRIEND: (0, 255, 0),           # green
+    KIND_PHONE: (0, 255, 255),          # cyan: nothing on the machine is
+    KIND_WARNING: (255, 0, 0),          # red, and only ever red
 }
 
 PULSES = 3          # how often the bar swells during one notification

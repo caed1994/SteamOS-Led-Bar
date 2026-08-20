@@ -290,47 +290,54 @@ class DesktopEntryTest(unittest.TestCase):
 
 
 class NotificationColourTest(unittest.TestCase):
-    """The panel offers a few colours; the config file takes any."""
+    """One list for every notification; the config file still takes any colour."""
 
-    PALETTES = (("ACHIEVEMENT_COLOR", ledpanel.ACHIEVEMENT_COLOURS),
-                ("MESSAGE_COLOR", ledpanel.MESSAGE_COLOURS),
-                ("FRIEND_COLOR", ledpanel.FRIEND_COLOURS))
+    def setUp(self):
+        self.colours = ledpanel.NOTIFICATION_COLOURS
 
     def test_every_offered_colour_is_one_the_service_accepts(self):
         from steamos_led import notify
-        for _key, palette in self.PALETTES:
-            for label, value in palette:
-                notify.parse_color(value)       # raises if it is not one
-                self.assertTrue(label, value)
+        for label, value in self.colours:
+            self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
+            notify.parse_color(value)           # raises if it is not one
+            self.assertTrue(label, value)
 
-    def test_the_first_entry_is_what_the_service_ships_with(self):
-        # The menu opens on the default, so the default has to be in it - and
-        # first, because that is where "Gold (default)" belongs.
-        for key, palette in self.PALETTES:
-            self.assertEqual(palette[0][1].lower(),
-                             config_module.DEFAULTS[key].lower(), key)
+    def test_every_default_is_one_of_them(self):
+        """Or the menu opens on an entry it had to invent for itself.
+
+        A value the list does not hold is still shown - that is how a colour
+        put in the file by hand survives being looked at - but it is shown
+        under its own hex, and a fresh install should not be greeted by one.
+        """
+        offered = {value.lower() for _label, value in self.colours}
+        for _kind, prefix in config_module.CONFIGURABLE_KINDS:
+            self.assertIn(config_module.DEFAULTS[prefix + "_COLOR"].lower(),
+                          offered, prefix)
+
+    def test_no_two_notifications_start_out_the_same_colour(self):
+        # Four flashes that look alike are four flashes you have to read the
+        # log to tell apart.
+        started = [config_module.DEFAULTS[prefix + "_COLOR"].lower()
+                   for _kind, prefix in config_module.CONFIGURABLE_KINDS]
+        self.assertEqual(len(set(started)), len(started), started)
 
     def test_the_entries_are_distinct(self):
         # Labels are what the menu is keyed on, values what gets written.
-        for key, palette in self.PALETTES:
-            labels = [label for label, _value in palette]
-            values = [value.lower() for _label, value in palette]
-            self.assertEqual(len(set(labels)), len(labels), key)
-            self.assertEqual(len(set(values)), len(values), key)
+        labels = [label for label, _value in self.colours]
+        values = [value.lower() for _label, value in self.colours]
+        self.assertEqual(len(set(labels)), len(labels))
+        self.assertEqual(len(set(values)), len(values))
+
+    def test_it_stays_short_enough_to_pick_from_at_a_glance(self):
+        # The point of the list. It grew to eighteen by having a few per kind
+        # and then offering all of them everywhere, at which point choosing
+        # meant comparing swatch by swatch down a menu taller than the window.
+        self.assertLessEqual(len(self.colours), 10)
 
 
 class PhoneMenuTest(unittest.TestCase):
     """What the panel offers for the phone, and what it deliberately does not."""
 
-    def test_the_phone_colours_are_ones_the_service_accepts(self):
-        from steamos_led import notify
-        for label, value in ledpanel.PHONE_COLOURS:
-            self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
-            notify.parse_color(value)
-        # And the default is among them, or the menu opens on an entry it
-        # had to invent for a value it was already holding.
-        self.assertIn(config_module.DEFAULTS["PHONE_COLOR"],
-                      [value for _label, value in ledpanel.PHONE_COLOURS])
 
 
 class FlashPaletteTest(unittest.TestCase):
@@ -353,13 +360,17 @@ class FlashPaletteTest(unittest.TestCase):
         self.assertEqual(len(labels), len(set(labels)))
 
     def test_the_notification_colours_come_first(self):
-        # They are the ones this strip is known to look good in.
+        # The wheel is what somebody reaching for "make it go red" wants; the
+        # named oddities are for when they know what they are after.
         offered = [value for _label, value in self.palette]
-        known = [value for group in (ledpanel.ACHIEVEMENT_COLOURS,
-                                     ledpanel.MESSAGE_COLOURS,
-                                     ledpanel.FRIEND_COLOURS)
-                 for _label, value in group]
+        known = [value for _label, value in ledpanel.NOTIFICATION_COLOURS]
         self.assertEqual(offered[:len(known)], known)
+
+    def test_it_offers_more_than_a_notification_can_be_set_to(self):
+        # A different question from the settings menu: here you are trying a
+        # colour out, so an odd one is the point rather than a distraction.
+        self.assertGreater(len(self.palette),
+                           len(ledpanel.NOTIFICATION_COLOURS))
 
     def test_the_colour_the_shape_buttons_use_is_offered(self):
         self.assertIn(ledpanel.SHAPE_TEST_COLOUR,

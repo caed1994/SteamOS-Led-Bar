@@ -16,7 +16,8 @@ from steamos_led import notify  # noqa: E402
 
 class ColourParsingTest(unittest.TestCase):
     def test_named_kinds(self):
-        self.assertEqual(notify.parse_color("achievement"), (255, 215, 0))
+        self.assertEqual(notify.parse_color("achievement"),
+                         notify.KINDS[notify.KIND_ACHIEVEMENT])
         self.assertEqual(notify.parse_color("MESSAGE"), (128, 0, 255))
 
     def test_hex(self):
@@ -47,12 +48,18 @@ class OverlayTest(unittest.TestCase):
         frame = self.overlay.apply(self.base, 100.5)
         self.assertNotEqual(frame, self.base)
         self.assertEqual(len(frame), 4 * 3)
-        # Gold: red high, some green, no blue - on whichever LED is lit.
+        # The achievement colour, on whichever LED is lit - taken from the
+        # table rather than spelled out here, so changing what an achievement
+        # looks like is one edit and not a hunt through the tests. Compared by
+        # ratio: this is mid-flash, so every channel is scaled by the envelope
+        # and only their proportions survive.
         lit = max(range(4), key=lambda led: frame[led * 3])
-        red, green, blue = frame[lit * 3:lit * 3 + 3]
-        self.assertGreater(red, green)
-        self.assertGreater(green, blue)
-        self.assertEqual(blue, 0)
+        shown = frame[lit * 3:lit * 3 + 3]
+        wanted = notify.KINDS[notify.KIND_ACHIEVEMENT]
+        brightest = max(wanted)
+        for channel, (was, is_) in enumerate(zip(wanted, shown)):
+            self.assertAlmostEqual(is_ / max(shown), was / brightest, delta=0.02,
+                                   msg="channel %d" % channel)
 
     def test_brightness_varies_over_the_flash(self):
         self.overlay.trigger("achievement", 0.0)
@@ -76,7 +83,7 @@ class OverlayTest(unittest.TestCase):
         self.overlay.trigger("achievement", 100.0)
         self.assertIsNotNone(self.overlay.frame(100.5))
         self.assertIsNone(self.overlay.frame(102.1),
-                          "the bar has to go back to Steam, not stay gold")
+                          "the bar has to go back to Steam, not stay lit")
         self.assertFalse(self.overlay.active)
 
     def test_hands_the_bar_back_when_it_expires(self):
@@ -97,7 +104,9 @@ class OverlayTest(unittest.TestCase):
         # dark this early into a flash.
         red, green, blue = self.overlay.apply(self.base, 1.5)[3:6]
         self.assertGreater(red, blue, "the achievement is still being shown")
-        self.assertGreater(green, 0, "gold has green in it, purple does not")
+        self.assertGreater(green, 0,
+                           "the achievement colour has green in it, "
+                           "the message one does not")
 
     def test_disabled_overlay_never_fires(self):
         overlay = notify.NotificationOverlay(enabled=False, led_count=4)
@@ -135,20 +144,28 @@ class QueueTest(unittest.TestCase):
         frame = self.overlay.frame(now)
         return None if frame is None else tuple(frame[3:6])
 
-    def _is_gold(self, colour):
-        red, green, blue = colour
-        return red > green > blue
+    def _looks_like(self, colour, kind):
+        """Whether a lit pixel is this kind's colour, whatever its brightness.
 
-    def _is_purple(self, colour):
-        red, green, blue = colour
-        return blue > red and green == 0
+        Against the table rather than by hand-written channel inequalities:
+        "red > green > blue" identified gold, and went on passing for anything
+        else warm - then stopped meaning anything at all when the achievement
+        colour moved to a yellow, where red and green are equal. A ratio holds
+        whichever colour the table names next.
+        """
+        wanted = notify.KINDS[kind]
+        if max(colour) == 0:
+            return False
+        return all(abs(is_ / max(colour) - was / max(wanted)) < 0.02
+                   for was, is_ in zip(wanted, colour))
 
     def test_both_are_shown_in_the_order_they_arrived(self):
         self.overlay.trigger("achievement", 0.0)
         self.overlay.trigger("message", 0.0)         # the same tick
-        self.assertTrue(self._is_gold(self._middle(0.5)))
-        self.overlay.frame(2.1)      # the gold one ends and the queue moves on
-        self.assertTrue(self._is_purple(self._middle(2.6)),
+        self.assertTrue(self._looks_like(self._middle(0.5),
+                                         notify.KIND_ACHIEVEMENT))
+        self.overlay.frame(2.1)      # the first ends and the queue moves on
+        self.assertTrue(self._looks_like(self._middle(2.6), notify.KIND_MESSAGE),
                         "the queued message should follow, not be lost")
 
     def test_the_queued_one_starts_when_the_first_ends(self):

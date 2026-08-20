@@ -503,58 +503,51 @@ def load_command():
 # colour. These are the offered ones, not the possible ones - first is the
 # default the service ships with.
 
-ACHIEVEMENT_COLOURS = (
-    ("Gold", "#ffd700"),
-    ("Bronze", "#cd7f32"),
-    ("Platinum", "#e5e4e2"),
-)
-
-MESSAGE_COLOURS = (
+# One list for every notification, and a short one: eight hues round the wheel
+# and white. It used to be a handful per kind - gold and bronze for an
+# achievement, a teal for a friend - which read well in the source and came out
+# of the menu as eighteen near-neighbours you had to compare swatch by swatch.
+#
+# These are the offered colours, not the possible ones. The config file takes
+# any colour at all, and so does the trigger; a strip is also not a screen, and
+# the difference between a bronze and a gold on one is not the difference it is
+# in a paint chart.
+NOTIFICATION_COLOURS = (
+    ("Red", "#ff0000"),
+    ("Orange", "#ff8000"),
+    ("Yellow", "#ffff00"),
+    ("Green", "#00ff00"),
+    ("Cyan", "#00ffff"),
+    ("Blue", "#0000ff"),
     ("Purple", "#8000ff"),
-    ("Hot Pink", "#ff36c9"),
+    ("Magenta", "#ff00ff"),
+    ("White", "#ffffff"),
 )
 
-
-FRIEND_COLOURS = (
-    # Muted on purpose: someone appearing is worth less of your attention
-    # than someone writing to you.
-    ("Teal", "#00c850"),
-    ("Orange", "#ff3200"),
-)
-
-
-PHONE_COLOURS = (
-    # Nothing on the machine is this blue, which is the point: a phone
-    # notification is the one that did not come from the machine in front of
-    # you. WhatsApp's own green is offered for anyone whose phone only ever
-    # flashes for that one app.
-    ("Sky", "#00b0ff"),
+# Offered when a colour is picked outright rather than set - the Test page's
+# "flash a colour", where trying an odd one is the whole point. The wheel
+# first, then the ones worth having a name for.
+EXTRA_COLOURS = (
+    ("Steam blue", SHAPE_TEST_COLOUR),
     ("WhatsApp green", "#25d366"),
     ("Signal blue", "#3a76f0"),
+    ("Gold", "#ffd700"),
+    ("Amber", "#ffa000"),
 )
 
 
 def palette():
     """Colours to offer when one is being picked outright, in a sensible order.
 
-    The ones the notifications already use come first - they are the colours
-    this strip is known to look good in - and then the corners of the space,
-    for someone who only wants to see the bar go red. Anything else is typed
-    in: the config file takes any colour and so does the trigger.
+    The ones a notification can be set to come first - they are the wheel, and
+    what somebody reaching for "make it go red" wants - then the few worth
+    having a name for. Anything else is typed in: the config file takes any
+    colour and so does the trigger.
     """
     offered = []
-    for group in (ACHIEVEMENT_COLOURS, MESSAGE_COLOURS, FRIEND_COLOURS,
-                  PHONE_COLOURS):
-        for label, value in group:
-            if value.lower() not in {had.lower() for _n, had in offered}:
-                offered.append((label, value))
-    for entry in (("White", "#ffffff"), ("Red", "#ff0000"),
-                  ("Amber", "#ffa000"), ("Yellow", "#ffff00"),
-                  ("Green", "#00ff00"), ("Cyan", "#00ffff"),
-                  ("Steam blue", SHAPE_TEST_COLOUR), ("Blue", "#0000ff"),
-                  ("Magenta", "#ff00ff")):
-        if entry[1].lower() not in {had.lower() for _n, had in offered}:
-            offered.append(entry)
+    for label, value in NOTIFICATION_COLOURS + EXTRA_COLOURS:
+        if value.lower() not in {had.lower() for _name, had in offered}:
+            offered.append((label, value))
     return tuple(offered)
 
 

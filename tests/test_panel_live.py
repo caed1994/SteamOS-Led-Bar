@@ -385,7 +385,13 @@ class LiveWindowTest(unittest.TestCase):
         # The menus hold what a value looks like, and the file may hold the
         # same colour in another case. Comparing the raw strings made the
         # window claim an unsaved change nobody had made.
-        self.panel.config["ACHIEVEMENT_COLOR"] = "#FFD700"
+        # The colour the window is holding, spelled the other way: written out
+        # as a literal this stopped being the same colour the moment the
+        # default moved, and then tested nothing at all.
+        holding = self.panel._value_for(
+            "ACHIEVEMENT_COLOR", self.panel.vars["ACHIEVEMENT_COLOR"][0].get())
+        self.assertRegex(holding, r"^#[0-9a-f]{6}$")
+        self.panel.config["ACHIEVEMENT_COLOR"] = holding.upper()
         self.panel._refresh_unsaved()
         self.root.update()
         self.assertNotIn("ACHIEVEMENT_COLOR", self.panel._differences())

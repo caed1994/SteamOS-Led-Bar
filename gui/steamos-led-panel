@@ -135,12 +135,12 @@ NOTIFICATIONS = [
     # how much has to be true before it can happen: Steam needs a game
     # running, the machine needs nothing, the phone needs a phone.
     ("From Steam", [
-        ("NOTIFY_ACHIEVEMENTS", "Achievements", "flash", "ACHIEVEMENT",
-         ledpanel.ACHIEVEMENT_COLOURS, None),
+        ("NOTIFY_ACHIEVEMENTS", "Achievements", "flash",
+         "ACHIEVEMENT", None, None),
         ("NOTIFY_MESSAGES", "Friend messages", "flash", "MESSAGE",
-         ledpanel.MESSAGE_COLOURS, None),
-        ("NOTIFY_FRIEND_ONLINE", "Friends coming online", "flash", "FRIEND",
-         ledpanel.FRIEND_COLOURS, None),
+         None, None),
+        ("NOTIFY_FRIEND_ONLINE", "Friends coming online", "flash",
+         "FRIEND", None, None),
     ]),
     ("From this machine", [
         # A warning has to mean the same thing on every machine, so there is
@@ -150,7 +150,7 @@ NOTIFICATIONS = [
     ]),
     ("From your phone", [
         ("NOTIFY_PHONE", "Phone notifications", "flash", "PHONE",
-         ledpanel.PHONE_COLOURS, None),
+         None, None),
         # PHONE_SOURCE is deliberately not here. "auto" makes the choice, and
         # overriding it is a thing you do knowing why - the same company as
         # PHONE_APPS, which lives in the file too. On the page it was one more
@@ -1784,7 +1784,7 @@ class Panel:
             controls.append(control)
             self._follow(variable)
             if kind == FLASH:
-                self._build_look(grid, row, low, high, lead=lead)
+                self._build_look(grid, row, low, lead=lead)
             elif kind == FIXED:
                 # What the two menus would have said, where they would have
                 # been. A blank there reads as a setting that failed to draw.
@@ -1817,7 +1817,7 @@ class Panel:
         self.vars[key] = (variable, "bool" if kind in (FLASH, FIXED) else kind)
         self._rows[key] = (labels, controls)
 
-    def _build_look(self, grid, row, prefix, colours, lead=0):
+    def _build_look(self, grid, row, prefix, lead=0):
         """The colour and the shape of one notification, beside its switch.
 
         Registered as settings of their own, under their own keys: that is
@@ -1827,8 +1827,8 @@ class Panel:
         same one the service spells them under - see CONFIGURABLE_KINDS.
         """
         for column, key, choices, width in (
-                (COLOUR_COLUMN, prefix + "_COLOR", self._colours(colours),
-                 COLOUR_WIDTH),
+                (COLOUR_COLUMN, prefix + "_COLOR",
+                 ledpanel.NOTIFICATION_COLOURS, COLOUR_WIDTH),
                 (SHAPE_COLUMN, prefix + "_STYLE", KIND_STYLE_CHOICES,
                  SHAPE_WIDTH)):
             variable = tk.StringVar()
@@ -1842,18 +1842,6 @@ class Panel:
             self._follow(variable)
             self.vars[key] = (variable, "named")
             self._rows[key] = ([], [field])
-
-    def _colours(self, colours):
-        """The colours suggested for one kind, then the rest of the palette.
-
-        Its own first, because those are the ones chosen for it. The whole
-        palette after them, so a colour nobody thought of for achievements is
-        still two clicks away rather than a trip to the config file.
-        """
-        offered = list(colours)
-        had = {value.lower() for _label, value in offered}
-        return offered + [entry for entry in ledpanel.palette()
-                          if entry[1].lower() not in had]
 
     def _follow(self, variable):
         """Watch a control, so the window can keep up with it.

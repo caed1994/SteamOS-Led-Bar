@@ -384,7 +384,7 @@ steamos-led-serial --notify comet:#1a9fff
 | `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again |
 | `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | default shape |
-| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` / `PHONE_COLOR` | `#ffd700` / `#8000ff` / `#00c850` / `#00b0ff` | what each one flashes |
+| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` / `PHONE_COLOR` | `#ffff00` / `#8000ff` / `#00ff00` / `#00ffff` | what each one flashes. The panel offers eight hues and white; the file takes any colour |
 | `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` / `PHONE_STYLE` | `default` | shape for that one kind, or `default` to follow `NOTIFY_STYLE` |
 
 ### The shapes
@@ -537,7 +537,7 @@ being where the general look is set; `PHONE_APPS_ONLY=1` ignores it instead.
 | Option | Panel | Meaning |
 | ------ | ----- | ------- |
 | `NOTIFY_PHONE` | yes | flash on the phone's notifications at all (default `0`) |
-| `PHONE_COLOR` / `PHONE_STYLE` | yes | what one looks like unless a rule says otherwise (`#00b0ff` / `default`) |
+| `PHONE_COLOR` / `PHONE_STYLE` | yes | what one looks like unless a rule says otherwise (`#00ffff` / `default`) |
 | `PHONE_APPS_ONLY` | yes | ignore apps the list does not name (default `0`) |
 | `PHONE_APPS` | file only | `App:colour` or `App:colour:shape`, separated by commas |
 | `PHONE_SOURCE` | file only | which bus to read: `auto`, `kdeconnect`, `desktop` |

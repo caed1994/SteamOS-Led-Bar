@@ -180,15 +180,24 @@ class EndToEndTest(unittest.TestCase):
         self.assertTrue(frames, "no frames at all:\n%s" % stderr)
         self.assertIn("notification: achievement", stderr)
 
-        def is_gold(frame):
-            red, green, blue = frame[2], frame[3], frame[4]
-            return blue == 0 and red > green > 0
+        # The achievement colour, read out of the table rather than described
+        # here: "red > green > 0" was gold, and stopped being an achievement
+        # at all when that colour moved. Mid-flash every channel is scaled by
+        # the envelope, so it is the proportions that are compared.
+        wanted = notify.KINDS[notify.KIND_ACHIEVEMENT]
 
-        golden = [index for index, frame in enumerate(frames) if is_gold(frame)]
-        self.assertTrue(golden, "the bar never turned gold:\n%s" % stderr)
+        def is_flash(frame):
+            shown = (frame[2], frame[3], frame[4])
+            if max(shown) == 0:
+                return False
+            return all(abs(is_ / max(shown) - was / max(wanted)) < 0.02
+                       for was, is_ in zip(wanted, shown))
+
+        lit = [index for index, frame in enumerate(frames) if is_flash(frame)]
+        self.assertTrue(lit, "the bar never flashed:\n%s" % stderr)
 
         # Steam's own colour was green (10, 200, 30) - it has to come back.
-        after = frames[golden[-1] + 1:]
+        after = frames[lit[-1] + 1:]
         self.assertTrue(after, "flash ran to the end of the test, cannot tell")
         self.assertEqual(tuple(after[-1][2:5]), (10, 200, 30),
                          "the bar did not go back to what Steam is showing")
