@@ -84,6 +84,12 @@ TICK_SECONDS = 60.0
 # and the next tick asks again a minute later.
 SETTLE_SECONDS = 2.0
 
+# What to tell Qt when starting kdeconnectd ourselves. It is a Qt application
+# and will not run without a platform plugin it can initialise; started from a
+# service it inherits "wayland", finds no compositor, and dumps core. A daemon
+# has nothing to draw, and this is the plugin for having nothing to draw on.
+QT_PLATFORM = "offscreen"
+
 
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
     """One notification, as much of it as the bus was willing to say.
@@ -606,17 +612,30 @@ def start_kdeconnectd(path=None):
     In a session of its own, so it outlives the bridge - and it must: this
     process restarts, and a daemon that went with it would be started afresh
     every time, dropping the phone's connection each time it did.
+
+    Started without a display, which is not a detail. kdeconnectd is a Qt
+    application, and Qt insists on a working platform plugin before it will
+    run at all - so started from here it inherited "wayland", found no
+    compositor to talk to, and dumped core before it had done anything:
+
+        Failed to create wl_display (No such file or directory)
+        qt.qpa.plugin: Could not load the Qt platform plugin "wayland"
+
+    It has nothing to draw. What is wanted from it is the network and the
+    bus, both of which work perfectly well with no screen at all.
     """
     path = path or kdeconnectd_path()
     if path is None:
         return None
     try:
         subprocess.Popen([path], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+                         stderr=subprocess.DEVNULL, start_new_session=True,
+                         env=dict(os.environ, QT_QPA_PLATFORM=QT_PLATFORM))
     except OSError as exc:
         LOG.warning("cannot start %s: %s", path, exc)
         return None
-    LOG.info("started %s, which nothing else was going to", path)
+    LOG.info("started %s with no display, which nothing else was going to",
+             path)
     return path
 
 

@@ -583,8 +583,11 @@ its daemon is started by the desktop session and dies with it.
 
 So the bridge starts it. It asks the bus first &mdash; on a machine where KDE
 Connect can be activated on demand, that is all it takes &mdash; and where the
-bus will not, it runs `kdeconnectd` itself, in a session of its own so the
-daemon outlives the bridge's own restarts. It checks again every minute, so a
+bus will not, it runs `kdeconnectd` itself &mdash; in a session of its own so
+the daemon outlives the bridge's own restarts, and with no display, because
+KDE Connect is a Qt application and Qt refuses to start without a platform
+plugin it can use. Started from a service it inherits Wayland, finds no
+compositor and dumps core; it has nothing to draw anyway. It checks again every minute, so a
 daemon that goes away mid-session comes back on its own.
 
 One thing has to be true for any of that: **your systemd has to keep running

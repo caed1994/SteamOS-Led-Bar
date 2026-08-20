@@ -278,6 +278,29 @@ class SourceTest(unittest.TestCase):
                                         return_value=None):
             self.assertIsNone(phone.kdeconnectd_path())
 
+    def test_it_is_started_without_a_display(self):
+        """Because Qt will not start one at all without a plugin it can use.
+
+        Measured on a Steam Deck: started from a service it inherited
+        "wayland", found no compositor, and dumped core before it had done
+        anything - "Failed to create wl_display". It has nothing to draw; the
+        network and the bus are what is wanted from it, and neither needs a
+        screen.
+        """
+        started = {}
+
+        def remember(command, **kwargs):
+            started.update(kwargs, command=command)
+            return None
+
+        with unittest.mock.patch.object(phone.subprocess, "Popen", remember):
+            phone.start_kdeconnectd("/bin/true")
+        self.assertEqual(started["env"]["QT_QPA_PLATFORM"], "offscreen")
+        # And the rest of the environment intact: it still has a bus to find,
+        # which is named in one of those variables.
+        for name in os.environ:
+            self.assertIn(name, started["env"], name)
+
     def test_it_is_started_in_a_session_of_its_own(self):
         """So it outlives the bridge, which restarts.
 
