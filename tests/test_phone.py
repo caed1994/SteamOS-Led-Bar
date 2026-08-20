@@ -708,6 +708,57 @@ class BridgeTest(unittest.TestCase):
         # could not shorten it, and neither could anything else.
         self.assertGreater(phone.TICK_SECONDS, 0)
 
+    def _conversation(self, bodies):
+        """One notification whose text keeps changing, as a phone sends it.
+
+        The first message is posted; every one after it is the same
+        notification with new words in it, announced as "refreshed".
+        """
+        posted = COUNTED_LINE
+        refresh = ("/modules/kdeconnect/devices/d33f/notifications: "
+                   "org.kde.kdeconnect.device.notifications.refreshed ()")
+        saying = {"body": bodies[0]}
+        sent = []
+        bridge = phone.Bridge(
+            phone.SOURCE_KDECONNECT, (), send=sent.append,
+            details=lambda seen: phone.Sighting(
+                "Notification Test", "ufnrhd", saying["body"],
+                where=seen.where))
+        bridge.line(posted)
+        for body in bodies[1:]:
+            saying["body"] = body
+            bridge.line(refresh)
+        return bridge, sent
+
+    def test_a_refreshed_notification_is_re_read_for_what_changed(self):
+        """The last layer of the reported bug, and the measured shape of it.
+
+        This KDE Connect announces a changed notification as "refreshed",
+        which says that something moved and not what - so six messages in one
+        conversation came out as one line in the dry run. The notification
+        keeps the object it always had, though, so the objects lately seen
+        are what get asked.
+        """
+        bridge, sent = self._conversation(
+            ["rjxhenfbg", "zweite", "dritte", "vierte", "fuenfte", "sechste"])
+        self.assertEqual(bridge.flashed, 6)
+        self.assertEqual(len(set(sent)), 6, sent)
+
+    def test_a_refresh_with_nothing_new_in_it_is_not_a_message(self):
+        # Something else on the phone moved. The service would drop it as a
+        # repeat anyway, but a dry run printing a line for it would be
+        # describing an event that did not happen.
+        bridge, sent = self._conversation(["one", "one", "one"])
+        self.assertEqual(bridge.flashed, 1, sent)
+
+    def test_only_so_many_notifications_are_kept_to_re_read(self):
+        # A phone left alone for a day should not leave a list of everything
+        # it ever sent, and only the recent ones can still say anything new.
+        bridge, _sent = self._conversation(["a", "b", "c"])
+        for index in range(phone.RECENT_NOTIFICATIONS * 2):
+            bridge.line(COUNTED_LINE.replace("('3',)", "('%d',)" % index))
+        self.assertLessEqual(len(bridge.recent), phone.RECENT_NOTIFICATIONS)
+
     def test_the_dry_run_names_a_signal_it_did_not_act_on(self):
         """Because the names differ between KDE Connect versions.
 
@@ -721,8 +772,12 @@ class BridgeTest(unittest.TestCase):
         bridge = phone.Bridge(phone.SOURCE_KDECONNECT, (), send=None,
                               report=lambda seen, _t: told.append(seen.app))
         bridge.run([odd, odd, odd])
-        self.assertEqual(told, ["(not acted on: notificationTicker)"],
-                         "said once, not once a line")
+        self.assertEqual(len(told), 1, "said once, not once a line")
+        # The whole line, because twice now a signal this passed over turned
+        # out to be the one carrying the messages, and what was wanted next
+        # was its object and its arguments.
+        self.assertIn("notificationTicker", told[0])
+        self.assertIn("/modules/kdeconnect/devices/d33f", told[0])
 
     def test_the_ones_it_knows_about_are_not_worth_mentioning(self):
         # Arrivals are acted on and removals are meant to be ignored; neither

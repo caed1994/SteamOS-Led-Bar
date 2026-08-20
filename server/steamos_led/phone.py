@@ -65,6 +65,11 @@ KDECONNECT_MEMBERS = ("notificationPosted", "notificationUpdated")
 # every notification dismissed on the phone, and flashing at those would light
 # the bar a second time for every message, as you picked the phone up.
 KDECONNECT_GONE = ("notificationRemoved", "allNotificationsRemoved")
+# And what it says when something changed without saying what. Measured on a
+# Steam Deck: this is how that KDE Connect reports the second message of a
+# conversation - the notification keeps the object it always had and only its
+# text moves, so the answer is to re-read the objects lately seen.
+KDECONNECT_REFRESH = ("refreshed",)
 DESKTOP_MEMBER = "Notify"
 
 # One notification, as an object of its own. KDE Connect's signal carries only
@@ -112,6 +117,11 @@ QT_PLATFORM = "offscreen"
 # notifications will not collide inside one repeat gap, short enough to read
 # in a log line.
 TAG_LENGTH = 8
+
+# How many notification objects to keep on hand for a "refreshed" to re-read.
+# Only the recent ones can still have anything new to say, and a phone left
+# alone all day should not leave a list of everything it ever sent.
+RECENT_NOTIFICATIONS = 8
 
 
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
@@ -546,6 +556,9 @@ class Bridge:
         self.details = details
         self.seen = 0
         self.flashed = 0
+        # The notification objects lately seen and what each last said, for a
+        # "refreshed" to re-read and compare against.
+        self.recent = {}
         # Signal names already mentioned, so a busy bus does not repeat one
         # line a hundred times.
         self.passed_over = set()
@@ -554,10 +567,57 @@ class Bridge:
         """Handle one line; returns the trigger written, if any."""
         sighting = read_line(text, self.source)
         if sighting is None:
+            if member_of(text) in KDECONNECT_REFRESH:
+                return self._look_again()
             self._passed_over(text)
             return None
-        if sighting.where and self.details is not None:
+        return self._handle(sighting)
+
+    def _remember(self, sighting):
+        """Keep the notification objects lately seen, and what they said.
+
+        Newest last and bounded: a phone left alone for a day would otherwise
+        leave a list of every notification it ever sent, and only the recent
+        ones can still have anything new to say.
+        """
+        where = sighting.where
+        self.recent.pop(where, None)
+        self.recent[where] = fingerprint(sighting)
+        for old in list(self.recent)[:-RECENT_NOTIFICATIONS]:
+            del self.recent[old]
+
+    def _look_again(self):
+        """Re-read the notifications lately seen, because one has changed.
+
+        Measured on a real machine: this KDE Connect announces a changed
+        notification as "refreshed", which says that something moved and not
+        what - while the notification itself keeps the object it always had.
+        So the objects are what gets asked, and the fingerprint decides
+        whether there is anything new in the answer.
+        """
+        if self.details is None:
+            return None
+        written = None
+        for where, said in list(self.recent.items()):
+            fresh = self.details(Sighting("", where=where))
+            if fresh is None or not fresh.app:
+                continue
+            if fingerprint(fresh) == said:
+                # The notification is still saying what it said last time.
+                # Something else on that phone moved, and the service would
+                # drop this as a repeat anyway - but a dry run that printed a
+                # line for it would be describing an event that did not
+                # happen.
+                continue
+            written = self._handle(fresh) or written
+        return written
+
+    def _handle(self, sighting):
+        """One notification, however it came to light."""
+        if sighting.where and self.details is not None and not sighting.title:
             sighting = self.details(sighting)
+        if sighting.where:
+            self._remember(sighting)
         self.seen += 1
         trigger = trigger_for(sighting, self.rules, self.kind,
                               self.listed_only)
@@ -589,7 +649,11 @@ class Bridge:
                 or member in KDECONNECT_GONE or member in self.passed_over):
             return
         self.passed_over.add(member)
-        self.report(Sighting("(not acted on: %s)" % member), None)
+        # The whole line, not just the name. Twice now a signal this did not
+        # act on turned out to be the one carrying the messages, and what was
+        # needed next was its object and its arguments - which a name alone
+        # does not give.
+        self.report(Sighting("(not acted on) " + text.strip()), None)
 
     def run(self, lines):
         for text in lines:
