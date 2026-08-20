@@ -587,8 +587,10 @@ bus will not, it runs `kdeconnectd` itself &mdash; in a session of its own so
 the daemon outlives the bridge's own restarts, and with no display, because
 KDE Connect is a Qt application and Qt refuses to start without a platform
 plugin it can use. Started from a service it inherits Wayland, finds no
-compositor and dumps core; it has nothing to draw anyway. It checks again every minute, so a
-daemon that goes away mid-session comes back on its own.
+compositor and dumps core; it has nothing to draw anyway. It checks again every minute while all is
+well, and every few seconds while KDE Connect is missing - so a daemon that
+goes away mid-session comes back on its own, and the phone is not left
+looking for the machine for a minute after every switch.
 
 One thing has to be true for any of that: **your systemd has to keep running
 when no session is open.** It does not by default &mdash; it stops with your

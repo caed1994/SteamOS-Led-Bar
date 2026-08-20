@@ -1161,9 +1161,20 @@ def run_watch_phone(config, print_only=False):
         else:
             LOG.info("KDE Connect is paired with: %s", ", ".join(now))
 
+    def how_soon():
+        """Often while KDE Connect is missing, seldom while it is not.
+
+        The minute that is right for looking in on something healthy is a
+        long time to sit with the phone trying to reconnect - and checking
+        every few seconds all day, to catch the few minutes a week when it
+        matters, is the other way to get it wrong.
+        """
+        return (phone.EAGER_SECONDS if known[0] is None
+                else phone.TICK_SECONDS)
+
     try:
         if source == phone.SOURCE_KDECONNECT:
-            bridge.watch(monitor.stdout, look_again)
+            bridge.watch(monitor.stdout, look_again, how_soon)
         else:
             bridge.run(monitor.stdout)
     except KeyboardInterrupt:

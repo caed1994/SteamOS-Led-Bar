@@ -79,6 +79,13 @@ FIELD_SEPARATOR = ":"
 # for a process built to outlive the session it started in.
 TICK_SECONDS = 60.0
 
+# And how often while it is missing. A minute is right for "nothing is
+# wrong, look in now and then"; it is far too long to wait when KDE Connect
+# has just died with the session and the phone is sitting there trying to
+# reconnect. Cheap enough at this rate - one short call - because it only
+# runs while something is actually broken.
+EAGER_SECONDS = 5.0
+
 # How long to let a freshly started KDE Connect claim its name before
 # asking it anything. Short: getting it wrong costs one wasted question,
 # and the next tick asks again a minute later.
@@ -522,12 +529,18 @@ class Bridge:
         select() rather than a thread. There is one thing to wait on and one
         thing to do about it, and a thread would need a way to be stopped
         that this loop already has by ending.
+
+        `every` may be a function rather than a number, asked before each
+        wait. That is what lets the caller look often while something is
+        wrong and seldom while nothing is: a fixed interval has to be either
+        wasteful or slow to notice, and neither is necessary.
         """
         # Read when it is called rather than when this was defined, so the
         # interval is one a test can shorten.
         every = TICK_SECONDS if every is None else every
         while True:
-            ready, _write, _bad = select.select([stream], [], [], every)
+            wait = every() if callable(every) else every
+            ready, _write, _bad = select.select([stream], [], [], wait)
             if not ready:
                 if tick is not None:
                     tick()

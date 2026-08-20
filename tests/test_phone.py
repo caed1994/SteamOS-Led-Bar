@@ -559,6 +559,39 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(bridge.flashed, 1, "the line was missed")
         self.assertEqual(len(ticks), 3)
 
+    def test_how_long_to_wait_is_asked_each_time_round(self):
+        """So it can look often while something is wrong and seldom while not.
+
+        A fixed interval has to be either wasteful or slow to notice. The
+        minute that suits looking in on a healthy KDE Connect is a long time
+        to sit with the phone trying to reconnect after a switch to Game Mode.
+        """
+        import os
+
+        read_fd, write_fd = os.pipe()
+        stream = os.fdopen(read_fd)
+        self.addCleanup(stream.close)
+        self.addCleanup(os.close, write_fd)
+
+        asked = []
+
+        def interval():
+            asked.append(len(asked))
+            if len(asked) >= 3:
+                raise KeyboardInterrupt
+            return 0.01
+
+        bridge = phone.Bridge(phone.SOURCE_DESKTOP, self.rules,
+                              send=self.sent.append)
+        with self.assertRaises(KeyboardInterrupt):
+            bridge.watch(stream, lambda: None, interval)
+        self.assertEqual(len(asked), 3, "it was asked once and remembered")
+
+    def test_a_plain_number_still_works(self):
+        self.assertGreater(phone.TICK_SECONDS, phone.EAGER_SECONDS,
+                           "looking in on something healthy should be the "
+                           "rarer of the two")
+
     def test_a_monitor_that_ends_ends_the_watch(self):
         # The bus going away with the session, which is the other thing that
         # can happen while nothing is being said.
