@@ -32,6 +32,7 @@ which is what somebody who has not thought about it wants.
 from __future__ import annotations
 
 import collections
+import hashlib
 import logging
 import os
 import select
@@ -96,6 +97,11 @@ SETTLE_SECONDS = 2.0
 # service it inherits "wayland", finds no compositor, and dumps core. A daemon
 # has nothing to draw, and this is the plugin for having nothing to draw on.
 QT_PLATFORM = "offscreen"
+
+# How much of the digest to put on the wire. Long enough that two different
+# notifications will not collide inside one repeat gap, short enough to read
+# in a log line.
+TAG_LENGTH = 8
 
 
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
@@ -458,10 +464,33 @@ def trigger_for(sighting, rules, kind=notify.KIND_PHONE, listed_only=False):
     """
     rule = match(rules, sighting.app)
     if rule is None:
-        return None if listed_only else kind
-    if rule.style:
-        return "%s%s%s" % (rule.style, FIELD_SEPARATOR, rule.color)
-    return rule.color
+        if listed_only:
+            return None
+        trigger = kind
+    elif rule.style:
+        trigger = "%s%s%s" % (rule.style, FIELD_SEPARATOR, rule.color)
+    else:
+        trigger = rule.color
+    return trigger + notify.TAG_SEPARATOR + fingerprint(sighting)
+
+
+def fingerprint(sighting):
+    """What tells this notification from the last one, in a few characters.
+
+    The service will not flash the same trigger twice within its repeat gap,
+    and that is right - an app posting the same notification again has not
+    said anything new. But every phone notification is the word "phone", or
+    one colour if the app has a rule, so without something to tell them apart
+    the second message of a conversation was dropped as a repeat of the
+    first, and a WhatsApp message and a Signal one seconds apart collided.
+
+    App, title and text, because those are what change when there is
+    something new to say. A notification quietly re-posted unchanged - which
+    is what the gap exists for - still comes out the same and is still only
+    one flash.
+    """
+    said = "\\0".join((sighting.app, sighting.title, sighting.body))
+    return hashlib.sha1(said.encode("utf-8", "replace")).hexdigest()[:TAG_LENGTH]
 
 
 # -- the loop ----------------------------------------------------------------

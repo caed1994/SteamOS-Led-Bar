@@ -312,6 +312,26 @@ STYLES = tuple(_STYLES)
 FIXED_KINDS = {KIND_WARNING: STYLE_ALTERNATE}
 
 
+# A trigger may also say what makes it distinct, after an "@". Nothing about
+# the flash changes; it is only what the repeat gap is keyed on, so that two
+# different messages are two flashes where two copies of one message are one.
+#
+# Needed because the interesting triggers are not distinct by themselves.
+# Everything the phone sends is the word "phone" - or one colour, if the app
+# has a rule - so without this the second message of a conversation was
+# dropped as a repeat of the first, and a WhatsApp message and a Signal one
+# within the same few seconds collided too.
+TAG_SEPARATOR = "@"
+
+
+def split_tag(text):
+    """(what makes this one distinct or None, the trigger itself)."""
+    trigger, separator, tag = str(text).strip().partition(TAG_SEPARATOR)
+    if not separator:
+        return None, str(text).strip()
+    return tag.strip() or None, trigger.strip()
+
+
 # A trigger may name the shape to use for that one flash: "comet:#1a9fff".
 # Nothing is stored - it is how you compare the shapes without first writing
 # one into the config and restarting, which is the wrong way round for
@@ -454,8 +474,8 @@ class NotificationOverlay:
     def active(self):
         return self.current is not None or bool(self.pending)
 
-    def trigger(self, kind, now):
-        """Show a flash, or put it in the queue. `kind` is a name or a colour.
+    def trigger(self, text, now):
+        """Show a flash, or put it in the queue. `text` is a name or a colour.
 
         Returns whether it will be shown at all: unknown input, a repeat of
         something the bar just said, and a full queue are each logged and
@@ -463,35 +483,44 @@ class NotificationOverlay:
         """
         if not self.enabled:
             return False
+        tag, kind = split_tag(text)
         shape, wanted = split_shape(kind)
         try:
             color = parse_color(wanted, self.colors)
         except ValueError as exc:
-            LOG.warning("ignoring notification %r: %s", kind, exc)
+            LOG.warning("ignoring notification %r: %s", text, exc)
             return False
 
-        if now < self._quiet_until.get(kind, 0.0):
+        # What the quiet window is keyed on. The trigger word, unless the
+        # caller said what makes this one distinct - see split_tag. Without
+        # that, everything the phone sends is the word "phone" and the second
+        # message of a conversation is dropped as a repeat of the first.
+        key = tag or kind
+
+        if now < self._quiet_until.get(key, 0.0):
             # Still showing this one, or only just finished it. Repeating adds
             # nothing, and restarting it mid-flash blinks the bar out and
             # regrows it - which is what a burst used to look like.
-            LOG.debug("skipping %r, the bar just said that", kind)
+            LOG.debug("skipping %r, the bar just said that", text)
             return False
-        if any(waiting == kind for waiting, _color, _shape in self.pending):
+        if any(waiting == key for waiting, _c, _s, _k in self.pending):
             return False
         if self.current is None:
-            self._start(kind, color, now, shape)
+            self._start(kind, color, now, shape, key)
             return True
         if len(self.pending) >= MAX_PENDING:
             LOG.info("dropping %r, %d flashes are already waiting",
                      kind, len(self.pending))
             return False
 
-        self.pending.append((kind, color, shape))
+        self.pending.append((key, color, shape, kind))
         LOG.info("notification queued: %s (%d waiting)", kind,
                  len(self.pending))
         return True
 
-    def _start(self, kind, color, now, shape=None):
+    def _start(self, kind, color, now, shape=None, key=None):
+        """Put one on the bar. `key` is what its quiet window is keyed on,
+        which is the trigger word unless the caller distinguished this one."""
         LOG.info("notification: %s", kind)
         # An explicit shape wins, including over a fixed kind: it can only
         # come from someone who wrote it into the pipe by hand. Nothing that
@@ -505,7 +534,7 @@ class NotificationOverlay:
         # per flash would grow this map without end.
         self._quiet_until = {name: until for name, until
                              in self._quiet_until.items() if until > now}
-        self._quiet_until[kind] = now + self.duration + self.repeat_gap
+        self._quiet_until[key or kind] = now + self.duration + self.repeat_gap
 
     def frame(self, now):
         """The flash's own frame, or None when no flash is running.
@@ -522,8 +551,8 @@ class NotificationOverlay:
             # which is why they never blend: a flash both starts and ends dark.
             self.current = None
             if self.pending:
-                kind, color, shape = self.pending.pop(0)
-                self._start(kind, color, now, shape)
+                key, color, shape, kind = self.pending.pop(0)
+                self._start(kind, color, now, shape, key)
         if self.current is None:
             return None
 

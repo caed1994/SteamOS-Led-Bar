@@ -417,8 +417,15 @@ class TriggerTest(unittest.TestCase):
             "WhatsApp:#25d366:double_flash, Signal:#3a76f0")
 
     def _trigger(self, app, **kwargs):
-        return phone.trigger_for(phone.Sighting(app, "", ""), self.rules,
-                                 **kwargs)
+        """The trigger, minus what makes this one notification distinct.
+
+        The tag is checked on its own below; everywhere else it would only
+        be a digest written out in an assertion, which says nothing about
+        the colour or the shape that the assertion is really about.
+        """
+        written = phone.trigger_for(phone.Sighting(app, "", ""), self.rules,
+                                    **kwargs)
+        return None if written is None else notify.split_tag(written)[1]
 
     def test_an_app_with_a_shape_of_its_own_is_spelled_out(self):
         self.assertEqual(self._trigger("WhatsApp"), "double_flash:#25d366")
@@ -435,6 +442,65 @@ class TriggerTest(unittest.TestCase):
         self.assertIsNone(self._trigger("Kalender", listed_only=True))
         self.assertEqual(self._trigger("WhatsApp", listed_only=True),
                          "double_flash:#25d366")
+
+    def test_two_messages_from_one_app_are_two_flashes(self):
+        """Reported: only the first message of a conversation ever showed.
+
+        The service will not flash the same trigger twice inside its repeat
+        gap, and everything the phone sends is the word "phone" - so the
+        second message was dropped as a repeat of the first, and stayed
+        dropped until the notification was cleared on the machine.
+        """
+        said = [phone.trigger_for(
+            phone.Sighting("Notification Test", "kekxnejd", body), ())
+            for body in ("fincu", "finctjfh", "finctjfhruxbfk")]
+        self.assertEqual(len(set(said)), 3, said)
+        # And all three still name the same kind, so the panel's colour and
+        # shape go on applying to every one of them.
+        for one in said:
+            self.assertEqual(notify.split_tag(one)[1], notify.KIND_PHONE)
+
+    def test_two_apps_seconds_apart_do_not_collide_either(self):
+        # The same bug, and the one nobody would have noticed as a bug: a
+        # WhatsApp message and a Signal one inside the same few seconds were
+        # one flash, because both were the word "phone".
+        first = phone.trigger_for(phone.Sighting("WhatsApp", "Anna", "hi"), ())
+        second = phone.trigger_for(phone.Sighting("Signal", "Bob", "hi"), ())
+        self.assertNotEqual(first, second)
+
+    def test_the_same_notification_twice_is_still_one_flash(self):
+        # Which is what the repeat gap is actually for. An app re-posting an
+        # unchanged notification has said nothing new.
+        same = phone.Sighting("Kalender", "Zahnarzt", "9:00")
+        self.assertEqual(phone.trigger_for(same, ()),
+                         phone.trigger_for(same, ()))
+
+    def test_the_overlay_keeps_them_apart_for_real(self):
+        """The two ends of it, checked against each other.
+
+        A digest the service ignored would be a fix that changed nothing,
+        and this is the assertion that would have caught the bug.
+        """
+        overlay = notify.NotificationOverlay(duration=3.5, led_count=17,
+                                             repeat_gap=10)
+        shown = []
+        for at, body in ((0.0, "fincu"), (2.0, "finctjfh"), (4.0, "later")):
+            trigger = phone.trigger_for(
+                phone.Sighting("Notification Test", "kekxnejd", body), ())
+            shown.append(overlay.trigger(trigger, at))
+            overlay.frame(at)
+        self.assertEqual(shown, [True, True, True])
+
+        # And the other way round: one notification posted three times over
+        # is one flash, which is the behaviour this must not have broken.
+        overlay = notify.NotificationOverlay(duration=3.5, led_count=17,
+                                             repeat_gap=10)
+        same = phone.Sighting("Kalender", "Zahnarzt", "9:00")
+        again = []
+        for at in (0.0, 2.0, 4.0):
+            again.append(overlay.trigger(phone.trigger_for(same, ()), at))
+            overlay.frame(at)
+        self.assertEqual(again, [True, False, False])
 
     def test_the_service_reads_back_everything_this_writes(self):
         # The two ends of the pipe, checked against each other: a trigger this
@@ -464,7 +530,7 @@ class BridgeTest(unittest.TestCase):
         bridge = self._bridge().run(DESKTOP_LINES)
         self.assertEqual(bridge.seen, 3)
         self.assertEqual(bridge.flashed, 3)
-        self.assertEqual(self.sent,
+        self.assertEqual([notify.split_tag(one)[1] for one in self.sent],
                          ["double_flash:#25d366", notify.KIND_PHONE,
                           notify.KIND_PHONE])
 
@@ -489,9 +555,10 @@ class BridgeTest(unittest.TestCase):
                               report=lambda seen, trigger: told.append(
                                   (seen.app, trigger)))
         bridge.run(DESKTOP_LINES)
-        self.assertEqual(told, [("WhatsApp", "double_flash:#25d366"),
-                                ("Signal", notify.KIND_PHONE),
-                                ("Discord", notify.KIND_PHONE)])
+        self.assertEqual([(app, notify.split_tag(one)[1]) for app, one in told],
+                         [("WhatsApp", "double_flash:#25d366"),
+                          ("Signal", notify.KIND_PHONE),
+                          ("Discord", notify.KIND_PHONE)])
         self.assertEqual(self.sent, [])
 
     def test_it_says_what_it_ignored_as_well_as_what_it_flashed(self):
@@ -502,7 +569,9 @@ class BridgeTest(unittest.TestCase):
                               listed_only=True,
                               report=lambda seen, trigger: told.append(trigger))
         bridge.run(DESKTOP_LINES)
-        self.assertEqual(told, ["double_flash:#25d366", None, None])
+        self.assertEqual([one if one is None else notify.split_tag(one)[1]
+                          for one in told],
+                         ["double_flash:#25d366", None, None])
 
     def test_the_lookup_reaches_the_rule_that_matches_on_it(self):
         # The whole point of the second call: without it this is "3", which
@@ -513,7 +582,8 @@ class BridgeTest(unittest.TestCase):
             phone.SOURCE_KDECONNECT, rules, send=sent.append,
             details=lambda seen: phone.read_details(COUNTED_DETAILS, seen))
         bridge.run([COUNTED_LINE])
-        self.assertEqual(sent, ["double_flash:#25d366"])
+        self.assertEqual([notify.split_tag(one)[1] for one in sent],
+                         ["double_flash:#25d366"])
 
     def test_it_is_only_asked_where_there_is_something_to_ask(self):
         # The desktop bus said everything already; a call per notification
