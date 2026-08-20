@@ -1146,7 +1146,16 @@ def run_watch_phone(config, print_only=False):
             return
         known[0] = now
         if now is None:
-            LOG.warning("KDE Connect has stopped answering")
+            # Whether there was anything to start it with, said here rather
+            # than nowhere: without it, "cannot find kdeconnectd" and "started
+            # it and it still will not answer" read identically - as silence.
+            found = phone.kdeconnectd_path()
+            LOG.warning("KDE Connect has stopped answering; %s",
+                        "started %s, giving it until the next check" % found
+                        if found else
+                        "kdeconnectd is not in any of %s, so there is nothing "
+                        "here to start it with"
+                        % ", ".join(phone.KDECONNECTD_PLACES))
         elif not now:
             LOG.warning("KDE Connect is no longer paired with any phone")
         else:
