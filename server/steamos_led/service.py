@@ -356,6 +356,20 @@ class Runner:
         snapshot = None
         showing = None
         last_key = None
+        # The soonest the next frame may go out. FPS is meant to be a ceiling
+        # and was only ever a timeout: the loop wakes on every write to the
+        # device, so the frame rate was Steam's write rate rather than the one
+        # asked for. Measured on a Steam Machine: during a download Steam
+        # writes the progress bar four hundred times a second, and every one
+        # of them was rendered and pushed down a link that carries about
+        # sixty. The state is still read every time; only the drawing and the
+        # sending are held to the rate in the config file.
+        due = 0.0
+        # Whether a frame is being held back, which is the only time the wait
+        # below has to be cut short. Without it the loop woke at the frame
+        # rate even when nothing was changing, and the idle heartbeat - the
+        # whole of IDLE_FPS - stopped happening.
+        pending = False
 
         while self.running:
             connected = self.link.connect()
@@ -370,6 +384,13 @@ class Runner:
                     and not self.renderer.is_animated(showing)
                     and not self.overlay.active):
                 interval = 1.0 / self.config["IDLE_FPS"]
+            # Never wait past the moment a frame is due. Without this the wait
+            # would run to the idle heartbeat and the frame rate would halve
+            # whenever Steam writes a little faster than the frames go out.
+            if pending:
+                waiting = time.monotonic()
+                if waiting < due:
+                    interval = min(interval, due - waiting)
 
             try:
                 changed, triggered = self._wait(interval)
@@ -428,6 +449,14 @@ class Runner:
                 else:
                     continue
 
+            # Read every write, draw at the rate that was asked for. Skipping
+            # here rather than earlier keeps the trigger pipe and the overheat
+            # watch above answering at whatever rate the loop turns.
+            if now < due:
+                pending = True
+                continue
+            pending = False
+
             showing = self._showing(snapshot, now)
 
             # A flash covers the whole bar; nothing underneath is worth drawing.
@@ -452,6 +481,12 @@ class Runner:
                 self._breathing_for_steam = False
             # Idle heartbeat too: the firmware blanks the strip if we go quiet.
             self.link.send_frame(payload, self.config["LED_COUNT"])
+            # From FPS rather than from the interval above: that one is how
+            # long to wait before resending an unchanged frame, which is a
+            # different question from how fast a changing one may go out. A
+            # download's progress bar is a static effect that changes every
+            # write, and holding it to the idle rate would make it a slideshow.
+            due = now + 1.0 / self.config["FPS"]
 
 
 # -- alternative modes ----------------------------------------------------

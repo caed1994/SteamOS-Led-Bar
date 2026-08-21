@@ -866,8 +866,12 @@ class StandbyQuietTest(unittest.TestCase):
         runner.link = StandbyTest.FakeLink()
         return runner
 
-    def _drive(self, runner, seconds=0.3, seq=None, writes=None):
+    def _drive(self, runner, seconds=0.3, seq=None, writes=None, every=0.02):
         """Run the real loop against a FIFO fed with snapshots.
+
+        `every` is how long the feed waits between two of them, which is what
+        a test about the frame rate needs to vary: nothing about the loop's
+        own rate shows while the device is written to faster than it.
 
         `seq` pins the sequence number, which is how the module says whether
         anything has written to it: pinned at UNTOUCHED_SEQ it never has, and
@@ -910,7 +914,7 @@ class StandbyQuietTest(unittest.TestCase):
                                 snapshot, counter if seq is None else seq))
                         except OSError:
                             return
-                    stop.wait(0.02)
+                    stop.wait(every)
             finally:
                 os.close(fd)
 
@@ -1008,6 +1012,66 @@ class StartupBreathTest(StandbyQuietTest):
         self.assertGreater(runner.link.frames, 0, "the flash was not shown")
         self.assertGreaterEqual(len(runner.link.standby), 1,
                                 "and the breath was not asked for again")
+
+
+class FrameRateTest(StandbyQuietTest):
+    """FPS as a ceiling, which is what it always said it was.
+
+    The loop wakes on every write to the device, so the frame rate was
+    whatever Steam's write rate happened to be. Measured on a Steam Machine:
+    during a download Steam writes the progress bar four hundred times a
+    second, and every one of them was rendered and pushed down a link that
+    carries about sixty.
+    """
+
+    def _runner(self, **overrides):
+        conf = dict(config.DEFAULTS)
+        conf.update(SERIAL_PORT="/dev/does-not-exist", NOTIFY=False)
+        conf.update(overrides)
+        runner = service.Runner(conf)
+        runner.link = StandbyTest.FakeLink()
+        return runner
+
+    def _rate(self, runner, seconds=1.2):
+        return runner.link.frames / seconds
+
+    def test_a_flood_of_writes_comes_out_at_the_frame_rate(self):
+        """Both ends of the one number, and they are easy to confuse.
+
+        What is fed here is a static effect that changes on every write -
+        which is exactly what a download's progress bar is. Held to the idle
+        rate it would be a slideshow at four frames a second; held to nothing
+        it goes out four hundred times a second. FPS is the ceiling, and
+        IDLE_FPS is only how long to wait before resending something that has
+        not changed.
+        """
+        runner = self._runner(FPS=60, IDLE_FPS=4)
+        self._drive(runner, seconds=1.2, every=0.0)     # as fast as it can
+        self.assertGreater(self._rate(runner), 25,
+                           "the frame rate fell to the idle rate")
+        self.assertLess(self._rate(runner), 90,
+                        "the frame rate followed Steam's write rate")
+
+    def test_writing_slower_than_that_still_sends_every_change(self):
+        # The cap is a ceiling, not a schedule. A bar that only redrew on its
+        # own clock would show a download's progress a frame late for no gain.
+        runner = self._runner(FPS=60)
+        self._drive(runner, seconds=1.2, every=0.05)     # about twenty a second
+        self.assertGreater(self._rate(runner), 12)
+        self.assertLess(self._rate(runner), 40)
+
+    def test_a_quiet_device_still_gets_its_heartbeat_and_no_more(self):
+        """The other end, and the one a first attempt at this broke.
+
+        The firmware blanks the strip if the host goes quiet, so an unchanging
+        scene still has to be resent - at IDLE_FPS, which is the whole of that
+        setting. Cutting the wait short whenever a frame was due turned that
+        into sixty a second.
+        """
+        runner = self._runner(FPS=60, IDLE_FPS=4)
+        self._drive(runner, seconds=1.2, writes=1)
+        self.assertLess(self._rate(runner), 12, "the idle rate stopped idling")
+        self.assertGreater(self._rate(runner), 1, "nothing was resent at all")
 
 
 class DesktopSceneTest(StandbyQuietTest):

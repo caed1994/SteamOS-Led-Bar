@@ -196,143 +196,56 @@ exactly as it runs on the microcontroller of a real Steam Machine.
 | 6 | factory | red, green, blue, white in turn | ![factory](docs/previews/factory.png) |
 | 7 | demo | rainbow with a breathing envelope | |
 
-`delay` is not a duration but a slider: the kernel module advertises `0-20` and
-starts at `8`. Cycle times scale linearly from that default, so `delay=0` is
-fastest and `delay=20` is 2.5x slower. One cycle at `delay=8` takes 3.5 s for
-rainbow, 1.6 s for breath, 2.5 s for patrol and 3.2 s for demo. `SPEED` scales
-all of them together, no cycle drops below 0.8 s, and `--dump` shows the
-`delay` your system reports.
+How fast they run comes from Steam, and `SPEED` scales all of them together.
 
-Every animation on this page comes out of `render.py` and `notify.py` frame by
-frame. `python3 tools/make-previews.py` rebuilds them and writes the data
-behind the [interactive catalogue](https://caed1994.github.io/SteamOS-Led-Bar/),
-which has the ones not pictured here.
+Every animation on this page comes out of `render.py` frame by frame;
+`python3 tools/make-previews.py` rebuilds them and the
+[interactive catalogue](https://caed1994.github.io/SteamOS-Led-Bar/).
 
 ### Desktop Mode
 
-Steam sets the LEDs in Game Mode and nowhere else. On the desktop the bar is
-therefore stuck on whatever the last session left behind &mdash; or dark, on a
-machine that has not been in one since it booted. So it can have an effect of
-its own there, on the panel's **Desktop mode** page:
+Steam only sets the LEDs in Game Mode, so on the desktop the bar keeps whatever
+the last session left. Give it something of its own on the panel's **Desktop
+mode** page:
 
 | Setting | Meaning |
 | ------- | ------- |
 | `DESKTOP_SCENE` | `steam` (default), `off`, `color`, `breath`, `patrol`, `rainbow` |
 | `DESKTOP_COLOR` | the colour for `color`, `breath` and `patrol` (`#ffffff`) |
-| `DESKTOP_BRIGHTNESS` | 0&ndash;255, the way Steam's own brightness works (`128`) |
-| `DESKTOP_SPEED` | how fast `breath`, `patrol` and `rainbow` run (`1.0`) |
+| `DESKTOP_BRIGHTNESS` | 0&ndash;255 (`128`) |
+| `DESKTOP_SPEED` | how fast it runs (`1.0`) |
 
-`steam` is the default and is what the bar always did: carry on with Steam's
-last state in both modes. Each of the other rows greys out under a scene it
-means nothing for: a rainbow makes its own colours, one colour standing still
-has no speed, and `off` has neither.
+**Game Mode stays Steam's.** Switch over and the bar goes back to Steam's own
+LED settings, untouched. Notifications still flash over a scene, and a download
+started on the desktop still shows its progress bar.
 
-**Game Mode is Steam's, whatever is set here.** Switch to it and the bar goes
-straight back to Steam's own LED settings, which nothing on that page touches
-&mdash; that is the point of the two being separate. Notifications still flash
-over a scene.
-
-`DESKTOP_SPEED` is the scene's own, and works the way Steam's speed slider does
-in Game Mode: it sets the same `delay` field a game's effect uses, so `2.0` is
-twice as fast in both. `SPEED` on the Strip page still scales everything, a
-game included, and the patrol's dots and what a rainbow shows come from there
-too &mdash; so an effect looks the same in both modes.
-
-**The load gauge answers to neither**, wherever it is shown. Each half of the
-bar fills to say how busy that chip is, and the floor under the innermost LED
-is what says *idle* rather than *off* &mdash; dimming or slowing that changes
-the reading rather than the look. `MAX_BRIGHTNESS` still applies to it, since
-that one is about how much current the strip may draw.
-
-A scene is drawn by the same renderer that draws Steam's snapshots &mdash; it
-*is* a snapshot, built here instead of read from the kernel module &mdash; so
-there is no second implementation of breath to drift out of step with the
-first.
-
-For a moment around the switch itself the bar stays Steam's either way, so the
-two never fight over it mid-handover. That same moment is why a **download
-started on the desktop** shows its progress bar: Steam writes the bar as it
-fills, and every write says the bar is Steam's for a little longer. When the
-download finishes, Steam puts back the effect that was set in Game Mode
-&mdash; and putting back what it found is taken as letting go rather than
-taking over, so the scene returns at once instead of showing that effect for a
-few seconds first.
-
-Putting it back means the same effect, at any brightness. Steam brackets a
-download with a fade of its own: it dims the effect to nothing before the
-progress bar appears and brings it back up afterwards, a step every thirty
-milliseconds. Half a lit rainbow is the same rainbow, so those fades are the
-scene's to cover &mdash; otherwise the Game Mode effect flashes for a quarter
-of a second at each end of every download.
-
-#### Checking that Game Mode is recognised
-
-Which mode the machine is in is the one thing this has to work out for itself.
-The service runs as root outside your session and cannot ask it, so it looks
-for **gamescope**, the compositor Game Mode runs under.
-
-**The check that needs nothing: switch to Game Mode and look at the bar.** If
-it goes back to Steam's own setting instead of staying on your scene, it works.
-That is worth doing once, because getting it wrong is the failure with no
-explanation on screen &mdash; a scene that held the bar through a game would be
-the service quietly ignoring the LED settings you had just changed.
-
-For the rest, in **Desktop Mode** &mdash; there is no terminal in Game Mode, so
-this is a Desktop Mode command and only ever reports the desktop half live:
+If the bar keeps your scene during a game, or never shows it at all:
 
 ```bash
 steamos-led-serial --desktop
 ```
 
-```
-DESKTOP_SCENE=breath
-  In Desktop Mode the bar shows: breath, colour #00b0ff, brightness 128, speed 1 (delay 8)
-Right now: Desktop Mode, no gamescope process running
-Steam's last LED write: 412 seconds ago (rainbow)
-So the bar is the desktop's, showing your scene.
-
-What it saw before now:
-  18:02:11 fractal steamos-led-serial[901]: no Game Mode session - the bar is the desktop's
-  19:41:03 fractal steamos-led-serial[901]: Game Mode is running (gamescope) - the bar is Steam's
-  21:05:55 fractal steamos-led-serial[901]: no Game Mode session - the bar is the desktop's
-```
-
-The second half is the Game Mode half, after the fact. The service records
-which mode it sees when it starts and whenever that changes, so a session you
-could not watch is still there to read afterwards; `--desktop` reads that
-record itself rather than handing you a `journalctl` line to type. A line
-naming gamescope means detection works on this machine. Nothing but desktop
-lines, after you have been in Game Mode, is the bug to report.
+It says which mode it thinks the machine is in, and what it saw before now.
 
 ### Before Steam has started, and while the machine sleeps
 
-The kernel module comes up reporting *off* and only counts up when something
-writes to it, so until Game Mode is running the truthful frame is black. The
-strip breathes amber through the whole boot instead and hands over the moment
-Steam sets the LEDs. A machine that boots to the desktop and never starts Game
-Mode keeps breathing, which says the same thing &mdash; unless a
-[Desktop Mode scene](#desktop-mode) is set, which is something to show, so it is
-shown instead.
+Until Game Mode has set the LEDs there is nothing to show, so the strip
+breathes amber through the boot and hands over the moment Steam does. A
+[Desktop Mode scene](#desktop-mode) takes over instead, if one is set.
 
 ![the startup breath](docs/previews/startup.png)
 
 Suspend the machine and the strip keeps a slow white breath going. Wake it and
-the normal effect comes back.
+the normal effect comes back; `STANDBY_PULSE=0` switches it off.
 
 ![the standby breath](docs/previews/standby.png)
 
 Both are dim on purpose &mdash; the standby one peaks at 30 of 255. That is the
 whole animation, not a broken image.
 
-**The ESP draws both itself.** During a suspend no process runs, so no frame can
-be rendered. A systemd sleep hook tells the service just before the machine goes
-down, the service hands the ESP a colour and a breath length, and the ESP
-carries on alone until the first frame arrives again. Three things follow. The
-ESP has to stay powered, which is a BIOS setting often called *ErP*, *Wake on
-USB* or *USB power in S3*; if yours cuts power the strip goes dark and nothing
-here can help. It needs the firmware from this version, since an older one
-ignores the message. And what it looks like is fixed, with `STANDBY_PULSE=0` to
-switch it off.
+**The ESP draws both itself**, since nothing runs during a suspend. So it has
+to stay powered &mdash; a BIOS setting often called *ErP*, *Wake on USB* or
+*USB power in S3* &mdash; and it needs the firmware from this version.
 
 To try it without suspending anything:
 
@@ -342,9 +255,7 @@ echo resume  > /run/steamos-led-serial/notify
 ```
 
 If the resume never arrives, the service takes the strip back after half a
-minute of *running* time. That uses the monotonic clock, which does not advance
-across a suspend, so a machine asleep for three days still wakes to a breathing
-strip.
+minute of running time.
 
 ## The rainbow slot
 
@@ -474,20 +385,15 @@ echo alternate:achievement > /run/steamos-led-serial/notify
 steamos-led-serial --notify comet:#1a9fff
 ```
 
-A trigger may also say who it is from, after an `@`. Nothing about the flash
-changes &mdash; it is only what `NOTIFY_REPEAT_GAP` is keyed on, so that two
-people writing are two flashes where one person writing ten times is one:
+A trigger may also say who it is from, after an `@`. That is what
+`NOTIFY_REPEAT_GAP` is keyed on, so ten messages from one person are one flash
+and somebody else in the same few seconds still gets through:
 
 ```bash
 echo 'phone@anna' > /run/steamos-led-serial/notify
 echo 'phone@anna' > /run/steamos-led-serial/notify   # inside the gap: quiet
 echo 'phone@bob'  > /run/steamos-led-serial/notify   # somebody else: flashes
 ```
-
-The phone bridge tags every notification with its app and title &mdash; the
-conversation it belongs to &mdash; so a burst from one person is a single
-flash and somebody else reaching you in the same few seconds still gets
-through.
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
@@ -562,9 +468,8 @@ profile** &mdash; by asking the Steam client on your own machine through Valve's
 local Steamworks API. All three need a **running game**, because Steamworks has
 to be initialised as an app. Desktop Mode and Game Mode both work.
 
-`install.sh` sets this up as a user service that starts with your session, since
-Steamworks talks to the Steam client of the logged-in user while the LED service
-runs as root. Nothing else to do:
+`install.sh` sets this up as a user service that starts with your session.
+Nothing else to do:
 
 ```bash
 systemctl --user status steamos-led-achievements
@@ -583,49 +488,38 @@ Pass `--skip-watcher` to the installer to leave it out, or disable it later with
 `systemctl --user disable --now steamos-led-achievements`. The three switches
 are independent; with all three off the watcher attaches to nothing.
 
-**The log shows it restarting after every game, which is on purpose.** A process
-that has initialised Steamworks as a game stays registered with Steam as an
-instance of it, and Steam will not report that game as stopped while the
-registration exists. Only the process ending clears it.
+**The log shows it restarting after every game, which is on purpose**: Steam
+will not report a game as stopped while anything is still registered as an
+instance of it.
 
-Chat arrives as a Steamworks callback, and callbacks only reach a Python binding
-through manual dispatch, added in SDK 1.51. Copies shipped inside older games and
-Proton versions cannot deliver them; Steam's own copy under `steamrt64/` can, and
-is on every machine, which is why it is preferred. Friends coming online ride the
-same callbacks but ask Steam for less, so on a machine where chat will not work
-this one still can. Steam replays who is already online when the friend list
-loads, so the first 20 seconds are ignored, as is any burst of more than three
-at once.
+Friend messages need a Steamworks library new enough to deliver callbacks, which
+not every machine has; `--probe-messages` says whether yours does. Friends
+coming online ask Steam for less, so that one works where chat does not.
 
 ### Your phone
 
 The bar can flash for a WhatsApp message, or anything else your phone puts in
-its notification shade. **KDE Connect** is what carries it over: pair the phone
-in KDE Connect's settings and switch its notification sync on, and a second user
-service reads those notifications off the session bus and writes a trigger into
-the pipe.
+its notification shade. **KDE Connect** carries it over: pair the phone in KDE
+Connect's settings, switch its notification sync on, and a user service reads
+those notifications and flashes the bar.
 
-Nothing here talks to WhatsApp, or to any other app &mdash; there is no interface
-for that. What it reads is the *notification*, which is why an app you have
-silenced on the phone stays silent here too, and why this is Android only:
-iOS does not let one app read another's notifications, so KDE Connect cannot
-forward them.
+Android only &mdash; iOS does not let one app read another's notifications.
+Nothing here talks to WhatsApp or to any other app: it reads the
+*notification*, so an app you have silenced on the phone stays silent here too.
 
-It is **off until you switch it on**, in the panel under *Notifications* >
-*From your phone* &mdash; the switch, its colour and its shape are all on that
-one line &mdash; or with `NOTIFY_PHONE=1`. Start by watching it work:
+**Off until you switch it on**, in the panel under *Notifications* > *From your
+phone*, or with `NOTIFY_PHONE=1`. Then restart the bridge &mdash; Apply does
+not, because it is a *user* service:
+
+```bash
+systemctl --user restart steamos-led-phone
+```
+
+To watch it work, as yourself and not with `sudo`:
 
 ```bash
 steamos-led-serial --watch-phone --print
 ```
-
-As yourself, not with `sudo`: the notifications are on your session bus and
-root cannot read it. That flashes nothing. It reports every notification it sees, what your machine
-calls the app it came from, what it would have flashed, and any signal on the
-bus it did *not* act on &mdash; the names differ between KDE Connect versions,
-and a bridge quietly ignoring the one that carries your messages looks exactly
-like a phone that has stopped sending them &mdash; which is how
-you find the names to write rules with:
 
 ```
 Reading the phone's notifications from KDE Connect
@@ -634,98 +528,33 @@ Reading the phone's notifications from KDE Connect
   com.android.calendar         -> phone
 ```
 
-It also says what would stop the real run from lighting anything &mdash; the
-dry run reads the bus whether or not the feature is switched on, so a machine
-where every line looks right and the bar stays dark is exactly the case it
-has to explain:
-
-```
-  note: NOTIFY_PHONE is off, so the bar will not do this for real yet.
-```
-
-Everything the phone sends flashes the same by default, and the panel is where
-that look is set. To give one app a colour and optionally a shape of its own,
-in the config file:
-
-```ini
-PHONE_APPS=WhatsApp:#25d366:double_flash, Signal:#3a76f0
-```
-
-The app is matched loosely and without case, so `whatsapp` finds both
-`WhatsApp` and `com.whatsapp` &mdash; the two spellings KDE Connect uses.
-Anything not named there flashes `PHONE_COLOR` in `PHONE_STYLE`;
-`PHONE_APPS_ONLY=1` silences it instead, so only the listed apps flash at all.
+That flashes nothing. It names every notification it sees and what it would
+have flashed, and says what would stop the real thing from lighting anything.
+To try the bar on its own, without involving the phone:
+`steamos-led-serial --notify phone`.
 
 | Option | Panel | Meaning |
 | ------ | ----- | ------- |
 | `NOTIFY_PHONE` | yes | flash on the phone's notifications at all (default `0`) |
-| `PHONE_COLOR` / `PHONE_STYLE` | yes | what one looks like unless a rule says otherwise (`#00ffff` / `default`) |
-| `PHONE_APPS` | file only | `App:colour` or `App:colour:shape`, separated by commas |
-| `PHONE_APPS_ONLY` | file only | ignore apps the list does not name (default `0`) |
+| `PHONE_COLOR` / `PHONE_STYLE` | yes | what one looks like (`#00ffff` / `default`) |
+| `PHONE_APPS` | file only | a look per app: `WhatsApp:#25d366:double_flash, Signal:#3a76f0` |
+| `PHONE_APPS_ONLY` | file only | ignore apps that list does not name (default `0`) |
 
-The last two are settings of the file rather than rows in the window. A list
-you add entries to is a control the panel does not have, and a switch that
-only means something once you have written that list is a switch whose label
-cannot explain itself &mdash; so both live here, where the comments have room.
-
-Switching it on in the panel writes the setting; the bridge picks it up when
-it is restarted, which Apply does not do for a *user* service:
-
-```bash
-systemctl --user restart steamos-led-phone
-systemctl --user status steamos-led-phone
-journalctl --user -u steamos-led-phone -f
-```
-
-To check the other half on its own &mdash; the pipe, the service and the strip,
-without involving the phone at all:
-
-```bash
-steamos-led-serial --notify phone
-```
-
-It needs `gdbus`, which comes with glib and is on any machine with a desktop;
-there is no D-Bus library to install.
-
-**Game Mode works too**, with one thing to know. The bridge is a user service
-that survives the switch, and the session bus belongs to your login rather
-than to Plasma, so both are still there. What is *not* there is KDE Connect:
-its daemon is started by the desktop session and dies with it.
-
-So the bridge starts it. It asks the bus first &mdash; on a machine where KDE
-Connect can be activated on demand, that is all it takes &mdash; and where the
-bus will not, it runs `kdeconnectd` itself &mdash; in a session of its own so
-the daemon outlives the bridge's own restarts, and with no display, because
-KDE Connect is a Qt application and Qt refuses to start without a platform
-plugin it can use. Started from a service it inherits Wayland, finds no
-compositor and dumps core; it has nothing to draw anyway. It checks again every minute while all is
-well, and every few seconds while KDE Connect is missing - so a daemon that
-goes away mid-session comes back on its own, and the phone is not left
-looking for the machine for a minute after every switch.
-
-One thing has to be true for any of that: **your systemd has to keep running
-when no session is open.** It does not by default &mdash; it stops with your
-last session, and switching to Game Mode ends one, so every user service goes
-with it. `install.sh` turns that on, and *Status & repair* checks it:
+**Game Mode works too**, with one thing to set up. KDE Connect's daemon dies
+with the desktop session, so the bridge starts it again itself &mdash; but your
+systemd has to keep running when no session is open, or the bridge is not there
+either. `install.sh` turns that on and *Status & repair* checks it:
 
 ```bash
 sudo loginctl enable-linger $USER
-loginctl show-user $USER --property=Linger      # Linger=yes
 ```
 
-Without it the symptom is not an error but a silence: nothing flashes, and
-the journal has nothing to say about why, because the thing that would have
-said it was not running either.
-
-There is no terminal in Game Mode, so the bridge says what it found in the
-journal instead. After a session, back in Desktop Mode:
+There is no terminal in Game Mode, so the bridge writes what it found to the
+journal. Afterwards, back on the desktop:
 
 ```bash
 journalctl --user -u steamos-led-phone --since "1 hour ago"
 ```
-
-A line saying KDE Connect did not answer is the one to look for: it means the
-bus could not start it, and it is worth checking in Desktop Mode first.
 
 ## The control panel
 
