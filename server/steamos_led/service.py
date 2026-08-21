@@ -464,14 +464,23 @@ def _interrupt_on_sigterm():
 
 
 def run_desktop(config):
-    """Report the desktop scene, and who has the bar at this moment.
+    """Report the desktop scene, and who has the bar - a Desktop Mode command.
 
-    The one thing in this feature that cannot be settled by a test: whether
-    *this* machine's Game Mode session is one the process table gives away.
+    Which is not a limitation to work around but the shape of the thing: there
+    is no terminal in Game Mode, so this can only ever be run on one side of
+    the question it is about. What it finds live is therefore always the
+    desktop half.
+
+    The other half is what the service *recorded* while nobody could watch.
+    It logs which mode it saw at startup and on every change, so the journal
+    is where a Game Mode session can be looked at afterwards - and this reads
+    it rather than printing a journalctl line to be typed, because the answer
+    to "was Game Mode ever recognised on this machine" should not be two more
+    steps away.
+
     Got wrong in the direction that matters, a scene would sit on the bar
-    through a game and ignore everything Steam asked for - so rather than
-    leave that to be discovered by the bar misbehaving, this says what it
-    found and what it concluded. Run it in both modes.
+    through a game and ignore everything Steam asked for, with nothing on
+    screen to say why. That is the failure this exists to make visible.
     """
     scene = build_scene(config)
     print("DESKTOP_SCENE=%s" % config["DESKTOP_SCENE"])
@@ -486,32 +495,68 @@ def run_desktop(config):
                  % (config["DESKTOP_COLOR"], config["DESKTOP_BRIGHTNESS"])))
 
     found = desktop.running_game_mode()
-    print("Game Mode: %s" % ("yes - %s is running" % found if found
-                             else "no such process is running"))
-    print("  (looked for a process whose name starts with: %s)"
-          % ", ".join(desktop.GAME_MODE_PROCESSES))
+    print("Right now: %s"
+          % ("Game Mode - %s is running" % found if found
+             else "Desktop Mode, no %s process running"
+             % " or ".join(desktop.GAME_MODE_PROCESSES)))
 
     now = time.monotonic()
+    ago = None
     try:
         with shim.ShimSource(config["DEVICE"]) as source:
             snapshot = source.read()
     except OSError as exc:
         print("Steam's last LED write: cannot tell, %s is not readable (%s)"
               % (config["DEVICE"], exc))
-        snapshot = None
     else:
         ago = desktop.steam_wrote_ago(snapshot, now)
         print("Steam's last LED write: %s"
               % ("never since the module loaded" if ago is None
                  else "%.0f seconds ago (%s)" % (ago, snapshot.effect_name)))
 
-    watch = desktop.Ownership()
+    # The rule the service goes by, spelled out from the two answers above
+    # rather than asked of an Ownership: that one would scan /proc a second
+    # time and log its own version of this into the middle of the report.
+    steams = bool(found) or (ago is not None and ago < desktop.GRACE_SECONDS)
     print("So the bar is %s."
-          % ("Steam's" if scene is None or watch.steam_has_it(snapshot, now)
+          % ("Steam's" if scene is None or steams
              else "the desktop's, showing your scene"))
-    if found and scene is not None:
-        print("  Switch to Desktop Mode and run this again to see the other "
-              "half of it.")
+    if scene is None:
+        return 0
+
+    # And the Game Mode half, which cannot be looked at while it is happening.
+    print("")
+    lines, why_not = desktop.journal_ownership()
+    if why_not:
+        print("What it saw before now: %s." % why_not)
+        print("  Try it with sudo - that record is the only way to see what "
+              "happens in Game Mode.")
+    elif not lines:
+        print("What it saw before now: nothing in the last two days.")
+        print("  The service says which mode it is in when it starts and "
+              "whenever that changes, so an empty list means it has not run "
+              "since this was installed. Restart it, then switch to Game Mode "
+              "and back:")
+        print("    sudo systemctl restart steamos-led-serial")
+    else:
+        print("What it saw before now:")
+        for line in lines:
+            print("  %s" % line)
+        if not any(desktop.GAME_MODE_MARK + " is running" in line
+                   for line in lines):
+            # The whole point of reading this. Every line saying "desktop"
+            # and none saying Game Mode, on a machine that has been in one,
+            # is detection that is not working - and the symptom without this
+            # is a bar that quietly ignores Steam during a game.
+            print("  Nothing there recognised a Game Mode session. If you "
+                  "have been in one since the last restart, that is the bug "
+                  "to report - the bar would be keeping your scene through "
+                  "games.")
+    print("")
+    print("The plainest check needs no terminal at all: switch to Game Mode "
+          "and look.")
+    print("The bar should go back to Steam's own setting rather than staying "
+          "on the scene.")
     return 0
 
 

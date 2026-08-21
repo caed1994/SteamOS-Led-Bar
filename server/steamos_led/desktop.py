@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 
 from . import notify
 from . import shim
@@ -158,6 +159,59 @@ def steam_wrote_ago(snapshot, now):
     return now - snapshot.monotonic_ns / 1e9
 
 
+# The phrase both of the lines below carry, and what finds them again. One
+# string in both places: a report that searched for wording the log had
+# stopped using would answer "nothing here" forever, which reads exactly like
+# a machine whose Game Mode was never recognised.
+GAME_MODE_MARK = "Game Mode"
+IN_GAME_MODE = GAME_MODE_MARK + " is running (%s) - the bar is Steam's"
+ON_THE_DESKTOP = "no " + GAME_MODE_MARK + " session - the bar is the desktop's"
+
+JOURNAL_UNIT = "steamos-led-serial.service"
+JOURNAL_SINCE = "-2 days"
+# Enough to show the last few switches without pasting a day of boots.
+JOURNAL_LINES = 6
+
+
+def journal_command(unit=JOURNAL_UNIT, since=JOURNAL_SINCE):
+    return ["journalctl", "-u", unit, "--since", since, "--no-pager",
+            "-o", "short-iso"]
+
+
+def read_journal(text):
+    """The ownership lines out of a journal dump, most recent last."""
+    return [line.strip() for line in (text or "").splitlines()
+            if GAME_MODE_MARK in line][-JOURNAL_LINES:]
+
+
+def journal_ownership(command=None):
+    """What the service recorded about which mode it was in: (lines, why not).
+
+    Read here rather than left as a command for somebody to type, because it
+    is the only way to see the Game Mode half at all. There is no terminal in
+    Game Mode, so what the service decided during a session can only be looked
+    at afterwards - and an instruction to pipe journalctl through grep is a
+    step at which most people stop.
+
+    A complaint instead of lines when the journal could not be read, which is
+    a different answer from "it has nothing to say": one means look again with
+    sudo, the other means this machine's Game Mode was never recognised.
+    """
+    try:
+        done = subprocess.run(command or journal_command(),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, timeout=15)
+    except FileNotFoundError:
+        return [], "there is no journalctl on this machine"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], "journalctl did not answer (%s)" % exc
+    if done.returncode != 0:
+        said = (done.stderr or "").strip().splitlines()
+        return [], ("journalctl refused: %s"
+                    % (said[-1] if said else "no reason given"))
+    return read_journal(done.stdout), ""
+
+
 class Ownership:
     """Whose the bar is at this moment, asked as often as the loop likes.
 
@@ -178,15 +232,19 @@ class Ownership:
 
     def game_mode(self, now):
         """The Game Mode process running now, "" if none - from the cache."""
-        if self._asked is None or now - self._asked >= self.interval:
+        first = self._asked is None
+        if first or now - self._asked >= self.interval:
             found = self.look()
-            if found != self.found:
-                # Said once per change, because it is the answer to both
-                # "why is my scene not showing" and "why is the bar ignoring
-                # Steam", and those look identical from in front of it.
-                LOG.info("Game Mode is running (%s) - the bar is Steam's"
-                         % found if found else
-                         "no Game Mode session - the bar is the desktop's")
+            if first or found != self.found:
+                # The journal is the only way to see this happen, because the
+                # only place you can watch it from is Game Mode and there is
+                # no terminal there. So: once when the service starts, and
+                # once on every change after it.
+                #
+                # It is the answer to both "why is my scene not showing" and
+                # "why is the bar ignoring Steam", and those two look
+                # identical from in front of the bar.
+                LOG.info(IN_GAME_MODE % found if found else ON_THE_DESKTOP)
             self.found = found
             self._asked = now
         return self.found

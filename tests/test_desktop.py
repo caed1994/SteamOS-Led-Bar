@@ -262,6 +262,83 @@ class OwnershipTest(unittest.TestCase):
                 watch.game_mode(1000.0 + tick)
         self.assertEqual(len(caught.output), 1)
 
+    def test_the_first_answer_is_said_even_when_it_is_the_dull_one(self):
+        """Because the journal is the only way to see any of this.
+
+        There is no terminal in Game Mode, so what the service decided during
+        a session can only be read afterwards - and a log that only spoke up
+        on a change would leave a service started on the desktop saying
+        nothing at all, which reads exactly like a check that never ran.
+        """
+        with self.assertLogs("steamos_led.desktop", "INFO") as caught:
+            self._watch("").game_mode(1000.0)
+        self.assertEqual(len(caught.output), 1)
+        self.assertIn(desktop.GAME_MODE_MARK, caught.output[0])
+
+
+class JournalTest(unittest.TestCase):
+    """Reading back what the service saw while nobody could watch."""
+
+    SAMPLE = "\n".join((
+        "2026-08-21T18:02:11+0200 fractal steamos-led-serial[901]: INFO "
+        "steamos-led: reading LED state from /dev/valve-leds-shim",
+        "2026-08-21T18:02:11+0200 fractal steamos-led-serial[901]: INFO "
+        "steamos-led: " + desktop.ON_THE_DESKTOP,
+        "2026-08-21T19:41:03+0200 fractal steamos-led-serial[901]: INFO "
+        "steamos-led: " + desktop.IN_GAME_MODE % "gamescope",
+        "2026-08-21T21:05:55+0200 fractal steamos-led-serial[901]: INFO "
+        "steamos-led: " + desktop.ON_THE_DESKTOP,
+    ))
+
+    def test_the_lines_it_wants_are_the_ones_it_wrote(self):
+        """The two ends of it, which is the whole reason this can be trusted.
+
+        A report that searched for wording the log had stopped using would
+        answer "nothing here" forever - and that reads exactly like a machine
+        whose Game Mode was never recognised, which is the bug it is meant to
+        find.
+        """
+        found = desktop.read_journal(self.SAMPLE)
+        self.assertEqual(len(found), 3)
+        self.assertIn("gamescope", found[1])
+
+    def test_the_rest_of_the_service_s_log_is_not_in_the_way(self):
+        self.assertTrue(all("reading LED state" not in line
+                            for line in desktop.read_journal(self.SAMPLE)))
+
+    def test_only_the_last_few_are_kept(self):
+        many = "\n".join([desktop.ON_THE_DESKTOP] * 50)
+        self.assertEqual(len(desktop.read_journal(many)),
+                         desktop.JOURNAL_LINES)
+
+    def test_nothing_to_read_is_no_lines_rather_than_a_crash(self):
+        for text in ("", None, "some other unit entirely"):
+            self.assertEqual(desktop.read_journal(text), [])
+
+    def test_it_asks_for_this_service_s_own_log(self):
+        command = desktop.journal_command()
+        self.assertEqual(command[0], "journalctl")
+        self.assertIn(desktop.JOURNAL_UNIT, command)
+        self.assertIn("--no-pager", command, "it must not wait for a key")
+
+    def test_a_journal_that_answers_is_read(self):
+        lines, why_not = desktop.journal_ownership(["printf", "%s",
+                                                    self.SAMPLE])
+        self.assertEqual(why_not, "")
+        self.assertEqual(len(lines), 3)
+
+    def test_a_journal_that_refuses_is_a_complaint_and_not_an_empty_list(self):
+        # The difference between "look again with sudo" and "this machine's
+        # Game Mode was never recognised", which are opposite conclusions.
+        lines, why_not = desktop.journal_ownership(["false"])
+        self.assertEqual(lines, [])
+        self.assertTrue(why_not)
+
+    def test_a_machine_without_journalctl_is_not_an_error(self):
+        lines, why_not = desktop.journal_ownership(["/nowhere/journalctl"])
+        self.assertEqual(lines, [])
+        self.assertIn("journalctl", why_not)
+
 
 class ConfigurationTest(unittest.TestCase):
     """The settings this adds, and what the service will not accept."""

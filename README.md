@@ -235,10 +235,23 @@ A scene is drawn by the same renderer that draws Steam's snapshots &mdash; it
 there is no second implementation of breath to drift out of step with the
 first.
 
+For the few seconds around the switch itself the bar stays Steam's either way,
+so the two never fight over it mid-handover.
+
+#### Checking that Game Mode is recognised
+
 Which mode the machine is in is the one thing this has to work out for itself.
 The service runs as root outside your session and cannot ask it, so it looks
-for **gamescope**, the compositor Game Mode runs under. To see what it found
-and what it concluded:
+for **gamescope**, the compositor Game Mode runs under.
+
+**The check that needs nothing: switch to Game Mode and look at the bar.** If
+it goes back to Steam's own setting instead of staying on your scene, it works.
+That is worth doing once, because getting it wrong is the failure with no
+explanation on screen &mdash; a scene that held the bar through a game would be
+the service quietly ignoring the LED settings you had just changed.
+
+For the rest, in **Desktop Mode** &mdash; there is no terminal in Game Mode, so
+this is a Desktop Mode command and only ever reports the desktop half live:
 
 ```bash
 steamos-led-serial --desktop
@@ -247,17 +260,22 @@ steamos-led-serial --desktop
 ```
 DESKTOP_SCENE=breath
   In Desktop Mode the bar shows: breath in #00b0ff at brightness 128
-Game Mode: no such process is running
-  (looked for a process whose name starts with: gamescope)
+Right now: Desktop Mode, no gamescope process running
 Steam's last LED write: 412 seconds ago (rainbow)
 So the bar is the desktop's, showing your scene.
+
+What it saw before now:
+  18:02:11 fractal steamos-led-serial[901]: no Game Mode session - the bar is the desktop's
+  19:41:03 fractal steamos-led-serial[901]: Game Mode is running (gamescope) - the bar is Steam's
+  21:05:55 fractal steamos-led-serial[901]: no Game Mode session - the bar is the desktop's
 ```
 
-Worth running in both modes once, because getting it wrong the other way round
-is the failure with no explanation on screen: a scene that held the bar through
-a game would be the service quietly ignoring the LED settings you had just
-changed. For the few seconds around the switch itself the bar stays Steam's
-either way, so the two never fight over it mid-handover.
+The second half is the Game Mode half, after the fact. The service records
+which mode it sees when it starts and whenever that changes, so a session you
+could not watch is still there to read afterwards; `--desktop` reads that
+record itself rather than handing you a `journalctl` line to type. A line
+naming gamescope means detection works on this machine. Nothing but desktop
+lines, after you have been in Game Mode, is the bug to report.
 
 ### Before Steam has started, and while the machine sleeps
 
@@ -764,7 +782,7 @@ steamos-led-serial` puts things back afterwards.
 | `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs |
 | `steamos-led-serial --temperature` | list sensors and what the [gauge](#temperature) makes of them |
 | `steamos-led-serial --load` | show which CPU and GPU [load counters](#load) this machine has |
-| `steamos-led-serial --desktop` | show the [Desktop Mode](#desktop-mode) scene and who has the bar right now |
+| `steamos-led-serial --desktop` | the [Desktop Mode](#desktop-mode) scene, who has the bar, and what the service recorded about Game Mode |
 | `steamos-led-serial --check-config` | load the configuration, validate it and print it |
 | `steamos-led-serial -v` | run in the foreground with debug output |
 
@@ -780,7 +798,7 @@ Follow the log with `journalctl -u steamos-led-serial -f`.
 | `sudo` rejects your password on a fresh Deck | there is no password yet, run `passwd` once |
 | `no ESP serial device found` | check `--list-ports`; if empty, try another USB cable, charging cables often have no data wires |
 | Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0: `MIN_BRIGHTNESS=40` |
-| Desktop Mode scene never shows, or shows during a game | `steamos-led-serial --desktop` in both modes: it says whether gamescope was found |
+| Desktop Mode scene never shows, or shows during a game | `steamos-led-serial --desktop` on the desktop: it reads back whether the service ever recognised a Game Mode session |
 | Red and green swapped | colour order of the firmware, see [docs/WIRING.md](docs/WIRING.md#colour-order) |
 | Download bar fills from the wrong end | `REVERSE=1` |
 | Dark after switching firmware | the GPIO2 and GPIO14 builds drive different pins, does the firmware match your wiring? |
