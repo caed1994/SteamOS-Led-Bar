@@ -162,6 +162,18 @@ class SceneTest(unittest.TestCase):
         self.assertGreater(max(dim), 0)
 
 
+class SteadyLoad:
+    """A load source that always has the same reading to give.
+
+    Steady on purpose: the gauge glides towards each new value, so a source
+    that moved would make every frame differ from the last and a test asking
+    "did this setting change the bar" could not tell which change it saw.
+    """
+
+    def fractions(self):
+        return (0.7, 0.3)
+
+
 class DescribeTest(unittest.TestCase):
     """What --desktop says a scene is doing, which is how a knob is trusted."""
 
@@ -202,19 +214,17 @@ class DescribeTest(unittest.TestCase):
         self.assertTrue(self._said(desktop.SCENE_COLOR).startswith(
             desktop.SCENE_COLOR))
 
-    def test_a_setting_is_named_exactly_when_it_changes_the_bar(self):
-        """The property that makes the line worth reading at all.
+    def _named_when_it_matters(self, **renderer_options):
+        """Each setting moved, the strip re-rendered, the line checked.
 
         Not "does the table say so" - that would only be the implementation
-        read back. Each setting is moved and the strip re-rendered, and the
-        line has to name it exactly when the pixels come out different.
-
-        Both ways round matter and for the same reason: a setting doing
-        something and going unmentioned is what "the slider does nothing"
-        was, and a setting mentioned while doing nothing is how somebody
-        comes to move it and see no change.
+        read back. Both ways round matter and for the same reason: a setting
+        doing something and going unmentioned is what "the slider does
+        nothing" was, and a setting mentioned while doing nothing is how
+        somebody comes to move it and see no change.
         """
-        renderer = render.Renderer(led_count=17)
+        shows = renderer_options.get("rainbow_shows", render.SHOWS_RAINBOW)
+        renderer = render.Renderer(led_count=17, **renderer_options)
 
         def lit(scene, color="#00b0ff", brightness=90, speed=2.0):
             return renderer.render(
@@ -223,12 +233,27 @@ class DescribeTest(unittest.TestCase):
         for name in desktop.SCENES:
             if name == desktop.SCENE_STEAM:
                 continue
-            said = desktop.describe(name, "#00b0ff", 90, 2.0)
+            said = desktop.describe(name, "#00b0ff", 90, 2.0, shows)
             for word, other in (("colour", lit(name, color="#ff0000")),
                                 ("brightness", lit(name, brightness=30)),
                                 ("speed", lit(name, speed=0.5))):
                 self.assertEqual(word in said, other != lit(name),
-                                 "%s: %s" % (name, word))
+                                 "%s showing %s: %s" % (name, shows, word))
+
+    def test_a_setting_is_named_exactly_when_it_changes_the_bar(self):
+        self._named_when_it_matters()
+
+    def test_the_gauge_in_the_rainbow_slot_answers_to_neither(self):
+        """Reported: the two sliders must not reach the CPU and GPU gauge.
+
+        A rainbow scene shows whatever RAINBOW_SHOWS puts in that slot, and
+        with the load gauge there the bar is drawing a reading - so brightness
+        and speed would change what it says rather than how it looks. The
+        report has to stop naming them at the same moment they stop working,
+        which is what the walk above checks for every scene at once.
+        """
+        self._named_when_it_matters(load=SteadyLoad(),
+                                    rainbow_shows=render.SHOWS_LOAD)
 
 
 class GameModeTest(unittest.TestCase):

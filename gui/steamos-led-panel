@@ -120,7 +120,7 @@ DESKTOP = [
         # in both. The ends are where that field runs out, and they repeat
         # DESKTOP_SPEED_FLOOR and _CEILING - written out because the tests
         # read this table literally, and checked against the validator there.
-        ("DESKTOP_SPEED", "Effect speed", "float", 0.4, 4.0, 0.2),
+        ("DESKTOP_SPEED", "Effect speed", "float", 0.4, 4.0, 0.1),
     ]),
 ]
 

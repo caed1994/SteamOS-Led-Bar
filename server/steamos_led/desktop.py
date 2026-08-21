@@ -147,7 +147,8 @@ def scene_snapshot(scene, color, brightness, speed=1.0):
         delay=delay_for(speed))
 
 
-def describe(scene, color, brightness, speed):
+def describe(scene, color, brightness, speed,
+             rainbow_shows=render.SHOWS_RAINBOW):
     """One scene in a line, naming every setting that is doing something.
 
     And only those. A report that left one out reads as a setting that is not
@@ -155,19 +156,28 @@ def describe(scene, color, brightness, speed):
     one lit scene that has no colour of yours, and "the slider does nothing"
     is what came back.
 
+    Which is also why the rainbow slot's tenant has a say. A rainbow scene
+    showing the load gauge answers to neither brightness nor speed: what it
+    draws is a reading, and both would change what it says rather than how it
+    looks - see render.rainbow_takes.
+
     Named as the settings name it rather than as the protocol does: "color" is
     what you picked and "manual" is what the shim calls the effect it becomes,
     and only one of the two is a word you can go and look up.
     """
     if scene == SCENE_STEAM:
         return scene
+    takes = (render.rainbow_takes(rainbow_shows) if scene == SCENE_RAINBOW
+             else render.TAKES_BOTH)
     doing = []
     if scene in SCENES_WITH_COLOUR:
         doing.append("colour %s" % color)
-    if scene in SCENES_LIT:
+    if scene in SCENES_LIT and render.TAKES_BRIGHTNESS in takes:
         doing.append("brightness %d" % brightness)
-    if scene in SCENES_THAT_MOVE:
+    if scene in SCENES_THAT_MOVE and render.TAKES_SPEED in takes:
         doing.append("speed %g (delay %d)" % (speed, delay_for(speed)))
+    if scene == SCENE_RAINBOW and rainbow_shows != render.SHOWS_RAINBOW:
+        doing.append("showing %s" % rainbow_shows)
     return scene + (", " + ", ".join(doing) if doing else "")
 
 

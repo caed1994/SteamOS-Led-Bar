@@ -245,6 +245,68 @@ class LoadGaugeTest(unittest.TestCase):
             self.assertGreaterEqual(total, previous, percent)
             previous = total
 
+    def _sent(self, brightness=255, delay=render.DELAY_DEFAULT, **options):
+        """What actually goes out on the wire, which is where dimming lands."""
+        renderer = _renderer(load=FakeLoad(0.9, 0.4), **options)
+        snapshot = shim.make_snapshot(shim.EFFECT_RAINBOW,
+                                      brightness=brightness, delay=delay)
+        return renderer.render(snapshot, 0.4)
+
+    def test_the_brightness_setting_does_not_reach_the_gauge(self):
+        """Reported, and it is what the gauge is saying rather than a look.
+
+        Each half fills to say how busy that chip is, and the floor under the
+        innermost LED is what says "idle" rather than "off" - so a dimmed
+        gauge is a gauge reading low. Steam's own brightness and a desktop
+        scene's are the same setting here and both stop at the same place.
+        """
+        self.assertEqual(self._sent(brightness=40), self._sent(brightness=255))
+
+    def test_the_speed_setting_does_not_reach_it_either(self):
+        # The glide runs on the clock rather than on the delay field, so a
+        # gauge at half speed would be a gauge showing where the load was.
+        self.assertEqual(self._sent(delay=2), self._sent(delay=20))
+
+    def test_the_brightness_ceiling_still_does(self):
+        # MAX_BRIGHTNESS is about how much current the strip may draw, which
+        # is not a matter of taste - a gauge that ignored it could pull more
+        # than the supply has.
+        self.assertLess(max(self._sent(max_brightness=80)),
+                        max(self._sent(max_brightness=255)))
+
+    def test_a_rainbow_standing_in_for_it_is_dimmed_as_a_rainbow(self):
+        """Because at that point it is not a gauge any more.
+
+        With nothing to read the slot goes back to Steam's own rainbow, and
+        a rainbow that ignored the brightness would be a bar stuck bright on
+        a machine whose counters cannot be read at all.
+        """
+        renderer = _renderer(load=FakeLoad(missing=True),
+                             rainbow_shows=render.SHOWS_LOAD)
+        dim = renderer.render(shim.make_snapshot(shim.EFFECT_RAINBOW,
+                                                 brightness=40), 0.4)
+        full = renderer.render(shim.make_snapshot(shim.EFFECT_RAINBOW,
+                                                  brightness=255), 0.4)
+        self.assertLess(max(dim), max(full))
+
+    def test_the_counters_are_read_once_a_frame_and_not_once_a_question(self):
+        """Because reading them is what moves the glide along.
+
+        fractions() advances the bar a little every time it is called, so a
+        frame that asked twice - once to draw and once to decide how bright
+        it goes out - would run at twice the rate it was drawn at.
+        """
+        asked = []
+
+        class Counting(FakeLoad):
+            def fractions(self, now=None):
+                asked.append(1)
+                return FakeLoad.fractions(self, now)
+
+        renderer = _renderer(load=Counting(), rainbow_shows=render.SHOWS_LOAD)
+        renderer.render(_rainbow_snapshot(), 0.4)
+        self.assertEqual(len(asked), 1)
+
     def test_without_a_gpu_counter_the_cpu_is_drawn_on_both_halves(self):
         # Rather than leaving one side dark, which reads as a broken strip
         # rather than as a machine whose driver does not publish the number.

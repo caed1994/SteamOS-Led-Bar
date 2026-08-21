@@ -254,14 +254,12 @@ def _load(snapshot, elapsed, options):
     peers - a bar for each, meeting in the middle, says that. Stacking them
     end to end would put one of them on the far side of the strip, which is
     where you look last.
-    """
-    readings = options.load.fractions()
-    if readings is None:
-        # Same reason as the temperature gauge: a dark strip would look like
-        # the service had died, and the log already said what happened.
-        return _rainbow(snapshot, elapsed, options)
 
-    cpu, gpu = readings
+    Only ever reached with a reading in hand: a gauge with nothing to read is
+    not this effect at all, and _substitute hands the slot back to the
+    rainbow before it gets here.
+    """
+    cpu, gpu = options.reading()
     # A machine whose driver publishes no GPU counter shows the CPU on both
     # halves. One reading drawn symmetrically still reads as one reading.
     if gpu is None:
@@ -387,17 +385,45 @@ SHOWS_LOAD = "load"
 SHOWS_FIRE = "fire"
 SHOWS_AURORA = "aurora"
 
-# Which renderer each choice puts in the rainbow's place, and - for the two
-# that read hardware - the Renderer attribute that has to be there for the
-# choice to mean anything. config validates against this table, so a new
-# entry is all a further effect needs.
+# What a scene's brightness and speed can reach. Named because the two of
+# them are not the same kind of thing to every effect: to most, brightness is
+# how bright it looks, and to a gauge it is half of what it is saying.
+TAKES_BRIGHTNESS = "brightness"
+TAKES_SPEED = "speed"
+TAKES_BOTH = frozenset((TAKES_BRIGHTNESS, TAKES_SPEED))
+
+# The load gauge answers to neither. It fills each half of the bar to say how
+# busy that chip is, and the floor under the innermost LED is what says "idle"
+# rather than "off" - dimming that changes the reading rather than the look.
+# Its glide runs on the clock instead of on the delay field, for the same
+# reason: a gauge at half speed is a gauge showing where the load was.
+#
+# MAX_BRIGHTNESS still applies to it. That one is about how much current the
+# strip may draw, which is not a matter of taste.
+TAKES_NOTHING = frozenset()
+
+# Which renderer each choice puts in the rainbow's place; the Renderer
+# attribute that has to be there for the choice to mean anything, for the two
+# that read hardware; and which of the bar's settings reach it. config
+# validates against this table, so a new entry is all a further effect needs.
 _SUBSTITUTES = {
-    SHOWS_TEMPERATURE: (_temperature, "temperature"),
-    SHOWS_LOAD: (_load, "load"),
-    SHOWS_FIRE: (_fire, None),
-    SHOWS_AURORA: (_aurora, None),
+    SHOWS_TEMPERATURE: (_temperature, "temperature", TAKES_BOTH),
+    SHOWS_LOAD: (_load, "load", TAKES_NOTHING),
+    SHOWS_FIRE: (_fire, None, TAKES_BOTH),
+    SHOWS_AURORA: (_aurora, None, TAKES_BOTH),
 }
 RAINBOW_CHOICES = (SHOWS_RAINBOW,) + tuple(_SUBSTITUTES)
+
+
+def rainbow_takes(rainbow_shows):
+    """Which of the bar's settings reach whatever holds the rainbow slot.
+
+    Asked by anything that describes a setting to somebody - a report naming
+    a brightness that the thing on the bar ignores is how you come to move a
+    slider and see nothing happen. Steam's own rainbow takes both, which is
+    also the answer for a name this does not know.
+    """
+    return _SUBSTITUTES.get(rainbow_shows, (None, None, TAKES_BOTH))[2]
 
 
 _EFFECTS = {
@@ -446,6 +472,8 @@ class Renderer:
         self.rainbow_shows = rainbow_shows
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}
+        # This frame's load, taken once - see reading().
+        self._reading = None
 
     @staticmethod
     def _build_gamma(gamma):
@@ -470,17 +498,39 @@ class Renderer:
             self._stretch[source] = weights
         return weights
 
+    def reading(self, fresh=False):
+        """This frame's load, taken once however often it is asked for.
+
+        fractions() moves the glide on a little every time it is called, so
+        asking it twice for one frame would run the bar at twice the rate.
+        The frame takes the reading; everything that has to know what came
+        back - whether there is a gauge to draw at all, and which of the
+        bar's settings reach it - reads the same answer.
+        """
+        if fresh:
+            self._reading = (None if self.load is None
+                             else self.load.fractions())
+        return self._reading
+
     def _substitute(self, snapshot):
         """The renderer standing in for the rainbow here, or None.
 
-        None also covers a choice whose hardware is missing - a gauge with no
-        source to read would draw nothing at all, and Steam's own rainbow is a
-        better answer to that than a dark strip.
+        None also covers a choice whose hardware is missing, and a load gauge
+        that has nothing to read - the first few frames of a fresh start, or
+        a machine with no counters at all. A bar drawn from no reading would
+        be a reading of nothing, and Steam's own rainbow says "not this"
+        better than a dark strip does. Decided here rather than inside the
+        gauge so that everything else agrees about what is on the bar: a
+        rainbow standing in for the load answers to brightness and speed the
+        way a rainbow does, and it could not if the swap were hidden.
         """
         if snapshot.effect != shim.EFFECT_RAINBOW:
             return None
-        effect, needs = _SUBSTITUTES.get(self.rainbow_shows, (None, None))
+        effect, needs, _takes = _SUBSTITUTES.get(self.rainbow_shows,
+                                                 (None, None, TAKES_BOTH))
         if effect is None or (needs and getattr(self, needs) is None):
+            return None
+        if effect is _load and self.reading() is None:
             return None
         return effect
 
@@ -508,6 +558,8 @@ class Renderer:
         """The 17 logical LEDs of the Steam Machine bar, floats in 0..255."""
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
+        # Before anything asks what is being drawn, and once for the frame.
+        self.reading(fresh=True)
         effect = (self._substitute(snapshot)
                   or _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL]))
         return effect(snapshot, elapsed, self)
@@ -538,13 +590,21 @@ class Renderer:
         return frame
 
     def render(self, snapshot, elapsed):
-        """Return the RGB byte payload for the physical strip."""
+        """Return the RGB byte payload for the physical strip.
+
+        The frame first, because what was drawn decides how bright it goes
+        out: a gauge whose brightness is its reading is not dimmed by the
+        setting that dims everything else - see rainbow_takes.
+        """
         frame = self._map_to_strip(self.render_logical(snapshot, elapsed))
 
-        if snapshot.enabled and snapshot.effect != shim.EFFECT_OFF:
-            level = max(snapshot.brightness_scale, self.min_brightness)
-        else:
+        if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             level = 0
+        elif (self._substitute(snapshot) is not None
+                and TAKES_BRIGHTNESS not in rainbow_takes(self.rainbow_shows)):
+            level = 255
+        else:
+            level = max(snapshot.brightness_scale, self.min_brightness)
         scale = (level / 255.0) * (self.max_brightness / 255.0)
 
         table = self._gamma_table

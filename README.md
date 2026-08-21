@@ -238,6 +238,12 @@ twice as fast in both. `SPEED` on the Strip page still scales everything, a
 game included, and the patrol's dots and what a rainbow shows come from there
 too &mdash; so an effect looks the same in both modes.
 
+**The load gauge answers to neither**, wherever it is shown. Each half of the
+bar fills to say how busy that chip is, and the floor under the innermost LED
+is what says *idle* rather than *off* &mdash; dimming or slowing that changes
+the reading rather than the look. `MAX_BRIGHTNESS` still applies to it, since
+that one is about how much current the strip may draw.
+
 A scene is drawn by the same renderer that draws Steam's snapshots &mdash; it
 *is* a snapshot, built here instead of read from the kernel module &mdash; so
 there is no second implementation of breath to drift out of step with the

@@ -493,7 +493,8 @@ def run_desktop(config):
               % desktop.describe(config["DESKTOP_SCENE"],
                                  config["DESKTOP_COLOR"],
                                  config["DESKTOP_BRIGHTNESS"],
-                                 config["DESKTOP_SPEED"]))
+                                 config["DESKTOP_SPEED"],
+                                 config["RAINBOW_SHOWS"]))
 
     found = desktop.running_game_mode()
     print("Right now: %s"
