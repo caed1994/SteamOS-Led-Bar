@@ -266,6 +266,129 @@ class LiveWindowTest(unittest.TestCase):
                  self._greyed("DESKTOP_BRIGHTNESS"),
                  self._greyed("DESKTOP_SPEED")), wanted, label)
 
+    def _corner(self, widget):
+        """The very corner pixel of the swatch this widget wears.
+
+        Which is all ground: a swatch is a rounded square, so the pixel
+        outside its curve is whatever the swatch was baked against. That is
+        the whole of the fault being tested - if it does not match what the
+        widget is painted with, it shows as a box behind the colour.
+        """
+        image = widget.cget("image")
+        self.assertTrue(image, "the widget wears no swatch")
+        return self.root.nametowidget(".").tk.call(image, "get", 0, 0)
+
+    def _shade(self, name):
+        colour = self.panel.roles.get(name, name)
+        return tuple(int(colour[index:index + 2], 16)
+                     for index in (1, 3, 5))
+
+    def _rgb(self, answer):
+        if isinstance(answer, str):
+            answer = answer.split()
+        return tuple(int(part) for part in answer)
+
+    def test_a_greyed_field_carries_a_swatch_baked_for_being_greyed(self):
+        """Reported, and only visible in the dark theme.
+
+        A swatch has no alpha - a quarter of its pixels are a blend with
+        whatever is behind it - so one baked against the ordinary shade sits
+        on a greyed field as a box. In the light theme the two shades are
+        near enough that nothing shows, which is why this went out.
+        """
+        self.panel.notebook.select(self._page_named("Desktop mode"))
+        scene = self.panel.vars["DESKTOP_SCENE"][0]
+        field = self.panel._widgets["DESKTOP_COLOR"]
+
+        scene.set("One colour")
+        self.root.update()
+        self.assertEqual(self._rgb(self._corner(field)),
+                         self._shade("surface"))
+
+        scene.set("Rainbow")            # the colour has nothing to say here
+        self.root.update()
+        self.assertTrue(self._greyed("DESKTOP_COLOR"))
+        self.assertEqual(
+            self._rgb(self._corner(field)),
+            self._shade(self.panel_module.material.disabled_container(
+                self.panel.roles)),
+            "the swatch is still baked for an ungreyed field")
+
+    def test_the_swatch_comes_back_when_the_field_does(self):
+        # The other way round, which a fix that only ever greyed would pass.
+        self.panel.notebook.select(self._page_named("Desktop mode"))
+        scene = self.panel.vars["DESKTOP_SCENE"][0]
+        field = self.panel._widgets["DESKTOP_COLOR"]
+        scene.set("Rainbow")
+        self.root.update()
+        scene.set("Breath")
+        self.root.update()
+        self.assertEqual(self._rgb(self._corner(field)),
+                         self._shade("surface"))
+
+    def test_applying_does_not_wake_a_setting_a_switch_holds_shut(self):
+        """Reported: Apply ungreyed the colour under a rainbow scene.
+
+        Every button in the window is greyed while a command runs, and the
+        drop-down fields are buttons - so letting them all go again at the
+        end handed back settings that DEPENDS_ON is meant to be holding.
+        Until the window was closed and opened, which is what made it look
+        like a drawing fault rather than a logic one.
+        """
+        self.panel.vars["DESKTOP_SCENE"][0].set("Rainbow")
+        self.root.update()
+        self.assertTrue(self._greyed("DESKTOP_COLOR"))
+        self.panel._set_busy(True)
+        self.root.update()
+        self.panel._set_busy(False)
+        self.root.update()
+        self.assertTrue(self._greyed("DESKTOP_COLOR"),
+                        "the colour woke up when the command ended")
+        # And the swatch went back with it, rather than being left behind.
+        self.assertEqual(
+            self._rgb(self._corner(self.panel._widgets["DESKTOP_COLOR"])),
+            self._shade(self.panel_module.material.disabled_container(
+                self.panel.roles)))
+
+    def test_a_colour_button_is_rebaked_under_the_pointer(self):
+        """The same fault on the Test page's colour dialog.
+
+        An outlined button blends its own fill under the pointer, so a swatch
+        baked against the plain shade shows as a box on the hovered one.
+        Driven by the states themselves rather than by moving a real pointer:
+        what the fix has to do is redraw when the state moves, and a test
+        that needed the mouse would be testing X.
+        """
+        seen = []
+
+        def look():
+            # From inside the dialog's own loop: it is modal, so the
+            # constructor does not return until the window is gone.
+            window = next(child for child in self.root.winfo_children()
+                          if isinstance(child, tk.Toplevel))
+            button = next(widget for widget in self._all(window)
+                          if isinstance(widget, ttk.Button)
+                          and widget.cget("image"))
+            seen.append(self._rgb(self._corner(button)))
+            button.state(["active"])
+            button.event_generate("<Enter>")
+            self.root.update()
+            self.root.update_idletasks()
+            seen.append(self._rgb(self._corner(button)))
+            window.destroy()
+
+        self.root.after(150, look)
+        self.panel_module.ColourDialog(self.root, self.panel._follow_shade)
+        self.assertEqual(len(seen), 2, "the dialog never came up")
+        self.assertNotEqual(seen[0], seen[1],
+                            "the swatch kept the shade it was baked against")
+
+    def _all(self, widget):
+        for child in widget.winfo_children():
+            yield child
+            for deeper in self._all(child):
+                yield deeper
+
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
         # The rail takes a sixth of the width, so wrapping to the window laid
         # the text out wider than the page it sits in - and a label whose text

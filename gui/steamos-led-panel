@@ -403,11 +403,18 @@ def _decimals(step):
     return len(("%g" % step).partition(".")[2])
 
 
-def _photo(picture):
-    """A list of pixel rows as a PhotoImage."""
+def _photo(picture, keep=True):
+    """A list of pixel rows as a PhotoImage.
+
+    `keep` parks it in _IMAGES for the window's life, which is what a style
+    element needs. A swatch says no and is held by the widget wearing it
+    instead: those are drawn again whenever the widget's shade moves, and a
+    list that only ever grew would collect one image per hover.
+    """
     photo = tk.PhotoImage(width=len(picture[0]), height=len(picture))
     photo.put(roundrect.as_put_string(picture))
-    _IMAGES.append(photo)
+    if keep:
+        _IMAGES.append(photo)
     return photo
 
 
@@ -1183,20 +1190,25 @@ class ColourDialog(Dialog):
 
     ACROSS = 5
 
-    def __init__(self, parent, swatch, title="Flash a colour"):
+    def __init__(self, parent, dress, title="Flash a colour"):
         self.chosen = None
-        self.swatch = swatch
+        # Given a way to dress a button rather than an image: an outlined
+        # button blends its own fill under the pointer, and a swatch baked
+        # against the plain shade sits on the hovered one as a box - which is
+        # the same fault as a greyed field's, and has the same answer.
+        self.dress = dress
         super().__init__(parent, title, None, confirm="Flash")
 
     def build(self, body):
         grid = ttk.Frame(body)
         grid.pack(anchor="w")
         for index, (label, value) in enumerate(ledpanel.palette()):
-            ttk.Button(grid, text=label, image=self.swatch(value),
-                       compound="left", style="Outlined.TButton",
-                       command=lambda hue=value: self._take(hue)).grid(
-                           row=index // self.ACROSS, column=index % self.ACROSS,
-                           sticky="ew", padx=(0, ROW_GAP), pady=(0, ROW_GAP))
+            button = ttk.Button(grid, text=label, compound="left",
+                                style="Outlined.TButton",
+                                command=lambda hue=value: self._take(hue))
+            button.grid(row=index // self.ACROSS, column=index % self.ACROSS,
+                        sticky="ew", padx=(0, ROW_GAP), pady=(0, ROW_GAP))
+            self.dress(button, value)
 
         typed = ttk.Frame(body)
         typed.pack(fill="x", pady=(ROW_GAP, 0))
@@ -1572,8 +1584,13 @@ class Panel:
         for button in self._busy_buttons:
             button.state(["disabled"] if busy else ["!disabled"])
         if not busy:
-            # These two have reasons of their own to be dead, which outlive
-            # the command that greyed everything.
+            # These have reasons of their own to be dead, which outlive the
+            # command that greyed everything - and _busy_buttons is every
+            # button in the window, drop-down fields included, so waking them
+            # all would hand back settings that a switch above them is meant
+            # to be holding shut. Reported: pressing Apply with a rainbow
+            # scene ungreyed its colour until the window was opened again.
+            self._refresh_enabled()
             self._refresh_unsaved()
             self._refresh_update()
             if code:
@@ -2019,6 +2036,12 @@ class Panel:
             label.configure(style="TLabel" if on else "Muted.TLabel")
         for control in controls:
             control.state(["!disabled"] if on else ["disabled"])
+        # A greyed field is painted in a shade of its own, so a swatch baked
+        # against the ordinary one now stands on it as a box. Drawn again
+        # rather than left, and after the state is set, because that is what
+        # it is read from.
+        if key in self._widgets:
+            self._show_swatch(key)
 
     def _note(self, parent, text, **kwargs):
         """A line of explanation that wraps at the window's width, not at 580.
@@ -2204,26 +2227,84 @@ class Panel:
                             self._menus[key], self._menu_parts[key],
                             self._swatch, self._menu_closed)
 
-    def _swatch_image(self, value):
-        """A swatch on a button, which stands on the page rather than a menu."""
-        return self._swatch(value, "surface")
-
-    def _swatch(self, value, ground):
+    def _swatch(self, value, ground, keep=True):
         """A square of colour for a menu entry, or None if this is not one.
 
         Told by the value rather than by a list of which settings are colours:
         anything the config file holds as #rrggbb is one, and a colour setting
         added later gets its swatch without anything here being told.
+
+        `ground` is a role name or a colour outright, because the shade behind
+        a swatch is not always one of the named ones - see _ground_under.
         """
         if not _COLOUR.match(str(value)):
             return None
+        shade = self.roles.get(ground, ground)
         square = roundrect.rows(
             SWATCH_SIZE, SWATCH_SIZE, material.SHAPE_EXTRA_SMALL, value,
-            self.roles[ground], border=self.roles["outline"], border_width=1)
+            shade, border=self.roles["outline"], border_width=1)
         # Wider than it is tall: a menu entry has no padding to give, so the
         # gap between the colour and its name is part of the picture.
-        blank = [self.roles[ground]] * SWATCH_GAP
-        return _photo([row + blank for row in square])
+        blank = [shade] * SWATCH_GAP
+        return _photo([row + blank for row in square], keep=keep)
+
+    # -- swatches on widgets that change shade under them ------------------
+    #
+    # A swatch has no alpha. It carries its ground in its rounded corners and
+    # in the gap beside it - forty-four of a swatch's one hundred and ninety
+    # six pixels are a blend of the colour and whatever is behind it - so one
+    # baked against the wrong shade appears as a box behind the colour. In the
+    # light theme the shades are near enough that nothing shows; in the dark
+    # one it is plainly a dark rectangle, which is how this was reported.
+    #
+    # Which shade is right is not decided once. A field greys its fill when it
+    # is disabled and a button blends its own under the pointer, so the ground
+    # is a question to be asked again whenever the answer can have moved. The
+    # two tables below mirror the pictures in apply_theme: a field's fill only
+    # moves when it is disabled, an ordinary button's moves for hover and
+    # press as well.
+    FIELD_STATES = ()
+    BUTTON_STATES = (("pressed", material.STATE_PRESSED),
+                     ("active", material.STATE_HOVER))
+
+    def _ground_under(self, widget, base="surface", states=FIELD_STATES):
+        """The colour actually behind a swatch on this widget, right now."""
+        showing = widget.state()
+        if "disabled" in showing:
+            return material.disabled_container(self.roles)
+        shade = self.roles[base]
+        for name, weight in states:
+            if name in showing:
+                return material.blend(shade, self.roles["on_surface"], weight)
+        return shade
+
+    def _dress(self, widget, value, base="surface", states=FIELD_STATES):
+        """Draw the swatch this widget should be wearing at this moment.
+
+        Held by the widget rather than by the window: it is drawn again every
+        time the shade moves, and a list of every image ever made would grow
+        for as long as somebody kept the pointer moving.
+        """
+        image = self._swatch(value, self._ground_under(widget, base, states),
+                             keep=False)
+        widget.configure(image=image or "")
+        widget._swatch_image = image                        # keeps it alive
+
+    def _follow_shade(self, widget, value, base="surface",
+                      states=BUTTON_STATES):
+        """Dress a widget now, and again whenever the pointer changes it.
+
+        For the buttons that blend their own fill. A field does not need this
+        - its fill only moves when it is disabled, and _set_enabled says so.
+        """
+        self._dress(widget, value, base, states)
+        for when in ("<Enter>", "<Leave>", "<ButtonPress-1>",
+                     "<ButtonRelease-1>"):
+            # after_idle, because the state is set by the binding ttk installs
+            # and ours can run first - reading it here would report the state
+            # the widget is leaving.
+            widget.bind(when, lambda _e, w=widget, v=value, b=base, s=states:
+                        w.after_idle(self._dress, w, v, b, s), add="+")
 
     def _panel_click(self, event):
         """A click anywhere in the panel takes an open drop-down down.
@@ -2248,9 +2329,7 @@ class Panel:
     def _show_swatch(self, key):
         """Put the chosen colour on the button, where it can be seen."""
         button = self._widgets[key]
-        image = self._swatch(self._value_for(key, button.cget("text")),
-                             "surface")
-        button.configure(image=image or "")
+        self._dress(button, self._value_for(key, button.cget("text")))
 
     def _label_for(self, key, value):
         """The entry for a configured value, added to the menu if it is new.
@@ -2774,8 +2853,7 @@ class Panel:
         return outer
 
     def flash_colour(self):
-        chosen = ColourDialog(
-            self.root, lambda value: self._swatch_image(value)).chosen
+        chosen = ColourDialog(self.root, self._follow_shade).chosen
         if chosen:
             self.runner.start(ledpanel.notify_command(chosen))
 
