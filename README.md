@@ -258,6 +258,13 @@ download finishes, Steam puts back the effect that was set in Game Mode
 taking over, so the scene returns at once instead of showing that effect for a
 few seconds first.
 
+Putting it back means the same effect, at any brightness. Steam brackets a
+download with a fade of its own: it dims the effect to nothing before the
+progress bar appears and brings it back up afterwards, a step every thirty
+milliseconds. Half a lit rainbow is the same rainbow, so those fades are the
+scene's to cover &mdash; otherwise the Game Mode effect flashes for a quarter
+of a second at each end of every download.
+
 #### Checking that Game Mode is recognised
 
 Which mode the machine is in is the one thing this has to work out for itself.

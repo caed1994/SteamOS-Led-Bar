@@ -101,10 +101,18 @@ class Snapshot:
                 return (red, green, blue)
         return (255, 255, 255)
 
-    def key(self):
-        """Everything that changes the rendered output, for change detection."""
+    def key(self, brightness=True):
+        """Everything that changes the rendered output, for change detection.
+
+        The brightness can be left out, for a caller asking whether two of
+        these are the same thing at different brightnesses rather than two
+        different things - see desktop.py, where Steam fading its own effect
+        down and back up is not Steam changing what it is showing. One field
+        list either way, so the two questions cannot drift apart.
+        """
         return (
-            self.enabled, self.effect, self.brightness_scale, self.delay,
+            self.enabled, self.effect,
+            self.brightness_scale if brightness else None, self.delay,
             self.breath_offset, self.breath_level, self.patrol_num,
             self.color_shift, tuple(self.pixels),
         )

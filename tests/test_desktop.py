@@ -668,6 +668,113 @@ class DumpColumnTest(unittest.TestCase):
                                            first.monotonic_ns, first.seq))
 
 
+class RecordedFadeTest(unittest.TestCase):
+    """The fade Steam puts around a download, recorded on a Steam Machine.
+
+    Reported as the Game Mode effect flashing for under a second at each end
+    of a download. What --dump showed is that Steam dims its own effect to
+    nothing before the progress bar appears and brings it back up afterwards,
+    a step every thirty milliseconds - and every step of both fades differs
+    from the state at rest in the brightness and in nothing else.
+
+    The values below are that recording. Kept because it is a fact about
+    somebody's machine rather than something reasoned out here, and the whole
+    fix rests on it.
+    """
+
+    BLUE = (1, 90, 255, 255)
+    DARK = (0, 0, 0, 255)
+
+    def _state(self, effect, brightness, pixels):
+        snapshot = shim.make_snapshot(effect, brightness=brightness, delay=10)
+        snapshot.breath_offset, snapshot.breath_level = 4, 32
+        snapshot.patrol_num, snapshot.color_shift = 3, 5
+        snapshot.pixels = list(pixels)
+        return snapshot
+
+    def _recorded(self):
+        """(what Steam wrote, seconds since its previous write)."""
+        rest = [self.BLUE] * 17
+        bar = [self.DARK] * 5 + [(0, 45, 127, 255)] + [self.BLUE] * 11
+        rainbow, manual = shim.EFFECT_RAINBOW, shim.EFFECT_MANUAL
+        return [(self._state(rainbow, 55, rest), 0.0)] + [
+            (self._state(rainbow, level, rest), 0.03)
+            for level in (43, 33, 23, 16, 10, 5, 2, 0)] + [
+            (self._state(manual, 0, rest), 0.39),
+            (self._state(manual, 55, rest), 0.0),
+            (self._state(manual, 55, bar), 0.0),
+            (self._state(manual, 55, bar), 0.72)] + [
+            (self._state(manual, level, bar), 0.03)
+            for level in (43, 33, 23, 16, 10, 5, 2, 0)] + [
+            (self._state(manual, 0, rest), 0.10),
+            (self._state(rainbow, 0, rest), 0.02)] + [
+            (self._state(rainbow, level, rest), 0.03)
+            for level in (1, 4, 8, 13, 21, 29, 40, 51, 55)]
+
+    def _walk(self):
+        """Replay it, and say what the bar showed at every step."""
+        watch = desktop.Ownership(look=lambda: "")
+        held, clock, seq, shown = [None], 0.0, 100, []
+
+        def look(when):
+            if held[0] is not None:
+                shown.append((held[0], watch.steam_has_it(held[0], when)))
+
+        for snapshot, gap in self._recorded():
+            # The service looks between two of Steam's writes, which is what
+            # lets the scene settle in and learn what Steam is resting at.
+            for step in range(1, int(gap / 0.25) + 1):
+                look(clock + step * 0.25)
+            clock += gap
+            seq += 1
+            snapshot.seq, snapshot.monotonic_ns = seq, int(clock * 1e9)
+            held[0] = snapshot
+            look(clock + 0.01)
+        return shown
+
+    def test_the_game_mode_effect_never_reaches_the_bar(self):
+        """The reported fault, as one sentence about the whole run.
+
+        Not "the fade-out is the scene's and the fade-in is too", which would
+        be the fix read back. Whatever else happens, the rainbow must not be
+        what the bar is showing at any point - it is the desktop's bar, and
+        the download is the only thing Steam has to say on it.
+        """
+        settled = False
+        for snapshot, steams in self._walk():
+            if not steams:
+                settled = True          # the scene has had the bar at least once
+                continue
+            if not settled:
+                continue                # before it ever settled, see the tests above
+            self.assertNotEqual(snapshot.effect, shim.EFFECT_RAINBOW,
+                                "the Game Mode effect flashed at brightness %d"
+                                % snapshot.brightness_scale)
+
+    def test_the_download_itself_still_gets_the_bar(self):
+        # The control. A scene that simply never gave way would pass the test
+        # above and lose the thing that test is protecting.
+        lit = [steams for snapshot, steams in self._walk()
+               if snapshot.effect == shim.EFFECT_MANUAL
+               and snapshot.brightness_scale > 0]
+        self.assertTrue(lit and all(lit), "the progress bar did not show")
+
+    def test_half_a_lit_rainbow_is_the_same_rainbow(self):
+        # The whole of it in one line: what makes two states the same thing
+        # Steam is resting at, and what does not.
+        rest = [self.BLUE] * 17
+        bright = self._state(shim.EFFECT_RAINBOW, 55, rest)
+        dimmed = self._state(shim.EFFECT_RAINBOW, 5, rest)
+        other = self._state(shim.EFFECT_BREATH, 55, rest)
+        self.assertEqual(desktop.resting_key(bright),
+                         desktop.resting_key(dimmed))
+        self.assertNotEqual(desktop.resting_key(bright),
+                            desktop.resting_key(other))
+        # And the brightness is still part of "has anything changed at all",
+        # which is a different question and one the loop asks every turn.
+        self.assertNotEqual(bright.key(), dimmed.key())
+
+
 class ConfigurationTest(unittest.TestCase):
     """The settings this adds, and what the service will not accept."""
 

@@ -212,6 +212,16 @@ def running_game_mode(root=PROC):
     return ""
 
 
+def resting_key(snapshot):
+    """What makes two snapshots the same thing Steam is resting at.
+
+    Everything the shim reports except the brightness, because Steam dims its
+    own effect on the way into a download and brings it back up on the way
+    out - see Ownership.steam_has_it. Half a lit rainbow is the same rainbow.
+    """
+    return None if snapshot is None else snapshot.key(brightness=False)
+
+
 def steam_wrote_ago(snapshot, now):
     """Seconds since Steam last set the LEDs, or None if it never has.
 
@@ -341,6 +351,17 @@ class Ownership:
         a guess about how often Steam writes, which is a thing this cannot
         know. If the restored state is not the one remembered, nothing is
         lost: the grace runs out the way it always did.
+
+        "What was already there" ignores the brightness, and that is the
+        whole of the second half of this. Measured on a Steam Machine: Steam
+        brackets a download with a fade of its own effect, dimming the
+        rainbow to nothing before the progress bar appears and bringing it
+        back up afterwards, a step every thirty milliseconds. Every step of
+        both fades differs from the state at rest in the brightness and in
+        nothing else - so compared on the whole snapshot each one read as
+        Steam taking the bar, and the Game Mode effect flashed at both ends
+        of every download. It is the same effect, dimmed; it is not Steam
+        showing something else.
         """
         if self.game_mode(now):
             return True
@@ -348,6 +369,6 @@ class Ownership:
         if ago is None or ago >= self.grace:
             # The scene has the bar. Whatever is on the shim while that is
             # true is what Steam will put back when it has finished.
-            self.at_rest = None if snapshot is None else snapshot.key()
+            self.at_rest = None if snapshot is None else resting_key(snapshot)
             return False
-        return self.at_rest is None or snapshot.key() != self.at_rest
+        return self.at_rest is None or resting_key(snapshot) != self.at_rest
