@@ -1390,6 +1390,8 @@ class Panel:
         # What is booked with after(), so it can be dropped when the window is
         self._preview_job = None
         self._refit_job = None
+        # And the catching-up a moved control books - see _settings_changed.
+        self._catching_up = None
         # Explanations that should use the width the window actually has
         self._wrapped = []
         self._wrap_width = 0
@@ -1447,7 +1449,7 @@ class Panel:
         self.status_tab = self._page(notebook, self._build_status)
         notebook.add(self.status_tab, text="Status & repair")
         self._build_rail()
-        self._settings_changed()
+        self._catch_up()                # now: the window is about to be shown
 
         # Closing goes through here so what is booked is dropped first. The
         # <Destroy> binding is the backstop; by the time it runs, some of the
@@ -1952,6 +1954,25 @@ class Panel:
         variable.trace_add("write", self._settings_changed)
 
     def _settings_changed(self, *_args):
+        """A control moved. Book the catching-up rather than doing it here.
+
+        Dragging a slider delivers a motion event for every pixel the pointer
+        travels, and each one of them lands here. Working through every
+        dependent row and every unsaved setting on each was measured at nine
+        milliseconds - call it ninety per cent of a core while a knob is
+        moving, and the window repainted as fast as the events arrived, which
+        is what put the desktop's own load gauge up.
+
+        Booked for the next idle moment instead. Tk runs idle work before it
+        redraws, so the window still catches up before anything is seen; it
+        just does it once per redraw rather than once per pixel.
+        """
+        if self._catching_up is None:
+            self._catching_up = self.root.after_idle(self._catch_up)
+
+    def _catch_up(self, *_args):
+        """Everything the window owes a control that moved."""
+        self._catching_up = None
         self._refresh_enabled()
         self._refresh_unsaved()
 
@@ -2034,6 +2055,18 @@ class Panel:
 
     def _set_enabled(self, key, on):
         labels, controls = self._rows[key]
+        # Nothing to do when the row already looks like that, which is almost
+        # every time: one moved control asks this of every row that hangs off
+        # anything, and hardly any of them hang off the one that moved. Over
+        # a slider drag, measured: eleven hundred of these in fifty steps, and
+        # not one of them a change.
+        #
+        # Read back off the widget rather than remembered here. _set_busy
+        # wakes every button in the window without coming through this, so an
+        # answer kept on the side would be stale exactly when it matters -
+        # which is the Apply that left a greyed colour ungreyed.
+        if controls and ("disabled" not in controls[0].state()) == bool(on):
+            return
         for label in labels:
             # Labels take a disabled state but clam draws them the same, so
             # the muted style does the greying that people actually see.
@@ -2470,7 +2503,7 @@ class Panel:
                          else str(value) if kind == "choice"
                          else float(value))
             shown += 1
-        self._settings_changed()
+        self._catch_up()                # now: the caller reports what it did
         return shown
 
     def reload_settings(self):
@@ -2648,10 +2681,10 @@ class Panel:
         """
         if event is not None and event.widget is not self.root:
             return                              # a child of ours, not the window
-        for job in (self._preview_job, self._refit_job):
+        for job in (self._preview_job, self._refit_job, self._catching_up):
             if job is not None:
                 self.root.after_cancel(job)
-        self._preview_job = self._refit_job = None
+        self._preview_job = self._refit_job = self._catching_up = None
         try:
             self.progress.stop()
         except tk.TclError:                                 # pragma: no cover

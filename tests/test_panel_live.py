@@ -413,6 +413,65 @@ class LiveWindowTest(unittest.TestCase):
             for deeper in self._all(child):
                 yield deeper
 
+    def test_a_slider_that_governs_nothing_reconfigures_nothing(self):
+        """Reported: dragging a slider put the CPU and the GPU up.
+
+        Every moved control asks every dependent row whether it should still
+        be greyed, and a drag delivers one of those per pixel the pointer
+        travels. Almost none of the answers ever change - measured, eleven
+        hundred asked and none changed over fifty steps - but each was being
+        applied anyway: thirty-odd widget reconfigures and five colour chips
+        redrawn from scratch, nine milliseconds a step, and the window
+        repainted as fast as the events arrived.
+
+        Counted rather than timed. A stopwatch on a build machine says
+        nothing anybody can act on; "it stopped touching the widgets" is the
+        thing that made it cheap.
+        """
+        touched = []
+        for key, (_labels, controls) in self.panel._rows.items():
+            for control in controls:
+                original = control.configure
+                control.configure = (
+                    lambda *a, __o=original, __k=key, **kw:
+                    (touched.append(__k), __o(*a, **kw))[1])
+        images = []
+        original_photo = self.panel_module._photo
+        self.panel_module._photo = (
+            lambda picture, keep=True, __o=original_photo:
+            (images.append(1), __o(picture, keep=keep))[1])
+        self.addCleanup(setattr, self.panel_module, "_photo", original_photo)
+
+        speed = self.panel.vars["SPEED"][0]
+        for step in range(20):
+            speed.set(0.5 + step * 0.1)
+            self.root.update()
+        self.assertEqual(touched, [], "rows were reconfigured for nothing")
+        self.assertEqual(images, [], "colour chips were redrawn for nothing")
+
+    def test_a_burst_of_moves_is_caught_up_with_once(self):
+        # What a drag looks like between two redraws. Doing the work per
+        # event rather than per redraw is what no amount of making the work
+        # cheaper would fix.
+        runs = []
+        real = self.panel._catch_up
+        self.panel._catch_up = lambda *a: (runs.append(1), real(*a))[1]
+        speed = self.panel.vars["SPEED"][0]
+        for step in range(20):
+            speed.set(0.5 + step * 0.1)
+        self.assertEqual(runs, [], "it did the work before the redraw")
+        self.root.update()
+        self.assertEqual(len(runs), 1, "once for the burst, not once each")
+
+    def test_a_switch_that_does_govern_something_still_greys_it(self):
+        # The control for the two above: cheap is easy if it stops working.
+        self.panel.notebook.select(self._page_named("Desktop mode"))
+        self.root.update()
+        for label, wanted in (("Rainbow", True), ("Breath", False)):
+            self.panel.vars["DESKTOP_SCENE"][0].set(label)
+            self.root.update()
+            self.assertEqual(self._greyed("DESKTOP_COLOR"), wanted, label)
+
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
         # The rail takes a sixth of the width, so wrapping to the window laid
         # the text out wider than the page it sits in - and a label whose text
