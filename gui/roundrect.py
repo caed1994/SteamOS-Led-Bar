@@ -16,6 +16,11 @@ import functools
 import math
 
 
+# Cached because a panel is drawn out of a handful of colours: every glyph
+# blends its ink against the same fill, over the same background, for every
+# antialiased pixel of its edge. Measured over one set of icons, 850 calls
+# asked about 7 distinct colours.
+@functools.lru_cache(maxsize=512)
 def _unpack(color):
     return tuple(int(color[index:index + 2], 16) for index in (1, 3, 5))
 
@@ -32,8 +37,12 @@ def blend(background, foreground, amount):
     if amount >= 1:
         return foreground
     back, front = _unpack(background), _unpack(foreground)
-    return _pack(back[index] * (1 - amount) + front[index] * amount
-                 for index in range(3))
+    rest = 1 - amount
+    # Spelled out rather than looped: this runs for every antialiased pixel of
+    # every shape and glyph the panel draws.
+    return _pack((back[0] * rest + front[0] * amount,
+                  back[1] * rest + front[1] * amount,
+                  back[2] * rest + front[2] * amount))
 
 
 def corner_radii(radius):

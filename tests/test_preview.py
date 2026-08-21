@@ -244,5 +244,45 @@ class CanvasColourTest(unittest.TestCase):
                              "channel %d does not move towards the LED" % index)
 
 
+class RendererReuseTest(unittest.TestCase):
+    """The preview asks for a frame 25 times a second, on a live window.
+
+    A renderer builds a 256 entry gamma table and its own interpolation
+    weights. Built per frame, at GAMMA=2.2 that was most of the frame it was
+    built for - so it is kept until a setting it was built from moves.
+    """
+
+    def test_a_still_window_builds_one_renderer(self):
+        page = preview.Preview({"LED_COUNT": 17, "GAMMA": 2.2})
+        first = page._renderer(render.SHOWS_FIRE)
+        for tick in range(50):
+            page.slot_frame(render.SHOWS_FIRE, tick / 25.0)
+        self.assertIs(page._renderer(render.SHOWS_FIRE), first,
+                      "nothing changed, so nothing had to be rebuilt")
+
+    def test_a_moved_slider_is_picked_up_at_once(self):
+        # The window writes its live values in before every frame, so a kept
+        # renderer must not outlive the settings it was built from.
+        page = preview.Preview({"LED_COUNT": 17, "GAMMA": 1.0})
+        self.assertEqual(len(page.slot_frame(render.SHOWS_FIRE, 1.0)), 17)
+        page.settings = {"LED_COUNT": 60, "GAMMA": 1.0}
+        self.assertEqual(len(page.slot_frame(render.SHOWS_FIRE, 1.0)), 60)
+
+    def test_each_slot_keeps_its_own(self):
+        # Switching what the tab shows is a different renderer, not the same
+        # one asked a different question.
+        page = preview.Preview({"LED_COUNT": 17})
+        fire = page._renderer(render.SHOWS_FIRE)
+        self.assertIsNot(page._renderer(render.SHOWS_AURORA), fire)
+
+    def test_the_sensor_readings_still_move(self):
+        # slot_frame writes into the sensor object the renderer holds, so a
+        # kept renderer has to keep seeing the walk rather than one reading.
+        page = preview.Preview({"LED_COUNT": 17})
+        frames = {tuple(page.slot_frame(render.SHOWS_TEMPERATURE, t / 25.0))
+                  for t in range(0, 400, 20)}
+        self.assertGreater(len(frames), 1, "the gauge should be walked")
+
+
 if __name__ == "__main__":
     unittest.main()

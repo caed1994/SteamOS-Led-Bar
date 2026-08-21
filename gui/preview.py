@@ -94,6 +94,8 @@ class Preview:
         self.sensor = _Scripted()
         self._overlay = None
         self._overlay_key = None
+        self._renderer_cache = None
+        self._renderer_key = None
 
     def setting(self, key):
         return self.settings.get(key, config_module.DEFAULTS[key])
@@ -114,21 +116,37 @@ class Preview:
         into the other is the mapping: the hardest thing on the Strip page to
         picture, and the one thing a preview drawn at seventeen could never
         show.
+
+        Kept until one of those settings moves, the way the overlay below is.
+        A renderer builds a 256 entry gamma table and its own interpolation
+        weights, and this is asked for a frame twenty-five times a second: at
+        GAMMA=2.2, building one was most of the frame it was built for. The
+        sensor is the same object throughout, so a kept renderer still sees
+        the values slot_frame writes into it.
         """
-        return render.Renderer(
-            led_count=self.led_count(),
-            mapping=self.setting("MAPPING"),
-            reverse=self.setting("REVERSE"),
-            max_brightness=self.setting("MAX_BRIGHTNESS"),
-            min_brightness=self.setting("MIN_BRIGHTNESS"),
-            gamma=self.setting("GAMMA"),
-            patrol_dots=self.setting("PATROL_DOTS"),
-            speed_scale=self.setting("SPEED"),
-            rainbow_shows=shows,
-            temperature=self.sensor,
-            load=self.sensor,
-            temperature_range=(self.setting("TEMPERATURE_MIN"),
-                               self.setting("TEMPERATURE_MAX")))
+        key = (shows, self.led_count(), self.setting("MAPPING"),
+               self.setting("REVERSE"), self.setting("MAX_BRIGHTNESS"),
+               self.setting("MIN_BRIGHTNESS"), self.setting("GAMMA"),
+               self.setting("PATROL_DOTS"), self.setting("SPEED"),
+               self.setting("TEMPERATURE_MIN"),
+               self.setting("TEMPERATURE_MAX"))
+        if key != self._renderer_key:
+            self._renderer_key = key
+            self._renderer_cache = render.Renderer(
+                led_count=self.led_count(),
+                mapping=self.setting("MAPPING"),
+                reverse=self.setting("REVERSE"),
+                max_brightness=self.setting("MAX_BRIGHTNESS"),
+                min_brightness=self.setting("MIN_BRIGHTNESS"),
+                gamma=self.setting("GAMMA"),
+                patrol_dots=self.setting("PATROL_DOTS"),
+                speed_scale=self.setting("SPEED"),
+                rainbow_shows=shows,
+                temperature=self.sensor,
+                load=self.sensor,
+                temperature_range=(self.setting("TEMPERATURE_MIN"),
+                                   self.setting("TEMPERATURE_MAX")))
+        return self._renderer_cache
 
     def slot_frame(self, shows, elapsed):
         """One frame of `fire`, `aurora`, `temperature` or `load`."""
