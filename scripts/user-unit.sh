@@ -25,11 +25,34 @@ WATCHER_UNITS=("$WATCHER_UNIT" "$PHONE_UNIT")
 # Must match WantedBy= in those units: it is where the enable symlink goes.
 WATCHER_WANTS="default.target.wants"
 
+# Who is asking, given that the scripts sourcing this always run as root.
+#
+# Two spellings, because there are two ways in: sudo from a terminal sets
+# SUDO_USER, and pkexec - which is how the control panel runs the installer -
+# sets PKEXEC_UID and no SUDO_USER at all.
+#
+# Reading only SUDO_USER is why an install started from the panel decided
+# there was nobody to install the user units for and skipped the lot: the
+# watchers, the menu entry, and the lingering that keeps them alive across
+# Game Mode. It said so in one line that scrolls past in the log, and the
+# panel then reported the lingering as a problem - correctly, and about
+# something it had just skipped itself. scripts/flash-firmware.sh reads both
+# and always did.
+invoking_user() {
+    local uid="${PKEXEC_UID:-${SUDO_UID:-}}"
+    if [[ -n "$uid" ]]; then
+        id -nu "$uid" 2>/dev/null
+        return
+    fi
+    [[ -n "${SUDO_USER:-}" ]] || return 1
+    printf '%s\n' "$SUDO_USER"
+}
+
 # Sets WATCHER_USER, WATCHER_HOME, WATCHER_DIR and WATCHER_RUNTIME for the
-# desktop user who invoked sudo. Returns non-zero, quietly, when there is no
+# desktop user who asked for this. Returns non-zero, quietly, when there is no
 # such user. The installer also uses this to run PlatformIO as that user.
 watcher_user_dirs() {
-    WATCHER_USER="${SUDO_USER:-}"
+    WATCHER_USER="$(invoking_user || true)"
     [[ -n "$WATCHER_USER" && "$WATCHER_USER" != "root" ]] || return 1
 
     local home

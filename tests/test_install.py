@@ -120,6 +120,141 @@ class BuildDirectoryTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "")
 
 
+USER_UNIT = os.path.join(HERE, "..", "scripts", "user-unit.sh")
+
+
+class InvokingUserTest(unittest.TestCase):
+    """Which desktop user a root script is working on behalf of.
+
+    Reported from a Steam Machine: after updating from the control panel,
+    "Services survive Game Mode" was the one thing broken. The installer does
+    turn lingering on - but only after working out who to turn it on for, and
+    that answer came from SUDO_USER alone. The panel runs the installer with
+    pkexec, which sets PKEXEC_UID and no SUDO_USER, so the whole step decided
+    there was nobody to install for: no lingering, no menu entry, and any new
+    user unit never installed either.
+    """
+
+    def _sourced(self, call, **environment):
+        """Run one call against the real file, with `id` and `getent` stubbed.
+
+        Stubbed rather than run against this machine's accounts: the point is
+        which variable is read, and a build container has no desktop user to
+        ask about.
+        """
+        stubs = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, stubs, True)
+        home = os.path.join(stubs, "home")
+        os.makedirs(home)
+        self._write(stubs, "id", 'case "$1" in\n'
+                                 '  -nu) [[ "$2" == "1000" ]] && echo deck ;;\n'
+                                 '  -u)  echo 1000 ;;\n'
+                                 'esac\n')
+        self._write(stubs, "getent",
+                    'echo "deck:x:1000:1000::%s:/bin/bash"\n' % home)
+
+        env = {"PATH": stubs + ":" + os.environ.get("PATH", ""),
+               "HOME": home}
+        env.update(environment)
+        return subprocess.run(
+            ["bash", "-c", 'set -euo pipefail\nsource "%s"\n%s' %
+             (USER_UNIT, call)],
+            capture_output=True, text=True, env=env)
+
+    def _write(self, directory, name, body):
+        path = os.path.join(directory, name)
+        with open(path, "w") as handle:
+            handle.write("#!/usr/bin/env bash\n" + body)
+        os.chmod(path, 0o755)
+
+    def test_pkexec_says_who_asked(self):
+        done = self._sourced('watcher_user_dirs && echo "$WATCHER_USER"',
+                             PKEXEC_UID="1000")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "deck")
+
+    def test_sudo_from_a_terminal_still_works(self):
+        done = self._sourced('watcher_user_dirs && echo "$WATCHER_USER"',
+                             SUDO_USER="deck")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "deck")
+
+    def test_neither_means_there_is_nobody_to_install_for(self):
+        # Quietly: the caller owns that message, and it has one.
+        done = self._sourced("watcher_user_dirs")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout.strip(), "")
+
+    def test_root_is_not_a_desktop_user(self):
+        # A root shell has no session to run the watchers in, and installing
+        # them into /root is worse than not installing them.
+        done = self._sourced("watcher_user_dirs", SUDO_USER="root")
+        self.assertNotEqual(done.returncode, 0)
+
+
+class LingerTest(unittest.TestCase):
+    """Turning lingering on, and then checking rather than assuming."""
+
+    FUNCTIONS = ("linger_is_on", "enable_linger")
+
+    def _with_loginctl(self, call, body):
+        stubs = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, stubs, True)
+        path = os.path.join(stubs, "loginctl")
+        with open(path, "w") as handle:
+            handle.write("#!/usr/bin/env bash\n" + body)
+        os.chmod(path, 0o755)
+        script = 'set -euo pipefail\nwarn() { echo "warn: $*" >&2; }\n%s\n%s' % (
+            "\n".join(_function(name) for name in self.FUNCTIONS), call)
+        env = dict(os.environ, PATH=stubs + ":" + os.environ.get("PATH", ""),
+                   STATE=os.path.join(stubs, "state"))
+        return subprocess.run(["bash", "-c", script], capture_output=True,
+                              text=True, env=env)
+
+    def test_it_is_on_after_being_turned_on(self):
+        done = self._with_loginctl('enable_linger deck', '''
+case "$1" in
+  enable-linger) touch "$STATE" ;;
+  show-user) [[ -e "$STATE" ]] && echo "Linger=yes" || echo "Linger=no" ;;
+esac
+''')
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_a_loginctl_that_says_yes_and_does_nothing_is_not_believed(self):
+        """The failure this was written for cannot be seen any other way.
+
+        enable-linger returning 0 and leaving it off looks exactly like
+        success from here, and the machine then disagrees with the log.
+        """
+        done = self._with_loginctl('enable_linger deck', '''
+case "$1" in
+  enable-linger) exit 0 ;;
+  show-user) echo "Linger=no" ;;
+esac
+''')
+        self.assertNotEqual(done.returncode, 0)
+
+    def test_what_loginctl_said_is_passed_on(self):
+        done = self._with_loginctl('enable_linger deck', '''
+case "$1" in
+  enable-linger) echo "Could not enable linger: Access denied" >&2; exit 1 ;;
+  show-user) echo "Linger=no" ;;
+esac
+''')
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("Access denied", done.stderr)
+
+    def test_one_already_on_is_left_alone(self):
+        done = self._with_loginctl('enable_linger deck', '''
+case "$1" in
+  enable-linger) echo "asked" >&2; exit 1 ;;
+  show-user) echo "Linger=yes" ;;
+esac
+''')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("asked", done.stderr)
+
+
 class InstallerShapeTest(unittest.TestCase):
     """Properties of install.sh that are easy to break from a distance."""
 

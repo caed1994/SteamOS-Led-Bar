@@ -257,6 +257,9 @@ chmod 0644 "$UNIT_PATH"
 # Set by install_user_units for the summary at the end, so the outcome is
 # decided once where it is known rather than reconstructed later.
 WATCHER_STATUS="not attempted"
+# Appended to it: installed and running is only half the answer if they stop
+# the moment you switch to Game Mode.
+LINGER_NOTE=""
 
 # One unit into the user's systemd. Says nothing: the caller owns the summary,
 # because it is the one that knows whether a failure here is the whole story.
@@ -332,17 +335,40 @@ install_user_units() {
     #
     # Measured on a Steam Deck: in Game Mode the bridge was not running at
     # all, which is why it never even reported that KDE Connect had gone.
-    if loginctl enable-linger "$WATCHER_USER" >/dev/null 2>&1; then
+    if enable_linger "$WATCHER_USER"; then
         say "Keeping $WATCHER_USER's services running across Game Mode"
+        LINGER_NOTE=""
     else
         warn "could not enable lingering for $WATCHER_USER. The watchers will"
         warn "stop when you switch to Game Mode; turn it on by hand with:"
         warn "  sudo loginctl enable-linger $WATCHER_USER"
+        LINGER_NOTE=" - but NOT across Game Mode, see above"
     fi
 
     user_systemctl daemon-reload || true
-    WATCHER_STATUS="enabled for $WATCHER_USER, starts at next login"
+    WATCHER_STATUS="enabled for $WATCHER_USER, starts at next login$LINGER_NOTE"
     return 0
+}
+
+# Whether that user's systemd is set to keep running. The same question the
+# control panel asks, and the only one that settles it.
+linger_is_on() {    # linger_is_on USER
+    local state
+    state="$(loginctl show-user "$1" --property=Linger 2>/dev/null || true)"
+    [[ "$state" == *"Linger=yes"* ]]
+}
+
+# Turn it on, and then look. Trusting the exit code is how the log can say it
+# was done while the panel says it is off, with nothing anywhere to explain
+# the difference - so what loginctl had to say for itself is passed on rather
+# than thrown away, as it used to be.
+enable_linger() {   # enable_linger USER
+    local reply
+    linger_is_on "$1" && return 0
+    reply="$(loginctl enable-linger "$1" 2>&1)" || true
+    linger_is_on "$1" && return 0
+    [[ -n "$reply" ]] && warn "loginctl: $reply"
+    return 1
 }
 
 # Starting them is separate from installing them, and deliberately later: the
@@ -360,7 +386,7 @@ start_user_units() {
     user_systemctl restart "$PHONE_UNIT" || true
     if user_systemctl restart "$WATCHER_UNIT"; then
         say "Watchers running now"
-        WATCHER_STATUS="running for $WATCHER_USER"
+        WATCHER_STATUS="running for $WATCHER_USER$LINGER_NOTE"
     fi
     return 0
 }
