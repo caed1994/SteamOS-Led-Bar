@@ -129,12 +129,8 @@ DESKTOP = [
 # panel runs there - sees the bar ignore every one of them, and nothing on the
 # page would explain why.
 DESKTOP_NOTE = (
-    "Only in Desktop Mode. Game Mode is Steam's: switch to it and the bar goes "
-    "back to whatever Steam's own LED settings say, which nothing here "
-    "changes. Effect speed is this scene's own, the way Steam's slider sets a "
-    "game's; the Strip page has the one that scales both, along with the "
-    "patrol's dots and what a rainbow shows - set The Rainbow entry there to "
-    "Fire or Aurora and this one shows that.")
+    "Only in Desktop Mode. Switch to Game Mode and Steam's own LED settings "
+    "take the bar back, untouched by anything here.")
 
 # The shapes, straight from the service. The per-notification menus also
 # offer "Same as default", which is not a shape but the absence of a choice.
@@ -825,10 +821,18 @@ def apply_theme(root):
                     foreground=on_surface, arrowcolor=variant,
                     padding=(10, sizes["field_padding"]),
                     arrowsize=ARROW_SIZE, anchor="w", compound="left")
+    # The background matters on a field carrying a swatch, and only there.
+    # Tk draws an image on a disabled widget through a fifty per cent
+    # stipple - the hatching you see over a greyed colour - and what shows
+    # through the holes is this option, not the shade Material.Field paints.
+    # Left at surface, half the pixels under the swatch came out the ordinary
+    # shade while the field around them was the greyed one, which in a dark
+    # theme is exactly the box this was reported as.
     style.map("Field.TButton",
               foreground=[("disabled", material.disabled(roles, on_surface))],
               arrowcolor=[("disabled", material.disabled(roles, variant))],
-              background=[("active", surface), ("pressed", surface)])
+              background=[("disabled", material.disabled_container(roles)),
+                          ("active", surface), ("pressed", surface)])
 
     style.configure("Horizontal.TScale", background=surface,
                     troughcolor=roles["surface_container_highest"])

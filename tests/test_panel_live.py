@@ -314,6 +314,30 @@ class LiveWindowTest(unittest.TestCase):
                 self.panel.roles)),
             "the swatch is still baked for an ungreyed field")
 
+    def test_what_shows_through_the_stipple_is_the_shade_around_it(self):
+        """The other half of that fault, and the half the image cannot show.
+
+        Tk draws an image on a disabled widget through a fifty per cent
+        stipple - that is the hatching over a greyed colour - and what shows
+        through the holes is the style's own background option, not the shade
+        the field element paints. Left disagreeing, every other pixel under
+        the swatch came out the ordinary shade while the field around them
+        was the greyed one: a box, in exactly the place a swatch baked
+        against the wrong ground would put one.
+
+        Which is why this is not checked on the swatch. A test that read the
+        image passed while the screen was still wrong - measured, on a dark
+        theme, before this was found.
+        """
+        field = self.panel._widgets["DESKTOP_COLOR"]
+        field.state(["disabled"])
+        self.root.update()
+        style = ttk.Style(self.root)
+        self.assertEqual(
+            style.lookup("Field.TButton", "background", ["disabled"]),
+            self.panel._ground_under(field),
+            "the stipple shows a different shade than the swatch is baked on")
+
     def test_the_swatch_comes_back_when_the_field_does(self):
         # The other way round, which a fix that only ever greyed would pass.
         self.panel.notebook.select(self._page_named("Desktop mode"))
