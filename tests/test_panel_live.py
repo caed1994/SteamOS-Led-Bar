@@ -241,17 +241,30 @@ class LiveWindowTest(unittest.TestCase):
             self.root.update()
             self.assertEqual(self._greyed("DESKTOP_COLOR"), wanted, label)
 
-    def test_a_scene_that_draws_nothing_greys_the_brightness_too(self):
-        # Brightness means something for a rainbow, which makes its own
-        # colour - so the two rows are not greyed by the same rule.
+    def test_each_of_the_three_is_greyed_by_a_rule_of_its_own(self):
+        """Because no two of them apply to the same set of scenes.
+
+        A rainbow has a brightness and a speed but no colour of yours; one
+        colour standing still has a colour and a brightness but no speed.
+        Greying all three together would put two settings that do something
+        out of reach, which is the same to look at as a knob that is broken.
+        """
         self.panel.notebook.select(self._page_named("Desktop mode"))
         self.root.update()
         scene = self.panel.vars["DESKTOP_SCENE"][0]
-        for label, wanted in (("Rainbow", False), ("One colour", False),
-                              ("Off", True), ("Leave it to Steam", True)):
+        #                       colour brightness speed
+        for label, wanted in (("One colour", (False, False, True)),
+                              ("Breath", (False, False, False)),
+                              ("Patrol", (False, False, False)),
+                              ("Rainbow", (True, False, False)),
+                              ("Off", (True, True, True)),
+                              ("Leave it to Steam", (True, True, True))):
             scene.set(label)
             self.root.update()
-            self.assertEqual(self._greyed("DESKTOP_BRIGHTNESS"), wanted, label)
+            self.assertEqual(
+                (self._greyed("DESKTOP_COLOR"),
+                 self._greyed("DESKTOP_BRIGHTNESS"),
+                 self._greyed("DESKTOP_SPEED")), wanted, label)
 
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
         # The rail takes a sixth of the width, so wrapping to the window laid

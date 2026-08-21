@@ -35,6 +35,7 @@ import os
 import subprocess
 
 from . import notify
+from . import render
 from . import shim
 
 LOG = logging.getLogger(__name__)
@@ -70,6 +71,15 @@ SCENES = (SCENE_STEAM,) + tuple(SCENE_EFFECTS)
 # a setting that does nothing.
 SCENES_WITH_COLOUR = (SCENE_COLOR, SCENE_BREATH, SCENE_PATROL)
 
+# Scenes that light the strip at all, which is what brightness is about - the
+# rainbow included, since it has a brightness even though it picks its own
+# colours.
+SCENES_LIT = SCENES_WITH_COLOUR + (SCENE_RAINBOW,)
+
+# And the ones that move, which is what speed is about. One colour standing
+# still has a speed the way a photograph has a frame rate.
+SCENES_THAT_MOVE = (SCENE_BREATH, SCENE_PATROL, SCENE_RAINBOW)
+
 # How often to ask whether Game Mode is running. Cheap - one directory
 # listing and a short read per process - but not free, and nothing here
 # changes faster than somebody can switch sessions.
@@ -101,13 +111,29 @@ GAME_MODE_PROCESSES = ("gamescope",)
 PROC = "/proc"
 
 
-def scene_snapshot(scene, color, brightness):
+def delay_for(speed):
+    """The module's `delay` field for a speed multiplier.
+
+    Steam's own speed slider sets that field, and a scene's sets it the same
+    way - so "twice as fast" means the same thing in a game and on the
+    desktop, and neither needs a special case in the renderer.
+
+    delay is not a duration but a position on a slider: the cycle scales
+    linearly with it from DELAY_DEFAULT, so a multiplier is simply that the
+    other way up. SPEED on the Strip page then scales this the way it scales
+    a game's, which is what keeps it one knob for "everything a bit slower".
+    """
+    if speed <= 0:
+        return render.DELAY_DEFAULT
+    steps = int(round(render.DELAY_DEFAULT / speed))
+    return max(0, min(steps, render.DELAY_MAX))
+
+
+def scene_snapshot(scene, color, brightness, speed=1.0):
     """One scene as a snapshot, or None for "leave it to Steam".
 
     Everything the renderer reads is set here, including the fields Steam
-    would have set for an effect it was animating itself: the delay is the
-    module's own default, so the desktop's breath runs at the same rate as a
-    game's, and SPEED scales both.
+    would have set for an effect it was animating itself.
     """
     if scene == SCENE_STEAM:
         return None
@@ -117,7 +143,32 @@ def scene_snapshot(scene, color, brightness):
     return shim.make_snapshot(
         effect=SCENE_EFFECTS[scene],
         color=(red, green, blue),
-        brightness=max(0, min(int(brightness), 255)))
+        brightness=max(0, min(int(brightness), 255)),
+        delay=delay_for(speed))
+
+
+def describe(scene, color, brightness, speed):
+    """One scene in a line, naming every setting that is doing something.
+
+    And only those. A report that left one out reads as a setting that is not
+    in play - which is what the brightness looked like under a rainbow, the
+    one lit scene that has no colour of yours, and "the slider does nothing"
+    is what came back.
+
+    Named as the settings name it rather than as the protocol does: "color" is
+    what you picked and "manual" is what the shim calls the effect it becomes,
+    and only one of the two is a word you can go and look up.
+    """
+    if scene == SCENE_STEAM:
+        return scene
+    doing = []
+    if scene in SCENES_WITH_COLOUR:
+        doing.append("colour %s" % color)
+    if scene in SCENES_LIT:
+        doing.append("brightness %d" % brightness)
+    if scene in SCENES_THAT_MOVE:
+        doing.append("speed %g (delay %d)" % (speed, delay_for(speed)))
+    return scene + (", " + ", ".join(doing) if doing else "")
 
 
 def running_game_mode(root=PROC):

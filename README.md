@@ -167,6 +167,7 @@ sudo systemctl start steamos-led-serial
 | `STANDBY_PULSE` | `1` | breathe white while suspended |
 | `DESKTOP_SCENE` | `steam` | what the bar shows in [Desktop Mode](#desktop-mode): `steam`, `off`, `color`, `breath`, `patrol`, `rainbow` |
 | `DESKTOP_COLOR` / `DESKTOP_BRIGHTNESS` | `#ffffff` / `128` | the colour and brightness that scene uses |
+| `DESKTOP_SPEED` | `1.0` | how fast that scene runs, the way Steam's own speed slider works |
 | `RAINBOW_SHOWS` | `rainbow` | what the [rainbow entry](#the-rainbow-slot) shows: `rainbow`, `temperature`, `load`, `fire` or `aurora` |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `80.0` | where the temperature gauge is green and where it is red |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the temperature gauge reads |
@@ -219,16 +220,23 @@ its own there, on the panel's **Desktop mode** page:
 | `DESKTOP_SCENE` | `steam` (default), `off`, `color`, `breath`, `patrol`, `rainbow` |
 | `DESKTOP_COLOR` | the colour for `color`, `breath` and `patrol` (`#ffffff`) |
 | `DESKTOP_BRIGHTNESS` | 0&ndash;255, the way Steam's own brightness works (`128`) |
+| `DESKTOP_SPEED` | how fast `breath`, `patrol` and `rainbow` run (`1.0`) |
 
 `steam` is the default and is what the bar always did: carry on with Steam's
-last state in both modes.
+last state in both modes. Each of the other rows greys out under a scene it
+means nothing for: a rainbow makes its own colours, one colour standing still
+has no speed, and `off` has neither.
 
 **Game Mode is Steam's, whatever is set here.** Switch to it and the bar goes
 straight back to Steam's own LED settings, which nothing on that page touches
-&mdash; that is the point of the two being separate. Nothing else changes
-either: notifications still flash over a scene, and the speed, the patrol's
-dots and what a rainbow shows all come from the same settings a game uses, so
-an effect looks the same in both modes.
+&mdash; that is the point of the two being separate. Notifications still flash
+over a scene.
+
+`DESKTOP_SPEED` is the scene's own, and works the way Steam's speed slider does
+in Game Mode: it sets the same `delay` field a game's effect uses, so `2.0` is
+twice as fast in both. `SPEED` on the Strip page still scales everything, a
+game included, and the patrol's dots and what a rainbow shows come from there
+too &mdash; so an effect looks the same in both modes.
 
 A scene is drawn by the same renderer that draws Steam's snapshots &mdash; it
 *is* a snapshot, built here instead of read from the kernel module &mdash; so
@@ -259,7 +267,7 @@ steamos-led-serial --desktop
 
 ```
 DESKTOP_SCENE=breath
-  In Desktop Mode the bar shows: breath in #00b0ff at brightness 128
+  In Desktop Mode the bar shows: breath, colour #00b0ff, brightness 128, speed 1 (delay 8)
 Right now: Desktop Mode, no gamescope process running
 Steam's last LED write: 412 seconds ago (rainbow)
 So the bar is the desktop's, showing your scene.

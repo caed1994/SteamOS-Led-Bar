@@ -115,6 +115,12 @@ DESKTOP = [
         ("DESKTOP_COLOR", "Colour", "named",
          ledpanel.NOTIFICATION_COLOURS, None, None),
         ("DESKTOP_BRIGHTNESS", "Brightness", "int", 0, 255, 1),
+        # The scene's own, the way Steam's speed slider sets a game's: it
+        # writes the same delay field, so twice as fast means the same thing
+        # in both. The ends are where that field runs out, and they repeat
+        # DESKTOP_SPEED_FLOOR and _CEILING - written out because the tests
+        # read this table literally, and checked against the validator there.
+        ("DESKTOP_SPEED", "Effect speed", "float", 0.4, 4.0, 0.2),
     ]),
 ]
 
@@ -125,9 +131,10 @@ DESKTOP = [
 DESKTOP_NOTE = (
     "Only in Desktop Mode. Game Mode is Steam's: switch to it and the bar goes "
     "back to whatever Steam's own LED settings say, which nothing here "
-    "changes. Speed and the patrol's dots come from the Strip page, and so "
-    "does what a rainbow shows - set The Rainbow entry there to Fire or "
-    "Aurora and this one shows that.")
+    "changes. Effect speed is this scene's own, the way Steam's slider sets a "
+    "game's; the Strip page has the one that scales both, along with the "
+    "patrol's dots and what a rainbow shows - set The Rainbow entry there to "
+    "Fire or Aurora and this one shows that.")
 
 # The shapes, straight from the service. The per-notification menus also
 # offer "Same as default", which is not a shape but the absence of a choice.
@@ -247,9 +254,11 @@ SETTINGS_TABS = (
 TEMPERATURE_SHOWN = ("RAINBOW_SHOWS", "temperature")
 SCENE_HAS_COLOUR = ("DESKTOP_SCENE", ("color", "breath", "patrol"))
 SCENE_IS_LIT = ("DESKTOP_SCENE", ("color", "breath", "patrol", "rainbow"))
+SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow"))
 DEPENDS_ON = {
     "DESKTOP_COLOR": (SCENE_HAS_COLOUR,),
     "DESKTOP_BRIGHTNESS": (SCENE_IS_LIT,),
+    "DESKTOP_SPEED": (SCENE_MOVES,),
     "TEMPERATURE_MIN": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_MAX": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_SENSOR": (TEMPERATURE_SHOWN,),

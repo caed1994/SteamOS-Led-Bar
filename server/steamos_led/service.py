@@ -123,7 +123,8 @@ def build_scene(config):
     """The snapshot to show in Desktop Mode, or None to leave the bar alone."""
     return desktop.scene_snapshot(config["DESKTOP_SCENE"],
                                   config["DESKTOP_COLOR"],
-                                  config["DESKTOP_BRIGHTNESS"])
+                                  config["DESKTOP_BRIGHTNESS"],
+                                  config["DESKTOP_SPEED"])
 
 
 def notification_colors(config):
@@ -488,11 +489,11 @@ def run_desktop(config):
         print("  The bar mirrors Steam in both modes, which is the default.")
         print("  Pick a scene on the panel's Desktop mode page to change it.")
     else:
-        print("  In Desktop Mode the bar shows: %s%s"
-              % (shim.EFFECT_NAMES.get(scene.effect, "?"),
-                 "" if config["DESKTOP_SCENE"] not in desktop.SCENES_WITH_COLOUR
-                 else " in %s at brightness %d"
-                 % (config["DESKTOP_COLOR"], config["DESKTOP_BRIGHTNESS"])))
+        print("  In Desktop Mode the bar shows: %s"
+              % desktop.describe(config["DESKTOP_SCENE"],
+                                 config["DESKTOP_COLOR"],
+                                 config["DESKTOP_BRIGHTNESS"],
+                                 config["DESKTOP_SPEED"]))
 
     found = desktop.running_game_mode()
     print("Right now: %s"

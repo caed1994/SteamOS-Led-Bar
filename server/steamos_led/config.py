@@ -91,6 +91,7 @@ DEFAULTS = {
     "DESKTOP_SCENE": desktop.SCENE_STEAM,
     "DESKTOP_COLOR": "#ffffff",
     "DESKTOP_BRIGHTNESS": 128,
+    "DESKTOP_SPEED": 1.0,
     "RAINBOW_SHOWS": "rainbow",
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 80.0,
@@ -267,6 +268,14 @@ MAPPINGS = ("stretch", "repeat", "crop")
 NOTIFY_STYLES = notify.STYLES
 RAINBOW_CHOICES = render.RAINBOW_CHOICES
 DESKTOP_SCENES = desktop.SCENES
+
+# What a desktop scene's own speed may be. Bounded by what the delay field it
+# sets can carry: below the floor every multiplier lands on the module's
+# slowest step and the slider stops meaning anything, and the ceiling is where
+# the fastest step is reached. MIN_CYCLE_SECONDS in render.py stops even that
+# from becoming a strobe.
+DESKTOP_SPEED_FLOOR = 0.4
+DESKTOP_SPEED_CEILING = 4.0
 # One notification's own style may also say "whichever NOTIFY_STYLE says".
 PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 
@@ -339,6 +348,9 @@ def validate(config):
         raise ConfigError("DESKTOP_COLOR: %s" % exc)
     if not 0 <= config["DESKTOP_BRIGHTNESS"] <= 255:
         raise ConfigError("DESKTOP_BRIGHTNESS must be between 0 and 255")
+    if not DESKTOP_SPEED_FLOOR <= config["DESKTOP_SPEED"] <= DESKTOP_SPEED_CEILING:
+        raise ConfigError("DESKTOP_SPEED must be between %g and %g"
+                          % (DESKTOP_SPEED_FLOOR, DESKTOP_SPEED_CEILING))
     for key in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
         if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
             raise ConfigError("%s must be between %g and %g degrees"

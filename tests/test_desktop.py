@@ -75,9 +75,52 @@ class SceneTest(unittest.TestCase):
     def test_it_runs_at_the_rate_a_game_s_effects_run_at(self):
         # The same effect in the same colour must not breathe at one speed in
         # a game and another on the desktop. The delay is what sets that, and
-        # the module's own default is the one Steam starts from.
+        # the module's own default is the one Steam starts from - so speed 1
+        # has to land exactly on it.
         scene = desktop.scene_snapshot(desktop.SCENE_BREATH, "#ffffff", 128)
         self.assertEqual(scene.delay, render.DELAY_DEFAULT)
+        self.assertEqual(desktop.delay_for(1.0), render.DELAY_DEFAULT)
+
+    def test_asking_for_twice_the_speed_halves_the_cycle(self):
+        """Which is what makes the number on the slider mean anything.
+
+        delay is a position, not a duration, and the cycle scales linearly
+        with it - so the multiplier is that the other way up. Checked through
+        the renderer rather than on the field, because the field is only
+        believable if the seconds come out right.
+        """
+        for speed, wanted in ((2.0, 0.5), (0.5, 2.0), (1.0, 1.0)):
+            scene = desktop.scene_snapshot(desktop.SCENE_BREATH, "#ffffff",
+                                           128, speed)
+            plain = desktop.scene_snapshot(desktop.SCENE_BREATH, "#ffffff", 128)
+            options = render.Renderer(led_count=17)
+            self.assertAlmostEqual(
+                render._cycle(scene, render.BREATH_CYCLE, options.speed_scale),
+                render._cycle(plain, render.BREATH_CYCLE, options.speed_scale)
+                * wanted, places=6, msg=speed)
+
+    def test_the_speed_cannot_ask_for_a_delay_the_module_has_no_room_for(self):
+        # It is one byte with a range the module advertises, so a multiplier
+        # outside what that can carry has to land on the end rather than wrap
+        # - and 0, which is "as fast as possible", is a real setting.
+        for speed in (0.01, 0.4, 1.0, 4.0, 1000.0):
+            delay = desktop.delay_for(speed)
+            self.assertGreaterEqual(delay, 0, speed)
+            self.assertLessEqual(delay, render.DELAY_MAX, speed)
+
+    def test_a_speed_of_nothing_is_the_default_rather_than_a_division(self):
+        self.assertEqual(desktop.delay_for(0), render.DELAY_DEFAULT)
+        self.assertEqual(desktop.delay_for(-1), render.DELAY_DEFAULT)
+
+    def test_the_slider_s_own_ends_reach_the_module_s(self):
+        # A floor below which every multiplier lands on the same slowest step
+        # is a slider whose bottom half does nothing.
+        self.assertEqual(desktop.delay_for(config_module.DESKTOP_SPEED_FLOOR),
+                         render.DELAY_MAX)
+        self.assertGreater(
+            desktop.delay_for(config_module.DESKTOP_SPEED_FLOOR),
+            desktop.delay_for(config_module.DESKTOP_SPEED_FLOOR * 1.5),
+            "the slow end of the slider is flat")
 
     def test_the_animated_ones_say_they_are(self):
         # What the loop reads to decide between the full frame rate and the
@@ -117,6 +160,75 @@ class SceneTest(unittest.TestCase):
             desktop.scene_snapshot(desktop.SCENE_COLOR, "#ffffff", 64), 0.0)
         self.assertGreater(max(bright), max(dim))
         self.assertGreater(max(dim), 0)
+
+
+class DescribeTest(unittest.TestCase):
+    """What --desktop says a scene is doing, which is how a knob is trusted."""
+
+    def _said(self, scene):
+        return desktop.describe(scene, "#00b0ff", 90, 2.0)
+
+    def test_every_setting_that_applies_is_named(self):
+        said = self._said(desktop.SCENE_BREATH)
+        for part in ("#00b0ff", "90", "2"):
+            self.assertIn(part, said, said)
+
+    def test_a_rainbow_still_names_its_brightness(self):
+        """The report that started this.
+
+        A rainbow makes its own colours, so the line only listed the colour
+        and the brightness together - and a report naming neither reads as a
+        brightness that is not in play. Which is exactly what came back:
+        "the slider does nothing".
+        """
+        said = self._said(desktop.SCENE_RAINBOW)
+        self.assertIn("brightness 90", said)
+        self.assertNotIn("#00b0ff", said, "a rainbow has no colour of yours")
+
+    def test_a_still_scene_claims_no_speed(self):
+        # The other half of the same rule: naming a setting that does nothing
+        # is how somebody comes to move it and see no change.
+        said = self._said(desktop.SCENE_COLOR)
+        self.assertIn("#00b0ff", said)
+        self.assertIn("brightness 90", said)
+        self.assertNotIn("speed", said)
+
+    def test_a_dark_bar_claims_none_of_them(self):
+        self.assertEqual(self._said(desktop.SCENE_OFF), desktop.SCENE_OFF)
+
+    def test_it_is_named_the_way_the_setting_is(self):
+        # Not "manual", which is what the shim calls the effect one colour
+        # becomes - the word in the report has to be the word in the file.
+        self.assertTrue(self._said(desktop.SCENE_COLOR).startswith(
+            desktop.SCENE_COLOR))
+
+    def test_a_setting_is_named_exactly_when_it_changes_the_bar(self):
+        """The property that makes the line worth reading at all.
+
+        Not "does the table say so" - that would only be the implementation
+        read back. Each setting is moved and the strip re-rendered, and the
+        line has to name it exactly when the pixels come out different.
+
+        Both ways round matter and for the same reason: a setting doing
+        something and going unmentioned is what "the slider does nothing"
+        was, and a setting mentioned while doing nothing is how somebody
+        comes to move it and see no change.
+        """
+        renderer = render.Renderer(led_count=17)
+
+        def lit(scene, color="#00b0ff", brightness=90, speed=2.0):
+            return renderer.render(
+                desktop.scene_snapshot(scene, color, brightness, speed), 0.4)
+
+        for name in desktop.SCENES:
+            if name == desktop.SCENE_STEAM:
+                continue
+            said = desktop.describe(name, "#00b0ff", 90, 2.0)
+            for word, other in (("colour", lit(name, color="#ff0000")),
+                                ("brightness", lit(name, brightness=30)),
+                                ("speed", lit(name, speed=0.5))):
+                self.assertEqual(word in said, other != lit(name),
+                                 "%s: %s" % (name, word))
 
 
 class GameModeTest(unittest.TestCase):
@@ -374,11 +486,22 @@ class ConfigurationTest(unittest.TestCase):
             with self.assertRaises(config_module.ConfigError):
                 config_module.validate(self._config(DESKTOP_BRIGHTNESS=value))
 
+    def test_a_speed_outside_what_the_delay_field_carries_is_refused(self):
+        for value in (0, -1.0, 0.39, 4.1):
+            with self.assertRaises(config_module.ConfigError, msg=value):
+                config_module.validate(self._config(DESKTOP_SPEED=value))
+
+    def test_the_speed_the_slider_can_reach_is_accepted(self):
+        for value in (config_module.DESKTOP_SPEED_FLOOR, 1.0,
+                      config_module.DESKTOP_SPEED_CEILING):
+            config_module.validate(self._config(DESKTOP_SPEED=value))
+
     def test_the_shipped_file_names_every_desktop_setting(self):
         path = os.path.join(HERE, "..", "server", "steamos-led-serial.conf")
         with open(path) as handle:
             text = handle.read()
-        for key in ("DESKTOP_SCENE", "DESKTOP_COLOR", "DESKTOP_BRIGHTNESS"):
+        for key in ("DESKTOP_SCENE", "DESKTOP_COLOR", "DESKTOP_BRIGHTNESS",
+                    "DESKTOP_SPEED"):
             self.assertIn("\n%s=" % key, text, key)
         # And names the scenes, because a menu of five words is exactly what
         # somebody editing the file by hand cannot guess.
@@ -389,10 +512,30 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIsNone(service.build_scene(self._config()))
         scene = service.build_scene(self._config(DESKTOP_SCENE="patrol",
                                                  DESKTOP_COLOR="#3a76f0",
-                                                 DESKTOP_BRIGHTNESS=90))
+                                                 DESKTOP_BRIGHTNESS=90,
+                                                 DESKTOP_SPEED=2.0))
         self.assertEqual(scene.effect, shim.EFFECT_PATROL)
         self.assertEqual(scene.base_color(), (0x3a, 0x76, 0xf0))
         self.assertEqual(scene.brightness_scale, 90)
+        self.assertEqual(scene.delay, desktop.delay_for(2.0))
+
+    def test_every_setting_on_the_page_reaches_the_scene(self):
+        """The check that would have caught a knob wired to nothing.
+
+        Three of these are read in one place each, and a service that read
+        three of the four would look exactly like one where a slider does
+        nothing - which is a thing to hear about from a test rather than from
+        somebody moving it.
+        """
+        plain = service.build_scene(self._config(DESKTOP_SCENE="breath"))
+        for key, value, field in (("DESKTOP_COLOR", "#3a76f0", "pixels"),
+                                  ("DESKTOP_BRIGHTNESS", 90,
+                                   "brightness_scale"),
+                                  ("DESKTOP_SPEED", 2.0, "delay")):
+            moved = service.build_scene(
+                self._config(DESKTOP_SCENE="breath", **{key: value}))
+            self.assertNotEqual(getattr(moved, field), getattr(plain, field),
+                                "%s changes nothing" % key)
 
 
 if __name__ == "__main__":
