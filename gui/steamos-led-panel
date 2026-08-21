@@ -103,6 +103,32 @@ STRIP = [
     ]),
 ]
 
+# What the bar does while Steam is not driving it. Its own page because it is
+# its own question: everything on Strip describes the hardware and applies
+# whoever is driving, and everything under Notifications is an interruption.
+# This is the one page about what the bar looks like the rest of the time - and
+# only in Desktop Mode, which is the sentence under it.
+DESKTOP = [
+    (None, [
+        ("DESKTOP_SCENE", "In Desktop Mode show", "named",
+         ledpanel.desktop_choices(config_module.DESKTOP_SCENES), None, None),
+        ("DESKTOP_COLOR", "Colour", "named",
+         ledpanel.NOTIFICATION_COLOURS, None, None),
+        ("DESKTOP_BRIGHTNESS", "Brightness", "int", 0, 255, 1),
+    ]),
+]
+
+# What the page says for itself. Without it the three rows above describe a
+# setting that appears not to work: somebody who tries them in Game Mode - the
+# panel runs there - sees the bar ignore every one of them, and nothing on the
+# page would explain why.
+DESKTOP_NOTE = (
+    "Only in Desktop Mode. Game Mode is Steam's: switch to it and the bar goes "
+    "back to whatever Steam's own LED settings say, which nothing here "
+    "changes. Speed and the patrol's dots come from the Strip page, and so "
+    "does what a rainbow shows - set The Rainbow entry there to Fire or "
+    "Aurora and this one shows that.")
+
 # The shapes, straight from the service. The per-notification menus also
 # offer "Same as default", which is not a shape but the absence of a choice.
 STYLE_CHOICES = ledpanel.style_choices(config_module.NOTIFY_STYLES)
@@ -197,8 +223,11 @@ ADVANCED = [
 # The tabs that carry settings, in the order they are shown. Test and
 # Status & repair come after them and are things you do rather than set,
 # which is why the Apply row does not appear under those two.
+# A third item is a line of explanation under the page's settings, for a page
+# whose rows cannot say when they apply.
 SETTINGS_TABS = (
     ("Strip", STRIP),
+    ("Desktop mode", DESKTOP, DESKTOP_NOTE),
     ("Notifications", NOTIFICATIONS),
     ("Advanced", ADVANCED),
 )
@@ -210,8 +239,17 @@ SETTINGS_TABS = (
 # An entry is either a key, which has to be switched on, or (key, value),
 # which has to be set to exactly that - the temperature settings mean nothing
 # unless the rainbow slot is showing the temperature in particular.
+# An entry's value may also be several, meaning any one of them will do - a
+# desktop scene has a colour to set under three of the five, and spelling that
+# as three separate rules is not something DEPENDS_ON can say. The scenes are
+# written out rather than taken from the service because this table is read
+# literally by the tests; a value that is not a scene is caught there.
 TEMPERATURE_SHOWN = ("RAINBOW_SHOWS", "temperature")
+SCENE_HAS_COLOUR = ("DESKTOP_SCENE", ("color", "breath", "patrol"))
+SCENE_IS_LIT = ("DESKTOP_SCENE", ("color", "breath", "patrol", "rainbow"))
 DEPENDS_ON = {
+    "DESKTOP_COLOR": (SCENE_HAS_COLOUR,),
+    "DESKTOP_BRIGHTNESS": (SCENE_IS_LIT,),
     "TEMPERATURE_MIN": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_MAX": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_SENSOR": (TEMPERATURE_SHOWN,),
@@ -1370,9 +1408,12 @@ class Panel:
         # Which tabs the Apply row belongs under, by widget rather than by
         # position - reordering the tabs must not silently change this.
         self._settings_tabs = set()
-        for title, table in SETTINGS_TABS:
+        for entry in SETTINGS_TABS:
+            title, table = entry[0], entry[1]
+            note = entry[2] if len(entry) > 2 else None
             tab = self._page(notebook,
-                             lambda where, t=table: self._build_settings(where, t))
+                             lambda where, t=table, n=note:
+                             self._build_settings(where, t, n))
             notebook.add(tab, text=title)
             self._settings_tabs.add(str(tab))
         self.preview_tab = self._page(notebook, self._build_preview)
@@ -1709,7 +1750,7 @@ class Panel:
                 anchor="w", pady=(0, ROW_GAP))
         return holder
 
-    def _build_settings(self, parent, groups):
+    def _build_settings(self, parent, groups, note=None):
         """One tab: a heading per group, a row per setting.
 
         One grid for the whole tab rather than one per group, headings included
@@ -1717,6 +1758,10 @@ class Panel:
         longest label, so the controls of one group started at a different x
         than the next - two ragged columns down a page whose whole point is
         that it is a list.
+
+        `note` is a line under the lot, for a page whose rows cannot say for
+        themselves when they apply. Under rather than over: it explains what
+        you have just read.
         """
         outer = ttk.Frame(parent)
         grid = ttk.Frame(outer)
@@ -1763,6 +1808,9 @@ class Panel:
                 self._build_row(grid, row, *entry,
                                 lead=BLOCK_GAP if position and fenced else 0)
                 row += 1
+        if note:
+            self._note(outer, note).pack(anchor="w", padx=SIDE_MARGIN,
+                                         pady=(GROUP_GAP, 0))
         return outer
 
     def _indent(self, key):
@@ -1931,7 +1979,13 @@ class Panel:
             self._set_enabled(key, all(self._satisfied(need) for need in needs))
 
     def _satisfied(self, need):
-        """Whether one DEPENDS_ON entry is met: switched on, or set to this."""
+        """Whether one DEPENDS_ON entry is met.
+
+        Switched on, set to this, or set to any one of these - the last
+        because a menu with five entries can have three of them mean the same
+        thing to the row below, and three rules saying so would each have to
+        be met at once.
+        """
         wanted = None
         if isinstance(need, tuple):
             need, wanted = need
@@ -1944,6 +1998,8 @@ class Panel:
         shown = variable.get()
         if kind in ("sensor", "named"):
             shown = self._value_for(need, shown)
+        if isinstance(wanted, tuple):
+            return shown in wanted
         return shown == wanted
 
     def _set_enabled(self, key, on):

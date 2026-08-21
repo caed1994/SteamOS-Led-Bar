@@ -70,6 +70,18 @@ class LiveWindowTest(unittest.TestCase):
     def _pages(self):
         return list(self.panel.notebook.tabs())
 
+    def _page_named(self, title):
+        """The page whose tab says this.
+
+        By name rather than by position: a page added anywhere but the end
+        shifts every index after it, and what that looks like is half a dozen
+        of these tests measuring the wrong page and failing about layout.
+        """
+        for page in self._pages():
+            if self.panel.notebook.tab(page, "text").strip() == title:
+                return page
+        self.fail("no page called %r" % title)
+
     def test_every_page_has_an_entry_in_the_rail(self):
         entries = self.panel.rail.winfo_children()
         self.assertEqual(len(entries), len(self._pages()))
@@ -123,7 +135,7 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertIsNotNone(self.panel._preview_job,
                              "the preview did not start")
-        self.panel.notebook.select(self._pages()[0])
+        self.panel.notebook.select(self._page_named("Strip"))
         self.root.update()
         # The booked frame runs once more and then declines to book another.
         self.root.after(80, self.root.quit)
@@ -135,7 +147,7 @@ class LiveWindowTest(unittest.TestCase):
         # A switch, a drop-down and a slider have no reason to agree on a
         # height unless they are made to, and a column alternating between
         # three of them has no rhythm whatever the padding between the rows.
-        self.panel.notebook.select(self._pages()[1])
+        self.panel.notebook.select(self._page_named("Notifications"))
         self.root.update()
         heights = {}
         for key in ("NOTIFY", "ACHIEVEMENT_COLOR", "NOTIFY_STYLE"):
@@ -153,7 +165,7 @@ class LiveWindowTest(unittest.TestCase):
         # notification blocks used to be the example and are now one line each
         # - see the flash rows - so the rainbow choice with the temperature
         # marks stepped in under it is what is left of the shape.
-        self.panel.notebook.select(self._pages()[0])
+        self.panel.notebook.select(self._page_named("Strip"))
         self.root.update()
         rows = ("STANDBY_PULSE", "RAINBOW_SHOWS", "TEMPERATURE_MIN",
                 "TEMPERATURE_MAX")
@@ -177,7 +189,7 @@ class LiveWindowTest(unittest.TestCase):
         # compare down a column, rather than twelve near-identical rows you
         # had to scroll between. Three controls at the same height is the
         # whole of that claim.
-        self.panel.notebook.select(self._pages()[1])
+        self.panel.notebook.select(self._page_named("Notifications"))
         self.root.update()
         for prefix, switch in (("ACHIEVEMENT", "NOTIFY_ACHIEVEMENTS"),
                                ("MESSAGE", "NOTIFY_MESSAGES"),
@@ -193,7 +205,7 @@ class LiveWindowTest(unittest.TestCase):
         # was on the switch column at first, which pushed the colour menus far
         # off to the right; moving it to the last column pulled them back so
         # far that the switch and the menu touched. Neither reads as a row.
-        self.panel.notebook.select(self._pages()[1])
+        self.panel.notebook.select(self._page_named("Notifications"))
         self.root.update()
         for prefix, switch in (("ACHIEVEMENT", "NOTIFY_ACHIEVEMENTS"),
                                ("PHONE", "NOTIFY_PHONE")):
@@ -207,6 +219,39 @@ class LiveWindowTest(unittest.TestCase):
                                         % (prefix, room))
                 self.assertLess(room, self.panel_module.GROUP_GAP * 3,
                                 "%s: %dpx is a gap, not a row" % (prefix, room))
+
+    def _greyed(self, key):
+        return "disabled" in self.panel._rows[key][1][0].state()
+
+    def test_a_scene_with_no_colour_greys_the_colour_out(self):
+        """The entry that means several values, which DEPENDS_ON could not say.
+
+        Three of the five scenes take the colour and two do not, and a rule
+        per scene would be three rules that all have to hold at once - which
+        is a colour greyed out forever. Checked here rather than by reading
+        the table, because what people see is the control.
+        """
+        self.panel.notebook.select(self._page_named("Desktop mode"))
+        self.root.update()
+        scene = self.panel.vars["DESKTOP_SCENE"][0]
+        for label, wanted in (("One colour", False), ("Breath", False),
+                              ("Patrol", False), ("Rainbow", True),
+                              ("Off", True), ("Leave it to Steam", True)):
+            scene.set(label)
+            self.root.update()
+            self.assertEqual(self._greyed("DESKTOP_COLOR"), wanted, label)
+
+    def test_a_scene_that_draws_nothing_greys_the_brightness_too(self):
+        # Brightness means something for a rainbow, which makes its own
+        # colour - so the two rows are not greyed by the same rule.
+        self.panel.notebook.select(self._page_named("Desktop mode"))
+        self.root.update()
+        scene = self.panel.vars["DESKTOP_SCENE"][0]
+        for label, wanted in (("Rainbow", False), ("One colour", False),
+                              ("Off", True), ("Leave it to Steam", True)):
+            scene.set(label)
+            self.root.update()
+            self.assertEqual(self._greyed("DESKTOP_BRIGHTNESS"), wanted, label)
 
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
         # The rail takes a sixth of the width, so wrapping to the window laid
@@ -270,7 +315,7 @@ class LiveWindowTest(unittest.TestCase):
         # The settings pages are longer than a 1080p screen can hold at a
         # large desktop font, so the foot of one has to be reachable.
         self.root.geometry("1100x520")
-        page = self._pages()[1]                 # notifications, the longest
+        page = self._page_named("Notifications")        # the longest
         self.panel.notebook.select(page)
         for _ in range(6):
             self.root.update()
@@ -284,7 +329,7 @@ class LiveWindowTest(unittest.TestCase):
 
     def test_a_page_that_fits_keeps_its_scrollbar_out_of_the_way(self):
         self.root.geometry("1100x1000")
-        page = self._pages()[2]                 # advanced, the shortest
+        page = self._page_named("Advanced")             # the shortest
         self.panel.notebook.select(page)
         for _ in range(6):
             self.root.update()
@@ -297,7 +342,7 @@ class LiveWindowTest(unittest.TestCase):
         # Apply row and no log at all - both were packed later and there was
         # nothing left to give them.
         self.root.geometry("1100x520")
-        self.panel.notebook.select(self._pages()[1])
+        self.panel.notebook.select(self._page_named("Notifications"))
         for _ in range(6):
             self.root.update()
         bottom = self.root.winfo_rooty() + self.root.winfo_height()
@@ -327,7 +372,7 @@ class LiveWindowTest(unittest.TestCase):
         self.panel._refit()
         for _ in range(6):
             self.root.update()
-        self.panel.notebook.select(self._pages()[0])
+        self.panel.notebook.select(self._page_named("Strip"))
         for _ in range(4):
             self.root.update()
         for key in ("TEMPERATURE_SENSOR", "RAINBOW_SHOWS", "LED_COUNT"):

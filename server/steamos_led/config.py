@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 
+from . import desktop
 from . import notify
 from . import phone
 from . import render
@@ -87,6 +88,9 @@ DEFAULTS = {
     "PHONE_STYLE": notify.STYLE_INHERIT,
     "PHONE_APPS": "",
     "PHONE_APPS_ONLY": False,
+    "DESKTOP_SCENE": desktop.SCENE_STEAM,
+    "DESKTOP_COLOR": "#ffffff",
+    "DESKTOP_BRIGHTNESS": 128,
     "RAINBOW_SHOWS": "rainbow",
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 80.0,
@@ -262,6 +266,7 @@ MAPPINGS = ("stretch", "repeat", "crop")
 # Taken from the modules that implement them, so the validator cannot drift.
 NOTIFY_STYLES = notify.STYLES
 RAINBOW_CHOICES = render.RAINBOW_CHOICES
+DESKTOP_SCENES = desktop.SCENES
 # One notification's own style may also say "whichever NOTIFY_STYLE says".
 PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 
@@ -325,6 +330,15 @@ def validate(config):
     if config["RAINBOW_SHOWS"] not in RAINBOW_CHOICES:
         raise ConfigError("RAINBOW_SHOWS must be one of: %s"
                           % ", ".join(RAINBOW_CHOICES))
+    if config["DESKTOP_SCENE"] not in DESKTOP_SCENES:
+        raise ConfigError("DESKTOP_SCENE must be one of: %s"
+                          % ", ".join(DESKTOP_SCENES))
+    try:
+        notify.parse_color(config["DESKTOP_COLOR"])
+    except ValueError as exc:
+        raise ConfigError("DESKTOP_COLOR: %s" % exc)
+    if not 0 <= config["DESKTOP_BRIGHTNESS"] <= 255:
+        raise ConfigError("DESKTOP_BRIGHTNESS must be between 0 and 255")
     for key in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
         if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
             raise ConfigError("%s must be between %g and %g degrees"

@@ -17,7 +17,8 @@ import sys
 import time
 
 from . import config as config_module
-from . import elf, load, notify, phone, render, serialport, shim, steamworks
+from . import desktop, elf, load, notify, phone, render, serialport, shim
+from . import steamworks
 from . import temperature
 from .link import EspLink
 
@@ -45,12 +46,10 @@ CONFIG_REFUSED_EXIT = 2
 STANDBY_COLOR = (30, 30, 30)
 STANDBY_PERIOD_MS = 6000            # one slow breath, calmer than the waiting one
 
-# The kernel module starts its counter here and steps it on every write, so a
-# snapshot still carrying it means Steam has not touched the LEDs since the
-# module loaded - which is most of a boot, and the module reports "off" all
-# the while. Rendering that faithfully is a black strip, and the ESP's own
-# startup breath dies at the handshake to make way for it.
-UNTOUCHED_SEQ = 1
+# Steam has not touched the LEDs since the module loaded - see shim. Rendering
+# that faithfully is a black strip, and the ESP's own startup breath dies at
+# the handshake to make way for it.
+UNTOUCHED_SEQ = shim.UNTOUCHED_SEQ
 
 # So the bar keeps breathing instead, in the firmware's own startup amber and
 # at its rhythm. Sent from here rather than left to the firmware because the
@@ -120,6 +119,13 @@ def build_renderer(config):
     )
 
 
+def build_scene(config):
+    """The snapshot to show in Desktop Mode, or None to leave the bar alone."""
+    return desktop.scene_snapshot(config["DESKTOP_SCENE"],
+                                  config["DESKTOP_COLOR"],
+                                  config["DESKTOP_BRIGHTNESS"])
+
+
 def notification_colors(config):
     """The named triggers whose colour the configuration can change."""
     return {kind: notify.parse_color(config[prefix + "_COLOR"])
@@ -166,6 +172,11 @@ class Runner:
             repeat_gap=config["NOTIFY_REPEAT_GAP"],
         )
         self.overheat = build_overheat_watch(config)
+        # What to show while Steam is not driving the bar, and who decides
+        # whether it is. Both None when DESKTOP_SCENE says to leave it alone,
+        # which is what keeps the loop's ordinary path exactly as it was.
+        self.scene = build_scene(config)
+        self.ownership = None if self.scene is None else desktop.Ownership()
         self.trigger = None
         self.source = None
         # Set while the machine is going to sleep: the ESP is breathing on its
@@ -327,9 +338,22 @@ class Runner:
         self.standby_since = None
         LOG.info("standby over (%s)", why)
 
+    def _showing(self, snapshot, now):
+        """Which snapshot to draw: Steam's, or the desktop scene.
+
+        Steam's whenever Steam has any claim on the bar, which is the safe way
+        round: a scene that held the bar through a Game Mode session would be
+        this ignoring the LED settings somebody just changed, where a scene
+        that gives way too readily is only a scene you do not see.
+        """
+        if self.scene is None or self.ownership.steam_has_it(snapshot, now):
+            return snapshot
+        return self.scene
+
     def _loop(self):
         started = time.monotonic()
         snapshot = None
+        showing = None
         last_key = None
 
         while self.running:
@@ -339,8 +363,10 @@ class Runner:
             interval = 1.0 / self.config["FPS"]
             # The renderer decides, not the snapshot: the temperature gauge
             # occupies the rainbow's slot, and Steam still calls that animated.
-            if (snapshot is not None
-                    and not self.renderer.is_animated(snapshot)
+            # Asked about what is on the bar rather than about what Steam last
+            # said, which are not the same thing while a scene is up.
+            if (showing is not None
+                    and not self.renderer.is_animated(showing)
                     and not self.overlay.active):
                 interval = 1.0 / self.config["IDLE_FPS"]
 
@@ -401,19 +427,27 @@ class Runner:
                 else:
                     continue
 
+            showing = self._showing(snapshot, now)
+
             # A flash covers the whole bar; nothing underneath is worth drawing.
             payload = self.overlay.frame(now)
-            if payload is None and snapshot.seq <= UNTOUCHED_SEQ:
+            if (payload is None and showing is snapshot
+                    and snapshot.seq <= UNTOUCHED_SEQ):
                 # Nothing to show yet, and black is not an improvement on the
                 # breath the ESP is already running. A flash still gets
                 # through - it is the branch above - and lands us back here
                 # afterwards, which is when the breath is asked for again.
+                # A scene is something to show, so it comes up on a machine
+                # that has not been in Game Mode since it booted rather than
+                # waiting for a session that may never happen.
                 self._hold_for_steam()
                 continue
             if payload is None:
-                payload = self.renderer.render(snapshot, now - started)
+                payload = self.renderer.render(showing, now - started)
             if self._breathing_for_steam:
-                LOG.info("Steam set the LEDs; taking the strip back")
+                LOG.info("%s; taking the strip back",
+                         "Steam set the LEDs" if showing is snapshot
+                         else "there is a desktop scene to show")
                 self._breathing_for_steam = False
             # Idle heartbeat too: the firmware blanks the strip if we go quiet.
             self.link.send_frame(payload, self.config["LED_COUNT"])
@@ -427,6 +461,58 @@ def _interrupt_on_sigterm():
     def handler(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, handler)
+
+
+def run_desktop(config):
+    """Report the desktop scene, and who has the bar at this moment.
+
+    The one thing in this feature that cannot be settled by a test: whether
+    *this* machine's Game Mode session is one the process table gives away.
+    Got wrong in the direction that matters, a scene would sit on the bar
+    through a game and ignore everything Steam asked for - so rather than
+    leave that to be discovered by the bar misbehaving, this says what it
+    found and what it concluded. Run it in both modes.
+    """
+    scene = build_scene(config)
+    print("DESKTOP_SCENE=%s" % config["DESKTOP_SCENE"])
+    if scene is None:
+        print("  The bar mirrors Steam in both modes, which is the default.")
+        print("  Pick a scene on the panel's Desktop mode page to change it.")
+    else:
+        print("  In Desktop Mode the bar shows: %s%s"
+              % (shim.EFFECT_NAMES.get(scene.effect, "?"),
+                 "" if config["DESKTOP_SCENE"] not in desktop.SCENES_WITH_COLOUR
+                 else " in %s at brightness %d"
+                 % (config["DESKTOP_COLOR"], config["DESKTOP_BRIGHTNESS"])))
+
+    found = desktop.running_game_mode()
+    print("Game Mode: %s" % ("yes - %s is running" % found if found
+                             else "no such process is running"))
+    print("  (looked for a process whose name starts with: %s)"
+          % ", ".join(desktop.GAME_MODE_PROCESSES))
+
+    now = time.monotonic()
+    try:
+        with shim.ShimSource(config["DEVICE"]) as source:
+            snapshot = source.read()
+    except OSError as exc:
+        print("Steam's last LED write: cannot tell, %s is not readable (%s)"
+              % (config["DEVICE"], exc))
+        snapshot = None
+    else:
+        ago = desktop.steam_wrote_ago(snapshot, now)
+        print("Steam's last LED write: %s"
+              % ("never since the module loaded" if ago is None
+                 else "%.0f seconds ago (%s)" % (ago, snapshot.effect_name)))
+
+    watch = desktop.Ownership()
+    print("So the bar is %s."
+          % ("Steam's" if scene is None or watch.steam_has_it(snapshot, now)
+             else "the desktop's, showing your scene"))
+    if found and scene is not None:
+        print("  Switch to Desktop Mode and run this again to see the other "
+              "half of it.")
+    return 0
 
 
 ROUTE_MARKS = {"ok": "WORKS ", "crashed": "CRASH ", "failed": "no    "}
@@ -1369,6 +1455,10 @@ def build_parser():
                        dest="check_config",
                        help="load and validate the configuration and exit; "
                             "prints the effective settings")
+    modes.add_argument("--desktop", action="store_true",
+                       help="report the Desktop Mode scene and who has the bar "
+                            "right now - run it in both modes to check that "
+                            "this machine's Game Mode is recognised")
     modes.add_argument("--temperature", action="store_true",
                        help="list the machine's temperature sensors and show "
                             "what the gauge would display right now")
@@ -1441,6 +1531,8 @@ def main(argv=None):
             return run_notify(config, args.notify)
         if args.check_config:
             return run_check_config(config)
+        if args.desktop:
+            return run_desktop(config)
         if args.temperature:
             return run_temperature(config)
         if args.load:

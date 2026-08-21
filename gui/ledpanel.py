@@ -602,6 +602,22 @@ def rainbow_choices(names):
     return tuple((labels.get(name, name.capitalize()), name) for name in names)
 
 
+def desktop_choices(names):
+    """Menu entries for what the bar shows in Desktop Mode.
+
+    Same arrangement as the two above: the service owns the list and only the
+    wording is here. "steam" needs the most of it - what it stands for is the
+    bar carrying on with whatever the last Game Mode session left, which is
+    what it did before this page existed.
+    """
+    labels = {
+        "steam": "Leave it to Steam",
+        "off": "Off",
+        "color": "One colour",
+    }
+    return tuple((labels.get(name, name.capitalize()), name) for name in names)
+
+
 def style_choices(styles, inherit=None):
     """Menu entries for the flash shapes, in the order the service has them.
 

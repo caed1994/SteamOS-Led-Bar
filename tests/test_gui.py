@@ -814,8 +814,6 @@ class SensorMenuTest(unittest.TestCase):
 class PanelSettingsTest(unittest.TestCase):
     """The settings list has to agree with the configuration it edits."""
 
-    TABLES = ("STRIP", "NOTIFICATIONS", "ADVANCED")
-
     def _panel(self):
         # Read out of the panel rather than imported: importing pulls in
         # tkinter, which a build machine has no reason to have.
@@ -823,17 +821,29 @@ class PanelSettingsTest(unittest.TestCase):
         with open(path) as handle:
             return ast.parse(handle.read())
 
+    def _assignments(self, panel=None):
+        """Every module-level name of the panel, to its value as an AST node."""
+        return {getattr(node.targets[0], "id", ""): node.value
+                for node in (panel or self._panel()).body
+                if isinstance(node, ast.Assign)}
+
     def _tables(self):
-        """The settings table of each tab, as AST nodes."""
-        found = {}
-        for node in self._panel().body:
-            name = (getattr(node.targets[0], "id", "")
-                    if isinstance(node, ast.Assign) else "")
-            if name in self.TABLES:
-                found[name] = node.value
-        for name in self.TABLES:
-            self.assertIn(name, found, "%s not found in the panel" % name)
-        return [found[name] for name in self.TABLES]
+        """The settings table of each tab, as AST nodes.
+
+        Found through SETTINGS_TABS rather than listed here. A page added to
+        the panel and not to a list in this file would be a page none of the
+        checks below ever looked at - which is not a failure anybody would
+        notice, the suite going green either way.
+        """
+        assigned = self._assignments()
+        tabs = assigned.get("SETTINGS_TABS")
+        self.assertIsNotNone(tabs, "SETTINGS_TABS not found in the panel")
+        tables = []
+        for entry in tabs.elts:
+            name = entry.elts[1].id
+            self.assertIn(name, assigned, "%s not found in the panel" % name)
+            tables.append(assigned[name])
+        return tables
 
     def _rows(self):
         """Every setting row, from every group of every tab."""
@@ -881,8 +891,8 @@ class PanelSettingsTest(unittest.TestCase):
         # look like, then what you do - which is also the order of how often
         # they are opened.
         self.assertEqual([title.strip() for title in self._tab_titles()],
-                         ["Strip", "Notifications", "Advanced", "Preview",
-                          "Test", "Status & repair"])
+                         ["Strip", "Desktop mode", "Notifications", "Advanced",
+                          "Preview", "Test", "Status & repair"])
 
     def test_no_tab_label_carries_a_menu_escape(self):
         # "&&" is how a *menu* label spells one ampersand. A notebook tab
@@ -930,10 +940,14 @@ class PanelSettingsTest(unittest.TestCase):
                 if wanted is None:
                     continue
                 # A value the service would refuse is one this row can never
-                # be ungreyed by, however carefully it is spelled here.
-                settings = dict(config_module.DEFAULTS)
-                settings[switch] = wanted
-                config_module.validate(settings)
+                # be ungreyed by, however carefully it is spelled here. An
+                # entry may name several, any one of which will do, and every
+                # one of them has to be a value the setting can hold.
+                for value in (wanted if isinstance(wanted, tuple)
+                              else (wanted,)):
+                    settings = dict(config_module.DEFAULTS)
+                    settings[switch] = value
+                    config_module.validate(settings)
 
     def _firmware_max_leds(self):
         path = os.path.join(HERE, "..", "firmware", "led-client",

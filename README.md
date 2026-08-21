@@ -139,6 +139,7 @@ The restart is required, nothing happens without it.
 | Patrol with three dots | `PATROL_DOTS=3` |
 | Show the temperature instead of the rainbow | `RAINBOW_SHOWS=temperature` |
 | Show how busy the CPU and GPU are | `RAINBOW_SHOWS=load` |
+| An effect of your own in Desktop Mode | `DESKTOP_SCENE=breath` |
 | Strip stays dark although an effect is on | `MIN_BRIGHTNESS=40` |
 | Dimmed colours look blotchy | `GAMMA=2.2` |
 | A fixed port instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` |
@@ -164,6 +165,8 @@ sudo systemctl start steamos-led-serial
 | `SPEED` | `1.0` | animation speed (`0.5` is half as fast) |
 | `PATROL_DOTS` | `1` | dots in the patrol effect |
 | `STANDBY_PULSE` | `1` | breathe white while suspended |
+| `DESKTOP_SCENE` | `steam` | what the bar shows in [Desktop Mode](#desktop-mode): `steam`, `off`, `color`, `breath`, `patrol`, `rainbow` |
+| `DESKTOP_COLOR` / `DESKTOP_BRIGHTNESS` | `#ffffff` / `128` | the colour and brightness that scene uses |
 | `RAINBOW_SHOWS` | `rainbow` | what the [rainbow entry](#the-rainbow-slot) shows: `rainbow`, `temperature`, `load`, `fire` or `aurora` |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `80.0` | where the temperature gauge is green and where it is red |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the temperature gauge reads |
@@ -204,13 +207,67 @@ frame. `python3 tools/make-previews.py` rebuilds them and writes the data
 behind the [interactive catalogue](https://caed1994.github.io/SteamOS-Led-Bar/),
 which has the ones not pictured here.
 
+### Desktop Mode
+
+Steam sets the LEDs in Game Mode and nowhere else. On the desktop the bar is
+therefore stuck on whatever the last session left behind &mdash; or dark, on a
+machine that has not been in one since it booted. So it can have an effect of
+its own there, on the panel's **Desktop mode** page:
+
+| Setting | Meaning |
+| ------- | ------- |
+| `DESKTOP_SCENE` | `steam` (default), `off`, `color`, `breath`, `patrol`, `rainbow` |
+| `DESKTOP_COLOR` | the colour for `color`, `breath` and `patrol` (`#ffffff`) |
+| `DESKTOP_BRIGHTNESS` | 0&ndash;255, the way Steam's own brightness works (`128`) |
+
+`steam` is the default and is what the bar always did: carry on with Steam's
+last state in both modes.
+
+**Game Mode is Steam's, whatever is set here.** Switch to it and the bar goes
+straight back to Steam's own LED settings, which nothing on that page touches
+&mdash; that is the point of the two being separate. Nothing else changes
+either: notifications still flash over a scene, and the speed, the patrol's
+dots and what a rainbow shows all come from the same settings a game uses, so
+an effect looks the same in both modes.
+
+A scene is drawn by the same renderer that draws Steam's snapshots &mdash; it
+*is* a snapshot, built here instead of read from the kernel module &mdash; so
+there is no second implementation of breath to drift out of step with the
+first.
+
+Which mode the machine is in is the one thing this has to work out for itself.
+The service runs as root outside your session and cannot ask it, so it looks
+for **gamescope**, the compositor Game Mode runs under. To see what it found
+and what it concluded:
+
+```bash
+steamos-led-serial --desktop
+```
+
+```
+DESKTOP_SCENE=breath
+  In Desktop Mode the bar shows: breath in #00b0ff at brightness 128
+Game Mode: no such process is running
+  (looked for a process whose name starts with: gamescope)
+Steam's last LED write: 412 seconds ago (rainbow)
+So the bar is the desktop's, showing your scene.
+```
+
+Worth running in both modes once, because getting it wrong the other way round
+is the failure with no explanation on screen: a scene that held the bar through
+a game would be the service quietly ignoring the LED settings you had just
+changed. For the few seconds around the switch itself the bar stays Steam's
+either way, so the two never fight over it mid-handover.
+
 ### Before Steam has started, and while the machine sleeps
 
 The kernel module comes up reporting *off* and only counts up when something
 writes to it, so until Game Mode is running the truthful frame is black. The
 strip breathes amber through the whole boot instead and hands over the moment
 Steam sets the LEDs. A machine that boots to the desktop and never starts Game
-Mode keeps breathing, which says the same thing.
+Mode keeps breathing, which says the same thing &mdash; unless a
+[Desktop Mode scene](#desktop-mode) is set, which is something to show, so it is
+shown instead.
 
 ![the startup breath](docs/previews/startup.png)
 
@@ -634,11 +691,12 @@ the application menu as **SteamOS LED bar**.
 ./gui/steamos-led-panel
 ```
 
-Six pages, picked from the list down the left side.
+Seven pages, picked from the list down the left side.
 
 | Page | What is on it |
 | ---- | ------------- |
 | **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
+| **Desktop mode** | what the bar shows while Steam is not driving it &mdash; see [Desktop Mode](#desktop-mode) |
 | **Notifications** | one line per thing that can flash - switch, colour, shape - grouped by where it comes from, and how long a flash lasts |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
 | **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
@@ -706,6 +764,7 @@ steamos-led-serial` puts things back afterwards.
 | `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs |
 | `steamos-led-serial --temperature` | list sensors and what the [gauge](#temperature) makes of them |
 | `steamos-led-serial --load` | show which CPU and GPU [load counters](#load) this machine has |
+| `steamos-led-serial --desktop` | show the [Desktop Mode](#desktop-mode) scene and who has the bar right now |
 | `steamos-led-serial --check-config` | load the configuration, validate it and print it |
 | `steamos-led-serial -v` | run in the foreground with debug output |
 
@@ -721,6 +780,7 @@ Follow the log with `journalctl -u steamos-led-serial -f`.
 | `sudo` rejects your password on a fresh Deck | there is no password yet, run `passwd` once |
 | `no ESP serial device found` | check `--list-ports`; if empty, try another USB cable, charging cables often have no data wires |
 | Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0: `MIN_BRIGHTNESS=40` |
+| Desktop Mode scene never shows, or shows during a game | `steamos-led-serial --desktop` in both modes: it says whether gamescope was found |
 | Red and green swapped | colour order of the firmware, see [docs/WIRING.md](docs/WIRING.md#colour-order) |
 | Download bar fills from the wrong end | `REVERSE=1` |
 | Dark after switching firmware | the GPIO2 and GPIO14 builds drive different pins, does the firmware match your wiring? |

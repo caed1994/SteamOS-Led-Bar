@@ -18,6 +18,13 @@ DEFAULT_DEVICE = "/dev/valve-leds-shim"
 
 MAGIC = 0x564C4544  # "VLED"
 LOGICAL_LEDS = 17
+
+# Where the module starts its counter, and where it stays until something
+# writes. A snapshot still carrying it means Steam has not touched the LEDs
+# since the module loaded - which is most of a boot, and the module reports
+# "off" all the while.
+UNTOUCHED_SEQ = 1
+
 HEADER_SIZE = 32
 PIXEL_SIZE = 4
 SNAPSHOT_SIZE = HEADER_SIZE + LOGICAL_LEDS * PIXEL_SIZE  # 100

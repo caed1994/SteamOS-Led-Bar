@@ -761,6 +761,7 @@ class StandbyTest(unittest.TestCase):
         def __init__(self):
             self.standby = []
             self.frames = 0
+            self.sent = []
             self.answer = True
 
         connected = True
@@ -780,6 +781,7 @@ class StandbyTest(unittest.TestCase):
 
         def send_frame(self, payload, led_count):
             self.frames += 1
+            self.sent.append(bytes(payload))
             return True
 
     def _runner(self, **overrides):
@@ -864,13 +866,20 @@ class StandbyQuietTest(unittest.TestCase):
         runner.link = StandbyTest.FakeLink()
         return runner
 
-    def _drive(self, runner, seconds=0.3, seq=None):
+    def _drive(self, runner, seconds=0.3, seq=None, writes=None):
         """Run the real loop against a FIFO fed with snapshots.
 
         `seq` pins the sequence number, which is how the module says whether
         anything has written to it: pinned at UNTOUCHED_SEQ it never has, and
         that is a boot before Steam starts. Left out, the number climbs from
         just above it, which is an ordinary session.
+
+        `writes` stops the feed after that many snapshots, holding the device
+        open. A device that is written to every 20ms wakes the loop every
+        20ms, so the loop's own choice of frame rate never shows - and that
+        choice is the only thing some of this is about. One write and then
+        silence is also what a real machine does: Steam writes when a setting
+        changes, not sixty times a second.
         """
         from steamos_led import shim as shim_module
 
@@ -890,15 +899,18 @@ class StandbyQuietTest(unittest.TestCase):
             snapshot = shim_module.make_snapshot(shim_module.EFFECT_MANUAL,
                                                  (10, 200, 30))
             counter = service.UNTOUCHED_SEQ
+            written = 0
             try:
                 while not stop.is_set():
-                    counter += 1
-                    try:
-                        os.write(fd, shim_module.encode(
-                            snapshot, counter if seq is None else seq))
-                    except OSError:
-                        return
-                    time.sleep(0.02)
+                    if writes is None or written < writes:
+                        counter += 1
+                        written += 1
+                        try:
+                            os.write(fd, shim_module.encode(
+                                snapshot, counter if seq is None else seq))
+                        except OSError:
+                            return
+                    stop.wait(0.02)
             finally:
                 os.close(fd)
 
@@ -996,3 +1008,108 @@ class StartupBreathTest(StandbyQuietTest):
         self.assertGreater(runner.link.frames, 0, "the flash was not shown")
         self.assertGreaterEqual(len(runner.link.standby), 1,
                                 "and the breath was not asked for again")
+
+
+class DesktopSceneTest(StandbyQuietTest):
+    """The switch itself, in the loop that has to make it.
+
+    The snapshot the feed writes is Steam's, and it is green. A scene of any
+    other colour is therefore the whole assertion: which of the two came out
+    of the renderer says which of them the loop chose, and nothing else in
+    the loop can produce either by accident.
+    """
+
+    STEAM_GREEN = (10, 200, 30)
+    SCENE_BLUE = "#0000ff"
+
+    def _runner(self, scene="color", running="", **overrides):
+        conf = dict(config.DEFAULTS)
+        conf.update(SERIAL_PORT="/dev/does-not-exist", NOTIFY=False,
+                    DESKTOP_SCENE=scene, DESKTOP_COLOR=self.SCENE_BLUE,
+                    DESKTOP_BRIGHTNESS=255, MAPPING="repeat")
+        conf.update(overrides)
+        runner = service.Runner(conf)
+        runner.link = StandbyTest.FakeLink()
+        if runner.ownership is not None:
+            runner.ownership.look = lambda: running
+        return runner
+
+    def _pixel(self, runner):
+        """The first LED of the last frame that went out."""
+        self.assertTrue(runner.link.sent, "nothing was sent at all")
+        return tuple(runner.link.sent[-1][:3])
+
+    def test_the_desktop_gets_the_scene_rather_than_steam_s_last_state(self):
+        runner = self._runner()
+        self._drive(runner)
+        red, green, blue = self._pixel(runner)
+        self.assertGreater(blue, green, "the bar is still showing Steam's")
+        self.assertEqual((red, green), (0, 0))
+
+    def test_game_mode_gets_steam_s_and_not_the_scene(self):
+        # The failure that matters. A scene that held the bar through a game
+        # would be the service ignoring the LED settings somebody had just
+        # changed, with nothing on screen to say why.
+        runner = self._runner(running="gamescope")
+        self._drive(runner)
+        red, green, blue = self._pixel(runner)
+        self.assertGreater(green, blue, "the scene took a Game Mode session")
+        self.assertEqual((red, green, blue), self.STEAM_GREEN)
+
+    def test_leaving_it_to_steam_is_what_it_did_before(self):
+        # The default, and the control for the two above: with no scene set
+        # the loop has to behave exactly as it always did.
+        runner = self._runner(scene="steam")
+        self.assertIsNone(runner.scene)
+        self._drive(runner)
+        self.assertEqual(self._pixel(runner), self.STEAM_GREEN)
+
+    def test_a_scene_comes_up_without_waiting_for_a_game_mode_session(self):
+        # A machine booted into Desktop Mode has a shim nobody has written to,
+        # and the loop leaves that to the ESP's startup breath. There is
+        # something to show now, so it is shown - otherwise the scene would
+        # only ever appear after the first trip through Game Mode.
+        runner = self._runner()
+        self._drive(runner, seq=service.UNTOUCHED_SEQ)
+        red, green, blue = self._pixel(runner)
+        self.assertEqual((red, green, blue), (0, 0, 255))
+
+    def test_that_breath_is_still_what_happens_with_no_scene_set(self):
+        runner = self._runner(scene="steam")
+        self._drive(runner, seq=service.UNTOUCHED_SEQ)
+        self.assertEqual(runner.link.frames, 0)
+        self.assertEqual(len(runner.link.standby), 1)
+
+    def test_a_notification_still_covers_the_scene(self):
+        # A scene is what the bar does when nothing is happening; a flash is
+        # something happening. Red over blue, so neither could be mistaken.
+        runner = self._runner(NOTIFY=True, NOTIFY_WARNING=False,
+                              NOTIFY_DURATION=2.0)
+        runner.overlay.trigger("warning", time.monotonic())
+        self._drive(runner)
+        self.assertTrue(any(frame[0] > frame[2] for frame in runner.link.sent),
+                        "the flash never got over the scene")
+
+    def test_the_frame_rate_follows_what_is_on_the_bar(self):
+        """Which is not what Steam last said, while a scene is up.
+
+        The idle rate exists for a scene that does not change, and Steam's
+        own last state is a still one here - so asked about that instead of
+        about what is being drawn, a desktop breath would be run at four
+        frames a second and stutter.
+
+        Driven from one write and then silence, because that is the only way
+        the loop's own choice of rate shows at all: a device written to every
+        20ms wakes it every 20ms whatever it decided.
+        """
+        steam = shim.make_snapshot(shim.EFFECT_MANUAL)
+        self.assertFalse(service.Runner(dict(
+            config.DEFAULTS, SERIAL_PORT="/dev/does-not-exist",
+        )).renderer.is_animated(steam), "Steam's own state is the still one")
+
+        still = self._runner(scene="color")
+        moving = self._runner(scene="breath")
+        self._drive(still, seconds=0.5, writes=1)
+        self._drive(moving, seconds=0.5, writes=1)
+        self.assertGreater(moving.link.frames, still.link.frames * 3,
+                           "the breath is being drawn at the idle rate")
