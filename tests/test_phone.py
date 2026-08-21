@@ -13,6 +13,7 @@ no test can, and that is what `--watch-phone --print` is for.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -356,13 +357,27 @@ class KdeConnectTest(unittest.TestCase):
         # Starting it is not the same as it answering, and the answer is what
         # the caller wanted - "which phones", not "did something happen".
         replies = ["", "({'d33f': 'Pixel 9 Pro'},)"]
-        with unittest.mock.patch.object(phone, "_ask",
-                                        side_effect=lambda _c: replies.pop(0)):
+        with unittest.mock.patch.object(
+                phone, "_ask",
+                side_effect=lambda _c, _timeout=None: replies.pop(0)):
             with unittest.mock.patch.object(phone, "start_kdeconnectd",
                                             return_value="/usr/lib/kdeconnectd"):
                 found = phone.wake_kdeconnect(settle=0)
         self.assertEqual(found, ["Pixel 9 Pro"])
         self.assertEqual(replies, [], "it did not ask a second time")
+
+    def test_a_bus_that_never_answers_is_given_up_on(self):
+        # Without a limit this waits forever, and whoever asked waits with it -
+        # the control panel asks this while it is drawing its window.
+        asked = {}
+
+        def remember(command, **kwargs):
+            asked.update(kwargs)
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+        with unittest.mock.patch.object(phone.subprocess, "run", remember):
+            self.assertIsNone(phone.wake_kdeconnect(revive=False, timeout=0.5))
+        self.assertEqual(asked["timeout"], 0.5)
 
     def test_waking_it_asks_something_that_changes_nothing(self):
         # Any call starts an activatable service, so the cheapest harmless

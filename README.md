@@ -492,6 +492,9 @@ not, because it is a *user* service:
 systemctl --user restart steamos-led-phone
 ```
 
+*Status & repair* then shows two more rows: the bridge running, and KDE Connect
+naming your phone. Both have to be there for anything to flash.
+
 To watch it work, as yourself and not with `sudo`:
 
 ```bash

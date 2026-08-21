@@ -15,6 +15,7 @@ import re
 import subprocess
 
 from steamos_led import config as config_module
+from steamos_led import phone
 from steamos_led import temperature
 
 INSTALL_DIR = "/var/lib/steamos-led-serial"
@@ -26,6 +27,13 @@ SHIM_DEVICE = "/dev/valve-leds-shim"
 MODULE_NAME = "leds-valve-shim"
 SERVICE = "steamos-led-serial.service"
 WATCHER = "steamos-led-achievements.service"
+PHONE_BRIDGE = "steamos-led-phone.service"
+
+# How long to let KDE Connect answer before calling it silent. Shorter than
+# the service's own wait, because the panel asks this on the thread that draws
+# the window. Both usual answers - it is there, or the bus has no such name -
+# come back in milliseconds; the wait is only for a machine where it hangs.
+PHONE_ASK_SECONDS = 2.0
 
 
 # The panel's own icon, next to the panel. A theme icon name is the fallback
@@ -106,6 +114,19 @@ class Probe:
             return False
         return "Linger=yes" in done.stdout
 
+    def phones(self):
+        """The phones KDE Connect names, or None when it says nothing at all.
+
+        Those are two different problems wearing the same face - a bar that
+        never flashes - so they are worth telling apart: nothing running to
+        forward the notifications, against something running that no phone is
+        talking to.
+
+        Asked without reviving it, because a status check reports what is
+        there and does not quietly start things.
+        """
+        return phone.wake_kdeconnect(revive=False, timeout=PHONE_ASK_SECONDS)
+
     def kernel_release(self):
         return platform.uname().release
 
@@ -162,6 +183,30 @@ def run_checks(probe=None, config=None):
     checks.append(Check(
         "Achievement watcher running", probe.unit_active(WATCHER, user=True),
         "journalctl --user -u %s says why" % WATCHER, repairable=True))
+
+    # Only when the feature is on: the bridge stops on purpose while
+    # NOTIFY_PHONE is off, so checking it unconditionally would report two
+    # problems on every machine that simply does not want phone flashes.
+    if (config or {}).get("NOTIFY_PHONE"):
+        checks.append(Check(
+            "Phone bridge running", probe.unit_active(PHONE_BRIDGE, user=True),
+            "journalctl --user -u %s says why" % PHONE_BRIDGE,
+            repairable=True))
+
+        found = probe.phones()
+        if found is None:
+            why = ("KDE Connect is not answering - open it once from the "
+                   "application menu, and install it if it is not there")
+        else:
+            why = ("KDE Connect is running, but no phone is paired with it - "
+                   "pair this machine in the KDE Connect app on the phone, "
+                   "and switch its notification sync on there")
+        checks.append(Check(
+            "KDE Connect paired with %s"
+            % (", ".join(found) if found else "your phone"), bool(found), why,
+            # Pairing happens on the phone, which no amount of reinstalling
+            # here can do.
+            repairable=False))
 
     # Last, because it is the one that explains the others going quiet rather
     # than failing: without it they are not running to fail.

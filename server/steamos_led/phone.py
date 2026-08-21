@@ -95,6 +95,11 @@ TICK_SECONDS = 60.0
 # runs while something is actually broken.
 EAGER_SECONDS = 5.0
 
+# How long to wait for an answer from the bus. Generous for the service,
+# which has nothing else to do; a window asking the same question while
+# somebody watches it draw wants a shorter one, and passes its own.
+ASK_SECONDS = 5.0
+
 # How long to let a freshly started KDE Connect claim its name before
 # asking it anything. Short: getting it wrong costs one wasted question,
 # and the next tick asks again a minute later.
@@ -758,7 +763,7 @@ def start_kdeconnectd(path=None):
     return path
 
 
-def wake_kdeconnect(revive=True, settle=SETTLE_SECONDS):
+def wake_kdeconnect(revive=True, settle=SETTLE_SECONDS, timeout=ASK_SECONDS):
     """Start KDE Connect if it is not up, and report what it knows.
 
     Called before the monitor starts, because a monitor attaches to a name
@@ -771,14 +776,14 @@ def wake_kdeconnect(revive=True, settle=SETTLE_SECONDS):
     running" and "KDE Connect is running and your phone is not talking to
     it". Both look identical from here otherwise: a bar that never flashes.
     """
-    reply = _ask(wake_command())
+    reply = _ask(wake_command(), timeout)
     if not reply.strip() and revive and start_kdeconnectd() is not None:
         # It has to finish claiming the name before it can be asked anything,
         # and a daemon that is starting is not yet a daemon that answers. One
         # short wait rather than a retry loop: if it is not up by then the
         # next tick asks again anyway, a minute later.
         time.sleep(settle)
-        reply = _ask(wake_command())
+        reply = _ask(wake_command(), timeout)
     if not reply.strip():
         return None
     return device_names(reply)
@@ -812,11 +817,12 @@ def look_up(sighting):
     return read_details(reply, sighting)
 
 
-def _ask(command):
+def _ask(command, timeout=ASK_SECONDS):
     """Run one short gdbus call; "" when it fails, however it fails."""
     try:
         done = subprocess.run(command, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, timeout=5)
+                              stderr=subprocess.DEVNULL, text=True,
+                              timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return ""
     return done.stdout if done.returncode == 0 else ""

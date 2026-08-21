@@ -32,13 +32,15 @@ class FakeProbe:
     """Answers about a machine, without being one."""
 
     def __init__(self, present=(), fifos=(), active=(), user_active=(),
-                 release="6.11.11-valve", linger=False):
+                 release="6.11.11-valve", linger=False, paired=None):
         self.present = set(present)
         self.fifos = set(fifos)
         self.active = set(active)
         self.user_active = set(user_active)
         self.release = release
         self.linger = linger
+        # None is "KDE Connect said nothing", the same as the real one.
+        self.paired = paired
 
     def exists(self, path):
         return path in self.present
@@ -52,6 +54,9 @@ class FakeProbe:
     def lingering(self, user=None):
         return self.linger
 
+    def phones(self):
+        return self.paired
+
     def kernel_release(self):
         return self.release
 
@@ -63,8 +68,8 @@ def healthy(release="6.11.11-valve"):
                  ledpanel.module_path(release)),
         fifos=("/run/steamos-led-serial/notify",),
         active=(ledpanel.SERVICE,),
-        user_active=(ledpanel.WATCHER,),
-        release=release, linger=True)
+        user_active=(ledpanel.WATCHER, ledpanel.PHONE_BRIDGE),
+        release=release, linger=True, paired=["Pixel 7"])
 
 
 class HealthyInstallationTest(unittest.TestCase):
@@ -174,6 +179,91 @@ class LingeringTest(unittest.TestCase):
         with open(os.path.join(HERE, "..", "install.sh")) as handle:
             text = handle.read()
         self.assertIn("loginctl enable-linger", text)
+
+
+class PhoneNotificationsTest(unittest.TestCase):
+    """Whether the phone flashes would work, which is two questions.
+
+    The bridge has to be running, and KDE Connect has to know a phone. Both
+    look the same from the sofa - a bar that never flashes for a message -
+    and neither showed up here at all before.
+    """
+
+    ON = {"NOTIFY": True, "NOTIFY_PHONE": True}
+
+    def names(self, probe, config=None):
+        return [check.name for check in
+                ledpanel.run_checks(probe=probe, config=config)]
+
+    def test_a_working_phone_setup_is_not_reported_broken(self):
+        checks = ledpanel.run_checks(probe=healthy(), config=self.ON)
+        self.assertEqual(ledpanel.broken(checks), [])
+
+    def test_the_phone_it_found_is_named(self):
+        checks = ledpanel.run_checks(probe=healthy(), config=self.ON)
+        self.assertTrue(any("Pixel 7" in check.name for check in checks),
+                        [check.name for check in checks])
+
+    def test_neither_is_asked_about_when_the_feature_is_off(self):
+        # The bridge exits on purpose while NOTIFY_PHONE is off, so a machine
+        # that never wanted phone flashes must not be told it is broken.
+        probe = healthy()
+        probe.user_active.discard(ledpanel.PHONE_BRIDGE)
+        probe.paired = None
+        checks = ledpanel.run_checks(probe=probe, config={"NOTIFY": True})
+        self.assertEqual(ledpanel.broken(checks), [])
+        self.assertFalse([name for name in self.names(probe, {"NOTIFY": True})
+                          if "hone" in name or "KDE" in name])
+
+    def test_a_stopped_bridge_points_at_its_journal(self):
+        probe = healthy()
+        probe.user_active.discard(ledpanel.PHONE_BRIDGE)
+        broken = ledpanel.broken(ledpanel.run_checks(probe=probe,
+                                                     config=self.ON))
+        self.assertEqual(len(broken), 1)
+        self.assertIn("journalctl --user -u steamos-led-phone",
+                      broken[0].detail)
+
+    def test_a_silent_kdeconnect_and_an_unpaired_one_read_differently(self):
+        silent = healthy()
+        silent.paired = None
+        unpaired = healthy()
+        unpaired.paired = []
+        details = []
+        for probe in (silent, unpaired):
+            broken = ledpanel.broken(ledpanel.run_checks(probe=probe,
+                                                         config=self.ON))
+            self.assertEqual(len(broken), 1)
+            details.append(broken[0].detail)
+        self.assertIn("not answering", details[0])
+        self.assertIn("pair this machine", details[1])
+        self.assertNotEqual(details[0], details[1])
+
+    def test_pairing_is_not_something_reinstalling_fixes(self):
+        probe = healthy()
+        probe.paired = []
+        broken = ledpanel.broken(ledpanel.run_checks(probe=probe,
+                                                     config=self.ON))[0]
+        self.assertFalse(broken.repairable)
+
+    def test_asking_starts_nothing_and_does_not_hang_the_window(self):
+        """The panel asks this while it is drawing itself.
+
+        Two things follow: it must not revive KDE Connect as a side effect of
+        being looked at, and it must give up quickly enough that a machine
+        where the bus hangs still gets a window.
+        """
+        asked = {}
+
+        def remember(**kwargs):
+            asked.update(kwargs)
+            return ["Pixel 7"]
+
+        with unittest.mock.patch.object(ledpanel.phone, "wake_kdeconnect",
+                                        remember):
+            self.assertEqual(ledpanel.Probe().phones(), ["Pixel 7"])
+        self.assertIs(asked["revive"], False)
+        self.assertLessEqual(asked["timeout"], 2.0)
 
 
 class NotInstalledTest(unittest.TestCase):
