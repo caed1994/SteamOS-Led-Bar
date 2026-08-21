@@ -249,8 +249,14 @@ A scene is drawn by the same renderer that draws Steam's snapshots &mdash; it
 there is no second implementation of breath to drift out of step with the
 first.
 
-For the few seconds around the switch itself the bar stays Steam's either way,
-so the two never fight over it mid-handover.
+For a moment around the switch itself the bar stays Steam's either way, so the
+two never fight over it mid-handover. That same moment is why a **download
+started on the desktop** shows its progress bar: Steam writes the bar as it
+fills, and every write says the bar is Steam's for a little longer. When the
+download finishes, Steam puts back the effect that was set in Game Mode
+&mdash; and putting back what it found is taken as letting go rather than
+taking over, so the scene returns at once instead of showing that effect for a
+few seconds first.
 
 #### Checking that Game Mode is recognised
 
@@ -793,7 +799,7 @@ steamos-led-serial` puts things back afterwards.
 | `steamos-led-serial --self-test` | test patterns, without Steam or the kernel module |
 | `steamos-led-serial --list-ports` | list connected USB serial devices |
 | `steamos-led-serial --simulate rainbow` | show one effect continuously |
-| `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs |
+| `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs, and how long since its previous write |
 | `steamos-led-serial --temperature` | list sensors and what the [gauge](#temperature) makes of them |
 | `steamos-led-serial --load` | show which CPU and GPU [load counters](#load) this machine has |
 | `steamos-led-serial --desktop` | the [Desktop Mode](#desktop-mode) scene, who has the bar, and what the service recorded about Game Mode |

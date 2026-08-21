@@ -365,6 +365,78 @@ class OwnershipTest(unittest.TestCase):
     def test_nothing_to_look_at_is_not_a_recent_write_either(self):
         self.assertIsNone(desktop.steam_wrote_ago(None, 1000.0))
 
+    def test_a_download_on_the_desktop_keeps_the_bar_steam_s(self):
+        """Which is why the grace is worth having at all.
+
+        Steam writes the progress bar as it fills, and every write pushes the
+        grace out again - so the bar stays Steam's for as long as the download
+        is filling it. Nothing set out to do that; it fell out of the grace,
+        and it is the half of this behaviour worth keeping.
+        """
+        watch = self._watch("", grace=2.0)
+        for when in (10.0, 11.0, 12.0):
+            filling = self._snapshot(wrote_at=when)
+            filling.pixels = [(0, 120, 255, 255)] * 17
+            self.assertTrue(watch.steam_has_it(filling, when + 0.5), when)
+
+    def test_steam_putting_back_what_it_found_is_steam_letting_go(self):
+        """Reported: a few seconds of the Game Mode effect after a download.
+
+        When the download finishes Steam restores the effect that was set in
+        Game Mode - so the last thing it writes is the state it was resting
+        at before any of it started, and the grace went on showing that for
+        its full length. A strange few seconds: an effect nobody asked for,
+        between the download and the desktop's own.
+        """
+        watch = self._watch("", grace=2.0)
+        resting = self._snapshot(wrote_at=-60.0)
+
+        # At rest, and the scene learns what Steam is resting at.
+        self.assertFalse(watch.steam_has_it(resting, 0.0))
+        self.assertIsNotNone(watch.at_rest)
+
+        # A download takes the bar.
+        filling = self._snapshot(wrote_at=10.0)
+        filling.pixels = [(0, 120, 255, 255)] * 17
+        self.assertTrue(watch.steam_has_it(filling, 10.1))
+
+        # And putting the effect back hands it straight over, rather than
+        # showing that effect until the grace runs out.
+        restored = self._snapshot(wrote_at=20.0)
+        self.assertFalse(watch.steam_has_it(restored, 20.1),
+                         "the Game Mode effect held the bar after a download")
+
+    def test_a_write_that_is_not_the_resting_state_still_takes_the_bar(self):
+        # The control. An early-out that let go of anything at all would be a
+        # scene that covered the download it is meant to give way to.
+        watch = self._watch("", grace=2.0)
+        self.assertFalse(watch.steam_has_it(self._snapshot(wrote_at=-60.0), 0.0))
+        moved = self._snapshot(wrote_at=10.0)
+        moved.pixels = [(255, 0, 0, 255)] * 17
+        self.assertTrue(watch.steam_has_it(moved, 10.1))
+
+    def test_it_only_learns_the_resting_state_while_the_scene_has_the_bar(self):
+        # What is on the shim while Steam is driving is not what Steam will
+        # rest at - it is the middle of a download. Learning it there would
+        # make the very next progress write look like a restore.
+        watch = self._watch("", grace=2.0)
+        watch.steam_has_it(self._snapshot(wrote_at=-60.0), 0.0)
+        resting = watch.at_rest
+        filling = self._snapshot(wrote_at=10.0)
+        filling.pixels = [(0, 120, 255, 255)] * 17
+        watch.steam_has_it(filling, 10.1)
+        self.assertEqual(watch.at_rest, resting, "it learned mid-download")
+
+    def test_a_service_that_started_mid_download_still_recovers(self):
+        # Nothing was learned before Steam took the bar, so the restore is
+        # not recognised and the grace runs out the way it always did. Worse
+        # by two seconds, once, and right again from then on.
+        watch = self._watch("", grace=2.0)
+        self.assertTrue(watch.steam_has_it(self._snapshot(wrote_at=10.0), 10.1))
+        self.assertIsNone(watch.at_rest)
+        self.assertFalse(watch.steam_has_it(self._snapshot(wrote_at=10.0), 13.0))
+        self.assertIsNotNone(watch.at_rest)
+
     def test_the_process_table_is_not_read_once_a_frame(self):
         # Sixty times a second, times a few hundred processes, for an answer
         # that cannot change faster than somebody can switch sessions.
@@ -475,6 +547,125 @@ class JournalTest(unittest.TestCase):
         lines, why_not = desktop.journal_ownership(["/nowhere/journalctl"])
         self.assertEqual(lines, [])
         self.assertIn("journalctl", why_not)
+
+
+class ReportedDownloadTest(unittest.TestCase):
+    """The whole sequence, walked once, in the order it was reported in.
+
+    Kept as one test rather than split up because what was wrong was not any
+    single answer - each of them was defensible - but the shape of the run:
+    scene, download, and then a few seconds of something nobody asked for.
+    """
+
+    class Device:
+        """The shim: it holds what Steam last wrote, and when."""
+
+        def __init__(self):
+            self.state, self.seq, self.written = None, shim.UNTOUCHED_SEQ, 0.0
+
+        def steam_writes(self, snapshot, when):
+            self.state, self.written = snapshot, when
+            self.seq += 1
+
+        def read(self):
+            if self.state is None:
+                return None
+            self.state.seq = self.seq
+            self.state.monotonic_ns = int(self.written * 1e9)
+            return self.state
+
+    def _download(self, filled):
+        snapshot = shim.make_snapshot(shim.EFFECT_MANUAL, (0, 120, 255))
+        snapshot.pixels = [(0, 120, 255, 255) if led < filled else (0, 0, 0, 0)
+                           for led in range(17)]
+        return snapshot
+
+    def test_the_bar_goes_scene_download_scene_and_nothing_between(self):
+        device = self.Device()
+        watch = desktop.Ownership(look=lambda: "")      # Desktop Mode
+        resting = shim.make_snapshot(shim.EFFECT_RAINBOW)
+        device.steam_writes(resting, -60.0)             # set in Game Mode
+
+        shown = []
+        def at(when):
+            shown.append("Steam" if watch.steam_has_it(device.read(), when)
+                         else "scene")
+
+        at(0.0)
+        for step, when in enumerate((10.0, 11.0, 12.0, 13.0)):
+            device.steam_writes(self._download(4 * step + 4), when)
+            at(when + 0.5)
+        device.steam_writes(resting, 14.0)              # the download is done
+        at(14.1)
+        at(20.0)
+
+        self.assertEqual(shown, ["scene"] + ["Steam"] * 4 + ["scene", "scene"],
+                         "the Game Mode effect showed between the two")
+
+    def test_the_tail_is_gone_however_long_the_grace_is(self):
+        """Which is what makes the two changes independent.
+
+        The grace is now short, and short is a guess about how often Steam
+        writes while a download runs - something nothing here can know. If
+        that guess is wrong the grace goes back up, and this is what says
+        the reported fault does not come back with it.
+        """
+        for grace in (2.0, 8.0, 60.0):
+            device = self.Device()
+            watch = desktop.Ownership(look=lambda: "", grace=grace)
+            resting = shim.make_snapshot(shim.EFFECT_RAINBOW)
+            device.steam_writes(resting, -600.0)
+            self.assertFalse(watch.steam_has_it(device.read(), 0.0), grace)
+            device.steam_writes(self._download(9), 10.0)
+            self.assertTrue(watch.steam_has_it(device.read(), 10.1), grace)
+            device.steam_writes(resting, 14.0)
+            self.assertFalse(watch.steam_has_it(device.read(), 14.1), grace)
+
+
+class DumpColumnTest(unittest.TestCase):
+    """How often Steam writes, which is the one thing --dump could not say.
+
+    It matters because the grace has to outlast the gap between two of a
+    download's writes, and nothing in this project can work that out from the
+    outside - it is Steam's business how often it redraws a progress bar.
+    """
+
+    def _written(self, seq, at_seconds):
+        snapshot = shim.make_snapshot(shim.EFFECT_MANUAL)
+        snapshot.seq = seq
+        snapshot.monotonic_ns = int(at_seconds * 1e9)
+        return snapshot
+
+    def test_the_gap_is_between_steam_s_writes_and_not_between_the_readings(self):
+        # The loop can be a second behind a write, so timing it here would
+        # measure this program rather than Steam.
+        first = self._written(4, 100.0)
+        second = self._written(5, 102.5)
+        self.assertIn("+2.50s", service.dump_line(second, first.monotonic_ns,
+                                                  first.seq))
+
+    def test_the_first_line_has_nothing_to_be_a_gap_from(self):
+        said = service.dump_line(self._written(4, 100.0), None, None)
+        self.assertNotIn("+", said)
+        self.assertIn("manual", said)
+
+    def test_a_write_that_went_by_unseen_is_said_so(self):
+        """Because a gap measured across one is not the gap anybody wanted.
+
+        The shim hands out the current state rather than a queue, so two
+        writes inside one wait come back as one - and the counter is the only
+        thing that gives that away.
+        """
+        first = self._written(4, 100.0)
+        said = service.dump_line(self._written(7, 100.2), first.monotonic_ns,
+                                 first.seq)
+        self.assertIn("2 write(s) not seen", said)
+
+    def test_nothing_is_said_when_none_went_by(self):
+        first = self._written(4, 100.0)
+        self.assertNotIn("not seen",
+                         service.dump_line(self._written(5, 100.2),
+                                           first.monotonic_ns, first.seq))
 
 
 class ConfigurationTest(unittest.TestCase):

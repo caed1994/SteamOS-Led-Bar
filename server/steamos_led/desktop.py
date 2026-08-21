@@ -90,11 +90,18 @@ CHECK_SECONDS = 2.0
 # Belt and braces for the switch itself. Leaving Game Mode, the compositor
 # and the LED write both stop within a moment of each other, and which of the
 # two this notices first is not worth depending on - so the scene waits out
-# a few seconds either way rather than flickering between the two owners at
-# the handover. It is not a substitute for finding gamescope: in a Game Mode
+# a moment either way rather than flickering between the two owners at the
+# handover. It is not a substitute for finding gamescope: in a Game Mode
 # session where that failed, this would only hold the bar until the grace ran
 # out. That is what --desktop is for.
-GRACE_SECONDS = 8.0
+#
+# It also turned out to be what shows a download's progress bar on the
+# desktop, which nothing here set out to do: Steam writes the bar as it fills
+# and every write pushes the grace out again. Worth keeping, so this is now
+# short enough that the tail after the last write is not something you sit
+# and watch - and see at_rest for how the tail was got rid of rather than
+# merely shortened.
+GRACE_SECONDS = 2.0
 
 # What a Game Mode session looks like from outside it.
 #
@@ -290,6 +297,9 @@ class Ownership:
         self.look = running_game_mode if look is None else look
         self.found = ""
         self._asked = None
+        # What was on the shim while the scene had the bar - Steam's state at
+        # rest. See steam_has_it.
+        self.at_rest = None
 
     def game_mode(self, now):
         """The Game Mode process running now, "" if none - from the cache."""
@@ -311,8 +321,33 @@ class Ownership:
         return self.found
 
     def steam_has_it(self, snapshot, now):
-        """Whether to leave the bar alone because Steam is driving it."""
+        """Whether to leave the bar alone because Steam is driving it.
+
+        Game Mode outright, and on the desktop for as long as Steam keeps
+        writing. That second half is what puts a download's progress bar on
+        the bar: every write pushes the grace out again, so the bar stays
+        Steam's for as long as the download is filling it.
+
+        And then there is the write that ends it. When the download finishes,
+        Steam puts back the effect that was set in Game Mode - so the last
+        thing it writes is the state it was resting at before any of this
+        started, and the grace would go on showing that for its full length.
+        Reported, and it is a strange few seconds: a Game Mode effect nobody
+        asked for, between the download and the desktop's own.
+
+        So a write that restores what Steam left behind ends the grace
+        instead of extending it. Steam putting back what was already there is
+        Steam letting go, not Steam taking over - and it is exact rather than
+        a guess about how often Steam writes, which is a thing this cannot
+        know. If the restored state is not the one remembered, nothing is
+        lost: the grace runs out the way it always did.
+        """
         if self.game_mode(now):
             return True
         ago = steam_wrote_ago(snapshot, now)
-        return ago is not None and ago < self.grace
+        if ago is None or ago >= self.grace:
+            # The scene has the bar. Whatever is on the shim while that is
+            # true is what Steam will put back when it has finished.
+            self.at_rest = None if snapshot is None else snapshot.key()
+            return False
+        return self.at_rest is None or snapshot.key() != self.at_rest

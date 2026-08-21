@@ -1342,17 +1342,39 @@ def run_list_ports():
     return 0
 
 
+def dump_line(snapshot, written, seen):
+    """One state change, with how long since Steam's previous one.
+
+    The gap is measured between the module's own stamps rather than between
+    the moments this noticed them: the module stamps every write, and this
+    loop can be a moment behind one. So the column answers "how often does
+    Steam write?" - which is the question a download raises, and one nothing
+    in this project can answer from the outside.
+
+    And it says when the answer is short of writes. The shim hands out the
+    current state rather than a queue, so two writes inside one wait are seen
+    as one - the counter is what gives that away, and a gap measured across a
+    write nobody saw is not the gap anybody wanted.
+    """
+    gap = ("" if written is None
+           else "+%.2fs" % ((snapshot.monotonic_ns - written) / 1e9))
+    missed = ("" if seen is None or snapshot.seq <= seen + 1
+              else "  (%d write(s) not seen)" % (snapshot.seq - seen - 1))
+    return "%8s %s%s" % (gap, snapshot, missed)
+
+
 def run_dump(config):
     """Print decoded snapshots without touching the serial port."""
     _interrupt_on_sigterm()
     with shim.ShimSource(config["DEVICE"]) as source:
-        last = None
+        last = written = seen = None
         print("watching %s, press Ctrl-C to stop" % config["DEVICE"])
         while True:
             snapshot = source.read()
             if snapshot is not None and snapshot.key() != last:
                 last = snapshot.key()
-                print(snapshot)
+                print(dump_line(snapshot, written, seen), flush=True)
+                written, seen = snapshot.monotonic_ns, snapshot.seq
             source.wait(1.0)
 
 
