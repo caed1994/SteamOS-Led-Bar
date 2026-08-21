@@ -307,14 +307,24 @@ class CommandTest(unittest.TestCase):
                         ledpanel.probe_messages_command()):
             self.assertNotIn("pkexec", command)
 
-    def test_restarting_the_watcher_needs_no_rights_and_stays_the_user(self):
-        # It is a user unit: "systemctl restart" as root would look for a
+    def test_restarting_the_watchers_needs_no_rights_and_stays_the_user(self):
+        # They are user units: "systemctl restart" as root would look for a
         # system unit of that name and find nothing, and pkexec would put a
         # password prompt in front of something that needs none.
-        command = ledpanel.restart_watcher_command()
+        command = ledpanel.restart_watchers_command()
         self.assertNotIn("pkexec", command)
         self.assertIn("--user", command)
         self.assertIn(ledpanel.WATCHER, command)
+
+    def test_the_phone_bridge_is_restarted_with_it(self):
+        """Reported: switching the phone flashes off and back on did nothing.
+
+        Apply restarted the achievement watcher and not the bridge, so the
+        bridge kept running on a setting that said off - and once it had
+        exited on that setting, nothing here started it again. Both units
+        read the file the panel just wrote; both have to be told.
+        """
+        self.assertIn(ledpanel.PHONE_BRIDGE, ledpanel.restart_watchers_command())
 
     def test_the_self_test_needs_rights_to_free_the_port(self):
         command = ledpanel.self_test_command("/repo", seconds=5)

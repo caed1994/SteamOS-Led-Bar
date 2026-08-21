@@ -511,13 +511,20 @@ def flash_firmware_command(source_dir, environment):
             environment]
 
 
-def restart_watcher_command():
-    """Restart the achievement watcher so it re-reads the configuration.
+def restart_watchers_command():
+    """Restart both user units so they re-read the configuration.
 
-    Unprivileged and separate on purpose: the watcher is a *user* unit, out of
-    the privileged helper's reach - but the panel already runs as that user.
+    Unprivileged and separate on purpose: they are *user* units, out of the
+    privileged helper's reach - but the panel already runs as that user.
+
+    Both of them, not just the achievement watcher. The phone bridge reads
+    the same file and was never restarted here, so the panel's own switch did
+    not take: turning the phone flashes off left the bridge running until the
+    next reboot, and turning them back on left it stopped where it had exited
+    on the old setting - which is exactly what the new status check then
+    reported, correctly, as a problem the panel had caused.
     """
-    return ["systemctl", "--user", "restart", WATCHER]
+    return ["systemctl", "--user", "restart", WATCHER, PHONE_BRIDGE]
 
 
 def notify_command(kind):

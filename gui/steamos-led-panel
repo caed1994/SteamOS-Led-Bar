@@ -2480,10 +2480,11 @@ class Panel:
                 return
             self.config.update(values)
             self._refresh_unsaved()
-            # The helper restarted the service, but the watcher reads the
-            # same file and is a user unit, out of its reach - without this a
-            # changed flash setting waits for the next game to end.
-            self.runner.start(ledpanel.restart_watcher_command(),
+            # The helper restarted the service, but the two watchers read the
+            # same file and are user units, out of its reach - without this a
+            # changed flash setting waits for the next game to end, and
+            # switching the phone flashes on or off does not take at all.
+            self.runner.start(ledpanel.restart_watchers_command(),
                               lambda _code: self.refresh_status())
 
         self.runner.start(

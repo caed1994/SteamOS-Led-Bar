@@ -485,8 +485,8 @@ Nothing here talks to WhatsApp or to any other app: it reads the
 *notification*, so an app you have silenced on the phone stays silent here too.
 
 **Off until you switch it on**, in the panel under *Notifications* > *From your
-phone*, or with `NOTIFY_PHONE=1`. Then restart the bridge &mdash; Apply does
-not, because it is a *user* service:
+phone*, or with `NOTIFY_PHONE=1`. Apply restarts the bridge for you; after
+editing the file by hand:
 
 ```bash
 systemctl --user restart steamos-led-phone
