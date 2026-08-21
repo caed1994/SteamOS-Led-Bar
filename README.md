@@ -32,21 +32,12 @@ cd ~/SteamOS-Led-Bar
 sudo ./install.sh
 ```
 
-That is the whole install. Keep the folder, you need it again after every
-SteamOS update.
-
-The installer unlocks the read-only rootfs and locks it again when it is done,
-installs `base-devel` and the kernel headers matching your exact kernel,
-builds and loads the kernel module, installs the service, config file, udev
-rule and suspend hook, offers PlatformIO and the ESP firmware, puts the
-control panel in the application menu and `steamos-led-serial` on your PATH,
-installs the desktop-session watchers as user services and starts everything.
+That is the whole install &mdash; kernel module, service, control panel and
+all. Keep the folder, you need it again after every SteamOS update.
 
 It asks four questions: LED count, serial port, baud rate, firmware. All have
-defaults, so pressing Enter four times is a complete install. Firmware defaults
-to *no*, since flashing is the one step that touches the hardware. Anything it
-wants to install on your system it asks about first, and says exactly what it
-will do:
+defaults, so pressing Enter four times is a complete install. Anything it wants
+to install on your system it asks about first:
 
 ```
 ==> The kernel module has to be built, and this machine is missing:
@@ -69,8 +60,8 @@ effect. The strip follows immediately. If it does not, `journalctl -u
 steamos-led-serial -f` says why.
 
 On a completely fresh SteamOS, `sudo` has no password yet: run `passwd` once
-before anything else. That is the one thing no script can do for you. If you
-would rather do the preparation by hand, or you are not on SteamOS:
+before anything else. To do the preparation by hand, or if you are not on
+SteamOS:
 
 ```bash
 sudo steamos-readonly disable
@@ -80,9 +71,8 @@ sudo pacman -S base-devel
 sudo pacman -S "$(cat /usr/lib/modules/$(uname -r)/pkgbase)-headers"
 ```
 
-That last line is worth knowing: the headers are named after your exact kernel,
-not after `linux`. On a Steam Machine that is something like
-`linux-neptune-616-headers`, and Arch writes the right name next to the modules.
+That last line matters: the headers are named after your exact kernel, not
+after `linux`.
 
 ## What you need
 
@@ -279,11 +269,10 @@ sudo systemctl restart steamos-led-serial
 ```
 
 Every other effect Steam offers keeps working, and `RAINBOW_SHOWS=rainbow`
-gives the rainbow back. Steam's colour slider still shifts `aurora`; `fire`
-ignores it. To look at one without going into Game Mode, stop the service and
-run `--simulate rainbow`, which draws whatever `RAINBOW_SHOWS` says. If a
-choice cannot work on your machine &mdash; `temperature` with no sensor, `load`
-with no counters &mdash; the rainbow is drawn instead and the log says why.
+gives the rainbow back. To look at one without going into Game Mode, stop the
+service and run `--simulate rainbow`. If a choice cannot work on your machine
+&mdash; `temperature` with no sensor, `load` with no counters &mdash; the
+rainbow is drawn instead and the log says why.
 
 ### Temperature
 
@@ -323,9 +312,8 @@ Between the marks the colour is mixed, so it moves as the machine does.
 Right now: #ffd200 across all 17 LEDs
 ```
 
-Put another path into `TEMPERATURE_SENSOR` to watch something else. The sensor
-is read once a second and averaged over about six, so the colour does not
-twitch. A machine that reports no temperature at all gets the rainbow.
+Put another path into `TEMPERATURE_SENSOR` to watch something else. A machine
+that reports no temperature at all gets the rainbow.
 
 ### Load
 
@@ -421,26 +409,15 @@ echo 'phone@bob'  > /run/steamos-led-serial/notify   # somebody else: flashes
 | `alternate` | the two halves flash in turn | ![alternate](docs/previews/shape-alternate.png) |
 | `sparkle` | grains of light flicker on and die out all over the bar | ![sparkle](docs/previews/shape-sparkle.png) |
 
-Shown in Steam blue, except `alternate`: a warning is always red. `comet` is
-the only shape with a direction and the only one `REVERSE` applies to.
-`double_flash` and `sparkle` are timed in seconds rather than in fractions of
-the flash, so a longer notification gives more pairs, or more glitter, rather
-than slower ones.
-
-`warning` is fixed at red and `alternate`, and `NOTIFY_WARNING` says whether it
-fires at all. That is the whole setting.
+Shown in Steam blue, except `alternate`: a warning is always red, in that
+shape, and `NOTIFY_WARNING` only says whether it fires at all. `comet` is the
+only shape with a direction and the only one `REVERSE` applies to.
 
 Flashes queue rather than interrupt each other, so an achievement and a message
-in the same tick show gold, then purple. At most four wait. A repeat is not
-queued behind itself: while a trigger is showing, and for `NOTIFY_REPEAT_GAP`
-seconds after, the same one is ignored, so three achievements in one poll are
-one flash. The gap is per trigger, so an achievement during a chat storm still
-gets through. Measured over a message a second for half a minute:
-
-| | flashes | bar lit |
-| --- | --- | --- |
-| `NOTIFY_REPEAT_GAP=10` | 3 | 26% of the time |
-| `NOTIFY_REPEAT_GAP=0` | 8 | 70% of the time |
+in the same tick show gold, then purple. A repeat does not queue: the same
+trigger is ignored while it is showing and for `NOTIFY_REPEAT_GAP` seconds
+after. The gap is per trigger, so an achievement during a chat storm still gets
+through.
 
 ### Overheating
 
@@ -578,41 +555,26 @@ Seven pages, picked from the list down the left side.
 | **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating-and-removing), flashing the firmware |
 
 **Apply and Reload sit under all of them**, because there is one config file.
-Apply writes every setting from every page, keeps the comments in the file, and
-restarts both the service and the watcher. It is greyed out while the window and
-the file agree, and the row says how much is unsaved when they do not. While a
-command runs there is a line under the title and the buttons go dead; the log at
-the foot stays folded and opens itself only when something fails. **After a SteamOS update, press
-*Rebuild and reinstall***: a system update brings a new kernel and the module was
-built for the old one, so it is gone and `/dev/valve-leds-shim` with it. Your
-configuration is kept and the ESP is never reflashed.
+Apply writes every setting from every page and restarts the service; it is
+greyed out while the window and the file agree. **After a SteamOS update, press
+*Rebuild and reinstall***: the update brings a new kernel and the module was
+built for the old one. Your configuration is kept and the ESP is never
+reflashed.
 
-Next to Apply and Reload, **Save profile** writes everything the window can set
-into a file of its own and **Load profile** reads one back. Profiles land in
-`profiles/` inside the clone, need no password, and are ignored by git. A
-profile *is* a config file, the same `KEY=value` lines read by the same parser,
-so a typo is refused when you load it rather than at the next service start, and
-a profile naming a withdrawn setting still loads without that line. Loading does
-not apply: the settings land in the window, then you press Apply. The serial
-port, the baud rate and the device are not in the window, so they can never
-arrive from another machine.
+**Save profile** writes everything the window can set into a file of its own
+and **Load profile** reads one back. Profiles land in `profiles/` inside the
+clone and are ignored by git. Loading does not apply: the settings land in the
+window, then you press Apply. The serial port, the baud rate and the device are
+not in the window, so they can never arrive from another machine.
 
 The panel runs as you, not as root. Flashing the bar and asking Steam questions
 need no rights; writing the config, the self-test and repairing each ask once
-through the normal password prompt. **In Game Mode the privileged half cannot
-work.** You can add the panel as a non-Steam game and the Test tab works there,
-but Game Mode runs no polkit agent and has no terminal to fall back on, so
-anything needing a password has to happen in Desktop Mode.
+for your password. **In Game Mode that half cannot work** &mdash; there is no
+password prompt there &mdash; so add the panel as a non-Steam game for the Test
+tab, and do the rest in Desktop Mode.
 
-The window is drawn to Material Design 3, seeded from your own Plasma accent
-colour and read from `~/.config/kdeglobals`, falling back to Breeze light
-without KDE. That one colour decides the rest: the tonal ladders it implies
-give every surface, label and outline its shade, so a dark scheme, a warm
-accent or a cold one all come out consistent without a second theme to pick.
-Its icon is a file you can replace: drop
-a PNG in as `gui/steamos-led-panel.png` (512x512 is a good size) and run
-`sudo ./install.sh --yes`. If the menu still shows the old one, log out and back
-in or run `kbuildsycoca6 --noincremental`.
+The window takes its colours from your Plasma accent. To change its icon, drop
+a PNG in as `gui/steamos-led-panel.png` and run `sudo ./install.sh --yes`.
 
 > The panel needs Python's `tkinter`. It is present on SteamOS, but a system
 > update can remove it (`sudo pacman -S tk` brings it back). Nothing is only
@@ -667,12 +629,8 @@ Follow the log with `journalctl -u steamos-led-serial -f`.
 ## Updating and removing
 
 From the control panel: *Status & repair* > *Update*, pick a branch, **Check for
-updates**, then **Update and install**. The check answers underneath the two
-buttons - up to date, or how many commits are waiting - and greys out **Update
-and install** when there is nothing to install. It refuses rather than
-resolves, so local edits or commits of your own stop it with a message naming
-them. Untracked files are fine, and the kernel module is only rebuilt when
-`leds-valve-shim/` actually changed.
+updates**, then **Update and install**. Local edits or commits of your own stop
+it with a message naming them, rather than being resolved behind your back.
 
 The same thing from the terminal:
 
