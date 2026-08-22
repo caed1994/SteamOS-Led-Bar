@@ -48,8 +48,8 @@ FIRMWARE_ENVS=(
     "d1_mini:ESP8266 with the D1 mini board profile, strip on GPIO2"
 )
 
-say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m warning:\033[0m %s\n' "$*" >&2; }
+# say() and warn() come from scripts/user-unit.sh, which the shared code there
+# uses as well. die() is the installer's own: stopping is its decision.
 die()  { printf '\033[1;31m error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
@@ -92,40 +92,10 @@ command -v python3 >/dev/null || die "python3 not found"
 
 # --- the read-only rootfs ---------------------------------------------------
 #
-# SteamOS mounts / read-only, and this installer writes to it in three places:
-# the suspend hook under /usr/lib/systemd, the kernel module under
-# /usr/lib/modules, and whatever pacman has to fetch to build that module.
-# Unlock once, here, before anything is asked or written - doing it around
-# each write in turn is how the suspend hook ended up being installed while
-# the rootfs was locked again, which aborts the whole run.
-#
-# The module's own installer does the same dance; finding it already unlocked,
-# it leaves it alone.
-
-ROOTFS_RELOCK=0
-
-relock_rootfs() {
-    [[ $ROOTFS_RELOCK -eq 1 ]] || return 0
-    ROOTFS_RELOCK=0                     # so the exit trap does not repeat it
-    say "Locking the read-only rootfs again"
-    steamos-readonly enable \
-        || warn "could not lock it again: sudo steamos-readonly enable"
-}
-
-unlock_rootfs() {
-    command -v steamos-readonly >/dev/null 2>&1 || return 0
-    steamos-readonly status 2>/dev/null | grep -qi enabled || return 0
-    say "Unlocking the read-only rootfs"
-    if ! steamos-readonly disable; then
-        warn "could not unlock the rootfs. The suspend hook and the kernel"
-        warn "module cannot be installed while / stays read-only."
-        return 1
-    fi
-    ROOTFS_RELOCK=1
-    # Put it back however this ends, including the die() paths.
-    trap relock_rootfs EXIT
-    return 0
-}
+# Once, before anything is asked or written. pacman needs it as much as the
+# suspend hook and the kernel module do, and doing it around each write in turn
+# is how the hook ended up being installed while the rootfs had been locked
+# again, which aborts the whole run. See scripts/user-unit.sh.
 
 unlock_rootfs || true
 

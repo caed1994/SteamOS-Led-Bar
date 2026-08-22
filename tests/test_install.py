@@ -255,6 +255,88 @@ esac
         self.assertNotIn("asked", done.stderr)
 
 
+UNINSTALLER = os.path.join(HERE, "..", "uninstall.sh")
+SLEEP_HOOK = os.path.join(HERE, "..", "systemd-sleep", "steamos-led-serial")
+
+
+class RootfsTest(unittest.TestCase):
+    """Unlocking SteamOS's read-only root, and putting it back.
+
+    Against the shared file rather than against either script, because being
+    shared is the fix: the installer had this and the uninstaller had a later
+    copy of its own that only covered the kernel module - so removing the
+    suspend hook, three steps earlier, failed on a read-only /usr and took the
+    whole uninstall with it.
+    """
+
+    def _with_readonly(self, call, state="enabled"):
+        """Run one call with a steamos-readonly that answers and records."""
+        stubs = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, stubs, True)
+        with open(os.path.join(stubs, "state"), "w") as handle:
+            handle.write(state + "\n")
+        path = os.path.join(stubs, "steamos-readonly")
+        with open(path, "w") as handle:
+            handle.write(
+                '#!/usr/bin/env bash\n'
+                'case "$1" in\n'
+                '  status)  cat "%s/state" ;;\n'
+                '  disable) echo disabled > "%s/state"\n'
+                '           echo disable >> "%s/log" ;;\n'
+                '  enable)  echo enabled > "%s/state"\n'
+                '           echo enable >> "%s/log" ;;\n'
+                'esac\n' % ((stubs,) * 5))
+        os.chmod(path, 0o755)
+
+        done = subprocess.run(
+            ["bash", "-c", 'set -euo pipefail\nsource "%s"\n%s' %
+             (USER_UNIT, call)], capture_output=True, text=True,
+            env={"PATH": stubs + ":" + os.environ.get("PATH", "")})
+        try:
+            with open(os.path.join(stubs, "log")) as handle:
+                did = handle.read().split()
+        except OSError:
+            did = []
+        return done, did
+
+    def test_a_locked_rootfs_is_unlocked(self):
+        done, did = self._with_readonly(
+            'unlock_rootfs; echo "relock=$ROOTFS_RELOCK"')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(did[0], "disable")
+        self.assertIn("relock=1", done.stdout)
+
+    def test_one_somebody_else_unlocked_is_left_as_they_left_it(self):
+        # Running steamos-readonly disable yourself and then this should not
+        # end with the rootfs locked again behind you.
+        done, did = self._with_readonly(
+            'unlock_rootfs; echo "relock=$ROOTFS_RELOCK"', state="disabled")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(did, [])
+        self.assertIn("relock=0", done.stdout)
+
+    def test_an_abandoned_run_still_locks_it_again(self):
+        # Including the paths that die() rather than reaching the end.
+        done, did = self._with_readonly('unlock_rootfs; exit 1')
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(did, ["disable", "enable"])
+
+    def test_it_is_locked_once_however_it_ends(self):
+        done, did = self._with_readonly('unlock_rootfs; relock_rootfs')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(did, ["disable", "enable"])
+
+    def test_a_machine_without_it_is_not_a_failure(self):
+        # Every distribution that is not SteamOS. No stub on the PATH here,
+        # which is exactly what such a machine looks like.
+        done = subprocess.run(
+            ["bash", "-c", 'set -euo pipefail\nsource "%s"\n'
+                           'unlock_rootfs; echo "$ROOTFS_RELOCK"' % USER_UNIT],
+            capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "0")
+
+
 class InstallerShapeTest(unittest.TestCase):
     """Properties of install.sh that are easy to break from a distance."""
 
@@ -367,14 +449,43 @@ class InstallerShapeTest(unittest.TestCase):
             self.assertLess(unlock, self.text.index(path),
                             "%s runs before the rootfs is unlocked" % what)
 
-    def test_the_rootfs_is_only_locked_again_if_we_unlocked_it(self):
-        # Somebody who ran steamos-readonly disable themselves should find it
-        # the way they left it.
-        self.assertIn("ROOTFS_RELOCK=1", self.text)
-        self.assertIn("[[ $ROOTFS_RELOCK -eq 1 ]] || return 0", self.text)
+    def test_the_uninstaller_unlocks_before_it_removes_anything(self):
+        """Order, and this one was measured rather than imagined.
 
-    def test_an_abandoned_run_still_locks_it_again(self):
-        self.assertIn("trap relock_rootfs EXIT", self.text)
+        The suspend hook lives under /usr/lib/systemd, and `rm -f` on a locked
+        rootfs does not quietly do nothing - it fails with "Read-only file
+        system", which under set -e ended the uninstall three steps in: udev
+        rule gone, and the service files, the command link and the
+        configuration all still there with nothing said about it. The
+        uninstaller had an unlock of its own, but only in front of the kernel
+        module, forty lines further down.
+        """
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        unlock = text.index("\nunlock_rootfs || true")
+        for path, what in (('rm -f "$SLEEP_HOOK_PATH"', "the suspend hook"),
+                           ('rm -f "$MODULE_PATH"', "the kernel module")):
+            self.assertLess(unlock, text.index(path),
+                            "%s is removed before the rootfs is unlocked"
+                            % what)
+        # And its own later copy is gone, or the two go on drifting.
+        self.assertNotIn("ROOTFS_WAS_READONLY", text)
+
+    def test_both_scripts_unlock_it_the_same_way(self):
+        # Which is the whole point of the shared file - see RootfsTest.
+        with open(USER_UNIT) as handle:
+            shared = handle.read()
+        self.assertIn("ROOTFS_RELOCK=1", shared)
+        self.assertIn("trap relock_rootfs EXIT", shared)
+        for path in (INSTALLER, UNINSTALLER):
+            with open(path) as handle:
+                text = handle.read()
+            self.assertIn("unlock_rootfs || true", text, path)
+            # Calling it, not carrying a copy of it. The advice printed for a
+            # machine that has to install packages by hand still names the
+            # command, which is a sentence and not a second implementation.
+            self.assertNotIn("unlock_rootfs() {", text, path)
+            self.assertNotIn("relock_rootfs() {", text, path)
 
     def test_platformio_is_offered_whatever_the_firmware_answer_was(self):
         """It used to be reached only from inside the flashing step.

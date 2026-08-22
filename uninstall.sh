@@ -37,6 +37,16 @@ done
 
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo ./uninstall.sh" >&2; exit 1; }
 
+# --- the read-only rootfs ---------------------------------------------------
+#
+# Before the first thing is removed, not before the kernel module. The suspend
+# hook lives under /usr/lib/systemd, and `rm -f` on a locked rootfs does not
+# quietly do nothing - it fails with "Read-only file system", which under
+# set -e ended the uninstall three steps in: the udev rule gone, the service
+# files, the command link and the configuration all still there, and nothing
+# said about it. Shared with install.sh so the two cannot drift again.
+unlock_rootfs || true
+
 # --- the units that run in the desktop session ------------------------------
 
 remove_user_units() {
@@ -92,22 +102,9 @@ if [[ $REMOVE_MODULE -eq 0 ]]; then
 fi
 
 # --- kernel module ---------------------------------------------------------
-
-ROOTFS_WAS_READONLY=0
-restore_readonly() {
-    if [[ $ROOTFS_WAS_READONLY -eq 1 ]] && command -v steamos-readonly >/dev/null 2>&1; then
-        steamos-readonly enable || true
-    fi
-}
-trap restore_readonly EXIT
-
-if command -v steamos-readonly >/dev/null 2>&1; then
-    if steamos-readonly status 2>/dev/null | grep -qi enabled; then
-        echo "Disabling the read-only rootfs to remove the module..."
-        steamos-readonly disable
-        ROOTFS_WAS_READONLY=1
-    fi
-fi
+#
+# The rootfs was unlocked at the top of this run and stays that way until the
+# exit trap puts it back - see unlock_rootfs.
 
 if lsmod | grep -q "^${MODULE_NAME//-/_}"; then
     rmmod "$MODULE_NAME" 2>/dev/null || modprobe -r "$MODULE_NAME" 2>/dev/null || true

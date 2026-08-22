@@ -12,6 +12,13 @@
 #
 # Sourced, not executed.
 
+# How both scripts say things. Here because the shared code below says things
+# too, and a helper that printed differently depending on which script sourced
+# it would be a helper you cannot read the output of. `die` stays with the
+# installer: stopping is its decision, not a shared one.
+say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m warning:\033[0m %s\n' "$*" >&2; }
+
 # The name you can type. Everything this project installs lives in /var/lib so
 # it survives a SteamOS update, and nothing there is on anybody's PATH - so
 # without this, every command in the README is one you can read and not run.
@@ -72,4 +79,47 @@ user_systemctl() {
     [[ -d "$WATCHER_RUNTIME" ]] || return 1
     runuser -u "$WATCHER_USER" -- env "XDG_RUNTIME_DIR=$WATCHER_RUNTIME" \
         systemctl --user "$@" >/dev/null 2>&1
+}
+
+# --- the read-only rootfs ---------------------------------------------------
+#
+# SteamOS mounts / read-only, and both scripts touch it: the installer writes
+# the suspend hook under /usr/lib/systemd and the kernel module under
+# /usr/lib/modules, and the uninstaller takes the same two back out. Under
+# set -e a write to a locked rootfs does not warn, it ends the run - so this is
+# done once, at the top, before anything is written or removed.
+#
+# Here rather than in each script for the reason everything else in this file
+# is here. The installer had it and the uninstaller had its own, later copy
+# that only covered the kernel module - so removing the suspend hook, three
+# steps earlier, failed on a read-only /usr and aborted the whole uninstall
+# with the service files still in place and nothing said about it.
+#
+# The kernel module's own installer does the same dance; finding it already
+# unlocked, it leaves it alone.
+
+ROOTFS_RELOCK=0
+
+relock_rootfs() {
+    [[ $ROOTFS_RELOCK -eq 1 ]] || return 0
+    ROOTFS_RELOCK=0                     # so the exit trap does not repeat it
+    say "Locking the read-only rootfs again"
+    steamos-readonly enable \
+        || warn "could not lock it again: sudo steamos-readonly enable"
+}
+
+unlock_rootfs() {
+    command -v steamos-readonly >/dev/null 2>&1 || return 0
+    steamos-readonly status 2>/dev/null | grep -qi enabled || return 0
+    say "Unlocking the read-only rootfs"
+    if ! steamos-readonly disable; then
+        warn "could not unlock the rootfs. Anything under /usr - the suspend"
+        warn "hook and the kernel module - cannot be touched while / stays"
+        warn "read-only."
+        return 1
+    fi
+    ROOTFS_RELOCK=1
+    # Put it back however this ends, including the die() paths.
+    trap relock_rootfs EXIT
+    return 0
 }
