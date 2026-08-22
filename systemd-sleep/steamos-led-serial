@@ -15,15 +15,44 @@
 # serial port, because the service holds that port exclusively. The pipe is
 # world-writable and already read in the service's main loop.
 
-FIFO="${STEAMOS_LED_NOTIFY_FIFO:-/run/steamos-led-serial/notify}"
+CONFIG="${STEAMOS_LED_CONFIG:-/etc/steamos-led-serial.conf}"
+DEFAULT_FIFO="/run/steamos-led-serial/notify"
+
+# Where the service is actually listening.
+#
+# NOTIFY_FIFO is a setting, and this used to know only the default - so a
+# machine that had moved the pipe got a hook writing into a path nothing was
+# reading, and the strip just went dark on suspend with nothing anywhere
+# connecting the two.
+#
+# Read in the order the service reads its own settings: the environment
+# outranks the file, and the last of two lines naming the same option wins.
+# Surrounding space and one pair of quotes come off, the way its parser does.
+FIFO="${STEAMOS_LED_NOTIFY_FIFO:-}"
+if [ -z "$FIFO" ] && [ -r "$CONFIG" ]; then
+    FIFO="$(sed -n 's/^[[:space:]]*NOTIFY_FIFO[[:space:]]*=//p' "$CONFIG" \
+            | tail -n 1 \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+                  -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/")"
+fi
+[ -n "$FIFO" ] || FIFO="$DEFAULT_FIFO"
 
 # Nobody listening is not a failure: the service may be stopped, or
 # notifications switched off. Either way there is nothing to hand over.
 [ -p "$FIFO" ] || exit 0
 
+# Opened read-write, and that is the whole of it. A FIFO opened for writing
+# alone blocks until somebody opens the other end - so a pipe left behind by a
+# service that died would hang this script, and systemd waits here before it
+# suspends: a machine that will not go to sleep, for a strip. Read-write never
+# blocks. The word is simply dropped if nothing is reading.
+tell() {
+    printf '%s\n' "$1" 1<> "$FIFO" 2>/dev/null || return 0
+}
+
 case "$1" in
   pre)
-    printf 'standby\n' > "$FIFO" 2>/dev/null || exit 0
+    tell standby
     # systemd suspends as soon as this script returns, so give the service a
     # moment to read the word and get the message out of the serial port.
     # Without this the machine can be asleep before the ESP has been told, and
@@ -31,7 +60,7 @@ case "$1" in
     sleep 0.5
     ;;
   post)
-    printf 'resume\n' > "$FIFO" 2>/dev/null || exit 0
+    tell resume
     ;;
 esac
 

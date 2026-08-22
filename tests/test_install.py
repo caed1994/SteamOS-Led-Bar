@@ -337,6 +337,101 @@ class RootfsTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "0")
 
 
+class SleepHookTest(unittest.TestCase):
+    """The word that hands the strip to the ESP before the machine sleeps."""
+
+    def _setup(self, config="", make_pipe=True):
+        room = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, room, True)
+        pipe = os.path.join(room, "notify")
+        if make_pipe:
+            os.mkfifo(pipe)
+        path = os.path.join(room, "conf")
+        with open(path, "w") as handle:
+            handle.write(config.replace("@PIPE@", pipe))
+        return room, pipe, path
+
+    def _run(self, action, config_path, timeout=10, **environment):
+        env = dict(os.environ, STEAMOS_LED_CONFIG=config_path)
+        env.update(environment)
+        return subprocess.run(["sh", SLEEP_HOOK, action, "suspend"],
+                              capture_output=True, text=True, env=env,
+                              timeout=timeout)
+
+    def _read(self, pipe, action, config_path, **environment):
+        """What arrives in the pipe, with something actually reading it."""
+        reader = os.open(pipe, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, reader)
+        self._run(action, config_path, **environment)
+        try:
+            return os.read(reader, 4096).decode()
+        except BlockingIOError:
+            return ""
+
+    def test_it_writes_into_the_pipe_the_configuration_names(self):
+        """NOTIFY_FIFO is a setting, and this used to know only the default.
+
+        A machine that had moved the pipe got a hook writing where nothing was
+        reading: the strip went dark on suspend instead of breathing, with
+        nothing anywhere connecting the two.
+        """
+        _room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
+        self.assertEqual(self._read(pipe, "pre", config), "standby\n")
+
+    def test_the_last_line_wins_the_way_the_service_reads_it(self):
+        _room, pipe, config = self._setup(
+            "# a comment\nNOTIFY_FIFO=/tmp/moved-since\n"
+            "NOTIFY_FIFO = \"@PIPE@\"  \n")
+        self.assertEqual(self._read(pipe, "post", config), "resume\n")
+
+    def test_the_environment_outranks_the_file(self):
+        # Which is the order the service reads its own settings in.
+        _room, pipe, config = self._setup("NOTIFY_FIFO=/tmp/not-this-one\n")
+        self.assertEqual(
+            self._read(pipe, "pre", config, STEAMOS_LED_NOTIFY_FIFO=pipe),
+            "standby\n")
+
+    def test_a_file_that_says_nothing_leaves_the_default_standing(self):
+        hook = open(SLEEP_HOOK).read()
+        self.assertIn('DEFAULT_FIFO="/run/steamos-led-serial/notify"', hook)
+        _room, _pipe, config = self._setup("LED_COUNT=17\n")
+        # Nothing at the default path on a build machine, so it is the quiet
+        # exit below rather than a write - which is the point.
+        self.assertEqual(self._run("pre", config).returncode, 0)
+
+    def test_a_pipe_nobody_is_reading_does_not_hang_the_suspend(self):
+        """systemd waits here before it suspends.
+
+        A FIFO opened for writing alone blocks until somebody opens the other
+        end, so a pipe left behind by a service that died stopped the machine
+        going to sleep at all - and the `|| exit 0` could not help, because
+        nothing failed, it simply never returned.
+        """
+        _room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
+        # Named through the environment as well as the file, so this reaches
+        # the write however the path is worked out - it is the open that is
+        # being tested, not the lookup above it.
+        done = self._run("post", config, timeout=10,      # raises if it hangs
+                         STEAMOS_LED_NOTIFY_FIFO=pipe)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_no_pipe_at_all_is_a_quiet_success(self):
+        # The service may be stopped, or notifications switched off.
+        _room, _pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n",
+                                           make_pipe=False)
+        done = self._run("pre", config)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "")
+
+    def test_it_says_nothing_on_the_actions_that_are_not_ours(self):
+        _room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
+        self.assertEqual(self._read(pipe, "hibernate-nonsense", config), "")
+
+    def test_it_parses(self):
+        done = subprocess.run(["sh", "-n", SLEEP_HOOK])
+        self.assertEqual(done.returncode, 0)
+
+
 class InstallerShapeTest(unittest.TestCase):
     """Properties of install.sh that are easy to break from a distance."""
 
