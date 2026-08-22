@@ -64,8 +64,17 @@ find_pio() {
 }
 
 if ! PIO="$(find_pio)"; then
+    # The installer is the answer rather than a pip line: on SteamOS the
+    # rootfs is read-only, so a system-wide pip install cannot write at all,
+    # and "pip install --user" lands in a directory the next system update
+    # resets - which is a flash that works today and stops working after an
+    # update, for no reason anybody would connect back to here.
     echo "PlatformIO (pio) not found for $TARGET_USER. Install it with:" >&2
-    echo "    python3 -m pip install --user platformio" >&2
+    echo "    sudo $SOURCE_DIR/install.sh" >&2
+    echo "which offers it, or by hand with PlatformIO's own installer:" >&2
+    echo "    curl -fsSL -O \\" >&2
+    echo "      https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py" >&2
+    echo "    python3 get-platformio.py" >&2
     echo "Nothing was changed; the board still has the firmware it had." >&2
     exit 1
 fi

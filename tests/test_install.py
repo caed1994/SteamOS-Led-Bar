@@ -512,10 +512,21 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertIn("readlink", text)
 
     def test_platformio_is_installed_the_way_steamos_allows(self):
-        # pip cannot write to a read-only rootfs, and --user lands in a
-        # directory the next system update resets.
+        """pip cannot write to a read-only rootfs, and --user is swept away.
+
+        Every script that mentions it, not only the installer: the flashing
+        helper told you to run the pip line when it could not find pio, which
+        is the one thing the installer goes out of its way not to do. Taking
+        that advice gets you a flash that works today and stops working after
+        the next system update, for no reason anybody would trace back here.
+        """
         self.assertIn("platformio-core-installer", self.text)
-        self.assertNotIn("pip install --user platformio", self.text)
+        for name in ("install.sh", "flash-esp.sh",
+                     os.path.join("scripts", "flash-firmware.sh")):
+            with open(os.path.join(HERE, "..", name)) as handle:
+                text = handle.read()
+            self.assertNotIn("pip install --user platformio", text, name)
+            self.assertNotIn("pip install platformio", text, name)
 
     def test_the_headers_hint_names_a_package_rather_than_a_search(self):
         # It used to print "pacman -Ss headers | grep ..." and leave the
