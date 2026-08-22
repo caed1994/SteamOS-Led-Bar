@@ -1247,7 +1247,10 @@ def run_watch_phone(config, print_only=False):
         rules, listed_only=config["PHONE_APPS_ONLY"],
         send=None if print_only else lambda trigger: notify.send(fifo, trigger),
         report=report if print_only else None,
-        details=phone.look_up)
+        details=phone.look_up,
+        # Nothing to settle in a dry run: it flashes nothing anyway, and its
+        # job is to show what the bus said.
+        settle=0.0 if print_only else phone.BACKLOG_SETTLE)
 
     # flush, because this runs as a service: Python block-buffers a piped
     # stdout, so these lines would sit in it until the process stopped.
@@ -1308,7 +1311,12 @@ def run_watch_phone(config, print_only=False):
         now = phone.wake_kdeconnect()
         if now == known[0]:
             return
-        known[0] = now
+        was, known[0] = known[0], now
+        if was is None and now is not None and not print_only:
+            # KDE Connect has come back, which means the phone is about to
+            # reconnect - and the first thing it does is hand over everything
+            # already on it. The same pile as at boot, and the same answer.
+            bridge.expect_backlog()
         if now is None:
             # Whether there was anything to start it with, said here rather
             # than nowhere: without it, "cannot find kdeconnectd" and "started

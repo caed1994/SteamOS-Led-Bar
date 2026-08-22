@@ -121,6 +121,24 @@ TAG_LENGTH = 8
 # alone all day should not leave a list of everything it ever sent.
 RECENT_NOTIFICATIONS = 8
 
+# A phone that has just connected hands KDE Connect everything already sitting
+# on it, one notificationPosted each - so a machine that has just booted
+# flashed once per unread message before anybody had touched it. Which is what
+# was reported. Nothing on the notification says how old it is, so these are
+# the two ways of telling that pile from people talking.
+#
+# The settling time is the machine having just started: the phone finds it a
+# few seconds later and the pile arrives then. Measured from the bridge
+# starting, which is a moment before the monitor attaches.
+BACKLOG_SETTLE = 45.0           # seconds after the bridge starts
+# And the flood is the same pile arriving later, when the phone rejoins the
+# network - after a suspend, or after walking out of range and back. Counted
+# in conversations rather than in notifications: six messages from one person
+# really are six flashes' worth, that was a reported bug of its own, while six
+# people inside four seconds is one packet being unpacked.
+BACKLOG_FLOOD = 3               # conversations
+BACKLOG_WINDOW = 4.0            # seconds they arrive within
+
 
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
     """One notification, as much of it as the bus was willing to say.
@@ -514,7 +532,8 @@ class Bridge:
     """
 
     def __init__(self, rules, kind=notify.KIND_PHONE,
-                 listed_only=False, send=None, report=None, details=None):
+                 listed_only=False, send=None, report=None, details=None,
+                 settle=0.0, clock=None):
         self.rules = rules
         self.kind = kind
         self.listed_only = listed_only
@@ -523,14 +542,31 @@ class Bridge:
         # Given rather than called for: it is the one step that talks to the
         # bus, so a test drives the whole loop by handing over a function.
         self.details = details
+        # Likewise the clock, which the settling time and the flood are the
+        # only things here to care about - a test should not have to wait out
+        # either of them.
+        self.clock = time.monotonic if clock is None else clock
         self.seen = 0
         self.flashed = 0
         # The notification objects lately seen and what each last said, for a
         # "refreshed" to re-read and compare against.
         self.recent = {}
+        # When each conversation lately flashed arrived, for the flood.
+        self.arrivals = collections.deque()
+        self._settled_at = 0.0
+        self.expect_backlog(settle)
         # Signal names already mentioned, so a busy bus does not repeat one
         # line a hundred times.
         self.passed_over = set()
+
+    def expect_backlog(self, seconds=BACKLOG_SETTLE):
+        """Hold flashes for a moment: a phone is about to hand over its pile.
+
+        Called at start, and again whenever KDE Connect has been away and come
+        back, because both mean the same thing - a connection is being made,
+        and the first thing across it is everything already on the phone.
+        """
+        self._settled_at = self.clock() + seconds
 
     def line(self, text):
         """Handle one line; returns the trigger written, if any."""
@@ -599,6 +635,13 @@ class Bridge:
             self.report(sighting, trigger)
         if trigger is None or self.send is None:
             return trigger
+        if self._catching_up(sighting):
+            # Seen and remembered, so a later "refreshed" will not read it as
+            # news - just not flashed. Asked here rather than before the
+            # report, so --print goes on showing everything the bus said: it
+            # is started by hand, and its first line is the message you have
+            # just sent yourself to test it.
+            return None
         try:
             self.send(trigger)
         except OSError as exc:
@@ -609,6 +652,30 @@ class Bridge:
             return trigger
         self.flashed += 1
         return trigger
+
+    def _catching_up(self, sighting):
+        """Is this the phone handing over its pile, rather than somebody?
+
+        It cannot be read off the notification: KDE Connect hands over an app,
+        a title and a text, and nothing at all about when the phone first
+        showed it. So it is told by when it arrived and by how much arrived
+        with it - see BACKLOG_SETTLE and BACKLOG_FLOOD.
+        """
+        now = self.clock()
+        if now < self._settled_at:
+            LOG.debug("not flashing %s: still settling after start",
+                      sighting.app)
+            return True
+        while self.arrivals and now - self.arrivals[0][0] > BACKLOG_WINDOW:
+            self.arrivals.popleft()
+        self.arrivals.append((now, whose(sighting)))
+        talking = {who for _when, who in self.arrivals}
+        if len(talking) > BACKLOG_FLOOD:
+            LOG.info("%d conversations inside %gs - taking that as the phone "
+                     "catching up rather than people", len(talking),
+                     BACKLOG_WINDOW)
+            return True
+        return False
 
     def _passed_over(self, text):
         """Mention a signal this did not act on, once per name.

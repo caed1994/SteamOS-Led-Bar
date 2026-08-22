@@ -838,6 +838,97 @@ class BridgeTest(unittest.TestCase):
                          "com.whatsapp")
 
 
+class BacklogTest(unittest.TestCase):
+    """The pile a phone hands over the moment it connects.
+
+    Reported from a real machine: the bar runs its startup animation, settles
+    into the desktop effect, and then flashes once for every notification
+    already sitting on the phone. Nothing was wrong with any of them - they
+    were all genuinely new to this process, which had just started - and the
+    service's repeat gap cannot help, because it is keyed on the conversation
+    and six messages from six people are six conversations.
+    """
+
+    def setUp(self):
+        self.now = 1000.0
+        self.sent = []
+
+    def _bridge(self, settle=phone.BACKLOG_SETTLE):
+        return phone.Bridge((), send=self.sent.append, settle=settle,
+                            clock=lambda: self.now)
+
+    def _pile(self, bridge, count, first=0, apart=0.2):
+        """`count` notifications from `count` different apps, back to back."""
+        for index in range(first, first + count):
+            bridge.line(_posted("0|com.app%d|%d|null|10%d"
+                                % (index, index, index)))
+            self.now += apart
+        return bridge
+
+    def test_the_pile_at_boot_does_not_flash(self):
+        bridge = self._pile(self._bridge(), 6)
+        self.assertEqual(bridge.seen, 6, "they were all read")
+        self.assertEqual(bridge.flashed, 0, self.sent)
+
+    def test_what_arrives_once_it_has_settled_flashes_as_ever(self):
+        bridge = self._bridge()
+        self.now += phone.BACKLOG_SETTLE + 1
+        self._pile(bridge, 2)
+        self.assertEqual(bridge.flashed, 2)
+
+    def test_a_pile_that_was_held_is_not_read_as_news_afterwards(self):
+        # It was seen and remembered, only not flashed - so the "refreshed"
+        # that follows any change on the phone does not walk the same pile
+        # back through and light the bar for it a moment later.
+        bridge = self._pile(self._bridge(), 6)
+        self.now += phone.BACKLOG_SETTLE + 1
+        self._pile(bridge, 6)
+        self.assertEqual(bridge.seen, 6, "they were dropped as repeats")
+        self.assertEqual(bridge.flashed, 0, self.sent)
+
+    def test_a_conversation_is_not_a_pile(self):
+        """Six messages from one person are still six flashes.
+
+        The flood counts conversations for exactly this reason: keyed on
+        notifications it would swallow a burst from somebody typing at you,
+        which is a reported bug of its own.
+        """
+        bridge = self._bridge(settle=0.0)
+        for index in range(6):
+            bridge.line(_posted("0|com.whatsapp|%d|null|101%d"
+                                % (index, index)))
+            self.now += 0.2
+        self.assertEqual(bridge.flashed, 6)
+
+    def test_the_phone_rejoining_the_network_later_is_caught_too(self):
+        # A suspend, or walking out of range and back: the bridge has been up
+        # for hours, so there is no settling time left to catch this.
+        bridge = self._pile(self._bridge(settle=0.0), 6)
+        self.assertEqual(bridge.flashed, phone.BACKLOG_FLOOD, self.sent)
+
+    def test_the_run_ends_when_the_phone_goes_quiet(self):
+        bridge = self._pile(self._bridge(settle=0.0), 6)
+        self.now += phone.BACKLOG_WINDOW + 1
+        self._pile(bridge, 1, first=6)
+        self.assertEqual(bridge.flashed, phone.BACKLOG_FLOOD + 1, self.sent)
+
+    def test_the_dry_run_still_shows_everything_the_bus_said(self):
+        # It flashes nothing anyway, and it is started by hand - its first
+        # line is the message you have just sent yourself to test it.
+        told = []
+        bridge = phone.Bridge((), send=None, clock=lambda: self.now,
+                              settle=phone.BACKLOG_SETTLE,
+                              report=lambda seen, _t: told.append(seen.app))
+        self._pile(bridge, 6)
+        self.assertEqual(len(told), 6)
+
+    def test_kde_connect_coming_back_arms_it_again(self):
+        bridge = self._bridge(settle=0.0)
+        bridge.expect_backlog()
+        self._pile(bridge, 6)
+        self.assertEqual(bridge.flashed, 0, self.sent)
+
+
 class ObstacleTest(unittest.TestCase):
     """Why the bar stayed dark although every line looked right.
 
