@@ -622,6 +622,107 @@ class ReportedDownloadTest(unittest.TestCase):
             self.assertFalse(watch.steam_has_it(device.read(), 14.1), grace)
 
 
+class DownloadGapTest(unittest.TestCase):
+    """The gap between Steam's writes, which the grace was shorter than.
+
+    Reported from a real machine, downloading a 100 GB game over a fast line:
+    about two seconds of the download's bar, then about five of the desktop's
+    own effect, then the download's again, all the way through. Steam writes
+    the progress bar once per step it can show, and the grace ran out in every
+    gap between two of them - so the bar changed hands a dozen times a minute
+    for a quarter of an hour.
+
+    The gap is not a constant, either. The bar has the same number of steps
+    whatever the connection, so it is the download's length divided by that -
+    seven seconds here, a minute on a line a tenth as fast.
+    """
+
+    Device = ReportedDownloadTest.Device
+
+    def _download(self, filled):
+        snapshot = shim.make_snapshot(shim.EFFECT_MANUAL, (0, 120, 255))
+        snapshot.pixels = [(0, 120, 255, 255) if led < filled else (0, 0, 0, 0)
+                           for led in range(17)]
+        return snapshot
+
+    def _run(self, gap, steps=8, look=""):
+        """A download whose bar moves every `gap` seconds; who had the bar."""
+        device = self.Device()
+        watch = desktop.Ownership(look=lambda: look)
+        resting = shim.make_snapshot(shim.EFFECT_RAINBOW)
+        device.steam_writes(resting, -600.0)
+
+        now, shown = 0.0, []
+        watch.steam_has_it(device.read(), now)          # a desktop period
+        for step in range(1, steps + 1):
+            device.steam_writes(self._download(2 * step), now)
+            for _ in range(int(gap * 4)):
+                shown.append(watch.steam_has_it(device.read(), now))
+                now += 0.25
+        device.steam_writes(resting, now)               # the download is done
+        after = [watch.steam_has_it(device.read(), now + tick)
+                 for tick in (0.1, 1.0, 5.0)]
+        return shown, after
+
+    def test_the_desktop_does_not_break_through_between_two_writes(self):
+        shown, _after = self._run(gap=7.0)
+        self.assertTrue(all(shown),
+                        "the desktop effect showed %d times during the "
+                        "download" % shown.count(False))
+
+    def test_a_slower_line_only_makes_the_gaps_longer(self):
+        # Which is why the patience is not a slightly larger guess at how
+        # often Steam writes: on a line a tenth as fast it writes a tenth as
+        # often, and any fixed guess of that kind is wrong for somebody.
+        shown, _after = self._run(gap=60.0)
+        self.assertTrue(all(shown), shown.count(False))
+
+    def test_the_download_still_ends_the_moment_steam_puts_it_back(self):
+        # The patience is only a backstop. What actually ends a download is
+        # Steam restoring what it was resting at, which is recognised exactly
+        # - so a long patience costs nothing at the end of one.
+        _shown, after = self._run(gap=7.0)
+        self.assertEqual(after, [False, False, False])
+
+    def test_one_stray_write_cannot_hold_the_bar_for_ever(self):
+        # A write that is not the resting state and is never followed up. The
+        # patience is what bounds it, and it is the only thing that does.
+        device = self.Device()
+        watch = desktop.Ownership(look=lambda: "", busy=30.0)
+        device.steam_writes(shim.make_snapshot(shim.EFFECT_RAINBOW), -600.0)
+        self.assertFalse(watch.steam_has_it(device.read(), 0.0))
+        device.steam_writes(self._download(9), 10.0)
+        self.assertTrue(watch.steam_has_it(device.read(), 39.0))
+        self.assertFalse(watch.steam_has_it(device.read(), 41.0))
+
+    def test_game_mode_does_not_leave_a_resting_state_behind_it(self):
+        """Or the session after it would never get the bar back.
+
+        What Steam rests at is learned on the desktop, and a Game Mode session
+        can leave the bar showing something else entirely. Carried across, the
+        old one would read as Steam showing something of its own for the whole
+        of the patience - which is the handover taking two minutes instead of
+        two seconds.
+        """
+        device = self.Device()
+        watch = desktop.Ownership(look=lambda: sessions[0], interval=0.0)
+        sessions = [""]
+
+        device.steam_writes(shim.make_snapshot(shim.EFFECT_RAINBOW), -600.0)
+        self.assertFalse(watch.steam_has_it(device.read(), 0.0))
+        self.assertIsNotNone(watch.at_rest, "it should have learned one")
+
+        sessions[0] = "gamescope"                       # into Game Mode
+        device.steam_writes(shim.make_snapshot(shim.EFFECT_PATROL), 100.0)
+        self.assertTrue(watch.steam_has_it(device.read(), 100.5))
+
+        sessions[0] = ""                                # and back out of it
+        self.assertTrue(watch.steam_has_it(device.read(), 101.0),
+                        "the grace covers the handover")
+        self.assertFalse(watch.steam_has_it(device.read(), 103.0),
+                         "the scene waited out the whole patience")
+
+
 class DumpColumnTest(unittest.TestCase):
     """How often Steam writes, which is the one thing --dump could not say.
 

@@ -103,6 +103,24 @@ CHECK_SECONDS = 2.0
 # merely shortened.
 GRACE_SECONDS = 2.0
 
+# And how long while Steam is showing something that is not the state it rests
+# at, which on the desktop means a download's progress bar.
+#
+# Far longer, because Steam writes that bar once per step it can show and no
+# oftener. Measured on a 100 GB download over a fast line: about seven seconds
+# between writes - and the gap grows in proportion on a slower one, there being
+# the same number of steps whatever the speed. Two seconds of patience meant
+# the desktop's own effect broke through in every one of those gaps, and the
+# bar swapped back and forth for the whole download. Which is what was
+# reported: two seconds of the download, five of the desktop, over and over.
+#
+# Long costs nothing here, because it is only a backstop. What really ends a
+# download is Steam putting back the state it was resting at, and that is
+# recognised exactly - see steam_has_it. This covers the machine that has no
+# such state to recognise, and bounds how long one stray write can hold the
+# bar.
+BUSY_SECONDS = 120.0
+
 # What a Game Mode session looks like from outside it.
 #
 # gamescope is the compositor Steam's Game Mode runs under, and the one
@@ -299,8 +317,10 @@ class Ownership:
     can switch sessions, and the loop asks sixty times a second.
     """
 
-    def __init__(self, grace=GRACE_SECONDS, interval=CHECK_SECONDS, look=None):
+    def __init__(self, grace=GRACE_SECONDS, interval=CHECK_SECONDS, look=None,
+                 busy=BUSY_SECONDS):
         self.grace = grace
+        self.busy = busy
         self.interval = interval
         # Given rather than called for, which is what lets a test drive this
         # without a process table of its own.
@@ -362,13 +382,31 @@ class Ownership:
         Steam taking the bar, and the Game Mode effect flashed at both ends
         of every download. It is the same effect, dimmed; it is not Steam
         showing something else.
+
+        Which leaves how long to wait between Steam's writes, and there are
+        two answers to that. While Steam is resting it is the short grace,
+        which is for the handover. While it is showing something of its own it
+        is BUSY_SECONDS, because a download's progress bar is written once per
+        step it can show - seven seconds apart on a fast line, further on a
+        slow one - and the bar is Steam's for the whole of that gap and not
+        for the first two seconds of it. Waiting only the grace there had the
+        two effects trading the bar back and forth for a whole download.
         """
         if self.game_mode(now):
+            # Nothing worked out on the desktop outlives a Game Mode session:
+            # what Steam rests at afterwards is whatever this session leaves
+            # behind, and the handover below works that out for itself. Kept,
+            # a stale one would read as Steam showing something of its own and
+            # hold the bar for the whole of the patience below.
+            self.at_rest = None
             return True
         ago = steam_wrote_ago(snapshot, now)
-        if ago is None or ago >= self.grace:
-            # The scene has the bar. Whatever is on the shim while that is
-            # true is what Steam will put back when it has finished.
-            self.at_rest = None if snapshot is None else resting_key(snapshot)
-            return False
-        return self.at_rest is None or resting_key(snapshot) != self.at_rest
+        resting = resting_key(snapshot)
+        if ago is not None:
+            busy = self.at_rest is not None and resting != self.at_rest
+            if ago < (self.busy if busy else self.grace):
+                return busy or self.at_rest is None
+        # The scene has the bar. Whatever is on the shim while that is true is
+        # what Steam will put back when it has finished.
+        self.at_rest = resting
+        return False
