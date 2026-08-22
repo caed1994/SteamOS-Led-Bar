@@ -130,7 +130,12 @@ RECENT_NOTIFICATIONS = 8
 # The settling time is the machine having just started: the phone finds it a
 # few seconds later and the pile arrives then. Measured from the bridge
 # starting, which is a moment before the monitor attaches.
-BACKLOG_SETTLE = 45.0           # seconds after the bridge starts
+#
+# Half a minute, which is the trade in both directions: it has to outlast the
+# phone finding a machine that has only just come up, and every second of it
+# is a second in which a message that really is new does not flash. The bridge
+# restarts on Apply as well as at boot, so it is not only a boot's worth.
+BACKLOG_SETTLE = 30.0           # seconds after the bridge starts
 # And the flood is the same pile arriving later, when the phone rejoins the
 # network - after a suspend, or after walking out of range and back. Counted
 # in conversations rather than in notifications: six messages from one person
