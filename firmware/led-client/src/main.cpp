@@ -133,6 +133,19 @@ static void blankStrip() {
   strip->Show();
 }
 
+// How long the strip is, as far as this firmware knows: what the host has been
+// driving, or the boot default before it has said anything.
+//
+// The two animations below draw on their own, and asking for LED_COUNT there
+// is asking for the *compile-time* length. On a strip longer than that,
+// ensureStrip would throw away the one the host had been driving and build a
+// short one in its place - so a 60 LED strip going into standby breathed on
+// its first seventeen and left the other forty-three frozen on whatever they
+// last showed, WS2812s holding their state until they are clocked again.
+static uint16_t knownLength() {
+  return stripLength > 0 ? stripLength : (uint16_t)LED_COUNT;
+}
+
 // ------------------------------------------------------------- protocol ---
 
 static const uint8_t SOF1 = 0xA5;
@@ -424,7 +437,9 @@ static void waitingAnimation(uint32_t now) {
   }
   lastWaitFrameMs = now;
 
-  ensureStrip(LED_COUNT);
+  // Always the boot default in practice: this only ever runs before the host
+  // has said anything, so there is no better answer to be had.
+  ensureStrip(knownLength());
   if (strip == nullptr) {
     return;
   }
@@ -447,7 +462,9 @@ static void standbyAnimation(uint32_t now) {
   }
   lastStandbyFrameMs = now;
 
-  ensureStrip(LED_COUNT);
+  // The length the host was driving, which by now it has said - see
+  // knownLength(). The whole strip goes to sleep, not the first seventeen.
+  ensureStrip(knownLength());
   if (strip == nullptr) {
     return;
   }

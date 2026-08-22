@@ -165,6 +165,30 @@ int main() {
   check(g_lastShown[0].R == 0 && g_lastShown[0].G == 0 && g_lastShown[0].B == 0,
         "BLANK clears the strip");
 
+  // --- standby breathes the whole strip, not the first LED_COUNT of it -----
+  //
+  // Reported shape: the animations drew on LED_COUNT, which is the *compile
+  // time* length. On this 60 LED strip that threw away the one the host had
+  // been driving and built a 17 LED one in its place, so everything past the
+  // seventeenth stayed frozen on its last frame for the whole suspend.
+  Serial.feed(longFrame.data(), longFrame.size());
+  pump();
+  {
+    std::vector<uint8_t> asleep{30, 30, 30, (uint8_t)(6000 & 0xFF),
+                                (uint8_t)(6000 >> 8)};
+    auto standbyFrame = hostFrame(0x21, asleep);
+    Serial.feed(standbyFrame.data(), standbyFrame.size());
+    pump();
+    g_millis += BREATH_FRAME_MS + 1;
+    pump();
+    check(g_lastShown.size() == 60, "standby breathes all 60 LEDs");
+    check(stripLength == 60, "the host's strip length survived the standby");
+    // And the host coming back takes it over again, breath or no breath.
+    Serial.feed(longFrame.data(), longFrame.size());
+    pump();
+    check(!standby && g_lastShown.size() == 60, "a frame ends the standby");
+  }
+
   // --- link watchdog blanks the strip --------------------------------------
   Serial.feed(longFrame.data(), longFrame.size());
   pump();
