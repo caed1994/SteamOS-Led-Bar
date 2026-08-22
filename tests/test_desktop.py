@@ -12,6 +12,7 @@ Steam Machine, and no test can answer it - which is what
 
 import os
 import sys
+import tempfile
 import unittest
 import unittest.mock
 
@@ -329,6 +330,11 @@ class OwnershipTest(unittest.TestCase):
             self.looked.append(1)
             return answers[min(len(self.looked) - 1, len(answers) - 1)]
 
+        # A machine that has been up for hours unless a test says otherwise.
+        # Read from /proc it would be whatever the machine running the tests
+        # happens to be, and a build machine that has just come up would fail
+        # every one of these - see BootTest for the boot itself.
+        kwargs.setdefault("uptime", lambda: 10000.0)
         return desktop.Ownership(look=look, **kwargs)
 
     def test_game_mode_means_the_bar_is_steam_s(self):
@@ -355,9 +361,10 @@ class OwnershipTest(unittest.TestCase):
 
     def test_a_device_nobody_ever_wrote_to_is_not_a_recent_write(self):
         # The module stamps the time when it loads, so an untouched device
-        # carries a timestamp that reads as a write moments ago - and on a
-        # machine freshly booted into Desktop Mode that would hold the scene
-        # off for the whole grace, for a write that never happened.
+        # carries a timestamp that reads as a write moments ago - which would
+        # hold the scene off for the grace, for a write that never happened.
+        # Asked of a machine that is long since up, the boot being the one
+        # time the scene is held off on purpose - see BootTest.
         untouched = self._snapshot(seq=shim.UNTOUCHED_SEQ, wrote_at=999.0)
         self.assertIsNone(desktop.steam_wrote_ago(untouched, 1000.0))
         self.assertFalse(self._watch("").steam_has_it(untouched, 1000.0))
@@ -620,6 +627,93 @@ class ReportedDownloadTest(unittest.TestCase):
             self.assertTrue(watch.steam_has_it(device.read(), 10.1), grace)
             device.steam_writes(resting, 14.0)
             self.assertFalse(watch.steam_has_it(device.read(), 14.1), grace)
+
+
+class BootTest(unittest.TestCase):
+    """The few seconds in which the machine has not decided what it is.
+
+    Reported: at switch-on the bar ran the startup breath for a few seconds,
+    then the desktop scene, then the startup breath again, and then Steam took
+    over. The middle two are the boot showing through. This service starts at
+    multi-user.target, which is before the session that says which mode this
+    is - so for a while a machine booting into Game Mode is indistinguishable
+    from a desktop: no gamescope yet, and nothing written to the LEDs. The
+    scene took that as its cue, and gamescope appearing took it back.
+    """
+
+    def _watch(self, up, running="", **kwargs):
+        self.up = [up]
+        return desktop.Ownership(look=lambda: running,
+                                 uptime=lambda: self.up[0], **kwargs)
+
+    def _untouched(self):
+        snapshot = shim.make_snapshot(effect=shim.EFFECT_OFF)
+        snapshot.seq = shim.UNTOUCHED_SEQ
+        snapshot.monotonic_ns = 0
+        return snapshot
+
+    def test_the_scene_does_not_come_up_in_the_middle_of_the_boot(self):
+        watch = self._watch(up=8.0)
+        self.assertTrue(watch.steam_has_it(self._untouched(), 1000.0),
+                        "the scene took the bar while the machine was still "
+                        "coming up")
+
+    def test_and_does_once_the_machine_is_up_with_no_game_mode_in_sight(self):
+        """Which is the whole reason the scene exists on such a machine.
+
+        A bar that waited for a Game Mode session that may never happen would
+        be a setting that does nothing on a desktop-only machine.
+        """
+        watch = self._watch(up=8.0)
+        untouched = self._untouched()
+        self.assertTrue(watch.steam_has_it(untouched, 1000.0))
+        self.assertFalse(watch.steam_has_it(untouched,
+                                            1000.0 + desktop.BOOT_SETTLE))
+
+    def test_a_machine_that_is_long_since_up_waits_for_nothing(self):
+        # Apply restarts the service, and that is not a boot: the scene has to
+        # come back the moment it does.
+        watch = self._watch(up=9000.0)
+        self.assertFalse(watch.steam_has_it(self._untouched(), 1000.0))
+
+    def test_steam_writing_ends_it_whatever_the_clock_says(self):
+        # The window is for "neither mode has spoken yet". One of them has.
+        watch = self._watch(up=8.0)
+        written = shim.make_snapshot(effect=shim.EFFECT_RAINBOW)
+        written.seq, written.monotonic_ns = 9, int(990.0 * 1e9)
+        self.assertFalse(watch.steam_has_it(written, 1000.0))
+
+    def test_game_mode_arriving_ends_it_the_other_way(self):
+        watch = self._watch(up=8.0, running="gamescope")
+        self.assertTrue(watch.steam_has_it(self._untouched(), 1000.0))
+
+    def test_the_uptime_is_read_once_and_not_once_a_frame(self):
+        # Sixty times a second, for an answer that only ever goes one way.
+        asked = []
+        watch = desktop.Ownership(look=lambda: "",
+                                  uptime=lambda: asked.append(1) or 8.0)
+        for tick in range(5):
+            watch.steam_has_it(self._untouched(), 1000.0 + tick)
+        self.assertEqual(len(asked), 1)
+
+    def test_a_machine_that_will_not_say_is_taken_as_up(self):
+        # /proc/uptime is not there, or says something unreadable. Holding the
+        # bar on that would be a scene that never appears on such a machine,
+        # which is worse than the few seconds this exists to fix.
+        watch = self._watch(up=None)
+        self.assertFalse(watch.steam_has_it(self._untouched(), 1000.0))
+
+    def test_an_unreadable_uptime_is_none_rather_than_an_error(self):
+        self.assertIsNone(desktop.machine_uptime("/does/not/exist"))
+        with tempfile.NamedTemporaryFile("w", suffix=".uptime") as handle:
+            handle.write("not a number at all\n")
+            handle.flush()
+            self.assertIsNone(desktop.machine_uptime(handle.name))
+
+    def test_the_real_one_reads_this_machine(self):
+        up = desktop.machine_uptime()
+        self.assertIsNotNone(up, "/proc/uptime should be readable here")
+        self.assertGreater(up, 0.0)
 
 
 class DownloadGapTest(unittest.TestCase):

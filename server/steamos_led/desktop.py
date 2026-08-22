@@ -121,6 +121,30 @@ GRACE_SECONDS = 2.0
 # bar.
 BUSY_SECONDS = 120.0
 
+# And how long a machine that has only just booted may go with neither a Game
+# Mode session nor a write from Steam before the scene takes the bar.
+#
+# The service is a system service - After=multi-user.target - so it is up and
+# talking to the strip well before the session that decides which mode this is.
+# In between, a machine booting into Game Mode looks exactly like a desktop:
+# gamescope has not started, Steam has written nothing. So the scene came up in
+# the middle of the boot and the startup breath resumed when gamescope finally
+# appeared, which is what was reported: the boot effect, then the desktop's,
+# then the boot effect again, then Steam.
+#
+# It costs nothing on that boot, the startup breath being what it holds. What
+# it costs is on a machine booting straight into Desktop Mode, where the scene
+# now waits this out - so it wants to be long enough to outlast a boot into
+# Game Mode and no longer.
+#
+# Measured against the machine's uptime rather than this process's, so it is
+# the boot that is waited out and not a restart: Apply restarts the service on
+# a machine that has been up for hours, and the scene should come up at once.
+BOOT_SETTLE = 45.0
+
+# Where that is read from. The first field is the seconds since boot.
+UPTIME = "/proc/uptime"
+
 # What a Game Mode session looks like from outside it.
 #
 # gamescope is the compositor Steam's Game Mode runs under, and the one
@@ -230,6 +254,21 @@ def running_game_mode(root=PROC):
     return ""
 
 
+def machine_uptime(path=UPTIME):
+    """Seconds since the machine booted, or None if that cannot be read.
+
+    None rather than nought, because the two mean opposite things here: one is
+    a machine that has just started and the other is a question this cannot
+    answer, and guessing "just started" at it would hold the scene off on every
+    machine without a /proc/uptime to read.
+    """
+    try:
+        with open(path) as handle:
+            return float(handle.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def resting_key(snapshot):
     """What makes two snapshots the same thing Steam is resting at.
 
@@ -318,15 +357,19 @@ class Ownership:
     """
 
     def __init__(self, grace=GRACE_SECONDS, interval=CHECK_SECONDS, look=None,
-                 busy=BUSY_SECONDS):
+                 busy=BUSY_SECONDS, boot_settle=BOOT_SETTLE, uptime=None):
         self.grace = grace
         self.busy = busy
         self.interval = interval
+        self.boot_settle = boot_settle
         # Given rather than called for, which is what lets a test drive this
-        # without a process table of its own.
+        # without a process table of its own - and the same for the clock the
+        # boot is measured against.
         self.look = running_game_mode if look is None else look
+        self.uptime = machine_uptime if uptime is None else uptime
         self.found = ""
         self._asked = None
+        self._booted_at = None
         # What was on the shim while the scene had the bar - Steam's state at
         # rest. See steam_has_it.
         self.at_rest = None
@@ -349,6 +392,20 @@ class Ownership:
             self.found = found
             self._asked = now
         return self.found
+
+    def still_booting(self, now):
+        """Whether the machine is too young to have decided which mode it is.
+
+        Read once and kept as a moment on the loop's own clock: the answer
+        only ever goes one way, and this is asked sixty times a second.
+
+        A machine that will not say how long it has been up is taken as up
+        already, which is what this did before the question was asked at all.
+        """
+        if self._booted_at is None:
+            up = self.uptime()
+            self._booted_at = now - (self.boot_settle if up is None else up)
+        return now - self._booted_at < self.boot_settle
 
     def steam_has_it(self, snapshot, now):
         """Whether to leave the bar alone because Steam is driving it.
@@ -391,6 +448,9 @@ class Ownership:
         slow one - and the bar is Steam's for the whole of that gap and not
         for the first two seconds of it. Waiting only the grace there had the
         two effects trading the bar back and forth for a whole download.
+
+        And before either of those there is the boot, where the honest answer
+        is neither: see still_booting.
         """
         if self.game_mode(now):
             # Nothing worked out on the desktop outlives a Game Mode session:
@@ -401,6 +461,12 @@ class Ownership:
             self.at_rest = None
             return True
         ago = steam_wrote_ago(snapshot, now)
+        if ago is None and self.still_booting(now):
+            # Neither mode has had its say: no Game Mode session, and nothing
+            # ever written to the LEDs. On a machine this young that is the
+            # boot itself and not an answer, and the startup breath is what
+            # belongs on the bar until one of the two turns up.
+            return True
         resting = resting_key(snapshot)
         if ago is not None:
             busy = self.at_rest is not None and resting != self.at_rest

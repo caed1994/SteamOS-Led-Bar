@@ -1086,7 +1086,7 @@ class DesktopSceneTest(StandbyQuietTest):
     STEAM_GREEN = (10, 200, 30)
     SCENE_BLUE = "#0000ff"
 
-    def _runner(self, scene="color", running="", **overrides):
+    def _runner(self, scene="color", running="", uptime=10000.0, **overrides):
         conf = dict(config.DEFAULTS)
         conf.update(SERIAL_PORT="/dev/does-not-exist", NOTIFY=False,
                     DESKTOP_SCENE=scene, DESKTOP_COLOR=self.SCENE_BLUE,
@@ -1096,6 +1096,10 @@ class DesktopSceneTest(StandbyQuietTest):
         runner.link = StandbyTest.FakeLink()
         if runner.ownership is not None:
             runner.ownership.look = lambda: running
+            # A machine long since up unless a test says otherwise. Read from
+            # /proc it would be whatever the build machine happens to be, and
+            # one that had just come up would answer differently.
+            runner.ownership.uptime = lambda: uptime
         return runner
 
     def _pixel(self, runner):
@@ -1137,6 +1141,21 @@ class DesktopSceneTest(StandbyQuietTest):
         self._drive(runner, seq=service.UNTOUCHED_SEQ)
         red, green, blue = self._pixel(runner)
         self.assertEqual((red, green, blue), (0, 0, 255))
+
+    def test_but_not_in_the_middle_of_the_boot(self):
+        """Reported: the boot effect, the scene, the boot effect, then Steam.
+
+        This service is up before the session that says which mode the machine
+        is in, so for a few seconds a boot into Game Mode looks exactly like a
+        desktop - and the scene took that as its cue. The startup breath is
+        what belongs there, and it should run through to Steam without the
+        scene appearing in the middle of it.
+        """
+        runner = self._runner(uptime=8.0)
+        self._drive(runner, seq=service.UNTOUCHED_SEQ)
+        self.assertEqual(runner.link.frames, 0, "the scene came up mid-boot")
+        self.assertEqual(len(runner.link.standby), 1,
+                         "the startup breath was not left to the ESP")
 
     def test_that_breath_is_still_what_happens_with_no_scene_set(self):
         runner = self._runner(scene="steam")
