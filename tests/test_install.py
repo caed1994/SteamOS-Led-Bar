@@ -26,17 +26,23 @@ from shellvalues import shell_value                   # noqa: E402
 
 
 def _function(name):
-    """One shell function lifted out of the installer, by source.
+    """One shell function lifted out, by source, wherever it lives.
 
-    Sourcing the whole script is not an option: it installs things. Lifting
-    the function keeps the test honest - it runs the same text that ships.
+    Sourcing the whole installer is not an option: it installs things. Lifting
+    the function keeps the test honest - it runs the same text that ships. Both
+    files are searched because a function shared with the uninstaller moves
+    into scripts/user-unit.sh, and a test that only knew one of the two would
+    fail on the move rather than on the behaviour.
     """
-    with open(INSTALLER) as handle:
-        text = handle.read()
-    match = re.search(r"^%s\(\) \{.*?^\}$" % re.escape(name),
-                      text, re.M | re.S)
-    assert match, "%s not found in install.sh" % name
-    return match.group(0)
+    for path in (INSTALLER, os.path.join(HERE, "..", "scripts",
+                                         "user-unit.sh"),
+                 os.path.join(HERE, "..", "uninstall.sh")):
+        with open(path) as handle:
+            match = re.search(r"^%s\(\) \{.*?^\}$" % re.escape(name),
+                              handle.read(), re.M | re.S)
+        if match:
+            return match.group(0)
+    raise AssertionError("%s is in none of the three scripts" % name)
 
 
 def _run(functions, call, roots=("/usr/lib/modules", "/lib/modules")):
@@ -337,6 +343,171 @@ class RootfsTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "0")
 
 
+class UninstallHomeTest(unittest.TestCase):
+    """What the installer wrote into the desktop user's home, taken back.
+
+    None of it is under a root path, so none of the uninstaller's rm -f lines
+    reached it: the menu entry stayed in the launcher pointing at a project
+    that was no longer installed, its icon stayed in the icon theme, and the
+    PATH line the installer had appended stayed in .bashrc under a comment
+    naming an installer that was gone.
+    """
+
+    OWN_BASHRC = "# mine\nalias ll='ls -l'\nexport EDITOR=vim\n"
+
+    def _home(self, sizes=(512,), bashrc=None):
+        room = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, room, True)
+        home = os.path.join(room, "home")
+
+        applications = os.path.join(home, ".local", "share", "applications")
+        os.makedirs(applications)
+        entry = os.path.join(applications, "steamos-led-panel.desktop")
+        with open(entry, "w") as handle:
+            handle.write("[Desktop Entry]\nName=SteamOS LED bar\n")
+
+        icons = []
+        for size in sizes:
+            where = os.path.join(home, ".local", "share", "icons", "hicolor",
+                                 "%dx%d" % (size, size), "apps")
+            os.makedirs(where)
+            icons.append(os.path.join(where, "steamos-led-panel.png"))
+            with open(icons[-1], "wb") as handle:
+                handle.write(b"\x89PNG\r\n")
+
+        profile = os.path.join(home, ".bashrc")
+        if bashrc is not None:
+            with open(profile, "w") as handle:
+                handle.write(bashrc)
+        return room, home, entry, icons, profile
+
+    def _call(self, call, room, home):
+        """Run one uninstaller function, with the machine's answers stubbed."""
+        stubs = os.path.join(room, "stubs")
+        os.makedirs(stubs, exist_ok=True)
+        self._write(stubs, "id", 'case "$1" in\n'
+                                 '  -nu) [[ "$2" == "1000" ]] && echo deck ;;\n'
+                                 '  -u)  echo 1000 ;;\n'
+                                 'esac\n')
+        self._write(stubs, "getent",
+                    'echo "deck:x:1000:1000::%s:/bin/bash"\n' % home)
+        # runuser is how a root script does something as the user; here the
+        # test already *is* that user, so it drops the wrapper and runs it.
+        self._write(stubs, "runuser",
+                    'while [[ $# -gt 0 ]]; do\n'
+                    '  case "$1" in\n'
+                    '    -u) shift 2 ;;\n'
+                    '    --) shift; break ;;\n'
+                    '    *) break ;;\n'
+                    '  esac\n'
+                    'done\n'
+                    'exec "$@"\n')
+        self._write(stubs, "update-desktop-database", "exit 0\n")
+
+        script = ('set -euo pipefail\nsource "%s"\nPLATFORMIO_NOTE=0\n%s\n%s\n'
+                  % (USER_UNIT,
+                     "\n".join(_function(name) for name in
+                               ("remove_menu_entry", "remove_platformio_path",
+                                "add_platformio_to_path")),
+                     call))
+        return subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True,
+            env={"PATH": stubs + ":" + os.environ.get("PATH", ""),
+                 "PKEXEC_UID": "1000", "HOME": home})
+
+    def _write(self, directory, name, body):
+        path = os.path.join(directory, name)
+        with open(path, "w") as handle:
+            handle.write("#!/usr/bin/env bash\n" + body)
+        os.chmod(path, 0o755)
+
+    def test_the_menu_entry_goes(self):
+        room, home, entry, icons, _profile = self._home()
+        done = self._call("remove_menu_entry", room, home)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(os.path.exists(entry), "still in the launcher")
+        self.assertFalse(os.path.exists(icons[0]), "icon still in the theme")
+
+    def test_an_icon_left_at_another_size_goes_too(self):
+        # It is filed under the width read out of the PNG, so an older install
+        # may have put one somewhere this one would never look.
+        room, home, _entry, icons, _profile = self._home(sizes=(128, 512))
+        self._call("remove_menu_entry", room, home)
+        for icon in icons:
+            self.assertFalse(os.path.exists(icon), icon)
+
+    def test_a_home_with_none_of_it_says_nothing(self):
+        room = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, room, True)
+        home = os.path.join(room, "home")
+        os.makedirs(home)
+        done = self._call("remove_menu_entry", room, home)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "")
+
+    def test_the_path_line_goes_and_nothing_else_does(self):
+        line = 'export PATH="$HOME/.platformio/penv/bin:$PATH"'
+        note = "# PlatformIO, added by the SteamOS LED bar installer."
+        room, home, _entry, _icons, profile = self._home(
+            bashrc=self.OWN_BASHRC + "\n" + note + "\n" + line + "\n")
+        done = self._call("remove_platformio_path", room, home)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        with open(profile) as handle:
+            left = handle.read()
+        self.assertNotIn(".platformio", left)
+        self.assertNotIn("SteamOS LED bar installer", left)
+        for kept in self.OWN_BASHRC.strip().splitlines():
+            self.assertIn(kept, left, "it ate something of theirs")
+
+    def test_a_profile_it_never_touched_is_left_alone(self):
+        room, home, _entry, _icons, profile = self._home(bashrc=self.OWN_BASHRC)
+        done = self._call("remove_platformio_path", room, home)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        with open(profile) as handle:
+            self.assertEqual(handle.read(), self.OWN_BASHRC)
+
+    def test_a_line_somebody_wrote_themselves_is_not_ours_to_delete(self):
+        """Only the two exact lines, and only under that comment.
+
+        Somebody who put PlatformIO on their own PATH before ever meeting this
+        project should still have it afterwards.
+        """
+        theirs = 'export PATH="$HOME/.platformio/penv/bin:/opt/bin:$PATH"'
+        room, home, _entry, _icons, profile = self._home(
+            bashrc=self.OWN_BASHRC + theirs + "\n")
+        self._call("remove_platformio_path", room, home)
+        with open(profile) as handle:
+            self.assertIn(theirs, handle.read())
+
+    def test_no_bashrc_at_all_is_not_a_failure(self):
+        room, home, _entry, _icons, _profile = self._home()
+        done = self._call("remove_platformio_path", room, home)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_what_the_installer_writes_is_what_this_takes_back(self):
+        """The two halves against each other, which is the only real proof.
+
+        Both are held to the constants in the shared file, but a test that
+        only checked that would pass on two functions that agreed about a
+        string and disagreed about anything else - a trailing space, a
+        different comment. So the writer runs, then the remover, and what is
+        left has to be exactly what was there before.
+        """
+        room, home, _entry, _icons, profile = self._home(bashrc=self.OWN_BASHRC)
+        # WATCHER_HOME is what add_platformio_to_path writes against; the
+        # remover works it out for itself through watcher_user_dirs.
+        done = self._call(
+            'WATCHER_USER=deck WATCHER_HOME="%s" add_platformio_to_path\n'
+            'grep -ci platformio "%s"\n'
+            'remove_platformio_path' % (home, profile), room, home)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("2", done.stdout.split(),
+                      "the installer wrote no line to take back")
+        with open(profile) as handle:
+            self.assertEqual(handle.read().rstrip("\n"),
+                             self.OWN_BASHRC.rstrip("\n"))
+
+
 class SleepHookTest(unittest.TestCase):
     """The word that hands the strip to the ESP before the machine sleeps."""
 
@@ -610,12 +781,90 @@ class InstallerShapeTest(unittest.TestCase):
     def test_the_path_line_reaches_the_profile_unexpanded(self):
         # Written into .bashrc, so it has to survive as $HOME rather than as
         # whatever $HOME was on the machine that ran the installer.
+        with open(USER_UNIT) as handle:
+            shared = handle.read()
         self.assertIn(
             """PLATFORMIO_PATH_LINE='export PATH="$HOME/.platformio/penv/bin:$PATH"'""",
-            self.text)
+            shared)
 
     def test_the_path_line_is_not_stacked_on_every_run(self):
-        self.assertIn("grep -qF '.platformio/penv/bin' \"$profile\"", self.text)
+        self.assertIn('grep -qF "$PLATFORMIO_PATH_MARK" "$profile"', self.text)
+
+    def test_the_two_scripts_spell_that_line_the_same_way(self):
+        """Written by one and deleted by the other, both by exact match.
+
+        A line appended in one spelling and looked for in another is a line
+        nobody removes - and this one names the installer that put it there,
+        so it would sit in somebody's .bashrc pointing at a project that is
+        no longer on the machine.
+        """
+        with open(USER_UNIT) as handle:
+            shared = handle.read()
+        for name in ("PLATFORMIO_PATH_NOTE=", "PLATFORMIO_PATH_LINE=",
+                     "PLATFORMIO_PATH_MARK="):
+            self.assertIn(name, shared)
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        self.assertIn('grep -vxF "$2" "$profile" | grep -vxF "$3"', text)
+        # Neither carries a copy of the line itself to drift from. Where pio
+        # lives is a different question and stays where it is asked.
+        for path in (INSTALLER, UNINSTALLER):
+            with open(path) as handle:
+                self.assertNotIn('export PATH="$HOME/.platformio',
+                                 handle.read(), path)
+
+    # Paths the installer names but does not create, so the uninstaller has
+    # nothing to take back. Listed rather than guessed at, so that a new one
+    # is a decision somebody makes here rather than a file left behind.
+    NOT_INSTALLED = {
+        "SHIM_DEVICE",      # the kernel makes it when the module loads
+        "SOURCE_DIR",       # the clone, which is the user's
+    }
+
+    def test_every_path_the_installer_writes_is_one_the_uninstaller_knows(self):
+        """Which is the whole question: does it all come back off again.
+
+        By constant rather than by literal, because both scripts already name
+        them the same way, and a path added to one and missed in the other is
+        exactly the kind of leftover nobody notices - the menu entry sat in
+        somebody's launcher that way, pointing at a project that was no longer
+        installed.
+        """
+        with open(UNINSTALLER) as handle:
+            uninstaller = handle.read()
+        with open(USER_UNIT) as handle:
+            shared = handle.read()
+
+        named = set(re.findall(r"^([A-Z][A-Z0-9_]*)=[\"']?/", self.text, re.M))
+        named |= set(re.findall(r"^([A-Z][A-Z0-9_]*)=[\"']?\.?[a-z]", shared,
+                                re.M))
+        missing = sorted(
+            name for name in named - self.NOT_INSTALLED
+            if name not in uninstaller and name not in shared)
+        self.assertEqual(missing, [], "the uninstaller never mentions these")
+
+    def test_the_things_that_live_in_a_home_are_taken_back(self):
+        # Under no root path, so none of the rm -f lines reach them - see
+        # UninstallHomeTest for what these actually do.
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        for call in ("remove_menu_entry", "remove_platformio_path"):
+            self.assertIn("\n%s\n" % call, text,
+                          "%s is defined but never called" % call)
+
+    def test_what_it_leaves_behind_it_says_so(self):
+        """A thing left on purpose and a thing forgotten look identical.
+
+        So the ones that are somebody else's - the config, the module, the
+        clone, lingering, PlatformIO itself - are reported at the end rather
+        than left to be found.
+        """
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        self.assertIn('echo "Left in place:"', text)
+        for subject in ("$CONFIG_PATH", "--remove-module", "$SOURCE_DIR",
+                        "disable-linger", ".platformio"):
+            self.assertIn(subject, text, subject)
 
     def test_a_partial_upgrade_is_used_on_purpose(self):
         # -Syu would pull a newer kernel than the one now running, and the

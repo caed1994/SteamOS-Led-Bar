@@ -320,14 +320,9 @@ install_user_units() {
     return 0
 }
 
-# Whether that user's systemd is set to keep running. The same question the
-# control panel asks, and the only one that settles it.
-linger_is_on() {    # linger_is_on USER
-    local state
-    state="$(loginctl show-user "$1" --property=Linger 2>/dev/null || true)"
-    [[ "$state" == *"Linger=yes"* ]]
-}
-
+# linger_is_on() is in scripts/user-unit.sh: the uninstaller asks the same
+# question to say whether it left the switch on.
+#
 # Turn it on, and then look. Trusting the exit code is how the log can say it
 # was done while the panel says it is off, with nothing anywhere to explain
 # the difference - so what loginctl had to say for itself is passed on rather
@@ -605,23 +600,22 @@ find_pio() {
 # tell you to use.
 PLATFORMIO_INSTALLER_URL="https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py"
 
-# The line that puts pio on the PATH of a normal shell. Single-quoted so $HOME
-# reaches the profile unexpanded and keeps working if the home directory moves.
-PLATFORMIO_PATH_LINE='export PATH="$HOME/.platformio/penv/bin:$PATH"'
+# PLATFORMIO_PATH_LINE and its comment are in scripts/user-unit.sh: the
+# uninstaller deletes exactly these two lines again, and a line written in one
+# spelling and looked for in another is a line nobody removes.
 
 add_platformio_to_path() {
     local profile="$WATCHER_HOME/.bashrc"
     # The standalone installer leaves the PATH to you, so without this "pio"
     # is only found by things that know where to look - this installer does,
     # your shell does not.
-    if grep -qF '.platformio/penv/bin' "$profile" 2>/dev/null; then
+    if grep -qF "$PLATFORMIO_PATH_MARK" "$profile" 2>/dev/null; then
         return 0                        # already there; do not stack copies
     fi
     say "Adding PlatformIO to the PATH in $profile"
     if ! runuser -u "$WATCHER_USER" -- bash -c '
-            printf "\n# PlatformIO, added by the SteamOS LED bar installer.\n%s\n" \
-                "$1" >> "$2"
-        ' _ "$PLATFORMIO_PATH_LINE" "$profile"; then
+            printf "\n%s\n%s\n" "$1" "$2" >> "$3"
+        ' _ "$PLATFORMIO_PATH_NOTE" "$PLATFORMIO_PATH_LINE" "$profile"; then
         warn "could not write $profile - add this line yourself:"
         warn "    $PLATFORMIO_PATH_LINE"
     fi
@@ -761,22 +755,6 @@ install_panel_icon() {
     fi
 }
 
-refresh_desktop_caches() {  # refresh_desktop_caches <applications dir>
-    # Plasma reads the menu from a cache it builds itself, so a rewritten
-    # entry keeps its old icon until that is rebuilt - which is exactly what
-    # "the icon did not change" looks like. Best effort: none of this is
-    # worth failing an install over, and a logout fixes it anyway.
-    runuser -u "$WATCHER_USER" -- update-desktop-database "$1" >/dev/null 2>&1 \
-        || true
-    local cache
-    for cache in kbuildsycoca6 kbuildsycoca5; do
-        command -v "$cache" >/dev/null 2>&1 || continue
-        runuser -u "$WATCHER_USER" -- "$cache" --noincremental >/dev/null 2>&1 \
-            || true
-        break
-    done
-}
-
 install_control_panel() {
     local source="$SOURCE_DIR/gui/steamos-led-panel.desktop"
     [[ -f "$source" ]] || { PANEL_STATUS="not in the repository"; return 1; }
@@ -788,14 +766,16 @@ install_control_panel() {
 
     # The menu entry points into the clone rather than into INSTALL_DIR: the
     # panel's repair button re-runs install.sh, which only exists here.
-    local dir="$WATCHER_HOME/.local/share/applications"
+    # PANEL_ENTRY_DIR and PANEL_ENTRY are in scripts/user-unit.sh, so the
+    # uninstaller takes back the same file this writes.
+    local dir="$WATCHER_HOME/$PANEL_ENTRY_DIR"
     runuser -u "$WATCHER_USER" -- mkdir -p "$dir" || {
         PANEL_STATUS="could not write to $dir"; return 1; }
     sed -e "s|@SOURCE_DIR@|$SOURCE_DIR|g" \
         -e "s|@ICON@|$(install_panel_icon)|g" "$source" \
-        > "$dir/steamos-led-panel.desktop"
-    chown "$WATCHER_USER:$WATCHER_USER" "$dir/steamos-led-panel.desktop"
-    chmod 0644 "$dir/steamos-led-panel.desktop"
+        > "$dir/$PANEL_ENTRY"
+    chown "$WATCHER_USER:$WATCHER_USER" "$dir/$PANEL_ENTRY"
+    chmod 0644 "$dir/$PANEL_ENTRY"
     refresh_desktop_caches "$dir"
 
     if runuser -u "$WATCHER_USER" -- python3 -c 'import tkinter' >/dev/null 2>&1

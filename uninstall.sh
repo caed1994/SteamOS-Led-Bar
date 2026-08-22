@@ -70,6 +70,71 @@ remove_user_units() {
 
 remove_user_units
 
+# --- what the installer put in that user's home -----------------------------
+#
+# Not under any root path, so none of the rm -f lines below reach it - and all
+# of it was written by this project rather than by whoever is uninstalling.
+
+remove_menu_entry() {
+    watcher_user_dirs || return 0
+
+    local applications="$WATCHER_HOME/$PANEL_ENTRY_DIR"
+    local removed=0
+    if [[ -f "$applications/$PANEL_ENTRY" ]]; then
+        rm -f "$applications/$PANEL_ENTRY"
+        removed=1
+    fi
+
+    # Every size rather than the one this clone's icon happens to be: the
+    # installer files it under the width it reads out of the PNG, so an older
+    # install may well have left one somewhere else.
+    local icon
+    for icon in "$WATCHER_HOME"/$PANEL_ICON_GLOB; do
+        [[ -f "$icon" ]] || continue
+        rm -f "$icon"
+        removed=1
+    done
+
+    [[ $removed -eq 1 ]] || return 0
+    echo "Removed the control panel's menu entry and icon for $WATCHER_USER."
+    # Or the menu goes on offering it, and launching something that is no
+    # longer there, until the cache is rebuilt by itself.
+    refresh_desktop_caches "$applications"
+}
+
+# The two lines the installer appends to the user's .bashrc so "pio" is a
+# command they can type. PlatformIO itself stays: it is somebody else's
+# program, it may well be used for other things, and it is a few hundred
+# megabytes nobody should have to fetch again. The lines naming this installer
+# are ours to take back, and the summary says how to put them back by hand.
+remove_platformio_path() {
+    watcher_user_dirs || return 0
+
+    local profile="$WATCHER_HOME/.bashrc"
+    [[ -f "$profile" ]] || return 0
+    grep -qF "$PLATFORMIO_PATH_MARK" "$profile" 2>/dev/null || return 0
+
+    # By exact match, and as the user: anything looser would edit a line
+    # somebody put there themselves, and rewriting it as root would leave
+    # their own .bashrc owned by root. Written back through the same inode,
+    # so its ownership and mode are whatever they already were.
+    if runuser -u "$WATCHER_USER" -- bash -c '
+            profile="$1"; scratch="$profile.steamos-led.$$"
+            grep -vxF "$2" "$profile" | grep -vxF "$3" > "$scratch" || true
+            cat "$scratch" > "$profile" && rm -f "$scratch"
+        ' _ "$profile" "$PLATFORMIO_PATH_NOTE" "$PLATFORMIO_PATH_LINE"; then
+        echo "Took the PlatformIO PATH line back out of $profile."
+        PLATFORMIO_NOTE=1
+    else
+        echo "Could not edit $profile - remove this line by hand:" >&2
+        echo "    $PLATFORMIO_PATH_LINE" >&2
+    fi
+}
+
+PLATFORMIO_NOTE=0
+remove_menu_entry
+remove_platformio_path
+
 # Stopping the service blanks the strip before the process exits.
 systemctl disable --now steamos-led-serial.service 2>/dev/null || true
 rm -f "$UNIT_PATH"
@@ -89,30 +154,60 @@ fi
 
 rm -rf "${INSTALL_DIR:?}"
 
-if [[ $PURGE -eq 1 ]]; then
-    rm -f "$CONFIG_PATH"
-    echo "Removed, including $CONFIG_PATH."
-else
-    echo "Removed. Kept $CONFIG_PATH (use --purge to delete it)."
-fi
-
-if [[ $REMOVE_MODULE -eq 0 ]]; then
-    echo "The $MODULE_NAME kernel module was left in place (--remove-module removes it)."
-    exit 0
-fi
+[[ $PURGE -eq 1 ]] && rm -f "$CONFIG_PATH"
+echo "Removed."
 
 # --- kernel module ---------------------------------------------------------
 #
 # The rootfs was unlocked at the top of this run and stays that way until the
 # exit trap puts it back - see unlock_rootfs.
 
-if lsmod | grep -q "^${MODULE_NAME//-/_}"; then
-    rmmod "$MODULE_NAME" 2>/dev/null || modprobe -r "$MODULE_NAME" 2>/dev/null || true
-    echo "Module unloaded."
+if [[ $REMOVE_MODULE -eq 1 ]]; then
+    if lsmod | grep -q "^${MODULE_NAME//-/_}"; then
+        rmmod "$MODULE_NAME" 2>/dev/null \
+            || modprobe -r "$MODULE_NAME" 2>/dev/null || true
+        echo "Module unloaded."
+    fi
+    rm -f "$MODULE_PATH" "$MODULES_LOAD"
+    depmod "$RELEASE" || true
+    echo "Module removed from $MODULE_PATH."
 fi
 
-rm -f "$MODULE_PATH" "$MODULES_LOAD"
-depmod "$RELEASE" || true
-echo "Module removed from $MODULE_PATH."
-# /usr/lib/depmod.d/10-updates.conf is left alone: it only sets the general
-# search order for updates/ and other modules may rely on it.
+# --- what is still here, and why -------------------------------------------
+#
+# Said rather than left to be discovered. Everything above is this project's
+# own; everything below is either somebody else's, or yours, or a switch that
+# other things may be hanging off - so it is reported instead of removed.
+
+echo
+echo "Left in place:"
+if [[ $PURGE -eq 0 ]]; then
+    echo "  $CONFIG_PATH"
+    echo "      your settings - --purge deletes it"
+fi
+if [[ $REMOVE_MODULE -eq 0 ]]; then
+    echo "  the $MODULE_NAME kernel module"
+    echo "      --remove-module unloads and removes it"
+else
+    echo "  /usr/lib/depmod.d/10-updates.conf"
+    echo "      it only sets the general search order for updates/, and other"
+    echo "      modules may rely on it"
+fi
+echo "  $SOURCE_DIR"
+echo "      the clone, which is yours - delete it if you like"
+if [[ -n "${WATCHER_USER:-}" ]] && linger_is_on "$WATCHER_USER"; then
+    # Turned on by the installer if it was not already on, and not turned off
+    # here: it is a per-user switch that anything else in that account may be
+    # relying on by now, and taking it away would stop those too.
+    echo "  lingering for $WATCHER_USER, so their services survive Game Mode"
+    echo "      sudo loginctl disable-linger $WATCHER_USER"
+fi
+if [[ -n "${WATCHER_HOME:-}" && -d "$WATCHER_HOME/.platformio" ]]; then
+    echo "  $WATCHER_HOME/.platformio"
+    echo "      PlatformIO, which builds the ESP firmware. It is not ours,"
+    echo "      and other projects may be using it."
+    if [[ $PLATFORMIO_NOTE -eq 1 ]]; then
+        echo "      To go on typing \"pio\", put this back in ~/.bashrc:"
+        echo "        $PLATFORMIO_PATH_LINE"
+    fi
+fi

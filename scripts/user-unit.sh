@@ -81,6 +81,56 @@ user_systemctl() {
         systemctl --user "$@" >/dev/null 2>&1
 }
 
+# Whether that user's systemd is set to keep running with no session open.
+# The same question the control panel asks, and the only one that settles it -
+# asked by the installer before it turns the switch on, and by the uninstaller
+# to say that it left it on.
+linger_is_on() {    # linger_is_on USER
+    local state
+    state="$(loginctl show-user "$1" --property=Linger 2>/dev/null || true)"
+    [[ "$state" == *"Linger=yes"* ]]
+}
+
+# --- the desktop user's own home --------------------------------------------
+#
+# Three things land there that root's paths do not cover, and all three have to
+# be named identically by the script that writes them and the one that takes
+# them back - see the note at the top of this file.
+
+# The control panel's menu entry, and the icon it points at. The icon is filed
+# under the width read out of the PNG, so the uninstaller matches every size
+# rather than guessing at one: an older install may have left one elsewhere.
+PANEL_ENTRY_DIR=".local/share/applications"
+PANEL_ENTRY="steamos-led-panel.desktop"
+PANEL_ICON_GLOB=".local/share/icons/hicolor/*/apps/steamos-led-panel.png"
+
+# What the installer appends to the user's .bashrc so that "pio" is a command
+# they can type. Both lines exactly as written, because the uninstaller deletes
+# them by exact match - anything looser would edit a line somebody put there
+# themselves.
+PLATFORMIO_PATH_NOTE="# PlatformIO, added by the SteamOS LED bar installer."
+PLATFORMIO_PATH_LINE='export PATH="$HOME/.platformio/penv/bin:$PATH"'
+# What the idempotence check looks for, so a second install does not stack a
+# second copy - and so the uninstaller can tell whether there is one at all.
+PLATFORMIO_PATH_MARK=".platformio/penv/bin"
+
+refresh_desktop_caches() {  # refresh_desktop_caches <applications dir>
+    # Plasma reads the menu from a cache it builds itself, so an entry that has
+    # been rewritten keeps its old icon - and one that has been removed goes on
+    # being offered, and launching something that is no longer there - until
+    # that cache is rebuilt. Best effort: none of this is worth failing over,
+    # and a logout fixes it anyway.
+    runuser -u "$WATCHER_USER" -- update-desktop-database "$1" >/dev/null 2>&1 \
+        || true
+    local cache
+    for cache in kbuildsycoca6 kbuildsycoca5; do
+        command -v "$cache" >/dev/null 2>&1 || continue
+        runuser -u "$WATCHER_USER" -- "$cache" --noincremental >/dev/null 2>&1 \
+            || true
+        break
+    done
+}
+
 # --- the read-only rootfs ---------------------------------------------------
 #
 # SteamOS mounts / read-only, and both scripts touch it: the installer writes
