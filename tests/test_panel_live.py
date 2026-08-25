@@ -166,6 +166,9 @@ class LiveWindowTest(unittest.TestCase):
         # - see the flash rows - so the rainbow choice with the temperature
         # marks stepped in under it is what is left of the shape.
         self.panel.notebook.select(self._page_named("Strip"))
+        # The block has to be on the page to be measured, and which block is
+        # on it is now a choice - see the note above DEPENDS_ON.
+        self.panel.vars["RAINBOW_SHOWS"][0].set("Temperature")
         self.root.update()
         rows = ("STANDBY_PULSE", "RAINBOW_SHOWS", "TEMPERATURE_MIN",
                 "TEMPERATURE_MAX")
@@ -223,6 +226,17 @@ class LiveWindowTest(unittest.TestCase):
     def _greyed(self, key):
         return "disabled" in self.panel._rows[key][1][0].state()
 
+    def _shown(self, key):
+        """Whether the row is on the page at all.
+
+        The other half of the answer: a row waiting on a switch is greyed and
+        stays, a row waiting on a choice is taken away - see the note above
+        DEPENDS_ON. grid_info() empties when a widget is grid_remove'd, and
+        fills again with the place it had.
+        """
+        labels, controls = self.panel._rows[key]
+        return bool((labels + controls)[0].grid_info())
+
     def test_the_slot_reaches_only_the_rows_its_own_choice_needs(self):
         """One menu, and two sets of rows waiting on two different answers.
 
@@ -236,36 +250,84 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         slot = self.panel.vars["RAINBOW_SHOWS"][0]
         #                                temperature  load
-        for label, wanted in (("Temperature", (False, True)),
-                              ("CPU and GPU load", (True, False)),
-                              ("Steam's rainbow", (True, True)),
-                              ("Fire", (True, True))):
+        for label, wanted in (("Temperature", (True, False)),
+                              ("CPU and GPU load", (False, True)),
+                              ("Steam's rainbow", (False, False)),
+                              ("Fire", (False, False))):
             slot.set(label)
             self.root.update()
-            self.assertEqual((self._greyed("TEMPERATURE_MIN"),
-                              self._greyed("LOAD_CPU_COLOR")), wanted, label)
-            self.assertEqual(self._greyed("LOAD_GPU_COLOR"),
-                             self._greyed("LOAD_CPU_COLOR"),
+            self.assertEqual((self._shown("TEMPERATURE_MIN"),
+                              self._shown("LOAD_CPU_COLOR")), wanted, label)
+            self.assertEqual(self._shown("LOAD_GPU_COLOR"),
+                             self._shown("LOAD_CPU_COLOR"),
                              "the two halves are one decision")
+            self.assertEqual(self._shown("TEMPERATURE_SENSOR"),
+                             self._shown("TEMPERATURE_MIN"),
+                             "the marks and the sensor are one decision too")
 
-    def test_the_gauge_colours_start_on_a_name_rather_than_on_hex(self):
-        # The menu holds what is set; a shipped default the list does not
-        # offer becomes an entry under its own six hex digits, which reads as
-        # a setting nobody chose.
+    def test_a_row_taken_away_comes_back_where_it_was(self):
+        """grid_remove rather than grid_forget, and the difference matters.
+
+        forget throws the placement away, so the row would come back at
+        whatever position the grid handed out next - which on this page means
+        underneath everything, in the wrong group.
+        """
         self.panel.notebook.select(self._page_named("Strip"))
+        slot = self.panel.vars["RAINBOW_SHOWS"][0]
+        slot.set("Temperature")
         self.root.update()
-        for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
-            shown = self.panel.vars[key][0].get()
-            self.assertFalse(shown.startswith("#"),
-                             "%s opens on %s" % (key, shown))
+        before = {key: self.panel._rows[key][0][0].grid_info()["row"]
+                  for key in ("TEMPERATURE_MIN", "TEMPERATURE_SENSOR")}
+        slot.set("Fire")
+        self.root.update()
+        self.assertFalse(self._shown("TEMPERATURE_MIN"))
+        slot.set("Temperature")
+        self.root.update()
+        self.assertEqual({key: self.panel._rows[key][0][0].grid_info()["row"]
+                          for key in before}, before)
 
-    def test_a_scene_with_no_colour_greys_the_colour_out(self):
+    def test_the_page_closes_up_behind_a_row_it_took_away(self):
+        """The whole point of taking it away rather than greying it.
+
+        An empty grid row still has the floor every row is given, so that a
+        column of switches, menus and sliders keeps one rhythm - and a floor
+        under a row that is gone is the gap the row used to fill. Three of
+        those below the slot is a page that looks like it failed to draw.
+        """
+        self.panel.notebook.select(self._page_named("Strip"))
+        slot = self.panel.vars["RAINBOW_SHOWS"][0]
+        strip = ("LED_COUNT", "REVERSE", "MAX_BRIGHTNESS", "MIN_BRIGHTNESS",
+                 "PATROL_DOTS", "SPEED", "STANDBY_PULSE", "RAINBOW_SHOWS",
+                 "TEMPERATURE_MIN", "TEMPERATURE_MAX", "TEMPERATURE_SENSOR",
+                 "LOAD_CPU_COLOR", "LOAD_GPU_COLOR")
+
+        def lowest():
+            return max(self.panel._rows[key][0][0].winfo_rooty()
+                       for key in strip if self._shown(key))
+
+        slot.set("Fire")                # neither block is on the page
+        for _ in range(4):
+            self.root.update()
+        self.assertEqual(lowest(),
+                         self.panel._rows["RAINBOW_SHOWS"][0][0].winfo_rooty(),
+                         "something is still sitting below the slot")
+        bare = lowest()
+
+        slot.set("Temperature")
+        for _ in range(4):
+            self.root.update()
+        self.assertGreater(lowest(), bare, "the marks did not come back")
+
+    def test_a_scene_with_no_colour_takes_the_colour_away(self):
         """The entry that means several values, which DEPENDS_ON could not say.
 
         Three of the five scenes take the colour and two do not, and a rule
         per scene would be three rules that all have to hold at once - which
-        is a colour greyed out forever. Checked here rather than by reading
-        the table, because what people see is the control.
+        is a colour gone forever. Checked here rather than by reading the
+        table, because what people see is the control.
+
+        Taken away rather than greyed: a scene is a choice, and the colour
+        belongs to the scenes that have one - see the note above DEPENDS_ON.
         """
         self.panel.notebook.select(self._page_named("Desktop mode"))
         self.root.update()
@@ -275,9 +337,9 @@ class LiveWindowTest(unittest.TestCase):
                               ("Off", True), ("Leave it to Steam", True)):
             scene.set(label)
             self.root.update()
-            self.assertEqual(self._greyed("DESKTOP_COLOR"), wanted, label)
+            self.assertEqual(self._shown("DESKTOP_COLOR"), not wanted, label)
 
-    def test_each_of_the_three_is_greyed_by_a_rule_of_its_own(self):
+    def test_each_of_the_three_goes_by_a_rule_of_its_own(self):
         """Because no two of them apply to the same set of scenes.
 
         A rainbow has a brightness and a speed but no colour of yours; one
@@ -298,9 +360,9 @@ class LiveWindowTest(unittest.TestCase):
             scene.set(label)
             self.root.update()
             self.assertEqual(
-                (self._greyed("DESKTOP_COLOR"),
-                 self._greyed("DESKTOP_BRIGHTNESS"),
-                 self._greyed("DESKTOP_SPEED")), wanted, label)
+                (not self._shown("DESKTOP_COLOR"),
+                 not self._shown("DESKTOP_BRIGHTNESS"),
+                 not self._shown("DESKTOP_SPEED")), wanted, label)
 
     def _corner(self, widget):
         """The very corner pixel of the swatch this widget wears.
@@ -332,18 +394,21 @@ class LiveWindowTest(unittest.TestCase):
         on a greyed field as a box. In the light theme the two shades are
         near enough that nothing shows, which is why this went out.
         """
-        self.panel.notebook.select(self._page_named("Desktop mode"))
-        scene = self.panel.vars["DESKTOP_SCENE"][0]
-        field = self.panel._widgets["DESKTOP_COLOR"]
+        # On a row a *switch* governs: those are the ones still greyed, and
+        # greying is what this is about. A row waiting on a choice is taken
+        # away, and a swatch nobody can see needs no shade.
+        self.panel.notebook.select(self._page_named("Notifications"))
+        switch = self.panel.vars["NOTIFY_ACHIEVEMENTS"][0]
+        field = self.panel._widgets["ACHIEVEMENT_COLOR"]
 
-        scene.set("One colour")
+        switch.set(True)
         self.root.update()
         self.assertEqual(self._rgb(self._corner(field)),
                          self._shade("surface"))
 
-        scene.set("Rainbow")            # the colour has nothing to say here
+        switch.set(False)               # the colour has nothing to say here
         self.root.update()
-        self.assertTrue(self._greyed("DESKTOP_COLOR"))
+        self.assertTrue(self._greyed("ACHIEVEMENT_COLOR"))
         self.assertEqual(
             self._rgb(self._corner(field)),
             self._shade(self.panel_module.material.disabled_container(
@@ -395,18 +460,18 @@ class LiveWindowTest(unittest.TestCase):
         Until the window was closed and opened, which is what made it look
         like a drawing fault rather than a logic one.
         """
-        self.panel.vars["DESKTOP_SCENE"][0].set("Rainbow")
+        self.panel.vars["NOTIFY_ACHIEVEMENTS"][0].set(False)
         self.root.update()
-        self.assertTrue(self._greyed("DESKTOP_COLOR"))
+        self.assertTrue(self._greyed("ACHIEVEMENT_COLOR"))
         self.panel._set_busy(True)
         self.root.update()
         self.panel._set_busy(False)
         self.root.update()
-        self.assertTrue(self._greyed("DESKTOP_COLOR"),
+        self.assertTrue(self._greyed("ACHIEVEMENT_COLOR"),
                         "the colour woke up when the command ended")
         # And the swatch went back with it, rather than being left behind.
         self.assertEqual(
-            self._rgb(self._corner(self.panel._widgets["DESKTOP_COLOR"])),
+            self._rgb(self._corner(self.panel._widgets["ACHIEVEMENT_COLOR"])),
             self._shade(self.panel_module.material.disabled_container(
                 self.panel.roles)))
 
@@ -500,13 +565,20 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(len(runs), 1, "once for the burst, not once each")
 
     def test_a_switch_that_does_govern_something_still_greys_it(self):
-        # The control for the two above: cheap is easy if it stops working.
-        self.panel.notebook.select(self._page_named("Desktop mode"))
+        """The control for the two above, and for the other half of the rule.
+
+        A switch is not a choice: the setting under it belongs to the feature
+        the switch turns on, so it is greyed and stays where you can see it
+        exists. Only rows waiting on a choice are taken away.
+        """
+        self.panel.notebook.select(self._page_named("Notifications"))
         self.root.update()
-        for label, wanted in (("Rainbow", True), ("Breath", False)):
-            self.panel.vars["DESKTOP_SCENE"][0].set(label)
+        for state, wanted in ((False, True), (True, False)):
+            self.panel.vars["NOTIFY_ACHIEVEMENTS"][0].set(state)
             self.root.update()
-            self.assertEqual(self._greyed("DESKTOP_COLOR"), wanted, label)
+            self.assertEqual(self._greyed("ACHIEVEMENT_COLOR"), wanted, state)
+            self.assertTrue(self._shown("ACHIEVEMENT_COLOR"),
+                            "a switch does not take its setting away")
 
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
         # The rail takes a sixth of the width, so wrapping to the window laid
@@ -628,6 +700,9 @@ class LiveWindowTest(unittest.TestCase):
         for _ in range(6):
             self.root.update()
         self.panel.notebook.select(self._page_named("Strip"))
+        # The sensor menu is the widest control on the page, and it is only
+        # on the page while the slot is showing the temperature.
+        self.panel.vars["RAINBOW_SHOWS"][0].set("Temperature")
         for _ in range(4):
             self.root.update()
         for key in ("TEMPERATURE_SENSOR", "RAINBOW_SHOWS", "LED_COUNT"):

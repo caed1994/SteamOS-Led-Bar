@@ -243,9 +243,22 @@ SETTINGS_TABS = (
     ("Advanced", ADVANCED),
 )
 
-# Settings that only mean something while another switch is on. They are
-# greyed out rather than hidden: you can still see that the setting exists,
-# and where it lives, without it asking for attention it has not earned.
+# Settings that only mean something while something else says so, and what
+# happens to them while it does not. Two answers, because there are two kinds
+# of dependency here and they are not the same question.
+#
+# A row waiting on a *switch* is greyed and stays where it is. The setting
+# belongs to the feature that switch turns on, so greying it says "turn that
+# on to use this" while leaving you able to see that it exists and where it
+# lives - which is how you find out the feature has it at all.
+#
+# A row waiting on a *choice* is taken away. It does not belong to a feature
+# you have switched off; it belongs to one of several things the same slot can
+# hold, and the others' settings are not yours to be looking at. Three greyed
+# temperature marks under a load gauge are three rows about an effect that is
+# not on the bar - and unlike a switch, the choice that brings them back is
+# the row directly above them, so nothing is hidden from anybody who goes
+# looking. See _hides.
 #
 # An entry is either a key, which has to be switched on, or (key, value),
 # which has to be set to exactly that - the temperature settings mean nothing
@@ -1396,6 +1409,10 @@ class Panel:
         self.update_button = None
         # key -> (labels, controls), so a setting can be greyed out whole
         self._rows = {}
+        # key -> (grid, row, minsize, widgets), for a row that is taken away
+        # rather than greyed. Apart from _rows because everything else reads
+        # that as a pair, and because only some rows ever need this.
+        self._row_places = {}
         # page -> the canvas that scrolls it, for the wheel to find
         self._scrollers = {}
         # What is booked with after(), so it can be dropped when the window is
@@ -1847,7 +1864,15 @@ class Panel:
                 after = (indents[position + 1]
                          if position + 1 < len(indents) else 0)
                 fenced = (here == 0 and (after > 0 or before > 0)
-                          or here > 0 and before == 0)
+                          or here > 0 and before == 0
+                          # Two stepped-in rows that can never be on the page
+                          # together are two blocks, however close together
+                          # they are written: whichever of them is showing is
+                          # the first row under the choice that brought it,
+                          # and wants the same room under it as the other one.
+                          or (position
+                              and self._exclusive(entry[0],
+                                                  entries[position - 1][0])))
                 self._build_row(grid, row, *entry,
                                 lead=BLOCK_GAP if position and fenced else 0)
                 row += 1
@@ -1855,6 +1880,32 @@ class Panel:
             self._note(outer, note).pack(anchor="w", padx=SIDE_MARGIN,
                                          pady=(GROUP_GAP, 0))
         return outer
+
+    @staticmethod
+    def _wanted(needs, switch):
+        """Which answers from `switch` this row accepts, as a set."""
+        for need in needs:
+            if isinstance(need, tuple) and need[0] == switch:
+                value = need[1]
+                return set(value if isinstance(value, tuple) else (value,))
+        return set()
+
+    def _exclusive(self, key, other):
+        """Whether these two rows can never be on the page at the same time.
+
+        Which is not the same as "they hang off different rules". The desktop
+        scene's colour and its brightness hang off different lists of scenes
+        and are on the page together under three of them - one block. The
+        temperature marks and the load gauge's colours hang off answers from
+        the same choice that share nothing, so they are two.
+        """
+        needs, theirs = DEPENDS_ON.get(key, ()), DEPENDS_ON.get(other, ())
+        for switch in {need[0] for need in needs if isinstance(need, tuple)}:
+            mine, yours = self._wanted(needs, switch), self._wanted(theirs,
+                                                                   switch)
+            if yours and not (mine & yours):
+                return True
+        return False
 
     def _indent(self, key):
         """How far in a setting sits, by what it hangs off.
@@ -1878,13 +1929,17 @@ class Panel:
         own padding is the same everywhere, which is what makes the column
         regular now that the controls in it all stand the same height.
         """
-        grid.rowconfigure(row, minsize=self.roles["_sizes"]["control"]
-                          + 2 * ROW_PAD + lead)
+        minsize = self.roles["_sizes"]["control"] + 2 * ROW_PAD + lead
+        grid.rowconfigure(row, minsize=minsize)
         name = ttk.Label(grid, text=label)
         name.grid(row=row, column=0, sticky="w", pady=(ROW_PAD + lead, ROW_PAD),
                   padx=(self._indent(key) * INDENT_STEP, GROUP_GAP))
         value = self.config.get(key, config_module.DEFAULTS[key])
         labels, controls = [name], []
+        # What actually sits in this grid, which is not the same list: a
+        # slider is two widgets inside a frame, and it is the frame the grid
+        # knows about. Taking a row away means taking these - see _set_enabled.
+        occupies = [name]
 
         if kind in ("bool", FLASH, FIXED):
             variable = tk.BooleanVar(value=bool(value))
@@ -1892,15 +1947,18 @@ class Panel:
             control.grid(row=row, column=CONTROL_COLUMN, sticky="w",
                          pady=(ROW_PAD + lead, ROW_PAD))
             controls.append(control)
+            occupies.append(control)
             self._follow(variable)
             if kind == FLASH:
                 self._build_look(grid, row, low, lead=lead)
             elif kind == FIXED:
                 # What the two menus would have said, where they would have
                 # been. A blank there reads as a setting that failed to draw.
-                ttk.Label(grid, text=low, style="Muted.TLabel").grid(
-                    row=row, column=COLOUR_COLUMN, columnspan=2, sticky="w",
-                    padx=(LOOK_GAP, 0), pady=(ROW_PAD + lead, ROW_PAD))
+                said = ttk.Label(grid, text=low, style="Muted.TLabel")
+                said.grid(row=row, column=COLOUR_COLUMN, columnspan=2,
+                          sticky="w", padx=(LOOK_GAP, 0),
+                          pady=(ROW_PAD + lead, ROW_PAD))
+                occupies.append(said)
         elif kind in ("choice", "sensor", "named"):
             # Entries that are labels for something else - see the menu
             # helpers in ledpanel. A "choice" is the case where the label and
@@ -1915,17 +1973,23 @@ class Panel:
                        width=SENSOR_WIDTH if kind == "sensor" else MENU_WIDTH,
                        lead=ROW_PAD + lead)
             controls.append(self._widgets[key])
+            occupies.append(self._widgets[key])
             self._follow(variable)
         else:
             variable = tk.DoubleVar(value=float(value))
-            scale, readout = self._scale(grid, row, variable, low, high, step,
-                                         lead=ROW_PAD + lead)
+            scale, readout, holder = self._scale(grid, row, variable, low,
+                                                 high, step,
+                                                 lead=ROW_PAD + lead)
             controls.append(scale)
             self._follow(variable)
             labels.append(readout)
+            occupies.append(holder)
 
         self.vars[key] = (variable, "bool" if kind in (FLASH, FIXED) else kind)
         self._rows[key] = (labels, controls)
+        # Only what a row that can be taken away needs, and kept apart from
+        # _rows because everything else reads that as a pair.
+        self._row_places[key] = (grid, row, minsize, occupies)
 
     def _build_look(self, grid, row, prefix, lead=0):
         """The colour and the shape of one notification, beside its switch.
@@ -2064,8 +2128,33 @@ class Panel:
             return shown in wanted
         return shown == wanted
 
+    def _hides(self, key):
+        """Whether this row is taken away rather than greyed while it is off.
+
+        By what it hangs off, not by a list: a rule naming a value is a
+        *choice*, and the rows waiting on one belong to whichever thing the
+        slot is holding. See the note above DEPENDS_ON for why the two kinds
+        are answered differently.
+        """
+        return any(isinstance(need, tuple) for need in DEPENDS_ON.get(key, ()))
+
     def _set_enabled(self, key, on):
         labels, controls = self._rows[key]
+        if self._hides(key):
+            grid, row, minsize, occupies = self._row_places[key]
+            if bool(occupies[0].grid_info()) == bool(on):
+                return
+            # grid_remove rather than grid_forget: it remembers the placement,
+            # so the row comes back where it belongs instead of at the bottom
+            # of the page.
+            for widget in occupies:
+                widget.grid() if on else widget.grid_remove()
+            # And the row's floor with it. Every row is given one so a column
+            # of switches, menus and sliders keeps one rhythm - but a floor
+            # under an empty row is the gap the row used to fill, which is
+            # exactly what taking it away was meant to close.
+            grid.rowconfigure(row, minsize=minsize if on else 0)
+            return
         # Nothing to do when the row already looks like that, which is almost
         # every time: one moved control asks this of every row that hangs off
         # anything, and hardly any of them hang off the one that moved. Over
@@ -2429,7 +2518,9 @@ class Panel:
         scale.grid(row=0, column=0, sticky="ew")
         readout.grid(row=0, column=1, padx=(6, 0))
         show()
-        return scale, readout
+        # The holder too: it is what the outer grid actually holds, so it
+        # is what has to go when the row is taken away.
+        return scale, readout, holder
 
     def _collect(self):
         """Widget values as the config wants them, validated."""
