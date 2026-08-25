@@ -94,15 +94,39 @@ class WorkingDirectoryTest(unittest.TestCase):
         with open(os.path.join(self.repo, "flash-esp.sh"), "w") as handle:
             handle.write('#!/usr/bin/env bash\necho "flashing from $PWD"\n')
 
+    def _pretend_home(self):
+        """A home with a PlatformIO in it, and a getent that points there.
+
+        The script looks for pio in the *invoking user's* home, which it asks
+        getent for - so a machine without PlatformIO could not reach the line
+        this is about, and the test skipped itself there. Which meant a check
+        on a reported bug ran only where somebody happened to have flashed
+        firmware before, and silently nowhere else.
+        """
+        home = os.path.join(self.repo, "home")
+        binaries = os.path.join(home, ".local", "bin")
+        os.makedirs(binaries)
+        pio = os.path.join(binaries, "pio")
+        with open(pio, "w") as handle:
+            handle.write("#!/usr/bin/env bash\nexit 0\n")
+        os.chmod(pio, 0o755)
+
+        # The script wants field six of the passwd line, and nothing else.
+        stubs = os.path.join(self.repo, "stubs")
+        os.makedirs(stubs)
+        getent = os.path.join(stubs, "getent")
+        with open(getent, "w") as handle:
+            handle.write("#!/usr/bin/env bash\n"
+                         'echo "$2:x:0:0::%s:/bin/bash"\n' % home)
+        os.chmod(getent, 0o755)
+        return dict(os.environ,
+                    PATH=stubs + os.pathsep + os.environ.get("PATH", ""))
+
     def test_it_flashes_from_the_clone_whatever_it_was_started_in(self):
-        if not shutil.which("pio") and not any(
-                os.path.exists(os.path.expanduser(path)) for path in
-                ("~/.platformio/penv/bin/pio", "~/.local/bin/pio")):
-            self.skipTest("no PlatformIO to get past the check with")
         result = subprocess.run(
             ["bash", os.path.join(self.repo, "scripts", "flash-firmware.sh"),
              "fake"],
-            cwd="/", capture_output=True, text=True)
+            cwd="/", capture_output=True, text=True, env=self._pretend_home())
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("flashing from %s" % self.repo, result.stdout)
 
