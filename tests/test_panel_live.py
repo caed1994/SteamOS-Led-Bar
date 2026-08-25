@@ -258,9 +258,10 @@ class LiveWindowTest(unittest.TestCase):
             self.root.update()
             self.assertEqual((self._shown("TEMPERATURE_MIN"),
                               self._shown("LOAD_CPU_COLOR")), wanted, label)
-            self.assertEqual(self._shown("LOAD_GPU_COLOR"),
-                             self._shown("LOAD_CPU_COLOR"),
-                             "the two halves are one decision")
+            for key in ("LOAD_GPU_COLOR", "LOAD_SWAP"):
+                self.assertEqual(self._shown(key),
+                                 self._shown("LOAD_CPU_COLOR"),
+                                 "%s is not on the gauge's own rule" % key)
             self.assertEqual(self._shown("TEMPERATURE_SENSOR"),
                              self._shown("TEMPERATURE_MIN"),
                              "the marks and the sensor are one decision too")
@@ -299,7 +300,7 @@ class LiveWindowTest(unittest.TestCase):
         strip = ("LED_COUNT", "REVERSE", "MAX_BRIGHTNESS", "MIN_BRIGHTNESS",
                  "PATROL_DOTS", "SPEED", "STANDBY_PULSE", "RAINBOW_SHOWS",
                  "TEMPERATURE_MIN", "TEMPERATURE_MAX", "TEMPERATURE_SENSOR",
-                 "LOAD_CPU_COLOR", "LOAD_GPU_COLOR")
+                 "LOAD_CPU_COLOR", "LOAD_GPU_COLOR", "LOAD_SWAP")
 
         def lowest():
             return max(self.panel._rows[key][0][0].winfo_rooty()

@@ -328,19 +328,34 @@ class LoadPreviewTest(unittest.TestCase):
         self.assertEqual(self._hue(cpu), 0, cpu)        # amber leads on red
         self.assertEqual(self._hue(gpu), 2, gpu)
 
-    def test_the_blurb_does_not_name_a_colour_that_is_a_setting(self):
-        """Caught on a screenshot: the line under the stage still said
+    def test_the_blurb_names_nothing_that_is_a_setting(self):
+        """Caught on a screenshot, and then again by this test.
 
-        "CPU left in amber, GPU right in blue" while the bar it sat under was
-        green and violet. Which side is which does not move; which colour is
-        which does, so the blurb says the half that is fixed.
+        It read "CPU left in amber, GPU right in blue" while the bar it sat
+        under was green and violet - the colours having become settings. Then
+        the sides became one too, and "left" was as wrong as "amber" had been.
+
+        So it says the part of the effect that is not anybody's to change: a
+        bar per chip, growing out of the middle. Held against the two menus
+        rather than against a list of words here, or the sentence and the
+        settings drift apart again.
         """
         blurb = next(text for _label, name, text in preview.SLOT_EFFECTS
-                     if name == render.SHOWS_LOAD)
+                     if name == render.SHOWS_LOAD).lower()
         for colour, _value in ledpanel.load_colours():
-            self.assertNotIn(colour.lower(), blurb.lower(), blurb)
-        self.assertIn("left", blurb.lower())
-        self.assertIn("right", blurb.lower())
+            self.assertNotIn(colour.lower(), blurb, blurb)
+        for side in ("left", "right"):
+            self.assertNotIn(side, blurb, blurb)
+
+    def test_swapping_the_sides_shows_in_the_preview(self):
+        # The tab is where the switch is judged: one that changed the strip
+        # and not the picture would be a switch you cannot see the effect of
+        # until you have applied it.
+        plain = self._sides()
+        swapped = self._sides(LOAD_SWAP=True)
+        self.assertEqual(swapped, plain[::-1])
+        self.assertNotEqual(self._hue(plain[0]), self._hue(plain[1]),
+                            "the two halves were the same to begin with")
 
     def test_a_half_typed_colour_does_not_stop_the_preview(self):
         """It redraws twenty-five times a second while somebody types.

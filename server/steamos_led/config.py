@@ -95,6 +95,7 @@ DEFAULTS = {
     "RAINBOW_SHOWS": "rainbow",
     "LOAD_CPU_COLOR": "#ff6e00",
     "LOAD_GPU_COLOR": "#1a9fff",
+    "LOAD_SWAP": False,
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 80.0,
     "TEMPERATURE_SENSOR": "auto",

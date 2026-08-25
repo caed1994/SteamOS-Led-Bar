@@ -108,6 +108,10 @@ STRIP = [
          ledpanel.load_colours(), None, None),
         ("LOAD_GPU_COLOR", "GPU half", "named",
          ledpanel.load_colours(), None, None),
+        # Not REVERSE, which turns the whole strip around: this moves the two
+        # halves of this one gauge, which is what a strip mounted the other
+        # way up needs once REVERSE has already had its say.
+        ("LOAD_SWAP", "Swap the two sides", "bool", None, None, None),
     ]),
 ]
 
@@ -279,6 +283,7 @@ DEPENDS_ON = {
     "DESKTOP_SPEED": (SCENE_MOVES,),
     "LOAD_CPU_COLOR": (LOAD_SHOWN,),
     "LOAD_GPU_COLOR": (LOAD_SHOWN,),
+    "LOAD_SWAP": (LOAD_SHOWN,),
     "TEMPERATURE_MIN": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_MAX": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_SENSOR": (TEMPERATURE_SHOWN,),

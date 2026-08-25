@@ -266,12 +266,17 @@ def load_levels(fraction, length):
 
 
 def _load(snapshot, elapsed, options):
-    """Two bars growing out of the middle: CPU one way, GPU the other.
+    """Two bars growing out of the middle: one chip each way.
 
     Out of the centre rather than from one end, because the two readings are
     peers - a bar for each, meeting in the middle, says that. Stacking them
     end to end would put one of them on the far side of the strip, which is
     where you look last.
+
+    Which chip is on which side is LOAD_SWAP. The reading and the colour move
+    together, so swapping puts the CPU's bar *and* its colour on the right -
+    a swap that moved only one of the two would be a gauge whose colours had
+    stopped saying which chip is which.
 
     Only ever reached with a reading in hand: a gauge with nothing to read is
     not this effect at all, and _substitute hands the slot back to the
@@ -285,22 +290,22 @@ def _load(snapshot, elapsed, options):
     elif cpu is None:
         cpu = gpu
 
+    inner = ((gpu, options.load_gpu_colour, cpu, options.load_cpu_colour)
+             if options.load_swap
+             else (cpu, options.load_cpu_colour, gpu, options.load_gpu_colour))
+    near, near_colour, far, far_colour = inner
+
     half = shim.LOGICAL_LEDS // 2
     # The odd middle LED belongs to neither and stays dark, which is what
     # makes the two sides read as two - the same trick the alarm shape uses.
     gap = shim.LOGICAL_LEDS % 2
-    left = load_levels(cpu, half)
-    right = load_levels(gpu, half)
-
-    cpu_colour = options.load_cpu_colour
-    gpu_colour = options.load_gpu_colour
     frame = [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
-    for index, level in enumerate(left):
+    for index, level in enumerate(load_levels(near, half)):
         frame[half - 1 - index] = tuple(channel * level
-                                        for channel in cpu_colour)
-    for index, level in enumerate(right):
+                                        for channel in near_colour)
+    for index, level in enumerate(load_levels(far, half)):
         frame[half + gap + index] = tuple(channel * level
-                                          for channel in gpu_colour)
+                                          for channel in far_colour)
     return frame
 
 
@@ -465,7 +470,7 @@ class Renderer:
                  speed_scale=1.0, patrol_dots=1, temperature=None,
                  temperature_range=DEFAULT_TEMPERATURE_RANGE, load=None,
                  rainbow_shows=None, load_cpu_colour=None,
-                 load_gpu_colour=None):
+                 load_gpu_colour=None, load_swap=False):
         if led_count < 1:
             raise ValueError("led_count must be >= 1")
         if mapping not in MAPPINGS:
@@ -494,6 +499,8 @@ class Renderer:
         # whoever built this - see _as_colour.
         self.load_cpu_colour = _as_colour(load_cpu_colour, LOAD_CPU_COLOUR)
         self.load_gpu_colour = _as_colour(load_gpu_colour, LOAD_GPU_COLOUR)
+        # Which chip is on which side. Both the reading and the colour move.
+        self.load_swap = bool(load_swap)
         self.rainbow_shows = rainbow_shows
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}

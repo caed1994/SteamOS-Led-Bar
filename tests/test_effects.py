@@ -366,6 +366,58 @@ class LoadColourTest(unittest.TestCase):
         cpu, _gpu = self._sides(load_cpu_colour=(300.0, -20.0, 0.0))
         self.assertEqual(cpu, (255.0, 0.0, 0.0))
 
+    def test_swapping_moves_the_reading_and_its_colour_together(self):
+        """Which chip is on which side, for a strip mounted the other way up.
+
+        Both halves of the answer move: a swap that took the colours across
+        and left the readings would be a gauge whose colours had stopped
+        saying which chip is which, which is the one thing they are for.
+        """
+        renderer = _renderer(load=FakeLoad(1.0, 0.0), load_swap=True)
+        frame = renderer.render_logical(_rainbow_snapshot(), 0.0)
+        near, far = frame[self.HALF - 1], frame[self.HALF + 1]
+        # The busy chip is the CPU, so its full bar is now the right-hand one
+        # - and it is still wearing the CPU's colour.
+        self.assertEqual(far, render.LOAD_CPU_COLOUR)
+        # And the idle GPU's side is down at the floor, in the GPU's colour.
+        self.assertEqual(self._hue(near), self._hue(render.LOAD_GPU_COLOUR))
+        self.assertLess(max(near), max(far))
+
+    def test_not_swapping_is_what_it_always_did(self):
+        renderer = _renderer(load=FakeLoad(1.0, 0.0))
+        frame = renderer.render_logical(_rainbow_snapshot(), 0.0)
+        self.assertEqual(frame[self.HALF - 1], render.LOAD_CPU_COLOUR)
+        self.assertLess(max(frame[self.HALF + 1]),
+                        max(frame[self.HALF - 1]))
+
+    def test_a_swap_is_not_the_strip_turned_around(self):
+        """REVERSE moves every effect; this moves one gauge's two halves.
+
+        Which is why both exist: a strip mounted the other way up needs
+        REVERSE, and REVERSE then puts the CPU where you do not look first.
+        Turning the strip around and swapping the sides is back where it
+        started, and that is the pair working rather than one of them.
+        """
+        snapshot = _rainbow_snapshot()
+        plain = _renderer(load=FakeLoad(0.9, 0.2))
+        both = render.Renderer(led_count=shim.LOGICAL_LEDS,
+                               mapping=render.MAPPING_CROP, reverse=True,
+                               load=FakeLoad(0.9, 0.2), load_swap=True)
+        self.assertEqual(list(plain.render(snapshot, 0.0)),
+                         list(both.render(snapshot, 0.0)))
+
+    def test_the_middle_stays_dark_either_way(self):
+        # It belongs to neither chip, and a lit one makes the halves read as
+        # a single bar however they are arranged.
+        for swap in (False, True):
+            frame = _renderer(load=FakeLoad(1.0, 1.0),
+                              load_swap=swap).render_logical(
+                                  _rainbow_snapshot(), 0.0)
+            self.assertEqual(frame[self.HALF], (0.0, 0.0, 0.0), swap)
+
+    def _hue(self, pixel):
+        return max(range(3), key=lambda index: pixel[index])
+
     def test_the_gauge_is_the_only_thing_they_touch(self):
         # They are the load gauge's, not the strip's: an effect that started
         # answering to them would be a setting doing something its label does
@@ -436,12 +488,22 @@ class LoadColourSettingTest(unittest.TestCase):
                 config.validate(self._config(**{key: "orangeish"}))
             self.assertIn(key, str(caught.exception))
 
-    def test_the_shipped_file_names_them_both(self):
+    def test_the_shipped_file_names_them_all(self):
         path = os.path.join(HERE, "..", "server", "steamos-led-serial.conf")
         with open(path) as handle:
             text = handle.read()
-        for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
+        for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR", "LOAD_SWAP"):
             self.assertIn("\n%s=" % key, text, key)
+
+    def test_the_swap_reaches_the_strip_from_the_file(self):
+        # Through build_renderer, so a setting the service never reads cannot
+        # pass for one that does nothing.
+        plain = self._sides()
+        swapped = self._sides(LOAD_SWAP=True)
+        self.assertEqual(swapped, plain[::-1])
+
+    def test_it_ships_the_way_round_it_always_was(self):
+        self.assertFalse(config.DEFAULTS["LOAD_SWAP"])
 
 
 class FireTest(unittest.TestCase):

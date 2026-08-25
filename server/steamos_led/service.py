@@ -120,6 +120,7 @@ def build_renderer(config):
         # a colour, and it imports from render, so render cannot ask it.
         load_cpu_colour=notify.parse_color(config["LOAD_CPU_COLOR"]),
         load_gpu_colour=notify.parse_color(config["LOAD_GPU_COLOR"]),
+        load_swap=config["LOAD_SWAP"],
     )
 
 

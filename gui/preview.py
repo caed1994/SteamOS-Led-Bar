@@ -130,7 +130,8 @@ class Preview:
                self.setting("PATROL_DOTS"), self.setting("SPEED"),
                self.setting("TEMPERATURE_MIN"),
                self.setting("TEMPERATURE_MAX"),
-               self.setting("LOAD_CPU_COLOR"), self.setting("LOAD_GPU_COLOR"))
+               self.setting("LOAD_CPU_COLOR"), self.setting("LOAD_GPU_COLOR"),
+               self.setting("LOAD_SWAP"))
         if key != self._renderer_key:
             self._renderer_key = key
             self._renderer_cache = render.Renderer(
@@ -151,7 +152,8 @@ class Preview:
                 # colour half-typed into the config file is not a reason for
                 # the preview to stop drawing twenty-five times a second.
                 load_cpu_colour=self._colour("LOAD_CPU_COLOR"),
-                load_gpu_colour=self._colour("LOAD_GPU_COLOR"))
+                load_gpu_colour=self._colour("LOAD_GPU_COLOR"),
+                load_swap=self.setting("LOAD_SWAP"))
         return self._renderer_cache
 
     def _colour(self, key):
@@ -221,10 +223,12 @@ SLOT_EFFECTS = (
     ("Aurora", render.SHOWS_AURORA, "Slow curtains, green to violet"),
     ("Temperature", render.SHOWS_TEMPERATURE,
      "Colour carries the reading, cool to hot"),
-    # No colours named: they are LOAD_CPU_COLOR and LOAD_GPU_COLOR now, and a
-    # blurb saying "amber" under a bar somebody has just made green is the
-    # page contradicting itself. Which side is which does not move.
-    ("Load", render.SHOWS_LOAD, "CPU to the left, GPU to the right"),
+    # Neither a colour nor a side named: both are settings now - the colours
+    # are LOAD_CPU_COLOR and LOAD_GPU_COLOR, the sides are LOAD_SWAP - and a
+    # blurb saying "amber on the left" under a bar somebody has just made
+    # green and swapped is the page contradicting itself. What is left is what
+    # the effect actually always does.
+    ("Load", render.SHOWS_LOAD, "A bar for each chip, out of the middle"),
 )
 
 SHAPE_BLURBS = {
