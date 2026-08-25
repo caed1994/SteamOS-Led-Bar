@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
+import ledpanel  # noqa: E402
 import preview  # noqa: E402
 from steamos_led import config as config_module, notify, render, shim  # noqa: E402
 
@@ -326,6 +327,20 @@ class LoadPreviewTest(unittest.TestCase):
         cpu, gpu = self._sides()
         self.assertEqual(self._hue(cpu), 0, cpu)        # amber leads on red
         self.assertEqual(self._hue(gpu), 2, gpu)
+
+    def test_the_blurb_does_not_name_a_colour_that_is_a_setting(self):
+        """Caught on a screenshot: the line under the stage still said
+
+        "CPU left in amber, GPU right in blue" while the bar it sat under was
+        green and violet. Which side is which does not move; which colour is
+        which does, so the blurb says the half that is fixed.
+        """
+        blurb = next(text for _label, name, text in preview.SLOT_EFFECTS
+                     if name == render.SHOWS_LOAD)
+        for colour, _value in ledpanel.load_colours():
+            self.assertNotIn(colour.lower(), blurb.lower(), blurb)
+        self.assertIn("left", blurb.lower())
+        self.assertIn("right", blurb.lower())
 
     def test_a_half_typed_colour_does_not_stop_the_preview(self):
         """It redraws twenty-five times a second while somebody types.

@@ -221,7 +221,10 @@ SLOT_EFFECTS = (
     ("Aurora", render.SHOWS_AURORA, "Slow curtains, green to violet"),
     ("Temperature", render.SHOWS_TEMPERATURE,
      "Colour carries the reading, cool to hot"),
-    ("Load", render.SHOWS_LOAD, "CPU left in amber, GPU right in blue"),
+    # No colours named: they are LOAD_CPU_COLOR and LOAD_GPU_COLOR now, and a
+    # blurb saying "amber" under a bar somebody has just made green is the
+    # page contradicting itself. Which side is which does not move.
+    ("Load", render.SHOWS_LOAD, "CPU to the left, GPU to the right"),
 )
 
 SHAPE_BLURBS = {
