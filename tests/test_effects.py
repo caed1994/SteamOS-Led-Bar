@@ -20,7 +20,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import config, load, render, sampling, shim  # noqa: E402
+from steamos_led import config, load, notify, render  # noqa: E402
+from steamos_led import sampling, service, shim       # noqa: E402
 
 
 class FakeLoad:
@@ -231,6 +232,8 @@ class LoadGaugeTest(unittest.TestCase):
         frame = self._frame(0.0, 0.0)
         self.assertTrue(max(max(pixel) for pixel in frame) > 0)
 
+
+
     def test_the_bar_is_fractional_rather_than_whole_leds(self):
         # Eight LEDs a side would otherwise only ever show eighths.
         half = shim.LOGICAL_LEDS // 2
@@ -318,6 +321,127 @@ class LoadGaugeTest(unittest.TestCase):
             self.assertAlmostEqual(left[0] / render.LOAD_CPU_COLOUR[0],
                                    right[2] / render.LOAD_GPU_COLOUR[2],
                                    places=6, msg=offset)
+
+
+class LoadColourTest(unittest.TestCase):
+    """Which colour each half of the gauge is, which is now a setting."""
+
+    HALF = shim.LOGICAL_LEDS // 2
+
+    def _sides(self, **colours):
+        renderer = _renderer(load=FakeLoad(1.0, 1.0), **colours)
+        frame = renderer.render_logical(_rainbow_snapshot(), 0.0)
+        return frame[self.HALF - 1], frame[self.HALF + 1]
+
+    def test_the_shipped_pair_is_what_it_always_was(self):
+        # The point of a default: nobody's bar changes colour on an update.
+        self.assertEqual(self._sides(),
+                         (render.LOAD_CPU_COLOUR, render.LOAD_GPU_COLOUR))
+
+    def test_each_half_takes_the_colour_it_was_given(self):
+        cpu, gpu = self._sides(load_cpu_colour=(0.0, 255.0, 0.0),
+                               load_gpu_colour=(255.0, 0.0, 255.0))
+        self.assertEqual(cpu, (0.0, 255.0, 0.0))
+        self.assertEqual(gpu, (255.0, 0.0, 255.0))
+
+    def test_setting_one_leaves_the_other_where_it_was(self):
+        cpu, gpu = self._sides(load_cpu_colour=(0.0, 255.0, 0.0))
+        self.assertEqual(cpu, (0.0, 255.0, 0.0))
+        self.assertEqual(gpu, render.LOAD_GPU_COLOUR)
+
+    def test_the_same_colour_twice_is_allowed(self):
+        """Unreadable as a gauge, and still not ours to refuse.
+
+        What makes this one work is the halves being told apart, so two of one
+        colour is a bar that has stopped saying which chip is which - but
+        "too similar" is taste, not arithmetic, and the config file says so
+        rather than the validator.
+        """
+        cpu, gpu = self._sides(load_cpu_colour=(255.0, 0.0, 0.0),
+                               load_gpu_colour=(255.0, 0.0, 0.0))
+        self.assertEqual(cpu, gpu)
+
+    def test_a_channel_outside_a_byte_lands_on_the_end(self):
+        # It reaches the wire as one, so 300 would wrap and come out dark.
+        cpu, _gpu = self._sides(load_cpu_colour=(300.0, -20.0, 0.0))
+        self.assertEqual(cpu, (255.0, 0.0, 0.0))
+
+    def test_the_gauge_is_the_only_thing_they_touch(self):
+        # They are the load gauge's, not the strip's: an effect that started
+        # answering to them would be a setting doing something its label does
+        # not say.
+        plain = _renderer()
+        odd = _renderer(load_cpu_colour=(0.0, 255.0, 0.0),
+                        load_gpu_colour=(255.0, 0.0, 255.0))
+        snapshot = _rainbow_snapshot()
+        self.assertEqual(plain.render_logical(snapshot, 0.0),
+                         odd.render_logical(snapshot, 0.0))
+class LoadColourSettingTest(unittest.TestCase):
+    """The two colours as settings: from the file, through to lit pixels."""
+
+    def _config(self, **overrides):
+        settings = dict(config.DEFAULTS, RAINBOW_SHOWS=render.SHOWS_LOAD,
+                        LED_COUNT=shim.LOGICAL_LEDS, MAPPING="repeat",
+                        MAX_BRIGHTNESS=255)
+        settings.update(overrides)
+        return settings
+
+    def _sides(self, **overrides):
+        """The outermost LED of each half, with both chips at full load."""
+        renderer = service.build_renderer(self._config(**overrides))
+        renderer.load = FakeLoad(1.0, 1.0)
+        payload = renderer.render(_rainbow_snapshot(), 0.0)
+        pixels = [tuple(payload[i * 3:i * 3 + 3])
+                  for i in range(shim.LOGICAL_LEDS)]
+        return pixels[0], pixels[-1]
+
+    def test_the_shipped_values_are_the_colours_the_gauge_had(self):
+        # Two spellings of one fact, so they cannot drift: change the constant
+        # without the default and everybody's bar changes on an update.
+        for key, colour in (("LOAD_CPU_COLOR", render.LOAD_CPU_COLOUR),
+                            ("LOAD_GPU_COLOR", render.LOAD_GPU_COLOUR)):
+            self.assertEqual(notify.parse_color(config.DEFAULTS[key]),
+                             tuple(int(channel) for channel in colour), key)
+
+    def test_both_of_them_reach_the_strip(self):
+        """The check that would catch a knob wired to nothing.
+
+        Through build_renderer and render(), not through the argument: a
+        setting the service never reads looks exactly like one that does
+        nothing, and only the whole path says which.
+        """
+        cpu, gpu = self._sides(LOAD_CPU_COLOR="#00ff00",
+                               LOAD_GPU_COLOR="#ff00ff")
+        self.assertEqual(cpu, (0, 255, 0))
+        self.assertEqual(gpu, (255, 0, 255))
+
+    def test_the_default_file_draws_what_it_always_drew(self):
+        cpu, gpu = self._sides()
+        self.assertEqual(cpu, tuple(int(c) for c in render.LOAD_CPU_COLOUR))
+        self.assertEqual(gpu, tuple(int(c) for c in render.LOAD_GPU_COLOUR))
+
+    def test_every_spelling_of_a_colour_works_here_too(self):
+        # parse_color's, not a second reading of its own - a name, a hex
+        # triplet and three numbers all mean the same thing everywhere else.
+        cpu, gpu = self._sides(LOAD_CPU_COLOR="achievement",
+                               LOAD_GPU_COLOR="0,255,255")
+        self.assertEqual(cpu, notify.KINDS[notify.KIND_ACHIEVEMENT])
+        self.assertEqual(gpu, (0, 255, 255))
+
+    def test_a_colour_that_is_not_one_is_refused_at_load(self):
+        # Otherwise the mistake surfaces as a service that will not start,
+        # hours later, from a line nobody remembers editing.
+        for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
+            with self.assertRaises(config.ConfigError) as caught:
+                config.validate(self._config(**{key: "orangeish"}))
+            self.assertIn(key, str(caught.exception))
+
+    def test_the_shipped_file_names_them_both(self):
+        path = os.path.join(HERE, "..", "server", "steamos-led-serial.conf")
+        with open(path) as handle:
+            text = handle.read()
+        for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
+            self.assertIn("\n%s=" % key, text, key)
 
 
 class FireTest(unittest.TestCase):

@@ -219,11 +219,29 @@ def _temperature(snapshot, elapsed, options):
 # real zero and a real full, so how far the bar has come *is* the reading.
 # Temperature has neither, which is why that one uses colour instead.
 #
-# The colour says which chip. Amber and blue sit as far apart as two colours
-# on this strip can, so the two halves never read as one bar that happens to
-# be uneven.
+# The colour says which chip, and both are settings - LOAD_CPU_COLOR and
+# LOAD_GPU_COLOR. These two are what they ship as: amber and blue sit about as
+# far apart as two colours on this strip can, which is what stops the gauge
+# reading as one bar that happens to be uneven rather than as two.
+#
+# Worth knowing when changing them, and the reason the panel says so under the
+# rows: what makes this gauge readable is the two halves being told apart at a
+# glance. Two colours near each other on the wheel still work as a gauge, they
+# just stop working as *two*.
 LOAD_CPU_COLOUR = (255.0, 110.0, 0.0)
 LOAD_GPU_COLOUR = (26.0, 159.0, 255.0)
+
+
+def _as_colour(value, fallback):
+    """Three floats in 0..255, or the shipped colour when there is nothing.
+
+    Takes what a caller has already parsed rather than parsing itself: the
+    spelling of a colour is notify.parse_color's business, and notify imports
+    from here, so reaching back the other way is a circle.
+    """
+    if value is None:
+        return fallback
+    return tuple(max(0.0, min(float(channel), 255.0)) for channel in value)
 
 # The innermost LED of each half never goes fully dark, or an idle machine
 # looks like a strip somebody switched off.
@@ -274,13 +292,15 @@ def _load(snapshot, elapsed, options):
     left = load_levels(cpu, half)
     right = load_levels(gpu, half)
 
+    cpu_colour = options.load_cpu_colour
+    gpu_colour = options.load_gpu_colour
     frame = [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
     for index, level in enumerate(left):
         frame[half - 1 - index] = tuple(channel * level
-                                        for channel in LOAD_CPU_COLOUR)
+                                        for channel in cpu_colour)
     for index, level in enumerate(right):
         frame[half + gap + index] = tuple(channel * level
-                                          for channel in LOAD_GPU_COLOUR)
+                                          for channel in gpu_colour)
     return frame
 
 
@@ -444,7 +464,8 @@ class Renderer:
                  max_brightness=255, min_brightness=0, gamma=1.0,
                  speed_scale=1.0, patrol_dots=1, temperature=None,
                  temperature_range=DEFAULT_TEMPERATURE_RANGE, load=None,
-                 rainbow_shows=None):
+                 rainbow_shows=None, load_cpu_colour=None,
+                 load_gpu_colour=None):
         if led_count < 1:
             raise ValueError("led_count must be >= 1")
         if mapping not in MAPPINGS:
@@ -469,6 +490,10 @@ class Renderer:
         self.temperature_range = temperature_range
         # Something with .fractions(), likewise.
         self.load = load
+        # Which chip each half of the gauge stands for. Already parsed by
+        # whoever built this - see _as_colour.
+        self.load_cpu_colour = _as_colour(load_cpu_colour, LOAD_CPU_COLOUR)
+        self.load_gpu_colour = _as_colour(load_gpu_colour, LOAD_GPU_COLOUR)
         self.rainbow_shows = rainbow_shows
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}

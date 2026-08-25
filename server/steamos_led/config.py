@@ -93,6 +93,8 @@ DEFAULTS = {
     "DESKTOP_BRIGHTNESS": 128,
     "DESKTOP_SPEED": 1.0,
     "RAINBOW_SHOWS": "rainbow",
+    "LOAD_CPU_COLOR": "#ff6e00",
+    "LOAD_GPU_COLOR": "#1a9fff",
     "TEMPERATURE_MIN": 40.0,
     "TEMPERATURE_MAX": 80.0,
     "TEMPERATURE_SENSOR": "auto",
@@ -351,6 +353,17 @@ def validate(config):
     if not DESKTOP_SPEED_FLOOR <= config["DESKTOP_SPEED"] <= DESKTOP_SPEED_CEILING:
         raise ConfigError("DESKTOP_SPEED must be between %g and %g"
                           % (DESKTOP_SPEED_FLOOR, DESKTOP_SPEED_CEILING))
+    # Which chip each half of the load gauge stands for. Any colour at all,
+    # the same as every other colour setting - and deliberately not refused
+    # for being two shades of the same thing. What makes the gauge readable is
+    # telling the halves apart, but "too similar" is a judgement, not an
+    # arithmetic fact like the temperature marks below, and a validator that
+    # made it would be refusing somebody's taste.
+    for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
+        try:
+            notify.parse_color(config[key])
+        except ValueError as exc:
+            raise ConfigError("%s: %s" % (key, exc))
     for key in ("TEMPERATURE_MIN", "TEMPERATURE_MAX"):
         if not TEMPERATURE_FLOOR <= config[key] <= TEMPERATURE_CEILING:
             raise ConfigError("%s must be between %g and %g degrees"

@@ -116,6 +116,10 @@ def build_renderer(config):
                            config["TEMPERATURE_MAX"]),
         load=build_load_source(config),
         rainbow_shows=config["RAINBOW_SHOWS"],
+        # Parsed here rather than in the renderer: notify owns the spelling of
+        # a colour, and it imports from render, so render cannot ask it.
+        load_cpu_colour=notify.parse_color(config["LOAD_CPU_COLOR"]),
+        load_gpu_colour=notify.parse_color(config["LOAD_GPU_COLOR"]),
     )
 
 

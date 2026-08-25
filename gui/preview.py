@@ -129,7 +129,8 @@ class Preview:
                self.setting("MIN_BRIGHTNESS"), self.setting("GAMMA"),
                self.setting("PATROL_DOTS"), self.setting("SPEED"),
                self.setting("TEMPERATURE_MIN"),
-               self.setting("TEMPERATURE_MAX"))
+               self.setting("TEMPERATURE_MAX"),
+               self.setting("LOAD_CPU_COLOR"), self.setting("LOAD_GPU_COLOR"))
         if key != self._renderer_key:
             self._renderer_key = key
             self._renderer_cache = render.Renderer(
@@ -145,8 +146,20 @@ class Preview:
                 temperature=self.sensor,
                 load=self.sensor,
                 temperature_range=(self.setting("TEMPERATURE_MIN"),
-                                   self.setting("TEMPERATURE_MAX")))
+                                   self.setting("TEMPERATURE_MAX")),
+                # Read leniently, the way everything else on this page is: a
+                # colour half-typed into the config file is not a reason for
+                # the preview to stop drawing twenty-five times a second.
+                load_cpu_colour=self._colour("LOAD_CPU_COLOR"),
+                load_gpu_colour=self._colour("LOAD_GPU_COLOR"))
         return self._renderer_cache
+
+    def _colour(self, key):
+        """One colour setting as (r, g, b), or None to keep the shipped one."""
+        try:
+            return notify.parse_color(self.setting(key))
+        except ValueError:
+            return None
 
     def slot_frame(self, shows, elapsed):
         """One frame of `fire`, `aurora`, `temperature` or `load`."""

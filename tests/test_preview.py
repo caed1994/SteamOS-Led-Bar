@@ -275,6 +275,16 @@ class RendererReuseTest(unittest.TestCase):
         fire = page._renderer(render.SHOWS_FIRE)
         self.assertIsNot(page._renderer(render.SHOWS_AURORA), fire)
 
+    def test_a_gauge_colour_is_a_setting_it_was_built_from(self):
+        # Kept renderers are the trap: picking a colour and seeing the preview
+        # go on drawing the old one is exactly what a stale cache looks like.
+        page = preview.Preview({"LED_COUNT": 17,
+                                "LOAD_CPU_COLOR": "#ff6e00"})
+        first = page._renderer(render.SHOWS_LOAD)
+        page.settings = {"LED_COUNT": 17, "LOAD_CPU_COLOR": "#00ff00"}
+        self.assertIsNot(page._renderer(render.SHOWS_LOAD), first)
+
+
     def test_the_sensor_readings_still_move(self):
         # slot_frame writes into the sensor object the renderer holds, so a
         # kept renderer has to keep seeing the walk rather than one reading.
@@ -283,6 +293,49 @@ class RendererReuseTest(unittest.TestCase):
                   for t in range(0, 400, 20)}
         self.assertGreater(len(frames), 1, "the gauge should be walked")
 
+
+class LoadPreviewTest(unittest.TestCase):
+    """What the Preview tab draws for the load gauge, in the colours set.
+
+    The tab is where the two menus are judged - a colour picked on the Strip
+    page and previewed in the shipped one would be a preview of somebody
+    else's setting.
+    """
+
+    HALF = 17 // 2
+
+    def _sides(self, **settings):
+        page = preview.Preview(dict({"LED_COUNT": 17, "MAPPING": "repeat",
+                                     "MAX_BRIGHTNESS": 255}, **settings))
+        # A moment into the sweep, where LOAD_WALK has both halves well lit.
+        pixels = page.slot_frame(render.SHOWS_LOAD,
+                                 preview.SWEEP_SECONDS * 0.5)
+        return pixels[self.HALF - 1], pixels[self.HALF + 1]
+
+    def _hue(self, pixel):
+        """Which channel leads, which is all these assertions need."""
+        return max(range(3), key=lambda index: pixel[index])
+
+    def test_the_two_halves_come_out_in_the_colours_that_were_set(self):
+        cpu, gpu = self._sides(LOAD_CPU_COLOR="#00ff00",
+                               LOAD_GPU_COLOR="#0000ff")
+        self.assertEqual(self._hue(cpu), 1, cpu)        # green leads
+        self.assertEqual(self._hue(gpu), 2, gpu)        # blue leads
+
+    def test_the_shipped_pair_still_draws_amber_and_blue(self):
+        cpu, gpu = self._sides()
+        self.assertEqual(self._hue(cpu), 0, cpu)        # amber leads on red
+        self.assertEqual(self._hue(gpu), 2, gpu)
+
+    def test_a_half_typed_colour_does_not_stop_the_preview(self):
+        """It redraws twenty-five times a second while somebody types.
+
+        Read leniently, the way every other setting on this page is: a colour
+        mid-edit is not the moment to raise, and the shipped one standing in
+        is what the strip would do anyway.
+        """
+        cpu, _gpu = self._sides(LOAD_CPU_COLOR="#00ff")
+        self.assertEqual(self._hue(cpu), 0, "it did not fall back")
 
 if __name__ == "__main__":
     unittest.main()

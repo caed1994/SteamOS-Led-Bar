@@ -100,6 +100,14 @@ STRIP = [
         # decides what they are, so the menu is built from what it reports.
         ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor",
          None, None, None),
+        # And what the load gauge needs, in the order the menu above lists the
+        # two: temperature, then load. Two rows rather than one setting with a
+        # pair in it - they are two independent answers, and a menu of pairs
+        # would be the wheel squared.
+        ("LOAD_CPU_COLOR", "CPU half", "named",
+         ledpanel.load_colours(), None, None),
+        ("LOAD_GPU_COLOR", "GPU half", "named",
+         ledpanel.load_colours(), None, None),
     ]),
 ]
 
@@ -248,6 +256,7 @@ SETTINGS_TABS = (
 # written out rather than taken from the service because this table is read
 # literally by the tests; a value that is not a scene is caught there.
 TEMPERATURE_SHOWN = ("RAINBOW_SHOWS", "temperature")
+LOAD_SHOWN = ("RAINBOW_SHOWS", "load")
 SCENE_HAS_COLOUR = ("DESKTOP_SCENE", ("color", "breath", "patrol"))
 SCENE_IS_LIT = ("DESKTOP_SCENE", ("color", "breath", "patrol", "rainbow"))
 SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow"))
@@ -255,6 +264,8 @@ DEPENDS_ON = {
     "DESKTOP_COLOR": (SCENE_HAS_COLOUR,),
     "DESKTOP_BRIGHTNESS": (SCENE_IS_LIT,),
     "DESKTOP_SPEED": (SCENE_MOVES,),
+    "LOAD_CPU_COLOR": (LOAD_SHOWN,),
+    "LOAD_GPU_COLOR": (LOAD_SHOWN,),
     "TEMPERATURE_MIN": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_MAX": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_SENSOR": (TEMPERATURE_SHOWN,),

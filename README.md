@@ -161,6 +161,7 @@ sudo systemctl start steamos-led-serial
 | `RAINBOW_SHOWS` | `rainbow` | what the [rainbow entry](#the-rainbow-slot) shows: `rainbow`, `temperature`, `load`, `fire` or `aurora` |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `80.0` | where the temperature gauge is green and where it is red |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the temperature gauge reads |
+| `LOAD_CPU_COLOR` / `LOAD_GPU_COLOR` | `#ff6e00` / `#1a9fff` | the two halves of the load gauge |
 | `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
 | `BAUD` | `230400` | preferred baud rate, corrected on connect if needed |
 | `BAUD_AUTODETECT` | `1` | if there is no reply, try the other firmware baud rates |
@@ -317,10 +318,16 @@ that reports no temperature at all gets the rainbow.
 
 ### Load
 
-Two bars grow out of the middle: the CPU to the left in amber, the GPU to the
-right in blue. Nothing to set beyond `RAINBOW_SHOWS=load`. The counters are
-read four times a second, but the bar glides towards each reading over about a
-second and is redrawn every frame, so it walks rather than stepping.
+Two bars grow out of the middle: the CPU to the left, the GPU to the right.
+The counters are read four times a second, but the bar glides towards each
+reading over about a second and is redrawn every frame, so it walks rather
+than stepping.
+
+`LOAD_CPU_COLOR` and `LOAD_GPU_COLOR` set the two halves, from the panel's
+Strip page or by hand. The shipped amber and blue sit about as far apart as
+two colours on a strip can, which is what makes the gauge read as two bars
+rather than one uneven one; two colours near each other still work, they just
+stop working as two.
 
 ```bash
 /var/lib/steamos-led-serial/steamos-led-serial --load

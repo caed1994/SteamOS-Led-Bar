@@ -494,6 +494,62 @@ class NotificationColourTest(unittest.TestCase):
         self.assertLessEqual(len(self.colours), 10)
 
 
+class LoadColourMenuTest(unittest.TestCase):
+    """What the two halves of the load gauge may be set to in the panel."""
+
+    def setUp(self):
+        self.colours = ledpanel.load_colours()
+
+    def test_every_offered_colour_is_one_the_service_accepts(self):
+        from steamos_led import notify
+        for label, value in self.colours:
+            self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
+            notify.parse_color(value)           # raises if it is not one
+            self.assertTrue(label, value)
+
+    def test_both_shipped_colours_are_offered(self):
+        """Or the menu opens on six hex digits for a setting nobody chose.
+
+        Neither is on the notification wheel: they were picked to sit about as
+        far apart as two colours on a strip can, which is what makes the two
+        halves read as two - so they have to be offered here as well, or
+        putting back what you started with means typing.
+        """
+        offered = {value.lower() for _label, value in self.colours}
+        for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
+            self.assertIn(config_module.DEFAULTS[key].lower(), offered, key)
+
+    def test_the_wheel_the_notifications_use_is_offered_too(self):
+        # Which is the whole request: the same base colours, in the same
+        # order, so a colour means the same thing on every page.
+        offered = [value.lower() for _label, value in self.colours]
+        wanted = [value.lower()
+                  for _label, value in ledpanel.NOTIFICATION_COLOURS]
+        self.assertEqual(offered[-len(wanted):], wanted)
+
+    def test_the_entries_are_distinct(self):
+        labels = [label for label, _value in self.colours]
+        values = [value.lower() for _label, value in self.colours]
+        self.assertEqual(len(set(labels)), len(labels))
+        self.assertEqual(len(set(values)), len(values))
+
+    def test_a_label_means_one_colour_across_the_whole_panel(self):
+        # Two menus calling different shades by one name is how you pick a
+        # colour on one page and get another on the next.
+        seen = {}
+        for source in (self.colours, ledpanel.NOTIFICATION_COLOURS,
+                       ledpanel.palette()):
+            for label, value in source:
+                self.assertEqual(seen.setdefault(label, value.lower()),
+                                 value.lower(), label)
+
+    def test_the_two_start_out_telling_the_halves_apart(self):
+        # A gauge whose sides are one colour has stopped saying which chip is
+        # which. Not refused - it is somebody's bar - but not shipped either.
+        self.assertNotEqual(config_module.DEFAULTS["LOAD_CPU_COLOR"].lower(),
+                            config_module.DEFAULTS["LOAD_GPU_COLOR"].lower())
+
+
 class PhoneMenuTest(unittest.TestCase):
     """What the panel offers for the phone, and what it deliberately does not."""
 

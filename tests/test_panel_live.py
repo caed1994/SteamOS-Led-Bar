@@ -223,6 +223,42 @@ class LiveWindowTest(unittest.TestCase):
     def _greyed(self, key):
         return "disabled" in self.panel._rows[key][1][0].state()
 
+    def test_the_slot_reaches_only_the_rows_its_own_choice_needs(self):
+        """One menu, and two sets of rows waiting on two different answers.
+
+        Greyed rather than hidden, like everything else here - but greyed by
+        the choice, not by the page: the temperature marks mean nothing while
+        the slot is showing the load, and the gauge's two colours mean nothing
+        while it is showing the temperature. Both wrong at once would be four
+        settings out of reach with nothing on the page to say why.
+        """
+        self.panel.notebook.select(self._page_named("Strip"))
+        self.root.update()
+        slot = self.panel.vars["RAINBOW_SHOWS"][0]
+        #                                temperature  load
+        for label, wanted in (("Temperature", (False, True)),
+                              ("CPU and GPU load", (True, False)),
+                              ("Steam's rainbow", (True, True)),
+                              ("Fire", (True, True))):
+            slot.set(label)
+            self.root.update()
+            self.assertEqual((self._greyed("TEMPERATURE_MIN"),
+                              self._greyed("LOAD_CPU_COLOR")), wanted, label)
+            self.assertEqual(self._greyed("LOAD_GPU_COLOR"),
+                             self._greyed("LOAD_CPU_COLOR"),
+                             "the two halves are one decision")
+
+    def test_the_gauge_colours_start_on_a_name_rather_than_on_hex(self):
+        # The menu holds what is set; a shipped default the list does not
+        # offer becomes an entry under its own six hex digits, which reads as
+        # a setting nobody chose.
+        self.panel.notebook.select(self._page_named("Strip"))
+        self.root.update()
+        for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
+            shown = self.panel.vars[key][0].get()
+            self.assertFalse(shown.startswith("#"),
+                             "%s opens on %s" % (key, shown))
+
     def test_a_scene_with_no_colour_greys_the_colour_out(self):
         """The entry that means several values, which DEPENDS_ON could not say.
 

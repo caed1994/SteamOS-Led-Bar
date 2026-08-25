@@ -616,6 +616,32 @@ EXTRA_COLOURS = (
 )
 
 
+# The two the load gauge ships with. Offered beside the wheel because they are
+# not on it: they were picked to sit about as far apart as two colours on a
+# strip can, which is what makes the two halves read as two - so without them
+# here, putting back what you started with would mean typing six hex digits.
+# Named apart from the amber in EXTRA_COLOURS, which is a different shade for a
+# different picker.
+LOAD_DEFAULT_COLOURS = (
+    ("Deep amber", "#ff6e00"),
+    ("Steam blue", SHAPE_TEST_COLOUR),
+)
+
+
+def load_colours():
+    """Colours to offer for the load gauge's two halves, best answers first.
+
+    The shipped pair leads - one of them is what each row is already set to,
+    and a menu opening on six hex digits reads as a setting nobody chose -
+    then the wheel the notifications use.
+    """
+    offered = []
+    for label, value in LOAD_DEFAULT_COLOURS + NOTIFICATION_COLOURS:
+        if value.lower() not in {had.lower() for _name, had in offered}:
+            offered.append((label, value))
+    return tuple(offered)
+
+
 def palette():
     """Colours to offer when one is being picked outright, in a sensible order.
 
