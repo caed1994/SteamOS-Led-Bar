@@ -48,6 +48,7 @@ import preview as preview_module                            # noqa: E402
 import syssettings                                          # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
 from steamos_led import notify                              # noqa: E402
+from steamos_led import power                               # noqa: E402
 from steamos_led import render                              # noqa: E402
 from steamos_led import shim                                # noqa: E402
 from steamos_led import __version__ as VERSION              # noqa: E402
@@ -281,8 +282,26 @@ SETTINGS_TABS = (
 # pages. Kept as a table for the same reason SETTINGS_TABS is one: between
 # them these two are every settings row in the window, and the tests walk
 # both. A section missing from here is one Apply would never collect.
+# How the CPU trades speed against power. Both rows are "power" kind, which
+# means their menus are built from what this machine reports rather than from
+# anything written here - see power.py for why a list would be wrong.
+POWER = [
+    ("CPU", [
+        ("CPU_GOVERNOR", "Governor", "power", None, None, None),
+        ("CPU_EPP", "Energy preference", "power", None, None, None),
+    ]),
+]
+
+POWER_NOTE = (
+    "Applied now and again at every boot. The governor decides the clock; the "
+    "energy preference is a hint about where in its range the firmware should "
+    "sit, and it only has a say under a governor that lets the firmware "
+    "range - the performance governor pins it and the kernel refuses the "
+    "setting. Leaving both alone is the default and touches nothing.")
+
 SECTION_SETTINGS = {
     "keyboard": (SYSTEM, SYSTEM_NOTE),
+    "power": (POWER, POWER_NOTE),
 }
 
 # Which of the settings on those pages belong to the machine rather than to
@@ -290,6 +309,13 @@ SECTION_SETTINGS = {
 # the window has to ask: which file a value was read from and is written back
 # to. See Panel._saved and Panel.apply_settings.
 SYSTEM_KEYS = frozenset(syssettings.DEFAULTS)
+
+# And which belong to the CPU, which is a third file with a third way of being
+# written: /etc, so root, so a helper through pkexec - the same shape as the
+# LED service's own config rather than the keyboard layout's. Kept apart from
+# SYSTEM_KEYS for exactly that reason: those two sets differ in who may write
+# them, which is the only distinction the window has to make.
+POWER_KEYS = frozenset(power.DEFAULTS)
 
 # -- the window's top level -------------------------------------------------
 #
@@ -347,16 +373,6 @@ ABOUT_LINES = (
 )
 
 SOON = {
-    "power": (
-        "Energy Performance Preference and the CPU governor",
-        "Pick how the machine trades speed against power - the governor that "
-        "decides the clock, and the EPP hint that biases it - and have the "
-        "choice survive a reboot.",
-        "Nothing here yet. What the machine offers depends on its cpufreq "
-        "driver: with amd-pstate in active mode there are EPP values and two "
-        "governors, and in passive mode the classic governors and no EPP at "
-        "all - so this page has to be built from what the machine reports "
-        "rather than from a list written here."),
     "cec": (
         "HDMI CEC",
         "Let the machine talk to the television over the HDMI cable: wake "
@@ -409,7 +425,20 @@ SCENE_IS_LIT = ("DESKTOP_SCENE", ("color", "breath", "patrol", "rainbow",
 # load gauge either, whose brightness is half of what it is saying.
 SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow", "fire",
                                  "aurora"))
+# The energy preference is only in play under a governor that lets the
+# firmware range. Under `performance` the kernel pins it and refuses the file,
+# so the menu is taken away rather than offered and then ignored - the value
+# is written out as a *choice* rule, which is what gets a row hidden.
+#
+# Every governor but that one, listed rather than negated, because DEPENDS_ON
+# can say "is one of these" and cannot say "is not this". Only the two
+# amd-pstate offers in active mode plus the classic ones a passive machine
+# has: a governor missing from here hides a row that should be shown, which
+# is the safe way round of getting it wrong.
+EPP_IN_PLAY = ("CPU_GOVERNOR", ("", "powersave", "ondemand", "schedutil",
+                                "conservative", "userspace"))
 DEPENDS_ON = {
+    "CPU_EPP": (EPP_IN_PLAY,),
     "DESKTOP_COLOR": (SCENE_HAS_COLOUR,),
     "DESKTOP_BRIGHTNESS": (SCENE_IS_LIT,),
     "DESKTOP_SPEED": (SCENE_MOVES,),
@@ -1771,6 +1800,9 @@ class Panel:
         # merged into them: they come from different files, they are written
         # back by different means, and only one of the two restarts anything.
         self.system = syssettings.read()
+        # And the CPU's, which live in /etc like the service's own and are
+        # written the same way: through a short helper under pkexec.
+        self.power = self._load_power()
         self.vars = {}
         # key -> the (label, value) pairs and the widget, so a value that
         # turns up later can be added to both.
@@ -1889,17 +1921,29 @@ class Panel:
 
         # And the sections themselves, in the order the sidebar lists them.
         self._section_pages = {}
+        # Built in the order the sidebar lists them, and from the same table,
+        # so a section added to SECTIONS and to neither of the two below is
+        # caught here rather than showing an empty page.
+        self._section_pages["strip"] = None      # placed by _add_section
         self._add_section("strip", strip)
-        self._add_section("power", self._page(
-            self.sections, lambda where: self._build_soon(where, "power")))
-        self._add_section("cec", self._page(
-            self.sections, lambda where: self._build_soon(where, "cec")))
-        for key, (table, note) in SECTION_SETTINGS.items():
-            self._add_section(key, self._page(
-                self.sections, lambda where, t=table, n=note:
-                self._build_settings(where, t, n)))
-        self.status_tab = self._page(self.sections, self._build_status)
-        self._add_section("status", self.status_tab)
+        for key, _title, _subtitle, _icon in SECTIONS:
+            if key == "strip":
+                continue
+            if key in SECTION_SETTINGS:
+                table, note = SECTION_SETTINGS[key]
+                page = self._page(self.sections,
+                                  lambda where, t=table, n=note:
+                                  self._build_settings(where, t, n))
+            elif key in SOON:
+                page = self._page(self.sections,
+                                  lambda where, k=key: self._build_soon(where,
+                                                                        k))
+            elif key == "status":
+                page = self.status_tab = self._page(self.sections,
+                                                    self._build_status)
+            else:                                            # pragma: no cover
+                raise AssertionError("no page for the %s section" % key)
+            self._add_section(key, page)
         self._add_section("about", self._page(self.sections,
                                               self._build_about))
         self._build_sidebar()
@@ -2547,18 +2591,28 @@ class Panel:
                           sticky="w", padx=(LOOK_GAP, 0),
                           pady=(ROW_PAD + lead, ROW_PAD))
                 occupies.append(said)
-        elif kind in ("choice", "sensor", "named"):
+        elif kind in ("choice", "sensor", "named", "power"):
             # Entries that are labels for something else - see the menu
             # helpers in ledpanel. A "choice" is the case where the label and
-            # the value are the same word.
+            # the value are the same word. "sensor" and "power" are the two
+            # that are read off the machine when the row is built rather than
+            # written into the settings table: what a machine offers is not
+            # something this file can know, and a list here would be a list
+            # that is wrong on somebody's hardware.
             variable = tk.StringVar()
             choices = (ledpanel.sensor_choices(*ledpanel.read_sensors(),
                                                current=str(value))
                        if kind == "sensor"
+                       else ledpanel.power_choices(
+                           power.governors() if key == "CPU_GOVERNOR"
+                           else power.epp_values(),
+                           current=str(value), labels=power.LABELS)
+                       if kind == "power"
                        else [(entry, entry) for entry in low]
                        if kind == "choice" else list(low))
             self._menu(grid, row, key, variable, choices, str(value),
-                       width=SENSOR_WIDTH if kind == "sensor" else MENU_WIDTH,
+                       width=(SENSOR_WIDTH if kind in ("sensor", "power")
+                              else MENU_WIDTH),
                        lead=ROW_PAD + lead)
             controls.append(self._widgets[key])
             occupies.append(self._widgets[key])
@@ -2648,6 +2702,8 @@ class Panel:
         """
         if key in SYSTEM_KEYS:
             return self.system.get(key, syssettings.DEFAULTS[key])
+        if key in POWER_KEYS:
+            return self.power.get(key, power.DEFAULTS[key])
         return self.config.get(key, config_module.DEFAULTS[key])
 
     def _differences(self):
@@ -2666,7 +2722,7 @@ class Panel:
                 continue
             if kind == "bool":
                 same = bool(raw) == bool(saved)
-            elif kind in ("sensor", "named"):
+            elif kind in ("sensor", "named", "power"):
                 # What is shown against what the file's value would show, so a
                 # colour written in capitals in the file is not a change.
                 same = raw == self._label_for(key, str(saved))
@@ -2733,7 +2789,7 @@ class Panel:
         variable, kind = self.vars[switch]
         # A menu holds the label it shows, not the value it stands for.
         shown = variable.get()
-        if kind in ("sensor", "named"):
+        if kind in ("sensor", "named", "power"):
             shown = self._value_for(switch, shown)
         if isinstance(wanted, tuple):
             return shown in wanted
@@ -3191,14 +3247,14 @@ class Panel:
         """
         values = {}
         for key, (variable, kind) in self.vars.items():
-            if key in SYSTEM_KEYS:
+            if key in SYSTEM_KEYS or key in POWER_KEYS:
                 continue
             raw = variable.get()
             values[key] = (bool(raw) if kind == "bool"
                            else int(round(raw)) if kind == "int"
                            else float(raw) if kind == "float"
                            else self._value_for(key, raw)
-                           if kind in ("sensor", "named")
+                           if kind in ("sensor", "named", "power")
                            else str(raw))
         # The idle rate cannot exceed the active one, which two independent
         # sliders cannot express. Pulling FPS below IDLE_FPS is an obvious
@@ -3214,11 +3270,27 @@ class Panel:
         config_module.validate(merged)      # raises ConfigError
         return values
 
+    def _load_power(self):
+        """What the CPU settings file holds. Readable without any rights."""
+        return ledpanel.read_power_config()
+
     def _collect_system(self):
         """The machine's own settings out of the widgets, validated."""
         values = {key: self._value_for(key, self.vars[key][0].get())
                   for key in SYSTEM_KEYS if key in self.vars}
         syssettings.validate(values)        # raises SettingError
+        return values
+
+    def _collect_power(self):
+        """The CPU settings out of the widgets, checked against the machine.
+
+        Against the machine rather than against a list, and here rather than
+        only in the helper: a value this hardware does not offer should be
+        refused while the window still has somewhere to show the reason.
+        """
+        values = {key: self._value_for(key, self.vars[key][0].get())
+                  for key in POWER_KEYS if key in self.vars}
+        power.validate(values)              # raises ValueError
         return values
 
     def apply_settings(self):
@@ -3253,6 +3325,33 @@ class Panel:
             self._refresh_unsaved()
             self._write("Saved the machine's settings. They take effect at "
                         "the next login.\n\n")
+
+        try:
+            cpu = self._collect_power()
+        except ValueError as exc:
+            self._say("Not a usable setting", str(exc))
+            return
+        if cpu != self.power:
+            # Its own prompt, and only when it changed. Two prompts in a row
+            # is not lovely, but they are two different files installed by two
+            # different helpers - and the alternative is one helper that does
+            # everything, which is the shape this project deliberately does
+            # not have. See scripts/apply-power.sh.
+            staged = tempfile.NamedTemporaryFile(
+                "w", suffix=".conf", prefix="steamos-led-power-", delete=False)
+            with staged:
+                staged.write(ledpanel.power_config_text(cpu))
+            os.chmod(staged.name, 0o644)
+
+            def cpu_done(code, path=staged.name, wanted=dict(cpu)):
+                os.unlink(path)
+                if code == 0:
+                    self.power = wanted
+                    self._refresh_unsaved()
+
+            self.runner.start(
+                ledpanel.apply_power_command(SOURCE_DIR, staged.name),
+                cpu_done)
 
         if values == {key: self.config.get(key, config_module.DEFAULTS[key])
                       for key in values}:
@@ -3309,7 +3408,7 @@ class Panel:
             value = values[key]
             variable.set(bool(value) if kind == "bool"
                          else self._label_for(key, str(value))
-                         if kind in ("sensor", "named")
+                         if kind in ("sensor", "named", "power")
                          else str(value) if kind == "choice"
                          else float(value))
             shown += 1
@@ -3638,7 +3737,7 @@ class Panel:
                                else int(round(raw)) if kind == "int"
                                else float(raw) if kind == "float"
                                else self._value_for(key, raw)
-                               if kind in ("sensor", "named")
+                               if kind in ("sensor", "named", "power")
                                else str(raw))
             except (ValueError, TypeError, KeyError, tk.TclError):
                 continue

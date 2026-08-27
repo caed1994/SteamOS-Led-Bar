@@ -23,6 +23,10 @@ warn() { printf '\033[1;33m warning:\033[0m %s\n' "$*" >&2; }
 # it survives a SteamOS update, and nothing there is on anybody's PATH - so
 # without this, every command in the README is one you can read and not run.
 COMMAND_LINK="/usr/local/bin/steamos-led-serial"
+# The second program this installs, linked for the same reason: the README
+# tells you to run it, and a command you can read and not type is worse than
+# no command at all.
+POWER_COMMAND_LINK="/usr/local/bin/steamos-led-power"
 
 WATCHER_UNIT="steamos-led-achievements.service"
 PHONE_UNIT="steamos-led-phone.service"

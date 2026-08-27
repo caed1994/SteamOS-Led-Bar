@@ -1,0 +1,33 @@
+[Unit]
+Description=CPU governor and EPP for the SteamOS LED bar toolbox
+Documentation=https://github.com/caed1994/SteamOS-Led-Bar
+# sysfs has to be there, and cpufreq is set up long before this point.
+After=sysinit.target
+
+[Service]
+Type=oneshot
+# The settings are written once and stay until something else changes them,
+# so there is no process to keep. RemainAfterExit is what makes "is-active"
+# answer yes afterwards, which is what the control panel's check reads.
+RemainAfterExit=yes
+ExecStart=@INSTALL_DIR@/steamos-led-power --apply
+
+# It writes /sys/devices/system/cpu, so ProtectKernelTunables cannot be on -
+# that is exactly the tree it mounts read-only. Everything else that does not
+# get in the way of two sysfs writes is kept.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

@@ -583,7 +583,7 @@ enough settings to need it, has its own list of pages inside.
 | Section | What is in it |
 | ------- | ------------- |
 | **LED Strip** | everything about the bar. Seven pages, below |
-| **EPP & Governor** | performance and power. Not built yet |
+| **EPP & Governor** | the CPU governor and the energy preference &mdash; see [CPU power](#cpu-power) |
 | **HDMI CEC Mods** | talking to the television over HDMI. Not built yet |
 | **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
 | **Status & Repair** | what is installed and running, one button that puts it back, and [updating](#updating-and-removing) |
@@ -631,6 +631,37 @@ a PNG in as `gui/steamos-led-panel.png` and run `sudo ./install.sh --yes`.
 > update can remove it (`sudo pacman -S tk` brings it back). Nothing is only
 > available in the panel: every button runs a command you can also type, and
 > the panel prints the command it ran.
+
+### CPU power
+
+Two settings on the **EPP & Governor** page, both read off your own machine
+rather than from a list:
+
+| | |
+| --- | --- |
+| **Governor** | what decides the clock |
+| **Energy preference** | a hint about where in its range the firmware should sit |
+
+What exists depends on the cpufreq driver. A Steam Machine ships with
+`amd-pstate` in **active** mode, where the kernel offers `powersave` and
+`performance` and adds the EPP file. In `passive` or `guided` mode the classic
+governors are back (`schedutil`, `ondemand`, …) and there is no EPP at all. To
+see what yours has:
+
+```bash
+steamos-led-power --report
+```
+
+**The two are not independent.** Under `performance` the firmware is pinned to
+its top preference and the kernel refuses the EPP file, so the panel takes the
+preference row away while that governor is set. `powersave` is not a battery
+mode here &mdash; it is the setting that lets the firmware range at all.
+
+Both default to leaving the CPU exactly as SteamOS set it. A value you pick is
+applied straight away and written to `/etc/steamos-led-power.conf`;
+`steamos-led-power.service` puts it back at every boot, and is only enabled
+once you have set something. Uninstalling disables it and stops reapplying,
+but does not put the governor back &mdash; nothing recorded what it was before.
 
 ### Keyboard layout
 

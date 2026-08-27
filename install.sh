@@ -15,6 +15,8 @@ set -euo pipefail
 INSTALL_DIR="/var/lib/steamos-led-serial"
 CONFIG_PATH="/etc/steamos-led-serial.conf"
 UNIT_PATH="/etc/systemd/system/steamos-led-serial.service"
+POWER_UNIT_PATH="/etc/systemd/system/steamos-led-power.service"
+POWER_CONFIG_PATH="/etc/steamos-led-power.conf"
 UDEV_PATH="/etc/udev/rules.d/99-steamos-led-serial.rules"
 SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/steamos-led-serial"
 SHIM_DEVICE="/dev/valve-leds-shim"
@@ -166,6 +168,7 @@ install -d -m 0755 "$INSTALL_DIR"
 rm -rf "${INSTALL_DIR:?}/steamos_led"
 cp -r "$SOURCE_DIR/server/steamos_led" "$INSTALL_DIR/"
 install -m 0755 "$SOURCE_DIR/server/steamos-led-serial" "$INSTALL_DIR/steamos-led-serial"
+install -m 0755 "$SOURCE_DIR/server/steamos-led-power" "$INSTALL_DIR/steamos-led-power"
 find "$INSTALL_DIR/steamos_led" -type f -exec chmod 0644 {} +
 
 # A name to type. Everything lives in /var/lib so it survives a SteamOS
@@ -187,6 +190,9 @@ if install -d -m 0755 "$(dirname "$COMMAND_LINK")" 2>/dev/null \
 else
     warn "could not write $COMMAND_LINK - run it by its full path instead"
 fi
+
+ln -sfn "$INSTALL_DIR/steamos-led-power" "$POWER_COMMAND_LINK" 2>/dev/null \
+    || warn "could not write $POWER_COMMAND_LINK - run it by its full path"
 
 if [[ -f "$CONFIG_PATH" ]]; then
     say "Keeping existing $CONFIG_PATH"
@@ -221,6 +227,24 @@ say "Installing systemd unit to $UNIT_PATH"
 sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     "$SOURCE_DIR/server/steamos-led-serial.service" > "$UNIT_PATH"
 chmod 0644 "$UNIT_PATH"
+
+# The CPU settings. Its unit is installed but deliberately not enabled: with
+# nothing set in the config file it would run at every boot to do nothing, and
+# a service somebody did not ask for is a service they have to wonder about.
+# The panel enables it the first time a setting is applied - see
+# scripts/apply-power.sh.
+say "Installing systemd unit to $POWER_UNIT_PATH"
+sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
+    "$SOURCE_DIR/server/steamos-led-power.service" > "$POWER_UNIT_PATH"
+chmod 0644 "$POWER_UNIT_PATH"
+
+if [[ -f "$POWER_CONFIG_PATH" ]]; then
+    say "Keeping existing $POWER_CONFIG_PATH"
+else
+    say "Writing $POWER_CONFIG_PATH"
+    install -m 0644 "$SOURCE_DIR/server/steamos-led-power.conf" \
+        "$POWER_CONFIG_PATH"
+fi
 
 # --- the units that run in the desktop session ------------------------------
 

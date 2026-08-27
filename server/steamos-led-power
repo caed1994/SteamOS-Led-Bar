@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+"""Put the CPU governor and the EPP where the config file says.
+
+Run at boot by steamos-led-power.service, and again by the control panel
+whenever the setting changes. Both go through here rather than writing sysfs
+themselves, so there is one place that knows the order the two have to be
+written in and what a refusal means.
+
+    steamos-led-power --apply     write them, report what happened
+    steamos-led-power --report    say what the machine offers and holds
+
+Doing nothing is a valid outcome and the default one: with neither setting in
+the file this exits 0 having touched nothing, which is what an installation
+that nobody has configured should do to a machine.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from steamos_led import power                              # noqa: E402
+
+CONFIG_PATH = "/etc/steamos-led-power.conf"
+
+
+def load(path):
+    """The config file as {key: value}, defaults for anything missing."""
+    values = dict(power.DEFAULTS)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sign, value = line.partition("=")
+        if sign and name.strip() in values:
+            values[name.strip()] = value.strip().strip("\"'")
+    return values
+
+
+def write_all(name, value, root=""):
+    """One value into every policy. Returns the paths that refused it.
+
+    Every policy, because these files are per policy: writing only the first
+    leaves the other cores under a different governor, which is a machine in
+    two states at once and nothing on screen to say so.
+    """
+    refused = []
+    for policy in power.policies(root):
+        path = os.path.join(policy, name)
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(value)
+        except OSError as exc:
+            refused.append((path, exc))
+    return refused
+
+
+def apply_settings(values, root="", out=print):
+    """Governor first, then EPP. Returns an exit status.
+
+    The order matters and is the whole reason this is one program. Under the
+    `performance` governor the kernel pins the preference and refuses the EPP
+    file, so a run that wrote EPP first would have it accepted and then
+    overridden - and a run that wrote it after would see a refusal that is not
+    a fault. Written in this order, and the refusal is expected rather than
+    reported as a failure.
+    """
+    if not power.policies(root):
+        out("no cpufreq on this machine - nothing to set")
+        return 0
+
+    try:
+        power.validate(values, root)
+    except ValueError as exc:
+        out("refusing to write: %s" % exc)
+        return 2
+
+    governor = values.get("CPU_GOVERNOR", power.UNSET)
+    epp = values.get("CPU_EPP", power.UNSET)
+    status = 0
+
+    if governor != power.UNSET:
+        refused = write_all(power.GOVERNOR, governor, root)
+        if refused:
+            out("could not set the governor: %s" % refused[0][1])
+            status = 1
+        else:
+            out("governor: %s" % governor)
+
+    if epp != power.UNSET:
+        # What the governor will be once the write above has landed, which is
+        # not necessarily what was asked for if that write failed.
+        now = power.current(root).get("CPU_GOVERNOR", "")
+        if not power.epp_applies(now):
+            out("EPP left alone: the %s governor pins it" % now)
+        else:
+            refused = write_all(power.EPP, epp, root)
+            if refused:
+                out("could not set the EPP: %s" % refused[0][1])
+                status = 1
+            else:
+                out("EPP: %s" % epp)
+
+    if governor == power.UNSET and epp == power.UNSET:
+        out("nothing set in %s - leaving the CPU alone" % CONFIG_PATH)
+    return status
+
+
+def report(root="", out=print):
+    found = power.available(root)
+    out("cpufreq policies: %d" % found["policies"])
+    out("amd_pstate mode:  %s" % (found["mode"] or "not amd_pstate"))
+    out("governors:        %s" % (" ".join(found["governors"]) or "none"))
+    out("EPP values:       %s" % (" ".join(found["epp"]) or "none"))
+    out("now:              governor=%s epp=%s"
+        % (found["current"]["CPU_GOVERNOR"] or "-",
+           found["current"]["CPU_EPP"] or "-"))
+    if found["governors"] and not power.epp_applies(
+            found["current"]["CPU_GOVERNOR"]):
+        out("the %s governor pins the preference, so the EPP is not in play"
+            % power.PINNED_GOVERNOR)
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--apply", action="store_true",
+                        help="write the config file's settings to the CPU")
+    parser.add_argument("--report", action="store_true",
+                        help="say what this machine offers and holds")
+    parser.add_argument("--config", default=CONFIG_PATH,
+                        help="read this file instead of %s" % CONFIG_PATH)
+    parser.add_argument("--root", default="",
+                        help="a prefix for /sys, for testing")
+    args = parser.parse_args(argv)
+
+    if args.report or not args.apply:
+        return report(args.root)
+    return apply_settings(load(args.config), args.root)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

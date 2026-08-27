@@ -12,6 +12,8 @@ set -euo pipefail
 INSTALL_DIR="/var/lib/steamos-led-serial"
 CONFIG_PATH="/etc/steamos-led-serial.conf"
 UNIT_PATH="/etc/systemd/system/steamos-led-serial.service"
+POWER_UNIT_PATH="/etc/systemd/system/steamos-led-power.service"
+POWER_CONFIG_PATH="/etc/steamos-led-power.conf"
 UDEV_PATH="/etc/udev/rules.d/99-steamos-led-serial.rules"
 SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/steamos-led-serial"
 
@@ -138,6 +140,13 @@ remove_platformio_path
 # Stopping the service blanks the strip before the process exits.
 systemctl disable --now steamos-led-serial.service 2>/dev/null || true
 rm -f "$UNIT_PATH"
+
+# The CPU settings. Disabling stops it being reapplied at the next boot; what
+# is set right now is left as it is, because putting the governor back would
+# mean knowing what it was before this was ever installed, and nothing here
+# recorded that. It is a setting, not a change to be undone.
+systemctl disable steamos-led-power.service 2>/dev/null || true
+rm -f "$POWER_UNIT_PATH"
 systemctl daemon-reload
 
 rm -f "$UDEV_PATH"
@@ -151,10 +160,14 @@ if [[ -L "$COMMAND_LINK" \
       && "$(readlink "$COMMAND_LINK")" == "$INSTALL_DIR/steamos-led-serial" ]]; then
     rm -f "$COMMAND_LINK"
 fi
+if [[ -L "$POWER_COMMAND_LINK" \
+      && "$(readlink "$POWER_COMMAND_LINK")" == "$INSTALL_DIR/steamos-led-power" ]]; then
+    rm -f "$POWER_COMMAND_LINK"
+fi
 
 rm -rf "${INSTALL_DIR:?}"
 
-[[ $PURGE -eq 1 ]] && rm -f "$CONFIG_PATH"
+[[ $PURGE -eq 1 ]] && rm -f "$CONFIG_PATH" "$POWER_CONFIG_PATH"
 echo "Removed."
 
 # --- kernel module ---------------------------------------------------------
@@ -183,6 +196,7 @@ echo
 echo "Left in place:"
 if [[ $PURGE -eq 0 ]]; then
     echo "  $CONFIG_PATH"
+    echo "  $POWER_CONFIG_PATH"
     echo "      your settings - --purge deletes it"
 fi
 if [[ $REMOVE_MODULE -eq 0 ]]; then

@@ -645,7 +645,13 @@ class InstallerShapeTest(unittest.TestCase):
         typed = set(re.findall(r"^\s*(?:sudo )?(steamos-led-[a-z-]+)\b",
                                readme, re.M))
         self.assertIn(name, typed, "the README names no such command")
-        self.assertEqual(typed - {name, "steamos-led-serial.conf"}, set(),
+        # Every command this project puts on the PATH, by constant. A second
+        # program was added and the README told people to run it before it was
+        # linked anywhere - which is exactly the fault this test is about,
+        # caught the second time round rather than the first.
+        linked = {os.path.basename(shell_value(each))
+                  for each in ("COMMAND_LINK", "POWER_COMMAND_LINK")}
+        self.assertEqual(typed - linked - {"steamos-led-serial.conf"}, set(),
                          "the README names a command nothing installs")
 
     def test_the_user_units_are_installed_before_anything_that_can_fail(self):
@@ -842,6 +848,37 @@ class InstallerShapeTest(unittest.TestCase):
             name for name in named - self.NOT_INSTALLED
             if name not in uninstaller and name not in shared)
         self.assertEqual(missing, [], "the uninstaller never mentions these")
+
+    def test_the_cpu_applier_is_installed_and_removed(self):
+        """The second program this project installs, and its unit.
+
+        The path check above only sees things named by a constant, and the
+        applier is copied by its literal name alongside the service - so it
+        would go uncovered, and an installed program nobody removes is the
+        leftover that check exists to prevent.
+        """
+        with open(UNINSTALLER) as handle:
+            uninstaller = handle.read()
+        self.assertIn("server/steamos-led-power", self.text)
+        self.assertIn("steamos-led-power.service", self.text)
+        # Removed with the rest of INSTALL_DIR, which the uninstaller wipes
+        # whole - so what has to be named there is the unit outside it.
+        self.assertIn("POWER_UNIT_PATH", uninstaller)
+        self.assertIn("systemctl disable steamos-led-power.service",
+                      uninstaller)
+
+    def test_the_cpu_unit_is_installed_but_not_enabled(self):
+        """Installed so it is there; enabled only once something is set.
+
+        With nothing in its config the unit would run at every boot to do
+        nothing, and a service somebody did not ask for is one they have to
+        wonder about. scripts/apply-power.sh enables it the first time a
+        setting is applied.
+        """
+        self.assertNotIn("systemctl enable steamos-led-power", self.text)
+        with open(os.path.join(HERE, "..", "scripts",
+                               "apply-power.sh")) as handle:
+            self.assertIn('systemctl enable "$SERVICE"', handle.read())
 
     def test_the_things_that_live_in_a_home_are_taken_back(self):
         # Under no root path, so none of the rm -f lines reach them - see

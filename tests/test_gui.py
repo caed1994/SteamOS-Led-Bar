@@ -26,6 +26,7 @@ import kdetheme  # noqa: E402
 import ledpanel  # noqa: E402
 import roundrect  # noqa: E402
 import syssettings  # noqa: E402
+from steamos_led import power  # noqa: E402
 from steamos_led import config as config_module  # noqa: E402
 from steamos_led import desktop  # noqa: E402
 
@@ -1100,7 +1101,8 @@ class PanelSettingsTest(unittest.TestCase):
         soon = ast.literal_eval(assigned["SOON"])
         sections = [entry[0] for entry
                     in ast.literal_eval(assigned["SECTIONS"])]
-        self.assertEqual(sorted(soon), sorted(["power", "cec"]))
+        # Only HDMI CEC now: EPP & Governor was one of these and is built.
+        self.assertEqual(sorted(soon), ["cec"])
         for key, lines in soon.items():
             self.assertIn(key, sections, key)
             self.assertEqual(len(lines), 3, key)
@@ -1276,10 +1278,11 @@ class PanelSettingsTest(unittest.TestCase):
     def test_every_setting_shown_is_a_real_option(self):
         # In one of the two files the window edits. A key in neither is a
         # typo, and a typo here is a row that reads and writes nothing.
+        known = dict(config_module.DEFAULTS)
+        known.update(syssettings.DEFAULTS)
+        known.update(power.DEFAULTS)
         for key in self._settings():
-            self.assertTrue(
-                key in config_module.DEFAULTS or key in syssettings.DEFAULTS,
-                key)
+            self.assertIn(key, known, key)
 
     def test_the_system_page_names_the_settings_syssettings_owns(self):
         """The System page is written out; this is what pins it to the module.

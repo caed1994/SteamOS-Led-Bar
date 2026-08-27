@@ -16,6 +16,7 @@ import subprocess
 
 from steamos_led import config as config_module
 from steamos_led import phone
+from steamos_led import power as power_module
 from steamos_led import temperature
 
 INSTALL_DIR = "/var/lib/steamos-led-serial"
@@ -812,6 +813,74 @@ def sensor_choices(sensors, chosen=None, current="auto"):
         # driver unloaded, a typo. Showing it says what the service is set to;
         # dropping it would look like the setting had changed by itself.
         choices.append(("%s (not found)" % current, current))
+    return _uniquify(choices)
+
+
+POWER_CONFIG_PATH = "/etc/steamos-led-power.conf"
+
+
+def read_power_config(path=None):
+    """The CPU settings file as {key: value}, defaults for what is missing.
+
+    Its own small reader rather than config_module.load: that one is the LED
+    service's, it validates against the service's own options, and it would
+    refuse a file made only of settings it has never heard of.
+    """
+    values = dict(power_module.DEFAULTS)
+    try:
+        with open(path or POWER_CONFIG_PATH,
+                  encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sign, value = line.partition("=")
+        if sign and name.strip() in values:
+            values[name.strip()] = value.strip().strip("\"'")
+    return values
+
+
+def power_config_text(values):
+    """Those settings as a file, keeping the shipped one's comments.
+
+    The same shape as the LED config's update_text: what is written back is
+    the file that was there with its values replaced, so the explanation of
+    what a governor is survives every Apply.
+    """
+    lines = []
+    for key in sorted(power_module.DEFAULTS):
+        lines.append("%s=%s" % (key, values.get(key,
+                                                power_module.DEFAULTS[key])))
+    return "\n".join(lines) + "\n"
+
+
+def apply_power_command(source_dir, staged_path):
+    """Install the CPU settings and put them into effect, in one prompt."""
+    return ["pkexec", os.path.join(source_dir, "scripts", "apply-power.sh"),
+            staged_path]
+
+
+def power_choices(offered, current="", labels=None):
+    """(label, value) pairs for a CPU setting, from what the machine offers.
+
+    Never from a list here. Which governors and which preferences exist
+    depends on the cpufreq driver and the mode it is in - see power.py - so a
+    menu written down would be a menu that is wrong on somebody's machine.
+
+    "Leave it alone" leads, because it is the default and because it is the
+    entry that undoes the others. A value set in the config file that this
+    machine does not offer is kept and marked, the same way a missing sensor
+    is: dropping it would look like the setting had changed by itself.
+    """
+    labels = labels or {}
+    choices = [("Leave it to SteamOS", "")]
+    for value in offered:
+        choices.append((labels.get(value, value), value))
+    if current and current not in [value for _label, value in choices]:
+        choices.append(("%s (not offered here)" % current, current))
     return _uniquify(choices)
 
 

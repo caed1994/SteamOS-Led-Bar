@@ -1308,7 +1308,7 @@ class LiveWindowTest(unittest.TestCase):
         never do. Apply standing under a page with nothing on it is a button
         that would write a file nobody edited.
         """
-        for key, wanted in (("strip", True), ("power", False),
+        for key, wanted in (("strip", True), ("power", True),
                             ("cec", False), ("keyboard", True),
                             ("status", False), ("about", False)):
             self.panel._open_section(key)
@@ -1431,6 +1431,56 @@ class LiveWindowTest(unittest.TestCase):
         for child in widget.winfo_children():
             self._every_widget(child, found)
         return found
+
+    def test_the_cpu_menus_are_built_from_the_machine(self):
+        """Not from a list in the panel, which is the whole point of them.
+
+        This build machine has no cpufreq at all, so both menus come out with
+        nothing but "leave it alone" - which is the case a hardcoded list
+        would get wrong by offering governors that do not exist here.
+        """
+        self.panel._open_section("power")
+        self.root.update()
+        for key in ("CPU_GOVERNOR", "CPU_EPP"):
+            offered = [value for _label, value in self.panel._menus[key]]
+            self.assertEqual(
+                offered,
+                [""] + list(self.panel_module.power.governors()
+                            if key == "CPU_GOVERNOR"
+                            else self.panel_module.power.epp_values()),
+                key)
+
+    def test_the_energy_preference_goes_away_under_the_pinning_governor(self):
+        """The kernel refuses the EPP file while `performance` is set.
+
+        Offered anyway it would be a menu whose value the machine will not
+        take - so it is taken away, the way every row that waits on a choice
+        is. Driven through the menu rather than the variable, because what
+        the window stores is the label and the rule is about the value.
+        """
+        self.panel._open_section("power")
+        self.root.update()
+        governor = self.panel.vars["CPU_GOVERNOR"][0]
+        for value, shown in (("performance", False), ("powersave", True),
+                             ("", True)):
+            governor.set(self.panel._label_for("CPU_GOVERNOR", value))
+            self.root.update()
+            self.assertEqual(self._shown("CPU_EPP"), shown, value)
+
+    def test_the_cpu_settings_never_reach_the_led_config_or_a_profile(self):
+        # Third file, third writer. A governor in the LED service's config is
+        # a key it does not know, and in a profile it would change the CPU
+        # every time somebody tried a different look for the bar.
+        self.panel._open_section("power")
+        self.root.update()
+        values = self.panel._collect()
+        for key in ("CPU_GOVERNOR", "CPU_EPP"):
+            self.assertNotIn(key, values)
+            self.assertNotIn(key, self.panel_module.ledpanel.profile_text(
+                values))
+        merged = dict(self.panel_module.config_module.DEFAULTS)
+        merged.update(values)
+        self.panel_module.config_module.validate(merged)
 
     def test_no_card_stands_on_another_card(self):
         """Reported: dark notches inside the corners of the placeholder cards.
