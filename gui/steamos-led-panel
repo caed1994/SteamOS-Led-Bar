@@ -968,6 +968,14 @@ def apply_theme(root):
                     relief="flat", borderwidth=0)
     style.configure("TFrame", background=surface)
     style.configure("Card.TFrame", background=roles["surface_container_low"])
+    # The same tone, and no corners. For a frame that stands *on* a card
+    # rather than being one: a Card.TFrame inside a Card.TFrame draws its own
+    # rounded rectangle, and that picture's corners are painted against the
+    # page - so a nested one puts four notches of the page's colour on top of
+    # the card underneath it. The layout is left alone here, which is what
+    # keeps it flat; see panels() in dress, where Card.TFrame gets its image.
+    style.configure("OnCard.TFrame",
+                    background=roles["surface_container_low"])
     style.configure("TLabel", background=surface, foreground=on_surface)
     style.configure("Heading.TLabel", font=(family, size + TYPE_HEADLINE))
     # A group's name, in the accent: it is the one place colour is used to
@@ -1858,7 +1866,7 @@ class Panel:
         rail_card = ttk.Frame(strip, style="Card.TFrame")
         rail_card.pack(side="left", fill="y", padx=(0, GROUP_GAP),
                        pady=(0, GROUP_GAP))
-        self.rail = ttk.Frame(rail_card, style="Card.TFrame")
+        self.rail = ttk.Frame(rail_card, style="OnCard.TFrame")
         self.rail.pack(fill="y", expand=True, padx=ROW_GAP, pady=ROW_GAP)
         notebook = self.notebook = ttk.Notebook(strip)
         notebook.pack(side="left", fill="both", expand=True)
@@ -2103,7 +2111,7 @@ class Panel:
                     pady=SIDE_MARGIN)
         card = ttk.Frame(holder, style="Card.TFrame")
         card.pack(fill="x")
-        inner = ttk.Frame(card, style="Card.TFrame")
+        inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
         ttk.Label(inner, text="Coming soon", style="Section.TLabel",
                   background=self.roles["surface_container_low"]).pack(
@@ -2126,7 +2134,7 @@ class Panel:
                     pady=SIDE_MARGIN)
         card = ttk.Frame(holder, style="Card.TFrame")
         card.pack(fill="x")
-        inner = ttk.Frame(card, style="Card.TFrame")
+        inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
         ground = self.roles["surface_container_low"]
         ttk.Label(inner, text="SteamOS LED bar", style="Heading.TLabel",

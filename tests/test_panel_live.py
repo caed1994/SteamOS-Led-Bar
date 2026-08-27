@@ -1424,6 +1424,44 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(seen[True], self.panel.roles["positive"])
         self.assertEqual(seen[False], self.panel.roles["error"])
 
+    def _every_widget(self, widget=None, found=None):
+        found = [] if found is None else found
+        widget = self.root if widget is None else widget
+        found.append(widget)
+        for child in widget.winfo_children():
+            self._every_widget(child, found)
+        return found
+
+    def test_no_card_stands_on_another_card(self):
+        """Reported: dark notches inside the corners of the placeholder cards.
+
+        Card.TFrame is drawn with a nine-slice image, and that image carries
+        its own corners - painted against the *page*, because that is what a
+        card normally stands on. Put one inside another and those four corners
+        are four notches of the page's colour on top of the card underneath.
+
+        Structural rather than by pixel, so it catches the next one as well:
+        the fix is a flat OnCard.TFrame for anything that stands on a card,
+        and the mistake is easy to repeat because the two look identical in
+        the source and differ only where they overlap.
+        """
+        def cards(widget):
+            found = []
+            for parent in self._every_widget(widget):
+                try:
+                    if str(parent.cget("style")) == "Card.TFrame":
+                        found.append(parent)
+                except tk.TclError:                         # no -style option
+                    pass
+            return found
+
+        for card in cards(self.root):
+            inside = [str(other) for other in cards(card)
+                      if other is not card]
+            self.assertEqual(inside, [],
+                             "%s is a card standing on the card %s"
+                             % (inside, card))
+
     def test_the_window_is_dark_whatever_the_desktop_is(self):
         """Forced, and nothing about the desktop may talk it out of it.
 
