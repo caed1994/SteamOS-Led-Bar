@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
+import kdetheme                                             # noqa: E402
 import syssettings                                          # noqa: E402
 
 try:
@@ -688,7 +689,13 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_page_too_long_for_the_window_can_be_scrolled_to_its_end(self):
         # The settings pages are longer than a 1080p screen can hold at a
         # large desktop font, so the foot of one has to be reachable.
-        self.root.geometry("1100x520")
+        #
+        # At the smallest the window may be, which is the worst case and is
+        # also the only size this can be asked at: a geometry under the
+        # minimum is refused outright, so the 1100x520 that used to be here
+        # left the window at its minimum and the page fitting comfortably.
+        self.root.geometry("%dx%d" % (self.panel_module.MIN_WIDTH,
+                                      self.panel_module.MIN_HEIGHT))
         page = self._page_named("Notifications")        # the longest
         self.panel.notebook.select(page)
         for _ in range(6):
@@ -1256,6 +1263,123 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertFalse(self._is_dead())
 
+    def _sections(self):
+        return [entry[0] for entry in self.panel_module.SECTIONS] + ["about"]
+
+    def test_every_section_has_an_entry_in_the_sidebar(self):
+        self.assertEqual(sorted(self.panel._sidebar_entries),
+                         sorted(self._sections()))
+        self.assertEqual(sorted(self.panel._section_pages),
+                         sorted(self._sections()))
+
+    def test_the_sidebar_says_which_section_is_open(self):
+        # One selected, always, and never two. The pill is the only thing on
+        # screen that says where you are, so a stale one is the window lying
+        # about what it is showing.
+        for key in self._sections():
+            self.panel._open_section(key)
+            self.root.update()
+            lit = [name for name, entry
+                   in self.panel._sidebar_entries.items() if entry.selected]
+            self.assertEqual(lit, [key])
+
+    def test_the_header_names_the_section_that_is_open(self):
+        for key, title, _subtitle, _icon in self.panel_module.SECTIONS:
+            self.panel._open_section(key)
+            self.root.update()
+            self.assertEqual(self.panel.section_title.cget("text"), title)
+
+    def test_clicking_a_sidebar_entry_opens_its_section(self):
+        # Through the binding rather than by calling _open_section, because
+        # the binding is the part a canvas has to do for itself: a ttk widget
+        # would have brought its own command, and this one does not.
+        entry = self.panel._sidebar_entries["about"]
+        entry.canvas.event_generate("<Button-1>", x=10, y=10)
+        self.root.update()
+        self.assertEqual(self.panel.section, "about")
+        self.assertEqual(self.panel.sections.select(),
+                         self.panel._section_pages["about"])
+
+    def test_apply_is_offered_only_where_there_are_settings(self):
+        """Two levels to ask now, and the answer has to come from both.
+
+        A section that is one table of settings always has some; the strip has
+        some on four of its seven pages; the two unbuilt sections and About
+        never do. Apply standing under a page with nothing on it is a button
+        that would write a file nobody edited.
+        """
+        for key, wanted in (("strip", True), ("power", False),
+                            ("cec", False), ("keyboard", True),
+                            ("about", False)):
+            self.panel._open_section(key)
+            self.root.update()
+            self.assertEqual(self.panel._apply_shown, wanted, key)
+
+        self.panel._open_section("strip")
+        for title, wanted in (("Strip", True), ("Advanced", True),
+                              ("Preview", False), ("Test", False),
+                              ("Status & repair", False)):
+            self.panel.notebook.select(self._page_named(title))
+            self.root.update()
+            self.assertEqual(self.panel._apply_shown, wanted, title)
+
+    def test_the_wheel_scrolls_the_section_in_front_of_you(self):
+        """Not the strip's page, which is what one notebook meant.
+
+        _open_page is the fix and this is the case it was wrong for: with a
+        section other than the strip open, the wheel was still asking the
+        inner notebook what was on screen and scrolling a page nobody could
+        see.
+        """
+        self.panel._open_section("about")
+        self.root.update()
+        self.assertEqual(self.panel._open_page(),
+                         self.panel._section_pages["about"])
+        self.panel._open_section("strip")
+        self.panel.notebook.select(self._page_named("Notifications"))
+        self.root.update()
+        self.assertEqual(self.panel._open_page(), self.panel.notebook.select())
+
+    def test_the_foot_of_the_window_says_whether_the_bar_is_there(self):
+        # Three states and three colours: unknown before anything has been
+        # read, and then good or bad. Grey saying "looking" is honest where a
+        # red one would be a fault report about an unanswered question.
+        seen = {}
+        for connected in (None, True, False):
+            self.panel._say_link(connected)
+            self.root.update()
+            seen[connected] = self.panel.link_dot.itemcget(
+                self.panel._dot, "fill")
+            self.assertTrue(self.panel.link_said.cget("text").strip())
+        self.assertEqual(len(set(seen.values())), 3, seen)
+        self.assertEqual(seen[True], self.panel.roles["positive"])
+        self.assertEqual(seen[False], self.panel.roles["error"])
+
+    def test_the_window_is_dark_whatever_the_desktop_is(self):
+        """Forced, and nothing about the desktop may talk it out of it.
+
+        This build machine reports Breeze *light* - kdetheme.read() falls back
+        to it when there is no Plasma to ask - so a window that followed the
+        desktop would come up light right here. That it does not is the whole
+        assertion.
+
+        The preview is why: a page of lit LEDs judged against a white window
+        is a page of washed-out LEDs.
+        """
+        self.assertFalse(kdetheme.is_dark(kdetheme.read()),
+                         "this machine reports a dark desktop, so this test "
+                         "cannot tell the two apart")
+        self.assertLess(kdetheme.luminance(self.panel.roles["surface"]), 0.2,
+                        "the window came up light")
+        self.assertGreater(kdetheme.luminance(self.panel.roles["on_surface"]),
+                           0.5, "dark text on a dark window")
+
+    def test_the_accent_still_comes_from_the_desktop(self):
+        # The half of following the desktop that is kept. Dark is ours; which
+        # colour the pills and the headings are is Plasma's.
+        self.assertEqual(self.panel_module.material.scheme(
+            "#3daee9", dark=True)["primary"], self.panel.roles["primary"])
+
     def test_a_setting_that_hangs_off_a_switch_is_greyed_with_it(self):
         variable, _kind = self.panel.vars["NOTIFY"]
         _labels, controls = self.panel._rows["NOTIFY_DURATION"]
@@ -1463,9 +1587,7 @@ class SystemPageTest(unittest.TestCase):
         clicked. At twenty-eight entries this overflowed a 1280x800 display -
         a Steam Machine's own - by 126 pixels, and the suite was green.
         """
-        self.panel.notebook.select(
-            [page for page in self.panel.notebook.tabs()
-             if self.panel.notebook.tab(page, "text").strip() == "System"][0])
+        self.panel._open_section("keyboard")
         self.root.update()
         self.panel._open_menu(syssettings.LAYOUT)
         self.root.update()

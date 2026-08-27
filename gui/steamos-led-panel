@@ -50,6 +50,7 @@ from steamos_led import config as config_module             # noqa: E402
 from steamos_led import notify                              # noqa: E402
 from steamos_led import render                              # noqa: E402
 from steamos_led import shim                                # noqa: E402
+from steamos_led import __version__ as VERSION              # noqa: E402
 
 
 # Which settings to show, in order: key, label, kind, and for numeric ones the
@@ -266,19 +267,97 @@ SYSTEM_NOTE = (
     "its on-screen keyboard. Desktop Mode keeps its own layout in the system "
     "settings and is not changed by this.")
 
+# The LED strip's own pages - the inner list, inside one section. System is
+# not among them any more: a keyboard layout is not a setting of the bar, and
+# it is now a section of its own. See SECTION_SETTINGS.
 SETTINGS_TABS = (
     ("Strip", STRIP),
     ("Desktop mode", DESKTOP, DESKTOP_NOTE),
     ("Notifications", NOTIFICATIONS),
-    ("System", SYSTEM, SYSTEM_NOTE),
     ("Advanced", ADVANCED),
 )
+
+# Sections whose whole body is one table of settings, rather than a list of
+# pages. Kept as a table for the same reason SETTINGS_TABS is one: between
+# them these two are every settings row in the window, and the tests walk
+# both. A section missing from here is one Apply would never collect.
+SECTION_SETTINGS = {
+    "keyboard": (SYSTEM, SYSTEM_NOTE),
+}
 
 # Which of the settings on those pages belong to the machine rather than to
 # the LED service. One flat set, because that is the only question the rest of
 # the window has to ask: which file a value was read from and is written back
 # to. See Panel._saved and Panel.apply_settings.
 SYSTEM_KEYS = frozenset(syssettings.DEFAULTS)
+
+# -- the window's top level -------------------------------------------------
+#
+# What kind of thing you are configuring, which is a different question from
+# which page of it you are on. The bar had one list of pages until it stopped
+# being only a bar: a keyboard layout and a CPU governor are not settings of
+# the LED strip, and a single list with all of them on it would say they were.
+#
+# So two levels. This is the outer one - the list down the left edge, one
+# entry per section - and the LED strip's own seven pages are the inner one,
+# which is unchanged and now lives inside a single section.
+#
+# (key, title, subtitle, icon). The key is what the code refers to a section
+# by; the title and subtitle are what the entry says; the icon is drawn by
+# SidebarEntry, which is where the names are answered.
+SECTIONS = (
+    ("strip", "LED Strip", "Configure the lighting", "strip"),
+    ("power", "EPP & Governor", "Performance and power", "bolt"),
+    ("cec", "HDMI CEC Mods", "Control and tweaks", "screen"),
+    ("keyboard", "Keyboard Layout", "Layout for the session", "keys"),
+)
+
+# Sits at the foot of the sidebar rather than in the list: it is not a thing
+# you configure, and putting it in the run of four would have somebody hunting
+# for the setting it holds.
+ABOUT = ("about", "About", "Info and credits", "info")
+
+# What the two unbuilt sections say for themselves. Named here rather than
+# written into the builder so the tests can read them, and so the two are
+# obviously the same shape of promise.
+# What the About section says. A table rather than prose in the builder so it
+# reads as the short list of facts it is, and so a line can be added without
+# touching layout code.
+ABOUT_LINES = (
+    ("What it is",
+     "A bridge between SteamOS and a WS2812 strip on an ESP: the kernel shim "
+     "hands out what Steam writes to the LEDs, this service draws it, and the "
+     "board lights it. Plus the effects and notifications Steam has no menu "
+     "for."),
+    ("Project", "github.com/caed1994/SteamOS-Led-Bar"),
+    ("Licence",
+     "GPL-3.0-or-later. The firmware, the kernel shim, the service and this "
+     "panel are all in the one repository."),
+    ("Thanks",
+     "Everyone who worked out what the Steam Machine's LED protocol actually "
+     "says, and the FastLED and KDE Connect projects this leans on."),
+)
+
+SOON = {
+    "power": (
+        "Energy Performance Preference and the CPU governor",
+        "Pick how the machine trades speed against power - the governor that "
+        "decides the clock, and the EPP hint that biases it - and have the "
+        "choice survive a reboot.",
+        "Nothing here yet. What the machine offers depends on its cpufreq "
+        "driver: with amd-pstate in active mode there are EPP values and two "
+        "governors, and in passive mode the classic governors and no EPP at "
+        "all - so this page has to be built from what the machine reports "
+        "rather than from a list written here."),
+    "cec": (
+        "HDMI CEC",
+        "Let the machine talk to the television over the HDMI cable: wake "
+        "the screen with it, switch the input to it, and follow the "
+        "television's own volume.",
+        "Nothing here yet. This one needs a CEC adapter the kernel exposes, "
+        "and it is the section most likely to want a helper of its own - "
+        "which is why it is last."),
+}
 
 # Settings that only mean something while something else says so, and what
 # happens to them while it does not. Two answers, because there are two kinds
@@ -377,6 +456,44 @@ _IMAGES = []
 # a corner for a field you type in.
 BUTTON_HEIGHT = 36
 CARD_RADIUS = material.SHAPE_MEDIUM
+
+# The sidebar down the left edge. Wide enough for the longest subtitle at the
+# desktop's own font size, and tall enough for two lines with air round them -
+# both measured against the entries rather than guessed, see the tests.
+SIDEBAR_WIDTH = 268
+SIDEBAR_ENTRY_HEIGHT = 60
+SIDEBAR_RADIUS = material.SHAPE_MEDIUM
+SIDEBAR_ICON_X = 20
+SIDEBAR_TEXT_X = 56
+
+# The dot at the foot of the window that says whether the bar is there.
+STATUS_DOT = 5
+
+# How wide a page's content is allowed to get, whatever the monitor is. These
+# pages are a column of label-and-control, and a column read past about this
+# width stops being one: the label is at one end of the eye's travel and the
+# thing it names at the other. On a 2560 monitor the slack goes to the margin.
+CONTENT_MAX = 1040
+
+# What the window opens at, and the smallest it may be dragged to.
+#
+# Sized for the monitors this is actually used on now - 1920x1080 and
+# 2560x1440 - rather than for the 1280x800 of the machine itself, which is
+# where Game Mode runs and where this window is not the thing on screen.
+# The width is the sidebar, the inner list, a full content column and the
+# margins between them; anything narrower and the two lists crowd the settings
+# they are there to reach.
+# How wide a paragraph inside a card may run. The card is CONTENT_MAX at its
+# widest and has padding on both sides, so a paragraph that wrapped at
+# CONTENT_MAX would have its last words drawn past the card's own edge.
+# In material.SPACE rather than in GROUP_GAP, which is four of these and is
+# defined further down this file - a constant cannot use one declared after it.
+CARD_WRAP = CONTENT_MAX - 24 * material.SPACE
+
+START_WIDTH = 1400
+START_HEIGHT = 900
+MIN_WIDTH = 1120
+MIN_HEIGHT = 680
 FIELD_RADIUS = material.SHAPE_EXTRA_SMALL
 
 # The pages are picked from a list down the left rather than a row of tabs
@@ -467,6 +584,20 @@ TYPE_HEADLINE = 6
 TYPE_SECTION = 0
 TYPE_SUPPORT = -1
 
+# The window is dark whatever the desktop is, and only the *accent* follows.
+#
+# Not a preference, and the two halves of that are deliberate. This is a panel
+# for a machine that spends its life on a television in a dark room, and the
+# one thing every screenshot of it is judged against is the bar it is
+# configuring - a strip of light. A light window round a preview of lit LEDs
+# is the preview washed out.
+#
+# The accent still comes from Plasma, because that part of following the
+# desktop is the part that says whose machine this is - see kdetheme. What is
+# given up is the light/dark half of it, which is why this is one name in one
+# place rather than a condition spread through the styles.
+DARK = True
+
 
 def _decimals(step):
     """How many decimals a step needs: 1 -> 0, 0.5 -> 1, 0.05 -> 2."""
@@ -524,18 +655,25 @@ def dress(style, roles, sizes):
 
         Which one is open is said by a filled pill behind its name - the same
         tone a raised container would take, in the shape a button would take.
+
+        Every picture here is drawn against the *card* the list stands on
+        rather than against the page. A nine-slice image carries its own
+        corners, and a corner painted against the wrong ground is a pale notch
+        at each end of every entry - which is what the list looked like the
+        moment it was given a card to sit on.
         """
         radius = RAIL_HEIGHT // 2
+        ground = roles["surface_container_low"]
 
         style.element_create(
-            "Material.Rail", "image", _slice(radius, surface, surface),
+            "Material.Rail", "image", _slice(radius, ground, ground),
             ("selected", "active",
              _slice(radius, material.blend(roles["secondary_container"],
                                            roles["on_surface"],
-                                           material.STATE_HOVER), surface)),
-            ("selected", _slice(radius, roles["secondary_container"], surface)),
-            ("active", _slice(radius, wash("surface", "on_surface",
-                                           material.STATE_HOVER), surface)),
+                                           material.STATE_HOVER), ground)),
+            ("selected", _slice(radius, roles["secondary_container"], ground)),
+            ("active", _slice(radius, material.blend(
+                ground, roles["on_surface"], material.STATE_HOVER), ground)),
             border=radius, sticky="nsew", padding=(18, 10))
         style.layout("Rail.TRadiobutton", [
             ("Material.Rail", {"sticky": "nsew", "children": [
@@ -781,8 +919,7 @@ def apply_theme(root):
     bitmaps. Returns the roles, for the parts ttk cannot reach.
     """
     desktop = kdetheme.read()
-    roles = material.scheme(desktop["selection"],
-                            dark=kdetheme.is_dark(desktop),
+    roles = material.scheme(desktop["selection"], dark=DARK,
                             error=desktop["negative"],
                             positive=desktop["positive"])
     surface = roles["surface"]
@@ -859,10 +996,13 @@ def apply_theme(root):
     style.configure("TNotebook", background=surface, borderwidth=0,
                     bordercolor=surface, lightcolor=surface,
                     darkcolor=surface, tabmargins=(0, 4, 0, 0))
-    style.configure("Rail.TRadiobutton", background=surface,
-                    foreground=variant, focuscolor=surface, anchor="w")
+    # On the card the list stands on, not on the page - see rail() in dress.
+    style.configure("Rail.TRadiobutton",
+                    background=roles["surface_container_low"],
+                    foreground=variant,
+                    focuscolor=roles["surface_container_low"], anchor="w")
     style.map("Rail.TRadiobutton",
-              background=[("active", surface)],
+              background=[("active", roles["surface_container_low"])],
               foreground=[("selected", roles["on_secondary_container"])])
 
     # No padding: the layout's padding element would otherwise add four
@@ -1385,6 +1525,155 @@ class ProfileDialog(Dialog):
         super()._confirm()
 
 
+class SidebarEntry:
+    """One section in the list down the left edge.
+
+    A canvas rather than a ttk.Radiobutton, which is what the inner rail is.
+    That one has a single label in a single font, and this needs two: a title
+    and, under it in a smaller muted face, what the section is for. ttk has no
+    way to say that - a widget has one -font option - and a two-line label in
+    one face loses the distinction the subtitle exists to make.
+
+    A canvas has neither problem, and it is also how everything else in this
+    window that ttk could not draw is drawn: the progress rule, the preview
+    stage, the swatches. Text items take a font and a fill apiece, so the
+    whole entry is four items on one surface.
+
+    What it gives up is ttk's states, so hover and selection are bound here by
+    hand. That is three bindings, and it is the price of the second line.
+    """
+
+    def __init__(self, parent, roles, fonts, entry, on_pick):
+        self.roles = roles
+        self.key, title, subtitle, icon = entry
+        self.on_pick = on_pick
+        self.selected = False
+        self.hovering = False
+
+        self.canvas = tk.Canvas(
+            parent, width=SIDEBAR_WIDTH, height=SIDEBAR_ENTRY_HEIGHT,
+            highlightthickness=0, borderwidth=0, background=roles["surface"])
+        # The pill behind it, in each of the three shades it takes. Drawn once
+        # apiece and swapped, rather than redrawn on every pointer crossing:
+        # building one is a rounded rectangle the size of the entry, and the
+        # sidebar would otherwise do that work every time the pointer travels
+        # down the list.
+        self._grounds = {
+            state: _photo(roundrect.rows(
+                SIDEBAR_WIDTH, SIDEBAR_ENTRY_HEIGHT, SIDEBAR_RADIUS,
+                colour, roles["surface"]))
+            for state, colour in (
+                ("rest", roles["surface"]),
+                ("hover", material.blend(roles["surface"],
+                                         roles["on_surface"],
+                                         material.STATE_HOVER)),
+                ("selected", roles["secondary_container"]))}
+        self.ground = self.canvas.create_image(0, 0, anchor="nw",
+                                               image=self._grounds["rest"])
+        self._draw_icon(icon)
+        self.title = self.canvas.create_text(
+            SIDEBAR_TEXT_X, SIDEBAR_ENTRY_HEIGHT // 2 - 9, anchor="w",
+            text=title, font=fonts["title"], fill=roles["on_surface"])
+        self.subtitle = self.canvas.create_text(
+            SIDEBAR_TEXT_X, SIDEBAR_ENTRY_HEIGHT // 2 + 10, anchor="w",
+            text=subtitle, font=fonts["subtitle"],
+            fill=roles["on_surface_variant"])
+
+        self.canvas.bind("<Button-1>", lambda _event: self.on_pick(self.key))
+        self.canvas.bind("<Enter>", lambda _event: self._hover(True))
+        self.canvas.bind("<Leave>", lambda _event: self._hover(False))
+
+    def _draw_icon(self, name):
+        """A small pictogram, drawn from primitives.
+
+        Four shapes and a letter, none of them a font glyph: the symbols that
+        would say these things - a lightning bolt, a television - live in
+        emoji fonts that a machine may not have, and a missing glyph is an
+        empty box beside every entry rather than a plain one.
+        """
+        left, middle = SIDEBAR_ICON_X, SIDEBAR_ENTRY_HEIGHT // 2
+        colour = self.roles["on_surface_variant"]
+        # (item, which option carries its colour). Recorded as it is drawn
+        # rather than asked for later: a canvas line has no -outline at all,
+        # and itemcget raises on an option the item does not have instead of
+        # answering empty - so probing for it is a Tcl error, not a no-op.
+        self.icon = []
+
+        def solid(item):
+            self.icon.append((item, "fill"))
+
+        def drawn(item):
+            self.icon.append((item, "outline"))
+
+        if name == "strip":                     # the bar itself: four LEDs
+            for step in range(4):
+                spot = left + step * 6
+                solid(self.canvas.create_oval(spot, middle - 2, spot + 4,
+                                              middle + 2, outline="",
+                                              fill=colour))
+        elif name == "bolt":                    # power
+            solid(self.canvas.create_polygon(
+                left + 11, middle - 9, left + 3, middle + 1, left + 8,
+                middle + 1, left + 6, middle + 9, left + 15, middle - 2,
+                left + 10, middle - 2, outline="", fill=colour))
+        elif name == "screen":                  # a television
+            drawn(self.canvas.create_rectangle(left, middle - 7, left + 18,
+                                               middle + 4, outline=colour,
+                                               width=1.6))
+            solid(self.canvas.create_line(left + 5, middle + 8, left + 13,
+                                          middle + 8, fill=colour, width=1.6))
+            solid(self.canvas.create_line(left + 9, middle + 4, left + 9,
+                                          middle + 8, fill=colour, width=1.6))
+        elif name == "keys":                    # a keyboard
+            drawn(self.canvas.create_rectangle(left, middle - 6, left + 18,
+                                               middle + 6, outline=colour,
+                                               width=1.6))
+            for step in range(3):
+                spot = left + 4 + step * 5
+                solid(self.canvas.create_line(spot, middle - 2, spot + 2,
+                                              middle - 2, fill=colour,
+                                              width=1.6))
+            solid(self.canvas.create_line(left + 5, middle + 3, left + 13,
+                                          middle + 3, fill=colour, width=1.6))
+        else:                                   # about
+            drawn(self.canvas.create_oval(left, middle - 9, left + 18,
+                                          middle + 9, outline=colour,
+                                          width=1.6))
+            solid(self.canvas.create_line(left + 9, middle - 5, left + 9,
+                                          middle - 4, fill=colour, width=2))
+            solid(self.canvas.create_line(left + 9, middle - 1, left + 9,
+                                          middle + 5, fill=colour, width=1.6))
+
+    def pack(self, **options):
+        self.canvas.pack(**options)
+        return self
+
+    def _hover(self, over):
+        self.hovering = over
+        self._repaint()
+
+    def set_selected(self, selected):
+        self.selected = selected
+        self._repaint()
+
+    def _repaint(self):
+        """The pill, and the two texts that have to stay legible on it."""
+        state = ("selected" if self.selected
+                 else "hover" if self.hovering else "rest")
+        self.canvas.itemconfigure(self.ground, image=self._grounds[state])
+        # On the filled pill the text is the colour that container asks for,
+        # which is not the same as the one the page uses - a selected entry
+        # keeping the page's foreground is the one that goes unreadable.
+        lit = self.selected
+        title = self.roles["on_secondary_container" if lit else "on_surface"]
+        rest = self.roles["on_secondary_container" if lit
+                          else "on_surface_variant"]
+        self.canvas.itemconfigure(self.title, fill=title)
+        self.canvas.itemconfigure(self.subtitle, fill=rest)
+        for item, option in self.icon:
+            self.canvas.itemconfigure(item, **{option: rest})
+
+
 class Progress:
     """The line under the title while a command runs.
 
@@ -1440,7 +1729,13 @@ class Panel:
     def __init__(self, root):
         self.root = root
         root.title("SteamOS LED bar")
-        root.minsize(820, 640)
+        # Wide enough that the sidebar, the inner list and a full-width
+        # setting row all fit without the window having to be dragged bigger
+        # before anything can be read - which is what the old 820 meant once
+        # there was a second list down the left. The height is a floor only:
+        # _refit gives the window what the open page actually needs.
+        root.minsize(MIN_WIDTH, MIN_HEIGHT)
+        root.geometry("%dx%d" % (START_WIDTH, START_HEIGHT))
         self._set_window_icon()
 
         self.roles = apply_theme(root)
@@ -1478,28 +1773,44 @@ class Panel:
         self._wrapped = []
         self._wrap_width = 0
 
-        header = self.header = ttk.Frame(root)
-        header.pack(fill="x", padx=SIDE_MARGIN + SIDE_MARGIN // 2,
-                    pady=(GROUP_GAP, 0))
-        ttk.Label(header, text="SteamOS LED bar",
-                  style="Heading.TLabel").pack(anchor="w")
-        self.headline = ttk.Label(header, text="", style="Muted.TLabel")
+        # The header says which *section* is open, not what the program is
+        # called - the title bar already does that, and repeating it inside
+        # the window spends the one line that could say where you are.
+        # Two levels, outer first: the sidebar picks a section, and what a
+        # section holds is its own business. Only the LED strip has an inner
+        # list of pages; the rest are one page each.
+        outer = ttk.Frame(root)
+        self.sidebar = ttk.Frame(outer)
+        self.sidebar.pack(side="left", fill="y",
+                          padx=(SIDE_MARGIN, GROUP_GAP), pady=GROUP_GAP)
+        main = ttk.Frame(outer)
+        main.pack(side="left", fill="both", expand=True)
+
+        # The header is a child of `main` rather than of the window packed
+        # into it with in_. That form works until stacking order matters, and
+        # here it did not: the header is drawn behind the section under it and
+        # the window simply came up with no title on it at all.
+        header = self.header = ttk.Frame(main)
+        header.pack(fill="x", pady=(GROUP_GAP, GROUP_GAP // 2))
+        self.section_title = ttk.Label(header, text="",
+                                       style="Heading.TLabel")
+        self.section_title.pack(anchor="w")
+        self.headline = ttk.Label(header, text="", style="Muted.TLabel",
+                                  justify="left", wraplength=CONTENT_MAX)
         self.headline.pack(anchor="w", pady=(2, 0))
+        # Wrapped like everything else that is a sentence rather than a label.
+        # Left to one line it is the longest thing in the window - a toplevel
+        # asks for what its widest child wants, so the repair summary alone
+        # decided how wide the window opened.
+        self._wrapped.append(self.headline)
 
         # A line under the title while a command runs, packed and unpacked
         # rather than left there greyed: at rest it would be a rule across the
         # window that means nothing.
         #
-        self.progress = Progress(root, self.roles, PROGRESS_HEIGHT)
+        self.progress = Progress(main, self.roles, PROGRESS_HEIGHT)
 
-        # With the rail the pages have no tab row of their own: the list down
-        # the left side is what picks them, and the notebook is only the stack
-        # of pages underneath.
-        body = ttk.Frame(root)
-        self.rail = ttk.Frame(body)
-        self.rail.pack(side="left", fill="y", padx=(SIDE_MARGIN, GROUP_GAP))
-        notebook = self.notebook = ttk.Notebook(body)
-        notebook.pack(side="left", fill="both", expand=True)
+        self.sections = ttk.Notebook(main)
 
         # The foot of the window is claimed before the pages are, and from the
         # bottom up: pack hands out room in the order it was asked, so the
@@ -1507,12 +1818,31 @@ class Panel:
         # and no log at all - they were packed later and there was nothing
         # left. The pages scroll and these do not, so these go first.
         #
-        # Under the pages, not inside them: one file, one Apply.
+        # Under the sections, not inside one: one Apply for every setting in
+        # the window, whichever section it is on - see apply_settings.
+        self._build_statusbar(root)
         self.output = self._build_output(root)
         self.runner = Runner(root, self._write, self._set_busy)
         self._build_apply(root)
-        body.pack(fill="both", expand=True,
-                  padx=SIDE_MARGIN // 2, pady=(GROUP_GAP, 0))
+        self.sections.pack(fill="both", expand=True)
+        outer.pack(fill="both", expand=True,
+                   padx=SIDE_MARGIN // 2, pady=(0, 0))
+
+        # With the rail the pages have no tab row of their own: the list down
+        # the left side is what picks them, and the notebook is only the stack
+        # of pages underneath.
+        strip = ttk.Frame(self.sections)
+        # The inner list sits on a raised card, which is the one place in the
+        # window that needs a box round it: it is a list of pages standing
+        # beside the page it chose, and with both on the same ground the two
+        # read as one column of things you can click.
+        rail_card = ttk.Frame(strip, style="Card.TFrame")
+        rail_card.pack(side="left", fill="y", padx=(0, GROUP_GAP),
+                       pady=(0, GROUP_GAP))
+        self.rail = ttk.Frame(rail_card, style="Card.TFrame")
+        self.rail.pack(fill="y", expand=True, padx=ROW_GAP, pady=ROW_GAP)
+        notebook = self.notebook = ttk.Notebook(strip)
+        notebook.pack(side="left", fill="both", expand=True)
 
         # Which tabs the Apply row belongs under, by widget rather than by
         # position - reordering the tabs must not silently change this.
@@ -1531,6 +1861,21 @@ class Panel:
         self.status_tab = self._page(notebook, self._build_status)
         notebook.add(self.status_tab, text="Status & repair")
         self._build_rail()
+
+        # And the sections themselves, in the order the sidebar lists them.
+        self._section_pages = {}
+        self._add_section("strip", strip)
+        self._add_section("power", self._page(
+            self.sections, lambda where: self._build_soon(where, "power")))
+        self._add_section("cec", self._page(
+            self.sections, lambda where: self._build_soon(where, "cec")))
+        for key, (table, note) in SECTION_SETTINGS.items():
+            self._add_section(key, self._page(
+                self.sections, lambda where, t=table, n=note:
+                self._build_settings(where, t, n)))
+        self._add_section("about", self._page(self.sections,
+                                              self._build_about))
+        self._build_sidebar()
         self._catch_up()                # now: the window is about to be shown
 
         # Closing goes through here so what is booked is dropped first. The
@@ -1547,6 +1892,7 @@ class Panel:
         notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
         self._tab_changed()
         notebook.bind("<Configure>", self._rewrap)
+        self.sections.bind("<Configure>", self._rewrap)
 
         if ledpanel.in_game_mode():
             self._write(
@@ -1587,7 +1933,12 @@ class Panel:
         def fit(_event=None):
             wanted = inner.winfo_reqheight()
             across = inner.winfo_reqwidth()
-            width, room = canvas.winfo_width(), canvas.winfo_height()
+            # Capped, so a wide monitor gets air down the right rather than a
+            # slider two thousand pixels long. A settings column is read like
+            # a column: past a certain width the label and the control it
+            # belongs to are far enough apart to have to be traced by eye.
+            width = min(canvas.winfo_width(), CONTENT_MAX)
+            room = canvas.winfo_height()
             # At least the room it has, so a page with something set to expand
             # - the preview's stage - still fills the window when it fits.
             height = max(wanted, room)
@@ -1605,7 +1956,13 @@ class Panel:
                 canvas.configure(height=wanted, width=across)
             if (wanted > room) != bool(bar.winfo_ismapped()):
                 if wanted > room:
-                    bar.pack(side="right", fill="y")
+                    # before= the canvas, so the bar is allocated its width
+                    # first. pack hands out the cavity in packing order, and
+                    # the canvas asks for as much width as its content wants:
+                    # packed after it there was nothing left, so the bar was
+                    # placed, sized, and never mapped - a page that scrolled
+                    # by wheel and showed no bar to say so.
+                    bar.pack(side="right", fill="y", before=canvas)
                 else:
                     bar.pack_forget()
                     canvas.yview_moveto(0)
@@ -1624,11 +1981,155 @@ class Panel:
         canvas underneath it.
         """
         self._dismiss_menus()                   # a list is not scrolled past
-        canvas = self._scrollers.get(self.notebook.select())
+        canvas = self._scrollers.get(self._open_page())
         if canvas is None or not canvas.winfo_ismapped():
             return
         down = getattr(event, "num", 0) == 5 or getattr(event, "delta", 0) < 0
         canvas.yview_scroll(1 if down else -1, "units")
+
+    def _add_section(self, key, page):
+        """One page of the outer notebook, remembered by name.
+
+        By name rather than by position: the sidebar, the header and the
+        Apply row all need to say something about "the section that is open",
+        and an index into a notebook is the wrong handle for that - inserting
+        a section anywhere but the end would move every answer after it.
+        """
+        self.sections.add(page, text=key)
+        self._section_pages[key] = str(page)
+
+    def _build_sidebar(self):
+        """The list down the left edge, and the About entry under it.
+
+        About is packed to the bottom first. pack hands out room in the order
+        it is asked for, so a widget that wants the foot has to claim it
+        before the list above it takes the lot.
+        """
+        family, size = self.roles["_font"]
+        fonts = {"title": (family, size, "bold"),
+                 "subtitle": (family, size + TYPE_SUPPORT)}
+        self._sidebar_entries = {}
+        about = SidebarEntry(self.sidebar, self.roles, fonts, ABOUT,
+                             self._open_section)
+        about.pack(side="bottom", anchor="w")
+        self._sidebar_entries[ABOUT[0]] = about
+        for entry in SECTIONS:
+            made = SidebarEntry(self.sidebar, self.roles, fonts, entry,
+                                self._open_section)
+            made.pack(side="top", anchor="w", pady=(0, 2))
+            self._sidebar_entries[entry[0]] = made
+        self._open_section(SECTIONS[0][0])
+
+    def _open_section(self, key):
+        """Show a section, and make the window say which one is open."""
+        self.sections.select(self._section_pages[key])
+        for name, entry in self._sidebar_entries.items():
+            entry.set_selected(name == key)
+        self.section = key
+        self.section_title.configure(text=dict(
+            (entry[0], entry[1]) for entry in SECTIONS + (ABOUT,))[key])
+        self._tab_changed()
+
+    def _build_statusbar(self, parent):
+        """The line across the foot: is the bar there, and which version.
+
+        At the very bottom of the window rather than on the status page,
+        because it answers the question somebody has while looking at any of
+        them - a page of LED settings is worth less if nothing is listening.
+        """
+        bar = self.statusbar = ttk.Frame(parent)
+        bar.pack(side="bottom", fill="x",
+                 padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, GROUP_GAP))
+        self.link_dot = tk.Canvas(bar, width=STATUS_DOT * 2,
+                                  height=STATUS_DOT * 2, highlightthickness=0,
+                                  borderwidth=0,
+                                  background=self.roles["surface"])
+        self.link_dot.pack(side="left", padx=(0, ROW_GAP))
+        self._dot = self.link_dot.create_oval(
+            1, 1, STATUS_DOT * 2 - 1, STATUS_DOT * 2 - 1, width=0,
+            fill=self.roles["on_surface_variant"])
+        self.link_said = ttk.Label(bar, text="Looking for the bar...",
+                                   style="Muted.TLabel")
+        self.link_said.pack(side="left")
+        ttk.Label(bar, text="SteamOS LED bar v%s" % VERSION,
+                  style="Muted.TLabel").pack(side="right")
+
+    def _say_link(self, connected, detail=""):
+        """Colour the dot and say what it means. Three states, not two.
+
+        Unknown is its own: before the first status read there is nothing to
+        claim, and a grey dot saying "looking" is honest where a red one
+        saying "not connected" would be a fault report about a question
+        nobody has answered yet.
+        """
+        colour = (self.roles["on_surface_variant"] if connected is None
+                  else self.roles["positive"] if connected
+                  else self.roles["error"])
+        self.link_dot.itemconfigure(self._dot, fill=colour)
+        self.link_said.configure(
+            text=detail or ("Looking for the bar..." if connected is None
+                            else "LED bar connected" if connected
+                            else "LED bar not connected"))
+
+    def _build_soon(self, where, key):
+        """A section that is planned but not built.
+
+        It says what it will do and what is in the way, rather than only that
+        it is coming: a page that promises a feature and explains nothing is
+        indistinguishable from one that has quietly failed to load.
+        """
+        title, doing, blocked = SOON[key]
+        holder = ttk.Frame(where)
+        holder.pack(fill="both", expand=True, padx=SIDE_MARGIN,
+                    pady=SIDE_MARGIN)
+        card = ttk.Frame(holder, style="Card.TFrame")
+        card.pack(fill="x")
+        inner = ttk.Frame(card, style="Card.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ttk.Label(inner, text="Coming soon", style="Section.TLabel",
+                  background=self.roles["surface_container_low"]).pack(
+                      anchor="w")
+        ttk.Label(inner, text=title, style="Heading.TLabel",
+                  background=self.roles["surface_container_low"]).pack(
+                      anchor="w", pady=(ROW_GAP, GROUP_GAP // 2))
+        for text in (doing, blocked):
+            said = ttk.Label(inner, text=text, style="Muted.TLabel",
+                             background=self.roles["surface_container_low"],
+                             justify="left", wraplength=CARD_WRAP)
+            said.pack(anchor="w", pady=(0, ROW_GAP))
+            self._wrapped.append(said)
+        return holder
+
+    def _build_about(self, where):
+        """Who made it, what it is, and where to go for the rest."""
+        holder = ttk.Frame(where)
+        holder.pack(fill="both", expand=True, padx=SIDE_MARGIN,
+                    pady=SIDE_MARGIN)
+        card = ttk.Frame(holder, style="Card.TFrame")
+        card.pack(fill="x")
+        inner = ttk.Frame(card, style="Card.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ground = self.roles["surface_container_low"]
+        ttk.Label(inner, text="SteamOS LED bar", style="Heading.TLabel",
+                  background=ground).pack(anchor="w")
+        ttk.Label(inner, text="Version %s" % VERSION,
+                  style="Muted.TLabel", background=ground).pack(
+                      anchor="w", pady=(2, GROUP_GAP // 2))
+        # The label over its text rather than beside it. Beside it, the text
+        # column is the card's width less whatever the widest label takes -
+        # a number this had to be told, was told wrong, and the last words of
+        # two of the four lines were drawn past the edge of the card.
+        # Stacked, both are the same width and there is nothing to get wrong.
+        for label, text in ABOUT_LINES:
+            ttk.Label(inner, text=label, style="Section.TLabel",
+                      background=ground).pack(anchor="w", pady=(GROUP_GAP // 2,
+                                                                2))
+            said = ttk.Label(inner, text=text, style="Muted.TLabel",
+                             background=ground, justify="left",
+                             wraplength=CARD_WRAP)
+            said.pack(anchor="w")
+            self._wrapped.append(said)
+        return holder
 
     def _build_rail(self):
         """Fill the rail, once the notebook knows what pages it has.
@@ -1663,8 +2164,8 @@ class Panel:
         """
         if busy:
             self.progress.canvas.pack(side="top", fill="x",
-                                      padx=SIDE_MARGIN + SIDE_MARGIN // 2,
-                                      pady=(GROUP_GAP, 0), after=self.header)
+                                      pady=(0, GROUP_GAP // 2),
+                                      after=self.header)
             self.progress.start()
         else:
             self.progress.stop()
@@ -2298,9 +2799,13 @@ class Panel:
         Setting wraplength can also bring a Configure straight back, which is
         what comparing the width first ends.
         """
-        if event.widget is not self.notebook:
+        # Either notebook: a section that is one page of its own is as much a
+        # page with explanations on it as one of the strip's, and left out of
+        # this its text was laid out on one line - which a toplevel takes as a
+        # request, so the window opened two and a half thousand pixels wide.
+        if event.widget not in (self.notebook, self.sections):
             return
-        width = max(320, event.width - 3 * SIDE_MARGIN)
+        width = max(320, min(event.width, CONTENT_MAX) - 3 * SIDE_MARGIN)
         if width == self._wrap_width:
             return
         self._wrap_width = width
@@ -2384,18 +2889,44 @@ class Panel:
         self.unsaved.pack_forget()
 
     def _tab_changed(self, _event=None):
-        """Only show Apply where there is something to apply."""
+        """Only show Apply where there is something to apply.
+
+        Two levels to ask now. A section that is one table of settings always
+        has something; the LED strip has something only on four of its seven
+        pages; and the two unbuilt sections and About never do.
+        """
         # The rail follows the notebook rather than the other way round, so a
         # page selected in code - or by a keyboard shortcut - is still the one
         # the rail says is open.
         self._rail_choice.set(self.notebook.select())
-        show = self.notebook.select() in self._settings_tabs
+        show = self._has_settings()
         if show != self._apply_shown:
             self._show_apply(show)
         # The preview only runs while it can be seen.
         if self._preview_visible() and self._preview_job is None:
             self._preview_started = time.monotonic()
             self._preview_tick()
+
+    def _open_page(self):
+        """The scrolling page actually on screen, of either notebook.
+
+        Two levels means two answers, and the wheel needs the one in front of
+        you: asked of the inner notebook alone it scrolled the LED strip's
+        page while you were looking at a different section entirely.
+        """
+        if getattr(self, "section", None) == "strip":
+            return self.notebook.select()
+        return self._section_pages.get(getattr(self, "section", None))
+
+    def _has_settings(self):
+        """Whether what is on screen right now is settings to be applied."""
+        if getattr(self, "section", None) is None:
+            return False
+        if self.section in SECTION_SETTINGS:
+            return True
+        if self.section != "strip":
+            return False
+        return self.notebook.select() in self._settings_tabs
 
     def _field(self, parent, key, variable, choices, current, width=None):
         """A drop-down of (label, value) pairs, showing labels.
@@ -3478,6 +4009,9 @@ class Panel:
         self.headline.configure(
             text=ledpanel.repair_summary(checks),
             style="Bad.TLabel" if broken else "Good.TLabel")
+        # And the foot of the window, which asks the narrower question - see
+        # ledpanel.bar_is_live.
+        self._say_link(ledpanel.bar_is_live(checks))
         if broken:
             self._show_details(True)
         for row, check in enumerate(checks):

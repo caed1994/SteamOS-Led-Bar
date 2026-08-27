@@ -576,18 +576,32 @@ the application menu as **SteamOS LED bar**.
 ./gui/steamos-led-panel
 ```
 
-Eight pages, picked from the list down the left side.
+**Two levels.** The list down the left edge picks a *section* &mdash; what kind
+of thing you are configuring &mdash; and the LED strip, which is the one with
+enough settings to need it, has its own list of pages inside.
 
-| Page | What is on it |
-| ---- | ------------- |
+| Section | What is in it |
+| ------- | ------------- |
+| **LED Strip** | everything about the bar. Seven pages, below |
+| **EPP & Governor** | performance and power. Not built yet |
+| **HDMI CEC Mods** | talking to the television over HDMI. Not built yet |
+| **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
+| **About** | version, licence and credits, at the foot of the list |
+
+| LED Strip page | What is on it |
+| -------------- | ------------- |
 | **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
 | **Desktop mode** | what the bar shows while Steam is not driving it &mdash; see [Desktop Mode](#desktop-mode) |
 | **Notifications** | one line per thing that can flash - switch, colour, shape - grouped by where it comes from, and how long a flash lasts |
-| **System** | the machine's own settings rather than the bar's &mdash; see [Keyboard layout](#keyboard-layout) |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
 | **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists |
 | **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating-and-removing), flashing the firmware |
+
+The window is dark whatever your desktop is; only the accent colour follows
+Plasma. It is a panel for a strip of light, and a white window round a preview
+of lit LEDs is the preview washed out. A line across the foot says whether the
+bar is being driven, and which version this is.
 
 **Apply and Reload sit under all of them.** Apply writes every setting from
 every page and is greyed out while the window and the files agree. It asks for

@@ -992,6 +992,11 @@ class PanelSettingsTest(unittest.TestCase):
         the panel and not to a list in this file would be a page none of the
         checks below ever looked at - which is not a failure anybody would
         notice, the suite going green either way.
+
+        Both places settings live, since the window grew a second level:
+        SETTINGS_TABS is the LED strip's own pages and SECTION_SETTINGS is the
+        sections that are a single page of settings. A row on either is a row
+        Apply collects, so a row on either has to be checked.
         """
         assigned = self._assignments()
         tabs = assigned.get("SETTINGS_TABS")
@@ -999,6 +1004,14 @@ class PanelSettingsTest(unittest.TestCase):
         tables = []
         for entry in tabs.elts:
             name = entry.elts[1].id
+            self.assertIn(name, assigned, "%s not found in the panel" % name)
+            tables.append(assigned[name])
+
+        sections = assigned.get("SECTION_SETTINGS")
+        self.assertIsNotNone(sections,
+                             "SECTION_SETTINGS not found in the panel")
+        for value in sections.values:
+            name = value.elts[0].id
             self.assertIn(name, assigned, "%s not found in the panel" % name)
             tables.append(assigned[name])
         return tables
@@ -1047,12 +1060,51 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_tabs_are_in_the_order_they_are_worked_through(self):
         # What you set, then what you rarely set, then what those settings
         # look like, then what you do - which is also the order of how often
-        # they are opened. System sits with the settings pages and after the
-        # three about the bar: it is the one page that changes the machine
-        # rather than the strip, and the least often opened of them.
+        # they are opened. These are the LED strip's own pages: the keyboard
+        # layout used to be among them and is a section of its own now, which
+        # is the whole point of there being two levels.
         self.assertEqual([title.strip() for title in self._tab_titles()],
-                         ["Strip", "Desktop mode", "Notifications", "System",
-                          "Advanced", "Preview", "Test", "Status & repair"])
+                         ["Strip", "Desktop mode", "Notifications", "Advanced",
+                          "Preview", "Test", "Status & repair"])
+
+    def test_the_sections_are_in_the_order_the_sidebar_lists_them(self):
+        """The outer level: what kind of thing you are configuring.
+
+        The bar first because it is what the program is for and what is opened
+        every time; the two unbuilt ones next; the keyboard layout last of the
+        four because it is set once and never again. About is not in the run -
+        it is not a thing you configure - and sits at the foot of the sidebar,
+        which is why it is a name of its own rather than a fifth entry.
+        """
+        assigned = self._assignments()
+        sections = ast.literal_eval(assigned["SECTIONS"])
+        self.assertEqual([entry[0] for entry in sections],
+                         ["strip", "power", "cec", "keyboard"])
+        self.assertEqual([entry[1] for entry in sections],
+                         ["LED Strip", "EPP & Governor", "HDMI CEC Mods",
+                          "Keyboard Layout"])
+        self.assertEqual(ast.literal_eval(assigned["ABOUT"])[0], "about")
+        # Every one of them says what it is for. A sidebar of five titles with
+        # a blank line under one of them is a sidebar that failed to draw.
+        for entry in sections + (ast.literal_eval(assigned["ABOUT"]),):
+            self.assertTrue(entry[2].strip(), entry[0])
+            self.assertTrue(entry[3].strip(), entry[0])
+
+    def test_the_unbuilt_sections_say_what_they_will_do(self):
+        # A section that only says "coming soon" is indistinguishable from one
+        # that has quietly failed to load. Each says what it is for and what
+        # is in the way, and both are checked here so a third placeholder
+        # cannot be added as a bare promise.
+        assigned = self._assignments()
+        soon = ast.literal_eval(assigned["SOON"])
+        sections = [entry[0] for entry
+                    in ast.literal_eval(assigned["SECTIONS"])]
+        self.assertEqual(sorted(soon), sorted(["power", "cec"]))
+        for key, lines in soon.items():
+            self.assertIn(key, sections, key)
+            self.assertEqual(len(lines), 3, key)
+            for line in lines:
+                self.assertTrue(line.strip(), key)
 
     def test_no_tab_label_carries_a_menu_escape(self):
         # "&&" is how a *menu* label spells one ampersand. A notebook tab

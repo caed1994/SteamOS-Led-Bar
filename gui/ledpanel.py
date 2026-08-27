@@ -57,13 +57,19 @@ def module_path(release=None):
 class Check:
     """One thing that is either in order or not, and what to do if not."""
 
-    def __init__(self, name, ok, detail="", repairable=False):
+    def __init__(self, name, ok, detail="", repairable=False, live=False):
         self.name = name
         self.ok = ok
         self.detail = detail
         # Whether re-running the installer would put this right. A missing
         # kernel module would; an unplugged ESP would not.
         self.repairable = repairable
+        # Whether this one is about the bar being driven *now* rather than
+        # about the installation being complete. Marked here rather than
+        # matched by name somewhere else: the foot of the window asks a
+        # narrower question than the repair summary does, and a check's label
+        # is a sentence for people to read, not a key to look it up by.
+        self.live = live
 
     def __repr__(self):                                     # pragma: no cover
         return "<Check %s %s>" % (self.name, "ok" if self.ok else "broken")
@@ -166,11 +172,12 @@ def run_checks(probe=None, config=None):
     checks.append(Check(
         "LED device present", probe.exists(SHIM_DEVICE),
         "%s is missing, so there is no LED state to read" % SHIM_DEVICE,
-        repairable=True))
+        repairable=True, live=True))
 
     checks.append(Check(
         "Service running", probe.unit_active(SERVICE),
-        "systemctl status %s says why" % SERVICE, repairable=True))
+        "systemctl status %s says why" % SERVICE, repairable=True,
+        live=True))
 
     fifo = (config or {}).get("NOTIFY_FIFO") or "/run/steamos-led-serial/notify"
     notify_on = (config or {}).get("NOTIFY", True)
@@ -220,6 +227,23 @@ def run_checks(probe=None, config=None):
 
 def broken(checks):
     return [check for check in checks if not check.ok]
+
+
+def bar_is_live(checks):
+    """Whether the bar is actually being driven, as far as the checks see.
+
+    A narrower question than repair_summary answers, and deliberately so. The
+    summary is about the installation being whole - a missing menu entry
+    counts against it - and the foot of the window is about whether anything
+    is driving the strip at all. The two disagree often and both are right:
+    an installation with a stale menu entry is imperfect and lit.
+
+    None when nothing in the list can answer, which is not the same as a fault:
+    a caller can then say it is still looking rather than report a failure it
+    has not established.
+    """
+    found = [check.ok for check in checks if check.live]
+    return all(found) if found else None
 
 
 def repair_summary(checks):
