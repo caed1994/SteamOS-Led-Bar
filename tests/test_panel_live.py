@@ -1487,6 +1487,52 @@ class LiveWindowTest(unittest.TestCase):
         merged.update(values)
         self.panel_module.config_module.validate(merged)
 
+    def test_nothing_stands_on_a_ground_its_picture_was_not_drawn_against(self):
+        """The bug this window keeps making, caught by arithmetic this time.
+
+        Every rounded thing here is a nine-slice image, and an image keeps its
+        own corners whatever it is stretched over. So a widget wearing one has
+        to stand on a parent of exactly the colour that picture was drawn
+        against, or the corners show as a box of the wrong shade around it.
+
+        Four times now: the inner list when it was given a card, a card put
+        inside another card, the Output handle when the page changed colour
+        underneath it, and every button in the Apply row at the same moment.
+        Each was found by looking at a screenshot. dress() records the ground
+        of each picture as it makes it, so this can be found by walking.
+        """
+        grounds = self.panel.roles["_grounds"]
+        self.assertTrue(grounds, "dress recorded no grounds at all")
+        style = ttk.Style(self.root)
+
+        def background(widget):
+            if isinstance(widget, tk.Canvas):
+                return str(widget.cget("background"))
+            try:
+                named = str(widget.cget("style")) or widget.winfo_class()
+            except tk.TclError:                 # no -style option: a toplevel
+                return str(widget.cget("background"))
+            return str(style.lookup(named, "background"))
+
+        checked = 0
+        for widget in self._every_widget():
+            try:
+                named = str(widget.cget("style"))
+            except tk.TclError:
+                continue
+            if named not in grounds:
+                continue
+            parent = widget.nametowidget(widget.winfo_parent())
+            on = background(parent)
+            if not on:                          # nothing to compare against
+                continue
+            checked += 1
+            self.assertEqual(
+                grounds[named].lower(), on.lower(),
+                "%s wears a picture drawn against %s and stands on %s"
+                % (named, grounds[named], on))
+        self.assertGreater(checked, 10, "hardly anything was checked")
+
     def test_no_card_stands_on_another_card(self):
         """Reported: dark notches inside the corners of the placeholder cards.
 

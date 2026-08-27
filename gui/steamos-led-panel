@@ -716,6 +716,13 @@ def dress(style, roles, sizes):
     surface = roles["surface"]
     # The ground a card's own corners are drawn against - see apply_theme.
     page = roles["_page"]
+    # style name -> the colour that style's picture has baked into its own
+    # corners. A nine-slice keeps its corners whatever it is stretched over,
+    # so a widget wearing one has to stand on a parent of exactly this colour
+    # or the corners show as a box. Recorded here rather than reasoned about
+    # later: the mistake is invisible in the source and obvious on screen, and
+    # it has been made four times. See the live test that walks it.
+    grounds = roles["_grounds"] = {}
 
     def wash(container, content, amount):
         """A state layer: the content colour laid over its container."""
@@ -741,6 +748,7 @@ def dress(style, roles, sizes):
         """
         radius = RAIL_HEIGHT // 2
         ground = surface
+        grounds["Rail.TRadiobutton"] = ground
 
         style.element_create(
             "Material.Rail", "image", _slice(radius, ground, ground),
@@ -768,9 +776,12 @@ def dress(style, roles, sizes):
             _slice(CARD_RADIUS, surface, page),
             border=CARD_RADIUS, sticky="nsew")
         style.layout("Card.TFrame", [("Material.Panel", {"sticky": "nsew"})])
+        grounds["Card.TFrame"] = page
 
     def buttons():
         def variant(name, fill, over, outline=None, sides=20):
+            grounds[name.replace(".Button", ".TButton")] = roles[over]
+
             def picture(colour, edge=outline):
                 return _slice(BUTTON_HEIGHT // 2, colour, roles[over],
                               border=edge)
@@ -804,13 +815,21 @@ def dress(style, roles, sizes):
         # they are the two whose corners show it: a nine-slice carries its own
         # corners, and a picture drawn against the wrong one puts a box round
         # the button. The other two fill themselves and do not care.
+        # All four of them, not only the two whose fill is their ground. A
+        # nine-slice keeps its own corners whatever the fill is, so a filled
+        # button standing on the page had a square of the card's colour
+        # behind its pill - which is exactly what it looked like.
+        variant("Page.Filled.Button", roles["primary"], "_page")
+        variant("Page.Tonal.Button", roles["secondary_container"], "_page")
         variant("Page.Outlined.Button", page, "_page", outline=roles["outline"])
         variant("Page.Text.Button", page, "_page", sides=2)
         for name in ("Filled", "Tonal", "Outlined", "Text",
-                     "Page.Outlined", "Page.Text"):
+                     "Page.Filled", "Page.Tonal", "Page.Outlined",
+                     "Page.Text"):
             style.layout("%s.TButton" % name, [
                 ("%s.Button" % name, {"sticky": "nsew", "children": [
                     ("Button.label", {"side": "top", "sticky": ""})]})])
+        grounds["TButton"] = surface        # wears Tonal's picture
         style.layout("TButton", [
             ("Tonal.Button", {"sticky": "nsew", "children": [
                 ("Button.label", {"side": "top", "sticky": ""})]})])
@@ -1138,6 +1157,11 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
                                               "on_secondary_container"))
     style.map("Tonal.TButton", **label_fades("on_secondary_container"))
     style.configure("Outlined.TButton", **button("surface", "primary"))
+    style.configure("Page.Filled.TButton", **button("primary", "on_primary"))
+    style.map("Page.Filled.TButton", **label_fades("on_primary"))
+    style.configure("Page.Tonal.TButton", **button("secondary_container",
+                                                   "on_secondary_container"))
+    style.map("Page.Tonal.TButton", **label_fades("on_secondary_container"))
     style.configure("Page.Outlined.TButton", **button("_page", "primary"))
     style.map("Page.Outlined.TButton", **label_fades("primary"))
     style.map("Outlined.TButton", **label_fades("primary"))
@@ -1146,9 +1170,12 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("Page.Text.TButton", **button("_page", "primary", sides=2))
     style.map("Page.Text.TButton", **label_fades("primary"))
 
-    style.configure("TNotebook", background=surface, borderwidth=0,
-                    bordercolor=surface, lightcolor=surface,
-                    darkcolor=surface, tabmargins=(0, 4, 0, 0))
+    # On the page: a notebook is the stack the pages live in, and its own
+    # background shows above and beside whatever the page puts in it - which
+    # was a dark band across the top of every card.
+    style.configure("TNotebook", background=page, borderwidth=0,
+                    bordercolor=page, lightcolor=page,
+                    darkcolor=page, tabmargins=(0, 4, 0, 0))
     # On the card the list stands on, not on the page - see rail() in dress.
     style.configure("Rail.TRadiobutton", background=surface,
                     foreground=variant, focuscolor=surface, anchor="w")
@@ -1202,7 +1229,7 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("Horizontal.TScale", background=surface,
                     troughcolor=roles["surface_container_highest"])
     style.configure("TScrollbar", background=roles["surface_container_highest"],
-                    troughcolor=surface, bordercolor=surface,
+                    troughcolor=page, bordercolor=page,
                     arrowcolor=variant, relief="flat")
 
     dress(style, roles, sizes)
@@ -2263,7 +2290,7 @@ class Panel:
         indistinguishable from one that has quietly failed to load.
         """
         title, doing, blocked = SOON[key]
-        holder = ttk.Frame(where)
+        holder = ttk.Frame(where, style="Page.TFrame")
         holder.pack(fill="both", expand=True, padx=SIDE_MARGIN,
                     pady=SIDE_MARGIN)
         card = ttk.Frame(holder, style="Card.TFrame")
@@ -2286,7 +2313,7 @@ class Panel:
 
     def _build_about(self, where):
         """Who made it, what it is, and where to go for the rest."""
-        holder = ttk.Frame(where)
+        holder = ttk.Frame(where, style="Page.TFrame")
         holder.pack(fill="both", expand=True, padx=SIDE_MARGIN,
                     pady=SIDE_MARGIN)
         card = ttk.Frame(holder, style="Card.TFrame")
@@ -3194,9 +3221,10 @@ class Panel:
             # be describing what happens to only some of what it saves.
             ("left", ttk.Button(self.apply_row,
                                 text="Apply changes",
-                                style="Filled.TButton",
+                                style="Page.Filled.TButton",
                                 command=self.apply_settings)),
             ("left", ttk.Button(self.apply_row, text="Reload from file",
+                                style="Page.Tonal.TButton",
                                 command=self.reload_settings)),
             # Right-hand ones in reverse: pack puts each new one to the left of
             # the last, so this is what reads Save, Load across the page.
@@ -3779,7 +3807,7 @@ class Panel:
 
     def _build_preview(self, parent):
         """A simulated strip, so an effect can be looked at before it is set."""
-        outer = ttk.Frame(parent)
+        outer = ttk.Frame(parent, style="Page.TFrame")
 
         # The stage keeps its own dark backdrop whatever the desktop is set to
         # - a strip is judged against a dim room, not against the theme - so it
