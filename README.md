@@ -652,16 +652,26 @@ see what yours has:
 steamos-led-power --report
 ```
 
-**The two are not independent.** Under `performance` the firmware is pinned to
-its top preference and the kernel refuses the EPP file, so the panel takes the
-preference row away while that governor is set. `powersave` is not a battery
-mode here &mdash; it is the setting that lets the firmware range at all.
+**The governor rules the preference.** The preference row is only on the page
+when it is a setting at all, and it is written only then:
 
-Both default to leaving the CPU exactly as SteamOS set it. A value you pick is
-applied straight away and written to `/etc/steamos-led-power.conf`;
-`steamos-led-power.service` puts it back at every boot, and is only enabled
-once you have set something. Uninstalling disables it and stops reapplying,
-but does not put the governor back &mdash; nothing recorded what it was before.
+| Governor | Preference |
+| -------- | ---------- |
+| *Leave it to SteamOS* | not shown, not written &mdash; the CPU is not being managed here, so neither half is asserted |
+| `performance` | not shown, not written &mdash; the firmware is pinned to its top preference and the kernel refuses the file |
+| anything else | shown, and written with the governor |
+
+So there is no "leave it alone" for the preference: either you are managing
+the CPU, in which case both are set, or you are not, in which case nothing is
+touched. `powersave` is not a battery mode here &mdash; it is the setting that
+lets the firmware range at all.
+
+The governor defaults to leaving the CPU exactly as SteamOS set it, so a fresh
+install changes nothing. What you pick is applied straight away and written to
+`/etc/steamos-led-power.conf`; `steamos-led-power.service` puts it back at
+every boot, and is only enabled once you have set a governor. Uninstalling
+disables it and stops reapplying, but does not put the governor back &mdash;
+nothing recorded what it was before.
 
 ### Keyboard layout
 

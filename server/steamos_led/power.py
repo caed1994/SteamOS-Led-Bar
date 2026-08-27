@@ -49,9 +49,26 @@ UNSET = ""
 # that refusal as a failure.
 PINNED_GOVERNOR = "performance"
 
+# What the drivers with an EPP offer, for the one moment the machine will not
+# say. While the pinning governor is set the kernel collapses
+# energy_performance_available_preferences to that single value - so a list
+# read then reports what is choosable *now* rather than what the hardware can
+# do, and switching away from that governor in the same sitting would be
+# choosing from a list of one.
+#
+# These five are amd-pstate's and intel_pstate's alike, which between them are
+# every machine that has this file at all. Used only while the reported list
+# is untrustworthy; anywhere else the machine is asked.
+PINNED_FALLBACK = ("default", "performance", "balance_performance",
+                   "balance_power", "power")
+
 DEFAULTS = {
     "CPU_GOVERNOR": UNSET,
-    "CPU_EPP": UNSET,
+    # Not UNSET. The preference is only ever written alongside a governor -
+    # see epp_in_play - so there is no case where "leave the file alone" is a
+    # thing this can mean: either the CPU is being managed here, in which case
+    # both are set, or it is not, in which case neither is written.
+    "CPU_EPP": "default",
 }
 
 # Wording for the values these files use, for anything showing them to a
@@ -110,7 +127,43 @@ def governors(root=""):
 
 
 def epp_values(root=""):
-    return _offered(EPP_AVAILABLE, root)
+    """What the preference will take once a governor that allows it is set.
+
+    Not simply what the file says right now. While the pinning governor is
+    running the kernel collapses this list to that one value, so reading it
+    then answers "what may I choose at this instant" - and the question being
+    asked is always "what may I choose once I have applied the governor I am
+    about to apply", which is a different one.
+
+    This is the bug that reached a screenshot: with the performance governor
+    already applied, picking powersave and a preference in the same sitting
+    was refused, because the check read a list of one.
+    """
+    reported = _offered(EPP_AVAILABLE, root)
+    if not reported:
+        return ()                       # no EPP on this machine at all
+    if epp_applies(current(root).get("CPU_GOVERNOR", "")):
+        return reported
+    return PINNED_FALLBACK
+
+
+def epp_in_play(values, root=""):
+    """Whether the preference is a setting at all, for these values.
+
+    Three ways it is not, and all three mean the same thing to everything
+    that asks: do not offer it, do not validate it, do not write it.
+
+    Without a governor of ours, because then this project is not managing how
+    the CPU runs and should not be asserting half of it - a preference set
+    behind a governor nobody chose is a setting whose effect depends on what
+    SteamOS happens to default to. Under the pinning governor, because the
+    kernel refuses the file. And on a machine whose driver has no such file.
+    """
+    if values.get("CPU_GOVERNOR", UNSET) == UNSET:
+        return False
+    if not epp_applies(values.get("CPU_GOVERNOR", UNSET)):
+        return False
+    return bool(epp_values(root))
 
 
 def current(root=""):
@@ -154,14 +207,21 @@ def validate(values, root=""):
     A machine with no cpufreq at all accepts only "leave it alone", which is
     what an unset setting already is.
     """
-    for key, offered in (("CPU_GOVERNOR", governors(root)),
-                         ("CPU_EPP", epp_values(root))):
-        value = values.get(key, UNSET)
-        if value == UNSET:
-            continue
-        if value not in offered:
-            raise ValueError(
-                "%s=%s is not one this machine offers%s"
-                % (key, value,
-                   (": " + ", ".join(offered)) if offered
-                   else " - it has no cpufreq at all"))
+    governor = values.get("CPU_GOVERNOR", UNSET)
+    if governor != UNSET and governor not in governors(root):
+        offered = governors(root)
+        raise ValueError(
+            "CPU_GOVERNOR=%s is not one this machine offers%s"
+            % (governor, (": " + ", ".join(offered)) if offered
+               else " - it has no cpufreq at all"))
+
+    # Only when it is a setting at all. Checked against what will be on offer
+    # once the governor above has been applied, which is not what the file
+    # reports while a pinning governor is still running - see epp_values.
+    if not epp_in_play(values, root):
+        return
+    epp = values.get("CPU_EPP", UNSET)
+    if epp != UNSET and epp not in epp_values(root):
+        raise ValueError(
+            "CPU_EPP=%s is not one this machine offers: %s"
+            % (epp, ", ".join(epp_values(root))))

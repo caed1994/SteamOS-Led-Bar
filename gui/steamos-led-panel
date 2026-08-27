@@ -430,12 +430,19 @@ SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow", "fire",
 # so the menu is taken away rather than offered and then ignored - the value
 # is written out as a *choice* rule, which is what gets a row hidden.
 #
-# Every governor but that one, listed rather than negated, because DEPENDS_ON
-# can say "is one of these" and cannot say "is not this". Only the two
+# "Leave it to SteamOS" is not among them either, and that is the other half
+# of the rule: without a governor of ours this project is not managing how the
+# CPU runs, and a preference set behind a governor nobody chose is a setting
+# whose effect depends on whatever SteamOS happens to default to. Both halves
+# are in power.epp_in_play, which is what the applier obeys - so the row being
+# hidden and the value not being written are the same decision.
+#
+# Every governor that does let it through, listed rather than negated, because
+# DEPENDS_ON can say "is one of these" and cannot say "is not this". The two
 # amd-pstate offers in active mode plus the classic ones a passive machine
-# has: a governor missing from here hides a row that should be shown, which
-# is the safe way round of getting it wrong.
-EPP_IN_PLAY = ("CPU_GOVERNOR", ("", "powersave", "ondemand", "schedutil",
+# has: a governor missing from here hides a row that should be shown, which is
+# the safe way round of getting it wrong.
+EPP_IN_PLAY = ("CPU_GOVERNOR", ("powersave", "ondemand", "schedutil",
                                 "conservative", "userspace"))
 DEPENDS_ON = {
     "CPU_EPP": (EPP_IN_PLAY,),
@@ -2561,6 +2568,13 @@ class Panel:
         own padding is the same everywhere, which is what makes the column
         regular now that the controls in it all stand the same height.
         """
+        if kind == "power" and key == "CPU_EPP" and not power.epp_values():
+            # Not greyed and not hidden: never built. A driver in passive mode
+            # has no preference file at all, and a menu with nothing in it is
+            # a row about a setting this machine does not have. Left out of
+            # self.vars too, so nothing collects it and nothing compares it -
+            # see _collect_power, which keeps the stored value instead.
+            return
         minsize = self.roles["_sizes"]["control"] + 2 * ROW_PAD + lead
         grid.rowconfigure(row, minsize=minsize)
         name = ttk.Label(grid, text=label)
@@ -2606,7 +2620,8 @@ class Panel:
                        else ledpanel.power_choices(
                            power.governors() if key == "CPU_GOVERNOR"
                            else power.epp_values(),
-                           current=str(value), labels=power.LABELS)
+                           current=str(value), labels=power.LABELS,
+                           unset=key == "CPU_GOVERNOR")
                        if kind == "power"
                        else [(entry, entry) for entry in low]
                        if kind == "choice" else list(low))
@@ -3288,8 +3303,12 @@ class Panel:
         only in the helper: a value this hardware does not offer should be
         refused while the window still has somewhere to show the reason.
         """
-        values = {key: self._value_for(key, self.vars[key][0].get())
-                  for key in POWER_KEYS if key in self.vars}
+        # Started from what the file holds, so a row this machine has no
+        # hardware for - the preference, on a driver without one - keeps its
+        # stored value instead of vanishing from the config every Apply.
+        values = dict(self.power)
+        values.update({key: self._value_for(key, self.vars[key][0].get())
+                       for key in POWER_KEYS if key in self.vars})
         power.validate(values)              # raises ValueError
         return values
 

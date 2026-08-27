@@ -1154,6 +1154,40 @@ class PanelSettingsTest(unittest.TestCase):
         labels = [label for label, _value in offered]
         self.assertEqual(len(set(labels)), len(labels), labels)
 
+    def test_the_preference_hangs_off_the_governors_that_allow_it(self):
+        """The page rule and the applier rule have to be the same rule.
+
+        power.epp_in_play decides whether the preference is written; this
+        table decides whether the row is on the page. They disagreeing is
+        either a setting nobody can reach or - worse - one still in force
+        with nothing on screen that shows it.
+
+        Checked here rather than live because the machine running the suite
+        has no cpufreq, so no governor can be picked on it at all.
+        """
+        rule = ast.literal_eval(self._assignments()["EPP_IN_PLAY"])
+        self.assertEqual(rule[0], "CPU_GOVERNOR")
+        allowed = set(rule[1])
+        # Never without a governor of ours, and never under the pinning one.
+        self.assertNotIn("", allowed, "a preference behind no governor")
+        self.assertNotIn(power.PINNED_GOVERNOR, allowed)
+        # The two conditions this table can express. The third - whether the
+        # machine has a preference file at all - is not a value of any menu,
+        # and is answered by not building the row; see the live tests.
+        for governor in allowed:
+            self.assertNotEqual(governor, "")
+            self.assertTrue(
+                power.epp_applies(governor),
+                "%s is on the page but the applier would skip it" % governor)
+
+    def test_the_preference_menu_offers_no_way_to_leave_it_alone(self):
+        # It is only ever written alongside a governor, so "leave the file
+        # alone" is not a thing it can mean - the governor is where that is
+        # said. The governor's own menu keeps the entry.
+        self.assertEqual(ledpanel.power_choices(("a", "b"), unset=False)[0][1],
+                         "a")
+        self.assertEqual(ledpanel.power_choices(("a", "b"))[0][1], "")
+
     def test_what_a_switch_governs_is_a_real_setting(self):
         # The greying-out map names keys on both sides; a typo in either would
         # quietly leave a row enabled forever - and in the entries that want a

@@ -863,7 +863,7 @@ def apply_power_command(source_dir, staged_path):
             staged_path]
 
 
-def power_choices(offered, current="", labels=None):
+def power_choices(offered, current="", labels=None, unset=True):
     """(label, value) pairs for a CPU setting, from what the machine offers.
 
     Never from a list here. Which governors and which preferences exist
@@ -876,7 +876,11 @@ def power_choices(offered, current="", labels=None):
     is: dropping it would look like the setting had changed by itself.
     """
     labels = labels or {}
-    choices = [("Leave it to SteamOS", "")]
+    # `unset` is False for the preference, which has no such entry: it is only
+    # ever written alongside a governor, so "leave the file alone" is not
+    # something it can mean - either the CPU is being managed here or it is
+    # not, and the governor is where that is said.
+    choices = [("Leave it to SteamOS", "")] if unset else []
     for value in offered:
         choices.append((labels.get(value, value), value))
     if current and current not in [value for _label, value in choices]:

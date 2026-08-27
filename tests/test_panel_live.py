@@ -1435,37 +1435,40 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_cpu_menus_are_built_from_the_machine(self):
         """Not from a list in the panel, which is the whole point of them.
 
-        This build machine has no cpufreq at all, so both menus come out with
-        nothing but "leave it alone" - which is the case a hardcoded list
+        This build machine has no cpufreq at all, so the governor menu comes
+        out with nothing but "leave it alone" - the case a hardcoded list
         would get wrong by offering governors that do not exist here.
         """
         self.panel._open_section("power")
         self.root.update()
-        for key in ("CPU_GOVERNOR", "CPU_EPP"):
-            offered = [value for _label, value in self.panel._menus[key]]
-            self.assertEqual(
-                offered,
-                [""] + list(self.panel_module.power.governors()
-                            if key == "CPU_GOVERNOR"
-                            else self.panel_module.power.epp_values()),
-                key)
+        offered = [value for _label, value
+                   in self.panel._menus["CPU_GOVERNOR"]]
+        self.assertEqual(offered,
+                         [""] + list(self.panel_module.power.governors()))
 
-    def test_the_energy_preference_goes_away_under_the_pinning_governor(self):
-        """The kernel refuses the EPP file while `performance` is set.
+    def test_a_machine_with_no_preference_file_gets_no_row_for_one(self):
+        """Never built, rather than built and greyed.
 
-        Offered anyway it would be a menu whose value the machine will not
-        take - so it is taken away, the way every row that waits on a choice
-        is. Driven through the menu rather than the variable, because what
-        the window stores is the label and the rule is about the value.
+        A driver in passive mode has no energy_performance_preference at all,
+        and this machine has no cpufreq whatever - a menu with nothing in it
+        is a row about a setting that does not exist. Left out of self.vars
+        too, so nothing collects it and nothing compares it.
         """
         self.panel._open_section("power")
         self.root.update()
-        governor = self.panel.vars["CPU_GOVERNOR"][0]
-        for value, shown in (("performance", False), ("powersave", True),
-                             ("", True)):
-            governor.set(self.panel._label_for("CPU_GOVERNOR", value))
-            self.root.update()
-            self.assertEqual(self._shown("CPU_EPP"), shown, value)
+        self.assertEqual(self.panel_module.power.epp_values(), ())
+        self.assertNotIn("CPU_EPP", self.panel._rows)
+        self.assertNotIn("CPU_EPP", self.panel.vars)
+        # And Apply is still offered, for the governor that is there.
+        self.assertTrue(self.panel._apply_shown)
+
+    def test_the_stored_preference_survives_a_page_that_cannot_show_it(self):
+        # Collected from the file rather than from the widgets, so a config
+        # written on a machine that has an EPP is not emptied by opening the
+        # panel on one that does not.
+        self.panel.power = dict(self.panel.power, CPU_EPP="balance_power")
+        self.assertEqual(self.panel._collect_power()["CPU_EPP"],
+                         "balance_power")
 
     def test_the_cpu_settings_never_reach_the_led_config_or_a_profile(self):
         # Third file, third writer. A governor in the LED service's config is

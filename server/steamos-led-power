@@ -98,22 +98,41 @@ def apply_settings(values, root="", out=print):
         else:
             out("governor: %s" % governor)
 
-    if epp != power.UNSET:
-        # What the governor will be once the write above has landed, which is
-        # not necessarily what was asked for if that write failed.
-        now = power.current(root).get("CPU_GOVERNOR", "")
-        if not power.epp_applies(now):
-            out("EPP left alone: the %s governor pins it" % now)
+    # Asked *after* the governor has been written, which is the whole reason
+    # the two are done here in this order. The kernel collapses the list of
+    # preferences while a pinning governor is running, so what is on offer is
+    # only knowable once the governor being applied is the one in force.
+    #
+    # The state of the machine, not of the file: a governor whose write failed
+    # leaves the old one running, and the preference has to be judged against
+    # that rather than against what was asked for.
+    settled = dict(values)
+    settled["CPU_GOVERNOR"] = (power.current(root).get("CPU_GOVERNOR", "")
+                               if governor != power.UNSET else power.UNSET)
+    if not power.epp_in_play(settled, root):
+        if governor == power.UNSET:
+            pass                        # not ours to set; said below
+        elif not power.epp_applies(settled["CPU_GOVERNOR"]):
+            out("EPP left alone: the %s governor pins it"
+                % settled["CPU_GOVERNOR"])
         else:
-            refused = write_all(power.EPP, epp, root)
-            if refused:
-                out("could not set the EPP: %s" % refused[0][1])
-                status = 1
-            else:
-                out("EPP: %s" % epp)
+            out("EPP left alone: this machine has no preference to set")
+    elif epp != power.UNSET:
+        # No second validate here, and deliberately. The list of preferences
+        # the kernel reports widens again the moment the governor stops
+        # pinning it, and that widening is the kernel's to do - reading it
+        # back to check against would be this program racing the driver over
+        # a question the write itself answers. A value the file will not take
+        # is refused by the write, with the kernel's own reason.
+        refused = write_all(power.EPP, epp, root)
+        if refused:
+            out("could not set the EPP: %s" % refused[0][1])
+            status = 1
+        else:
+            out("EPP: %s" % epp)
 
-    if governor == power.UNSET and epp == power.UNSET:
-        out("nothing set in %s - leaving the CPU alone" % CONFIG_PATH)
+    if governor == power.UNSET:
+        out("no governor set in %s - leaving the CPU alone" % CONFIG_PATH)
     return status
 
 

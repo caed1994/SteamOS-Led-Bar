@@ -135,8 +135,16 @@ class ValidateTest(FakeCpu):
             power.validate({"CPU_GOVERNOR": "ondemand"}, self.root)
 
     def test_an_epp_this_machine_does_not_have_is_refused(self):
+        # With a governor, because without one the preference is not a
+        # setting at all and there is nothing to check - see epp_in_play.
         with self.assertRaises(ValueError):
-            power.validate({"CPU_EPP": "turbo"}, self.root)
+            power.validate({"CPU_GOVERNOR": "powersave", "CPU_EPP": "turbo"},
+                           self.root)
+
+    def test_an_epp_without_a_governor_is_not_checked_at_all(self):
+        # Not an oversight: it is not going to be written either, so refusing
+        # it would be refusing to save a value that changes nothing.
+        power.validate({"CPU_GOVERNOR": "", "CPU_EPP": "turbo"}, self.root)
 
     def test_the_message_names_what_is_on_offer(self):
         # So the answer to "then what may I set" is in the refusal itself.
@@ -201,6 +209,89 @@ class ApplyTest(FakeCpu):
         self.assertIn("nothing to set", "\n".join(said))
 
 
+class PinnedListTest(FakeCpu):
+    """Reported: the setting was refused after the governor had been applied.
+
+    The kernel collapses energy_performance_available_preferences to the one
+    pinned value while the performance governor is running. So after applying
+    that governor, picking powersave and a preference in the same sitting was
+    checked against a list of one and refused - a valid pair, rejected because
+    of the state the machine happened to be in on the way there.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # What the machine looks like once `performance` has been applied.
+        for cpu in range(self.CPUS):
+            where = os.path.join(self.root,
+                                 "sys/devices/system/cpu/cpu%d/cpufreq" % cpu)
+            self._put(os.path.join(where, power.GOVERNOR), "performance")
+            self._put(os.path.join(where, power.EPP_AVAILABLE), "performance")
+
+    def test_the_machine_really_does_report_one_value(self):
+        # The premise, so this test fails honestly if the shape ever changes.
+        self.assertEqual(power._offered(power.EPP_AVAILABLE, self.root),
+                         ("performance",))
+
+    def test_but_what_may_be_chosen_is_the_whole_set(self):
+        self.assertIn("balance_performance", power.epp_values(self.root))
+
+    def test_and_the_pair_that_was_refused_is_accepted(self):
+        power.validate({"CPU_GOVERNOR": "powersave",
+                        "CPU_EPP": "balance_performance"}, self.root)
+
+    def test_and_applying_it_writes_both(self):
+        code, said = self._apply(CPU_GOVERNOR="powersave",
+                                 CPU_EPP="balance_performance")
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self._get(0, power.GOVERNOR), "powersave")
+        self.assertEqual(self._get(0, power.EPP), "balance_performance")
+
+    def test_a_governor_is_still_checked_against_the_machine(self):
+        # The list of governors is not collapsed by anything, so that half
+        # goes on being checked as strictly as before.
+        with self.assertRaises(ValueError):
+            power.validate({"CPU_GOVERNOR": "ondemand"}, self.root)
+
+
+class GovernorRulesTheEppTest(FakeCpu):
+    """Without a governor of ours, the preference is not ours to set either."""
+
+    def test_it_is_not_in_play_without_a_governor(self):
+        self.assertFalse(power.epp_in_play({"CPU_GOVERNOR": "",
+                                            "CPU_EPP": "power"}, self.root))
+
+    def test_so_applying_writes_neither(self):
+        before = (self._get(0, power.GOVERNOR), self._get(0, power.EPP))
+        code, said = self._apply(CPU_GOVERNOR="", CPU_EPP="power")
+        self.assertEqual(code, 0)
+        self.assertEqual((self._get(0, power.GOVERNOR),
+                          self._get(0, power.EPP)), before)
+        self.assertIn("leaving the CPU alone", said)
+
+    def test_a_preference_left_in_the_file_stops_applying_with_it(self):
+        """The half that would otherwise be a setting nobody can see.
+
+        Set the pair, then take the governor back to "leave it to SteamOS".
+        The preference is still in the config file - the panel hides the row
+        rather than clearing it - and it must stop being written, or it is a
+        setting still in force with nothing on screen that shows it.
+        """
+        self._apply(CPU_GOVERNOR="powersave", CPU_EPP="power")
+        self.assertEqual(self._get(0, power.EPP), "power")
+        self._put(os.path.join(self.root,
+                               "sys/devices/system/cpu/cpu0/cpufreq",
+                               power.EPP), "default")
+        code, _said = self._apply(CPU_GOVERNOR="", CPU_EPP="power")
+        self.assertEqual(code, 0)
+        self.assertEqual(self._get(0, power.EPP), "default",
+                         "the hidden preference was written anyway")
+
+    def test_and_it_is_in_play_with_one(self):
+        self.assertTrue(power.epp_in_play({"CPU_GOVERNOR": "powersave",
+                                           "CPU_EPP": "power"}, self.root))
+
+
 class PassiveModeTest(FakeCpu):
     """The other mode, where the classic governors are back and EPP is gone."""
 
@@ -214,9 +305,19 @@ class PassiveModeTest(FakeCpu):
     def test_there_is_no_energy_preference_at_all(self):
         self.assertEqual(power.epp_values(self.root), ())
 
-    def test_so_setting_one_is_refused(self):
-        with self.assertRaises(ValueError):
-            power.validate({"CPU_EPP": "power"}, self.root)
+    def test_so_it_is_not_a_setting_here_and_is_never_written(self):
+        """No file to write, so the value is carried and ignored.
+
+        Refusing it would be refusing to save a config that is perfectly
+        good on the machine it came from - and this one has nowhere to put it
+        either way.
+        """
+        wanted = {"CPU_GOVERNOR": "schedutil", "CPU_EPP": "power"}
+        self.assertFalse(power.epp_in_play(wanted, self.root))
+        power.validate(wanted, self.root)
+        code, said = self._apply(**wanted)
+        self.assertEqual(code, 0)
+        self.assertIn("no preference to set", said)
 
     def test_and_a_governor_it_does_have_still_applies(self):
         code, _said = self._apply(CPU_GOVERNOR="schedutil")
