@@ -21,6 +21,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
+import syssettings                                          # noqa: E402
+
 try:
     import tkinter as tk
     from tkinter import ttk
@@ -1265,6 +1267,212 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update_idletasks()
         for control in controls:
             self.assertNotIn("disabled", control.state())
+
+
+@unittest.skipUnless(_has_display(), "no tkinter or no display")
+class SystemPageTest(unittest.TestCase):
+    """The machine's own settings, in the window that edits two files.
+
+    Built against a home directory of its own. The panel reads and writes the
+    real one through $HOME, so a test that did not move it would be a test
+    that rewrote the keyboard layout of whoever ran the suite.
+
+    Everything here is about the seam rather than about the keyboard: the
+    window has one Apply for two files now, and what must not happen is a
+    setting reaching the wrong one of them.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        import tempfile
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.home = holder.name
+        was = os.environ.get("HOME")
+        os.environ["HOME"] = self.home
+        self.addCleanup(lambda: os.environ.__setitem__("HOME", was)
+                        if was is not None else os.environ.pop("HOME", None))
+        self.path = syssettings.path_for(syssettings.LAYOUT, self.home)
+        self._build()
+
+    def _build(self):
+        """A fresh window, reading whatever the fake home says right now."""
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+        self.root = tk.Tk()
+        self.panel = self.panel_module.Panel(self.root)
+        # Nothing in a test may actually run pkexec. Recorded instead, which
+        # is also the assertion: whether the privileged half ran at all.
+        self.ran = []
+        self.panel.runner.start = lambda command, done=None: (
+            self.ran.append(command), True)[1]
+        self.root.update()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _layout(self):
+        return self.panel.vars[syssettings.LAYOUT][0]
+
+    def _on_disk(self):
+        return syssettings.read(self.home)[syssettings.LAYOUT]
+
+    def _label(self, value):
+        return dict((choice, label) for label, choice
+                    in syssettings.layouts())[value]
+
+    # -- reading -----------------------------------------------------------
+
+    def test_a_layout_already_set_is_what_the_window_opens_on(self):
+        syssettings.write({syssettings.LAYOUT: "fr"}, self.home)
+        self._build()
+        self.assertEqual(self._layout().get(), self._label("fr"))
+
+    def test_and_it_is_not_an_unsaved_change(self):
+        # The window agreeing with the file is the whole of what the unsaved
+        # count means. A page that read its own file wrong would open showing
+        # a change nobody made.
+        syssettings.write({syssettings.LAYOUT: "fr"}, self.home)
+        self._build()
+        self.assertEqual(self.panel._differences(), [])
+
+    def test_choosing_one_is_an_unsaved_change(self):
+        self._layout().set(self._label("de"))
+        self.root.update()
+        self.assertEqual(self.panel._differences(), [syssettings.LAYOUT])
+
+    # -- writing -----------------------------------------------------------
+
+    def test_applying_writes_it(self):
+        self._layout().set(self._label("de"))
+        self.root.update()
+        self.panel.apply_settings()
+        self.root.update()
+        self.assertEqual(self._on_disk(), "de")
+        self.assertEqual(self.panel._differences(), [],
+                         "the window still thinks it is unsaved")
+
+    def test_applying_a_layout_asks_for_no_password_and_restarts_nothing(self):
+        """The reason the two files are kept apart at all.
+
+        A keyboard layout is written by the panel, as you, into your own home.
+        Sending it through the helper that installs /etc would be a password
+        prompt for a file that needs none - and would bounce the LED service
+        for a setting it does not read.
+        """
+        self._layout().set(self._label("de"))
+        self.root.update()
+        self.panel.apply_settings()
+        self.root.update()
+        self.assertEqual(self.ran, [], "it went through pkexec anyway")
+
+    def test_a_service_setting_still_goes_through_the_helper(self):
+        # The other half: the split must not have taken the privileged path
+        # away from the settings that do need it.
+        self.panel.vars["LED_COUNT"][0].set(42)
+        self.root.update()
+        self.panel.apply_settings()
+        self.root.update()
+        self.assertTrue(self.ran, "the service's config was never installed")
+        self.assertIn("pkexec", self.ran[0][0])
+
+    def test_changing_both_writes_one_and_installs_the_other(self):
+        self._layout().set(self._label("de"))
+        self.panel.vars["LED_COUNT"][0].set(42)
+        self.root.update()
+        self.panel.apply_settings()
+        self.root.update()
+        self.assertEqual(self._on_disk(), "de")
+        self.assertTrue(self.ran, "the service's config was never installed")
+
+    def test_going_back_to_the_system_default_takes_the_file_away(self):
+        syssettings.write({syssettings.LAYOUT: "de"}, self.home)
+        self._build()
+        self._layout().set(syssettings.UNSET_LABEL)
+        self.root.update()
+        self.panel.apply_settings()
+        self.root.update()
+        self.assertFalse(os.path.exists(self.path), "the file is still there")
+
+    # -- the two files staying apart ---------------------------------------
+
+    def test_the_service_config_is_never_asked_to_hold_a_layout(self):
+        """The failure the split exists to prevent, at its own seam.
+
+        _collect builds what gets written into /etc and validated by the LED
+        service. A system setting in there is a key the service does not know:
+        it would be refused by validate, and if it were not, it would be
+        written into the service's config file and left there.
+        """
+        self._layout().set(self._label("de"))
+        self.root.update()
+        values = self.panel._collect()
+        self.assertNotIn(syssettings.LAYOUT, values)
+        merged = dict(self.panel_module.config_module.DEFAULTS)
+        merged.update(values)
+        self.panel_module.config_module.validate(merged)
+
+    def test_a_profile_does_not_carry_the_machine_s_settings(self):
+        # A profile is a set of LED settings you swap between. Carrying a
+        # keyboard layout in one would change the machine every time somebody
+        # tried a different look for the bar.
+        self._layout().set(self._label("de"))
+        self.root.update()
+        self.assertNotIn(syssettings.LAYOUT,
+                         self.panel_module.ledpanel.profile_text(
+                             self.panel._collect()))
+
+    def test_reload_picks_up_a_file_that_changed_underneath(self):
+        # Both files, because the button says "Reload from file" and there
+        # are two. Reloading only the service's would leave this page showing
+        # an edit that Reload appeared to have thrown away.
+        self._layout().set(self._label("de"))
+        self.root.update()
+        syssettings.write({syssettings.LAYOUT: "fr"}, self.home)
+        self.panel.reload_settings()
+        self.root.update()
+        self.assertEqual(self._layout().get(), self._label("fr"))
+        self.assertEqual(self.panel._differences(), [])
+
+    # -- the menu ----------------------------------------------------------
+
+    def test_a_layout_the_menu_does_not_list_still_shows_up(self):
+        """Editing the file by hand is a supported way to use this.
+
+        The menu cannot be ninety-nine entries long - it does not scroll - so
+        the way to an unlisted layout is the file. Opening the window must not
+        then quietly replace it with the first entry that does fit.
+        """
+        syssettings.write({syssettings.LAYOUT: "kz"}, self.home)
+        self._build()
+        self.assertEqual(self.panel._value_for(
+            syssettings.LAYOUT, self._layout().get()), "kz")
+        self.assertEqual(self.panel._differences(), [])
+
+    def test_the_whole_menu_fits_on_the_screen(self):
+        """Measured on the window, which is the only place it shows.
+
+        The drop-down sizes itself to its entries and is then clamped to the
+        screen: entries past the bottom edge are drawn nowhere and cannot be
+        clicked. At twenty-eight entries this overflowed a 1280x800 display -
+        a Steam Machine's own - by 126 pixels, and the suite was green.
+        """
+        self.panel.notebook.select(
+            [page for page in self.panel.notebook.tabs()
+             if self.panel.notebook.tab(page, "text").strip() == "System"][0])
+        self.root.update()
+        self.panel._open_menu(syssettings.LAYOUT)
+        self.root.update()
+        popup = self.panel._popup.window
+        self.assertLessEqual(popup.winfo_reqheight(),
+                             popup.winfo_screenheight(),
+                             "the last entries are off the bottom edge")
 
 
 if __name__ == "__main__":

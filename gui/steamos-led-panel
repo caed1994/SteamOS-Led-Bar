@@ -45,6 +45,7 @@ import material                                             # noqa: E402
 import roundrect                                            # noqa: E402
 import ledpanel                                             # noqa: E402
 import preview as preview_module                            # noqa: E402
+import syssettings                                          # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
 from steamos_led import notify                              # noqa: E402
 from steamos_led import render                              # noqa: E402
@@ -240,12 +241,44 @@ ADVANCED = [
 # which is why the Apply row does not appear under those two.
 # A third item is a line of explanation under the page's settings, for a page
 # whose rows cannot say when they apply.
+# The machine's own settings, which are not the LED service's and are not in
+# its config file. Its own page for the same reason Desktop mode has one: it
+# is its own question, and the thing it changes is the computer rather than
+# the bar.
+#
+# Everything here is written into the user's home and needs no rights at all -
+# see syssettings. That is what makes the keyboard layout the right first one
+# to sit here: no helper script, no password, and nothing that a wrong value
+# leaves in a state a reboot cannot undo.
+# The key is written out rather than taken from syssettings, the way the scene
+# names below are: this table is read literally by the tests, and a name they
+# have to resolve is a name they cannot check. That it is the right one is
+# itself checked there.
+SYSTEM = [
+    ("Keyboard", [
+        ("XKB_DEFAULT_LAYOUT", "Keyboard layout", "named",
+         syssettings.layouts(), None, None),
+    ]),
+]
+
+SYSTEM_NOTE = (
+    "Takes effect at the next login, and governs Game Mode - gamescope and "
+    "its on-screen keyboard. Desktop Mode keeps its own layout in the system "
+    "settings and is not changed by this.")
+
 SETTINGS_TABS = (
     ("Strip", STRIP),
     ("Desktop mode", DESKTOP, DESKTOP_NOTE),
     ("Notifications", NOTIFICATIONS),
+    ("System", SYSTEM, SYSTEM_NOTE),
     ("Advanced", ADVANCED),
 )
+
+# Which of the settings on those pages belong to the machine rather than to
+# the LED service. One flat set, because that is the only question the rest of
+# the window has to ask: which file a value was read from and is written back
+# to. See Panel._saved and Panel.apply_settings.
+SYSTEM_KEYS = frozenset(syssettings.DEFAULTS)
 
 # Settings that only mean something while something else says so, and what
 # happens to them while it does not. Two answers, because there are two kinds
@@ -1412,6 +1445,10 @@ class Panel:
 
         self.roles = apply_theme(root)
         self.config = self._load_config()
+        # The machine's own settings, kept beside the service's rather than
+        # merged into them: they come from different files, they are written
+        # back by different means, and only one of the two restarts anything.
+        self.system = syssettings.read()
         self.vars = {}
         # key -> the (label, value) pairs and the widget, so a value that
         # turns up later can be added to both.
@@ -1957,7 +1994,7 @@ class Panel:
         name = ttk.Label(grid, text=label)
         name.grid(row=row, column=0, sticky="w", pady=(ROW_PAD + lead, ROW_PAD),
                   padx=(self._indent(key) * INDENT_STEP, GROUP_GAP))
-        value = self.config.get(key, config_module.DEFAULTS[key])
+        value = self._saved(key)
         labels, controls = [name], []
         # What actually sits in this grid, which is not the same list: a
         # slider is two widgets inside a frame, and it is the frame the grid
@@ -2074,6 +2111,17 @@ class Panel:
         self._refresh_enabled()
         self._refresh_unsaved()
 
+    def _saved(self, key):
+        """What is on disk for this setting, from whichever file holds it.
+
+        The one place the window has to know that its rows come from two
+        files. Everything else - the unsaved count, the controls a page is
+        built from, Reload - goes through here and does not have to care.
+        """
+        if key in SYSTEM_KEYS:
+            return self.system.get(key, syssettings.DEFAULTS[key])
+        return self.config.get(key, config_module.DEFAULTS[key])
+
     def _differences(self):
         """Which settings in the window are not what the file holds.
 
@@ -2083,7 +2131,7 @@ class Panel:
         """
         changed = []
         for key, (variable, kind) in self.vars.items():
-            saved = self.config.get(key, config_module.DEFAULTS[key])
+            saved = self._saved(key)
             try:
                 raw = variable.get()
             except (ValueError, tk.TclError):        # pragma: no cover
@@ -2287,8 +2335,12 @@ class Panel:
         # the row for "what to do with these settings", and a profile is those
         # settings by another name.
         self._apply_buttons = [
+            # Not "Apply and restart service" any longer. The System page's
+            # settings restart nothing - they are the machine's, they take
+            # effect at the next login - so a button promising a restart would
+            # be describing what happens to only some of what it saves.
             ("left", ttk.Button(self.apply_row,
-                                text="Apply and restart service",
+                                text="Apply changes",
                                 style="Filled.TButton",
                                 command=self.apply_settings)),
             ("left", ttk.Button(self.apply_row, text="Reload from file",
@@ -2558,9 +2610,17 @@ class Panel:
         return scale, readout, holder
 
     def _collect(self):
-        """Widget values as the config wants them, validated."""
+        """The service's settings out of the widgets, validated.
+
+        System settings are not in here - see _collect_system. They are a
+        different file with a different validator, and putting one of them
+        through config_module.validate would be asking the LED service to
+        approve a keyboard layout.
+        """
         values = {}
         for key, (variable, kind) in self.vars.items():
+            if key in SYSTEM_KEYS:
+                continue
             raw = variable.get()
             values[key] = (bool(raw) if kind == "bool"
                            else int(round(raw)) if kind == "int"
@@ -2582,11 +2642,51 @@ class Panel:
         config_module.validate(merged)      # raises ConfigError
         return values
 
+    def _collect_system(self):
+        """The machine's own settings out of the widgets, validated."""
+        values = {key: self._value_for(key, self.vars[key][0].get())
+                  for key in SYSTEM_KEYS if key in self.vars}
+        syssettings.validate(values)        # raises SettingError
+        return values
+
     def apply_settings(self):
+        """Put the window into the files, one prompt at most.
+
+        The machine's settings first, because they are the half that needs no
+        rights: written here and now, by us, as you. Only the service's half
+        goes through pkexec, and only when it has actually changed - a
+        keyboard layout should not be asking for a password, and it should not
+        be restarting the LED service either.
+        """
         try:
             values = self._collect()
         except config_module.ConfigError as exc:
             self._say("Not a usable setting", str(exc))
+            return
+
+        try:
+            system = self._collect_system()
+        except syssettings.SettingError as exc:
+            self._say("Not a usable setting", str(exc))
+            return
+        if system != self.system:
+            try:
+                syssettings.write(system)
+            except OSError as exc:
+                self._say("System settings",
+                          "Could not write %s:\n%s"
+                          % (syssettings.directory(), exc))
+                return
+            self.system = system
+            self._refresh_unsaved()
+            self._write("Saved the machine's settings. They take effect at "
+                        "the next login.\n\n")
+
+        if values == {key: self.config.get(key, config_module.DEFAULTS[key])
+                      for key in values}:
+            # Nothing of the service's changed, so there is nothing to install
+            # and nothing to restart. Without this, changing only a system
+            # setting would still ask for a password and bounce the bar.
             return
 
         try:
@@ -2645,10 +2745,25 @@ class Panel:
         return shown
 
     def reload_settings(self):
+        """Both files back into the window, throwing away what is unsaved.
+
+        Both, because the button says "Reload from file" and the window is
+        showing two of them. Reloading only the service's would leave the
+        System page showing an edit that Reload appeared to have discarded.
+        """
         self.config = self._load_config()
+        self.system = syssettings.read()
         merged = dict(config_module.DEFAULTS)
         merged.update(self.config)
+        merged.update(self.system)
         self._show_values(merged)
+        # Said here rather than at the end of load_profile, where it used to
+        # be: that one reports what it loaded and then claimed to have
+        # reloaded /etc as well, which it had not, while this - the thing that
+        # does reload it - said nothing at all.
+        self._write("Reloaded %s and %s\n\n"
+                    % (config_module.DEFAULT_CONFIG_PATH,
+                       syssettings.directory()))
 
     # -- profiles ---------------------------------------------------------
 
@@ -2706,7 +2821,6 @@ class Panel:
             self._write("%d setting(s) in the file are not shown here and "
                         "were left alone.\n" % skipped)
         self._write("Nothing is written yet - press Apply to keep it.\n\n")
-        self._write("Reloaded %s\n\n" % config_module.DEFAULT_CONFIG_PATH)
 
     # -- tests ------------------------------------------------------------
 

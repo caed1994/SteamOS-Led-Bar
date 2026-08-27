@@ -576,21 +576,24 @@ the application menu as **SteamOS LED bar**.
 ./gui/steamos-led-panel
 ```
 
-Seven pages, picked from the list down the left side.
+Eight pages, picked from the list down the left side.
 
 | Page | What is on it |
 | ---- | ------------- |
 | **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
 | **Desktop mode** | what the bar shows while Steam is not driving it &mdash; see [Desktop Mode](#desktop-mode) |
 | **Notifications** | one line per thing that can flash - switch, colour, shape - grouped by where it comes from, and how long a flash lasts |
+| **System** | the machine's own settings rather than the bar's &mdash; see [Keyboard layout](#keyboard-layout) |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
 | **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists |
 | **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating-and-removing), flashing the firmware |
 
-**Apply and Reload sit under all of them**, because there is one config file.
-Apply writes every setting from every page and restarts the service; it is
-greyed out while the window and the file agree. **After a SteamOS update, press
+**Apply and Reload sit under all of them.** Apply writes every setting from
+every page and is greyed out while the window and the files agree. It asks for
+your password and restarts the service only when something the service reads
+has actually changed &mdash; the **System** page's settings are your own, in
+your own home, and go in without either. **After a SteamOS update, press
 *Rebuild and reinstall***: the update brings a new kernel and the module was
 built for the old one. Your configuration is kept and the ESP is never
 reflashed.
@@ -614,6 +617,44 @@ a PNG in as `gui/steamos-led-panel.png` and run `sudo ./install.sh --yes`.
 > update can remove it (`sudo pacman -S tk` brings it back). Nothing is only
 > available in the panel: every button runs a command you can also type, and
 > the panel prints the command it ran.
+
+### Keyboard layout
+
+Game Mode has no keyboard settings of its own. gamescope builds its keymap
+through libxkbcommon, which falls back to `XKB_DEFAULT_LAYOUT` when nothing
+else has said otherwise &mdash; so a German keyboard types as a US one until
+that variable is set for the session.
+
+The **System** page sets it. It writes one line into a file of your own:
+
+```
+~/.config/environment.d/10-keyboard.conf
+```
+
+which systemd's user manager reads at login. So it **takes effect at the next
+login**, not immediately, and it needs no password &mdash; nothing outside
+your home is touched.
+
+| | |
+| --- | --- |
+| Governs | Game Mode: gamescope, its on-screen keyboard, and games under it |
+| Does **not** govern | Desktop Mode, where Plasma keeps its own layout in the system settings |
+| Undo | pick **Leave it to the system**, which removes the line and the file |
+
+The menu offers nineteen layouts rather than all ninety-nine the system knows:
+the panel's drop-down does not scroll, and on a 1280&times;800 screen a longer
+list runs off the bottom edge where it cannot be clicked. For anything else,
+write the code into the file by hand &mdash; the panel keeps it, shows it in
+the menu as its own entry, and never replaces it:
+
+```bash
+mkdir -p ~/.config/environment.d
+echo "XKB_DEFAULT_LAYOUT=kz" > ~/.config/environment.d/10-keyboard.conf
+```
+
+Two layouts to switch between are a comma-separated list (`de,us`). Other
+`XKB_DEFAULT_*` variables in that file &mdash; a model, a variant, switching
+options &mdash; are left alone: the panel edits its own line and nothing else.
 
 ## Diagnostics and troubleshooting
 

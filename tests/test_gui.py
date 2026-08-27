@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 import kdetheme  # noqa: E402
 import ledpanel  # noqa: E402
 import roundrect  # noqa: E402
+import syssettings  # noqa: E402
 from steamos_led import config as config_module  # noqa: E402
 from steamos_led import desktop  # noqa: E402
 
@@ -1046,10 +1047,12 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_tabs_are_in_the_order_they_are_worked_through(self):
         # What you set, then what you rarely set, then what those settings
         # look like, then what you do - which is also the order of how often
-        # they are opened.
+        # they are opened. System sits with the settings pages and after the
+        # three about the bar: it is the one page that changes the machine
+        # rather than the strip, and the least often opened of them.
         self.assertEqual([title.strip() for title in self._tab_titles()],
-                         ["Strip", "Desktop mode", "Notifications", "Advanced",
-                          "Preview", "Test", "Status & repair"])
+                         ["Strip", "Desktop mode", "Notifications", "System",
+                          "Advanced", "Preview", "Test", "Status & repair"])
 
     def test_no_tab_label_carries_a_menu_escape(self):
         # "&&" is how a *menu* label spells one ampersand. A notebook tab
@@ -1218,8 +1221,28 @@ class PanelSettingsTest(unittest.TestCase):
         self.assertEqual(len(set(keys)), len(keys))
 
     def test_every_setting_shown_is_a_real_option(self):
+        # In one of the two files the window edits. A key in neither is a
+        # typo, and a typo here is a row that reads and writes nothing.
         for key in self._settings():
-            self.assertIn(key, config_module.DEFAULTS, key)
+            self.assertTrue(
+                key in config_module.DEFAULTS or key in syssettings.DEFAULTS,
+                key)
+
+    def test_the_system_page_names_the_settings_syssettings_owns(self):
+        """The System page is written out; this is what pins it to the module.
+
+        Both ways round. A key on the page that syssettings does not own would
+        be read from the LED service's config and written back to it - the one
+        thing the split exists to prevent - and a setting syssettings owns
+        that no page offers is one nobody can reach.
+        """
+        panel = self._panel()
+        table = self._assignments(panel).get("SYSTEM")
+        self.assertIsNotNone(table, "SYSTEM not found in the panel")
+        keys = [row.elts[0].value
+                for group in table.elts for row in group.elts[1].elts]
+        self.assertEqual(sorted(keys), sorted(syssettings.DEFAULTS))
+        self.assertIn(syssettings.LAYOUT, keys)
 
     def test_the_install_time_ones_are_left_out(self):
         # Serial port, baud rate, device path and library paths are decisions
