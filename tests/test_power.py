@@ -40,6 +40,7 @@ class FakeCpu(unittest.TestCase):
     GOVERNORS = "performance powersave"
     PREFERENCES = "default performance balance_performance balance_power power"
     MODE = "active"
+    DRIVER = "amd-pstate-epp"
     CPUS = 2
 
     def setUp(self):
@@ -59,6 +60,7 @@ class FakeCpu(unittest.TestCase):
         where = os.path.join(self.root,
                              "sys/devices/system/cpu/cpu%d/cpufreq" % cpu)
         os.makedirs(where)
+        self._put(os.path.join(where, power.DRIVER), self.DRIVER)
         self._put(os.path.join(where, power.GOVERNORS_AVAILABLE),
                   self.GOVERNORS)
         self._put(os.path.join(where, power.GOVERNOR), "powersave")
@@ -96,6 +98,9 @@ class ReadingTest(FakeCpu):
         # The files are per policy. A machine written to on cpu0 alone is one
         # running its cores under different governors, with nothing to say so.
         self.assertEqual(len(power.policies(self.root)), self.CPUS)
+
+    def test_it_names_the_driver(self):
+        self.assertEqual(power.driver(self.root), "amd-pstate-epp")
 
     def test_it_reports_the_driver_mode(self):
         # active and passive offer different governors and only one of them
@@ -292,12 +297,78 @@ class GovernorRulesTheEppTest(FakeCpu):
                                            "CPU_EPP": "power"}, self.root))
 
 
+class IntelTest(FakeCpu):
+    """The same shape, from the other vendor.
+
+    intel_pstate in its active mode offers the same two governors and the
+    same five preferences as amd-pstate does, and pins the preference under
+    the same governor - so everything here works on it, and this is the test
+    that says so rather than an assumption in a comment.
+
+    What Intel does not have is /sys/devices/system/cpu/amd_pstate/status.
+    The mode is in the driver's own name instead: intel_pstate is the active
+    one, intel_cpufreq is that driver in passive mode.
+    """
+
+    DRIVER = "intel_pstate"
+    MODE = ""                           # no amd_pstate directory at all
+
+    def test_the_driver_is_named_without_asking_amd(self):
+        self.assertEqual(power.driver(self.root), "intel_pstate")
+        self.assertEqual(power.driver_mode(self.root), "")
+
+    def test_the_report_does_not_say_what_the_machine_is_not(self):
+        said = []
+        self.applier.report(self.root, said.append)
+        text = "\n".join(said)
+        self.assertIn("intel_pstate", text)
+        self.assertNotIn("amd_pstate", text)
+
+    def test_the_preferences_are_the_same_five(self):
+        self.assertEqual(set(power.epp_values(self.root)),
+                         set(power.PINNED_FALLBACK))
+
+    def test_and_setting_both_works_the_same_way(self):
+        code, said = self._apply(CPU_GOVERNOR="powersave",
+                                 CPU_EPP="balance_power")
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self._get(0, power.GOVERNOR), "powersave")
+        self.assertEqual(self._get(0, power.EPP), "balance_power")
+
+    def test_and_performance_pins_the_preference_here_too(self):
+        before = self._get(0, power.EPP)
+        code, said = self._apply(CPU_GOVERNOR="performance", CPU_EPP="power")
+        self.assertEqual(code, 0)
+        self.assertEqual(self._get(0, power.EPP), before)
+        self.assertIn("pins it", said)
+
+
+class OldIntelTest(FakeCpu):
+    """acpi-cpufreq: classic governors, no preference file anywhere."""
+
+    DRIVER = "acpi-cpufreq"
+    GOVERNORS = "conservative ondemand userspace powersave performance"
+    PREFERENCES = ""
+    MODE = ""
+
+    def test_there_is_no_preference_to_set(self):
+        self.assertEqual(power.epp_values(self.root), ())
+        self.assertFalse(power.epp_in_play({"CPU_GOVERNOR": "ondemand"},
+                                           self.root))
+
+    def test_but_the_governor_still_works(self):
+        code, said = self._apply(CPU_GOVERNOR="ondemand", CPU_EPP="power")
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self._get(0, power.GOVERNOR), "ondemand")
+
+
 class PassiveModeTest(FakeCpu):
     """The other mode, where the classic governors are back and EPP is gone."""
 
     GOVERNORS = "conservative ondemand userspace powersave performance schedutil"
     PREFERENCES = ""
     MODE = "passive"
+    DRIVER = "amd-pstate"
 
     def test_the_classic_governors_are_offered(self):
         self.assertIn("schedutil", power.governors(self.root))

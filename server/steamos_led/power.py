@@ -3,14 +3,22 @@
 
 """How the CPU trades speed against power, and how to change it.
 
-Two knobs, and on this hardware they are not independent.
+Two knobs, and they are not independent.
 
 The *governor* decides the clock. The *EPP* - energy performance preference -
 is a hint to the firmware about where in its range to sit. Which of them exist
-depends on the driver: with amd-pstate in `active` mode, which is what a Steam
-Machine ships with, the kernel offers only `performance` and `powersave` as
-governors and adds an EPP file; in `passive` or `guided` mode the classic
-governors are back and there is no EPP at all.
+depends on the cpufreq driver, and the two families behave the same way:
+
+    amd-pstate / intel_pstate, active   performance and powersave, plus an EPP
+    amd-pstate / intel_cpufreq, passive the classic governors, usually no EPP
+    acpi-cpufreq and older              the classic governors, no EPP at all
+
+Nothing here is written for one vendor. Everything but one reporting line goes
+through the generic cpufreq files, which is why this works on Intel as it does
+on the AMD part a Steam Machine has - the pinning rule below included, since
+intel_pstate pins the preference under `performance` exactly as amd-pstate
+does. The exception is driver_mode, which reads a file only AMD publishes and
+is reported beside driver() rather than instead of it.
 
 So nothing here has a list of its own. Everything offered is read out of sysfs
 at the moment it is asked for, and a machine that offers neither gets a page
@@ -32,6 +40,7 @@ import os
 CPUFREQ = "/sys/devices/system/cpu/cpu*/cpufreq"
 PSTATE_STATUS = "/sys/devices/system/cpu/amd_pstate/status"
 
+DRIVER = "scaling_driver"
 GOVERNOR = "scaling_governor"
 GOVERNORS_AVAILABLE = "scaling_available_governors"
 EPP = "energy_performance_preference"
@@ -56,9 +65,10 @@ PINNED_GOVERNOR = "performance"
 # do, and switching away from that governor in the same sitting would be
 # choosing from a list of one.
 #
-# These five are amd-pstate's and intel_pstate's alike, which between them are
-# every machine that has this file at all. Used only while the reported list
-# is untrustworthy; anywhere else the machine is asked.
+# These five are amd-pstate's and intel_pstate's alike - between them every
+# machine that has this file at all, which is why one list serves both. Used
+# only while the reported list is untrustworthy; anywhere else the machine is
+# asked.
 PINNED_FALLBACK = ("default", "performance", "balance_performance",
                    "balance_power", "power")
 
@@ -104,12 +114,32 @@ def policies(root=""):
     return sorted(glob.glob(root + CPUFREQ))
 
 
+def driver(root=""):
+    """Which cpufreq driver is running: intel_pstate, amd-pstate-epp, ...
+
+    The generic answer, and the one worth leading a report with. Every machine
+    with cpufreq has this file, where amd_pstate/status exists on exactly one
+    family - so a report built on that one alone told an Intel machine only
+    what it was not.
+    """
+    found = policies(root)
+    if not found:
+        return ""
+    return _read(os.path.join(found[0], DRIVER))
+
+
 def driver_mode(root=""):
     """What amd_pstate says it is in, or "" when it is not amd_pstate.
 
-    Worth reporting rather than only acting on: `active` and `passive` offer
-    different governors and only one of them has an EPP, so a page that showed
-    the wrong set would look broken to somebody who had read the wiki.
+    Only AMD publishes its mode under a name like this; on Intel the same
+    distinction is in the driver's own name - intel_pstate is the active one
+    and intel_cpufreq is that driver in passive mode. So this is reported
+    beside driver() rather than instead of it.
+
+    Worth reporting rather than only acting on: active and passive offer
+    different governors and only one of them reliably has an EPP, so a page
+    that showed the wrong set would look broken to somebody who had read the
+    wiki.
     """
     return _read(root + PSTATE_STATUS)
 
@@ -178,6 +208,7 @@ def current(root=""):
 def available(root=""):
     """Everything a page needs to build itself, in one read of the machine."""
     return {
+        "driver": driver(root),
         "mode": driver_mode(root),
         "governors": governors(root),
         "epp": epp_values(root),

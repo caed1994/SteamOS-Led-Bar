@@ -139,7 +139,13 @@ def apply_settings(values, root="", out=print):
 def report(root="", out=print):
     found = power.available(root)
     out("cpufreq policies: %d" % found["policies"])
-    out("amd_pstate mode:  %s" % (found["mode"] or "not amd_pstate"))
+    out("driver:           %s" % (found["driver"] or "none"))
+    # Only where there is one to say. On Intel the mode is in the driver's own
+    # name above - intel_pstate is active, intel_cpufreq is it in passive -
+    # so a line saying "not amd_pstate" would be telling an Intel machine
+    # what it is not and nothing about what it is.
+    if found["mode"]:
+        out("amd_pstate mode:  %s" % found["mode"])
     out("governors:        %s" % (" ".join(found["governors"]) or "none"))
     out("EPP values:       %s" % (" ".join(found["epp"]) or "none"))
     out("now:              governor=%s epp=%s"

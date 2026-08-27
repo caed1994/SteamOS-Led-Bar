@@ -642,11 +642,18 @@ rather than from a list:
 | **Governor** | what decides the clock |
 | **Energy preference** | a hint about where in its range the firmware should sit |
 
-What exists depends on the cpufreq driver. A Steam Machine ships with
-`amd-pstate` in **active** mode, where the kernel offers `powersave` and
-`performance` and adds the EPP file. In `passive` or `guided` mode the classic
-governors are back (`schedutil`, `ondemand`, …) and there is no EPP at all. To
-see what yours has:
+What exists depends on the cpufreq driver, and **AMD and Intel behave the
+same way here**:
+
+| Driver | What you get |
+| ------ | ------------ |
+| `amd-pstate` / `intel_pstate`, active | `powersave` and `performance`, plus the EPP |
+| `amd-pstate` / `intel_cpufreq`, passive | the classic governors (`schedutil`, `ondemand`, …), usually no EPP |
+| `acpi-cpufreq` and older | the classic governors, no EPP at all |
+
+A Steam Machine ships with `amd-pstate` in active mode. Everything here reads
+the generic cpufreq files, so none of it is written for one vendor. To see
+what yours has:
 
 ```bash
 steamos-led-power --report
