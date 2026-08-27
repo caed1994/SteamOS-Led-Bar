@@ -714,6 +714,8 @@ def dress(style, roles, sizes):
     stands on its own so one refusal does not take the rest with it.
     """
     surface = roles["surface"]
+    # The ground a card's own corners are drawn against - see apply_theme.
+    page = roles["_page"]
 
     def wash(container, content, amount):
         """A state layer: the content colour laid over its container."""
@@ -738,7 +740,7 @@ def dress(style, roles, sizes):
         moment it was given a card to sit on.
         """
         radius = RAIL_HEIGHT // 2
-        ground = roles["surface_container_low"]
+        ground = surface
 
         style.element_create(
             "Material.Rail", "image", _slice(radius, ground, ground),
@@ -763,7 +765,7 @@ def dress(style, roles, sizes):
         # cannot take a background of its own - the log and the preview stage.
         style.element_create(
             "Material.Panel", "image",
-            _slice(CARD_RADIUS, roles["surface_container_low"], surface),
+            _slice(CARD_RADIUS, surface, page),
             border=CARD_RADIUS, sticky="nsew")
         style.layout("Card.TFrame", [("Material.Panel", {"sticky": "nsew"})])
 
@@ -797,7 +799,15 @@ def dress(style, roles, sizes):
         # A text button stands among text and lines up with it; the padding a
         # filled button needs would hang it off to the right of everything.
         variant("Text.Button", surface, "surface", sides=2)
-        for name in ("Filled", "Tonal", "Outlined", "Text"):
+        # And the two of them again for a button standing on the page rather
+        # than on a card. These are the two whose fill *is* their ground, so
+        # they are the two whose corners show it: a nine-slice carries its own
+        # corners, and a picture drawn against the wrong one puts a box round
+        # the button. The other two fill themselves and do not care.
+        variant("Page.Outlined.Button", page, "_page", outline=roles["outline"])
+        variant("Page.Text.Button", page, "_page", sides=2)
+        for name in ("Filled", "Tonal", "Outlined", "Text",
+                     "Page.Outlined", "Page.Text"):
             style.layout("%s.TButton" % name, [
                 ("%s.Button" % name, {"sticky": "nsew", "children": [
                     ("Button.label", {"side": "top", "sticky": ""})]})])
@@ -1034,6 +1044,12 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     surface = roles["surface"]
     on_surface = roles["on_surface"]
     variant = roles["on_surface_variant"]
+    # The desk the cards lie on. Every widget in this window keeps `surface`
+    # as its ground - which is what keeps the pictures ttk draws correct,
+    # since each of them has its background baked into its own corners - and
+    # the *page* behind them is the tone that differs. The other way round
+    # would mean a second copy of every style and a second set of pictures.
+    page = roles["_page"] = roles["surface_container"]
 
     style = ttk.Style()
     try:
@@ -1055,7 +1071,7 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     sizes = material.control_sizes(
         tkfont.Font(root, font=(family, size)).metrics("linespace"))
 
-    root.configure(background=surface)
+    root.configure(background=page)
     # One background for the whole window. Material tells groups apart by
     # spacing and a heading rather than by a box round each, which is what
     # keeps a page of thirty settings from reading as thirty compartments -
@@ -1066,15 +1082,27 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
                     troughcolor=roles["surface_container_highest"],
                     relief="flat", borderwidth=0)
     style.configure("TFrame", background=surface)
-    style.configure("Card.TFrame", background=roles["surface_container_low"])
+    # The few things that stand on the page rather than on a card: the header,
+    # the status bar, the row of buttons under the pages. Named variants
+    # rather than a second theme, and only a background - everything else
+    # cascades from the style each is derived from.
+    #
+    # Written out one by one rather than looped, like the buttons below: a
+    # style name that only ever appears in a variable is a name nothing can
+    # check, and a misspelled one is the quietest bug ttk has.
+    style.configure("Page.TFrame", background=page)
+    style.configure("Page.Muted.TLabel", background=page)
+    style.configure("Page.Heading.TLabel", background=page)
+    style.configure("Page.Good.TLabel", background=page)
+    style.configure("Page.Bad.TLabel", background=page)
+    style.configure("Card.TFrame", background=surface)
     # The same tone, and no corners. For a frame that stands *on* a card
     # rather than being one: a Card.TFrame inside a Card.TFrame draws its own
     # rounded rectangle, and that picture's corners are painted against the
     # page - so a nested one puts four notches of the page's colour on top of
     # the card underneath it. The layout is left alone here, which is what
     # keeps it flat; see panels() in dress, where Card.TFrame gets its image.
-    style.configure("OnCard.TFrame",
-                    background=roles["surface_container_low"])
+    style.configure("OnCard.TFrame", background=surface)
     style.configure("TLabel", background=surface, foreground=on_surface)
     style.configure("Heading.TLabel", font=(family, size + TYPE_HEADLINE))
     # A group's name, in the accent: it is the one place colour is used to
@@ -1110,20 +1138,22 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
                                               "on_secondary_container"))
     style.map("Tonal.TButton", **label_fades("on_secondary_container"))
     style.configure("Outlined.TButton", **button("surface", "primary"))
+    style.configure("Page.Outlined.TButton", **button("_page", "primary"))
+    style.map("Page.Outlined.TButton", **label_fades("primary"))
     style.map("Outlined.TButton", **label_fades("primary"))
     style.configure("Text.TButton", **button("surface", "primary", sides=2))
     style.map("Text.TButton", **label_fades("primary"))
+    style.configure("Page.Text.TButton", **button("_page", "primary", sides=2))
+    style.map("Page.Text.TButton", **label_fades("primary"))
 
     style.configure("TNotebook", background=surface, borderwidth=0,
                     bordercolor=surface, lightcolor=surface,
                     darkcolor=surface, tabmargins=(0, 4, 0, 0))
     # On the card the list stands on, not on the page - see rail() in dress.
-    style.configure("Rail.TRadiobutton",
-                    background=roles["surface_container_low"],
-                    foreground=variant,
-                    focuscolor=roles["surface_container_low"], anchor="w")
+    style.configure("Rail.TRadiobutton", background=surface,
+                    foreground=variant, focuscolor=surface, anchor="w")
     style.map("Rail.TRadiobutton",
-              background=[("active", roles["surface_container_low"])],
+              background=[("active", surface)],
               foreground=[("selected", roles["on_secondary_container"])])
 
     # No padding: the layout's padding element would otherwise add four
@@ -1673,7 +1703,7 @@ class SidebarEntry:
 
         self.canvas = tk.Canvas(
             parent, width=SIDEBAR_WIDTH, height=SIDEBAR_ENTRY_HEIGHT,
-            highlightthickness=0, borderwidth=0, background=roles["surface"])
+            highlightthickness=0, borderwidth=0, background=roles["_page"])
         # The pill behind it, in each of the three shades it takes. Drawn once
         # apiece and swapped, rather than redrawn on every pointer crossing:
         # building one is a rounded rectangle the size of the entry, and the
@@ -1682,10 +1712,10 @@ class SidebarEntry:
         self._grounds = {
             state: _photo(roundrect.rows(
                 SIDEBAR_WIDTH, SIDEBAR_ENTRY_HEIGHT, SIDEBAR_RADIUS,
-                colour, roles["surface"]))
+                colour, roles["_page"]))
             for state, colour in (
-                ("rest", roles["surface"]),
-                ("hover", material.blend(roles["surface"],
+                ("rest", roles["_page"]),
+                ("hover", material.blend(roles["_page"],
                                          roles["on_surface"],
                                          material.STATE_HOVER)),
                 ("selected", roles["secondary_container"]))}
@@ -1764,7 +1794,7 @@ class SidebarEntry:
                 drawn(self.canvas.create_oval(left + across - 3, spot - 3,
                                               left + across + 3, spot + 3,
                                               outline=colour, width=1.6,
-                                              fill=self.roles["surface"]))
+                                              fill=self.roles["_page"]))
         elif name == "wrench":                  # putting it right
             solid(self.canvas.create_line(left + 2, middle + 8, left + 11,
                                           middle - 1, fill=colour, width=3))
@@ -1826,7 +1856,7 @@ class Progress:
     def __init__(self, parent, roles, height):
         self.height = height
         self.canvas = tk.Canvas(parent, height=height, highlightthickness=0,
-                                borderwidth=0, background=roles["surface"])
+                                borderwidth=0, background=roles["_page"])
         self.track = self.canvas.create_rectangle(
             0, 0, 1, height, width=0,
             fill=roles["surface_container_highest"])
@@ -1920,23 +1950,24 @@ class Panel:
         # Two levels, outer first: the sidebar picks a section, and what a
         # section holds is its own business. Only the LED strip has an inner
         # list of pages; the rest are one page each.
-        outer = ttk.Frame(root)
-        self.sidebar = ttk.Frame(outer)
+        outer = ttk.Frame(root, style="Page.TFrame")
+        self.sidebar = ttk.Frame(outer, style="Page.TFrame")
         self.sidebar.pack(side="left", fill="y",
                           padx=(SIDE_MARGIN, GROUP_GAP), pady=GROUP_GAP)
-        main = ttk.Frame(outer)
+        main = ttk.Frame(outer, style="Page.TFrame")
         main.pack(side="left", fill="both", expand=True)
 
         # The header is a child of `main` rather than of the window packed
         # into it with in_. That form works until stacking order matters, and
         # here it did not: the header is drawn behind the section under it and
         # the window simply came up with no title on it at all.
-        header = self.header = ttk.Frame(main)
+        header = self.header = ttk.Frame(main, style="Page.TFrame")
         header.pack(fill="x", pady=(GROUP_GAP, GROUP_GAP // 2))
         self.section_title = ttk.Label(header, text="",
-                                       style="Heading.TLabel")
+                                       style="Page.Heading.TLabel")
         self.section_title.pack(anchor="w")
-        self.headline = ttk.Label(header, text="", style="Muted.TLabel",
+        self.headline = ttk.Label(header, text="",
+                                  style="Page.Muted.TLabel",
                                   justify="left", wraplength=CONTENT_MAX)
         self.headline.pack(anchor="w", pady=(2, 0))
         # Wrapped like everything else that is a sentence rather than a label.
@@ -1972,7 +2003,7 @@ class Panel:
         # With the rail the pages have no tab row of their own: the list down
         # the left side is what picks them, and the notebook is only the stack
         # of pages underneath.
-        strip = ttk.Frame(self.sections)
+        strip = ttk.Frame(self.sections, style="Page.TFrame")
         # The inner list sits on a raised card, which is the one place in the
         # window that needs a box round it: it is a list of pages standing
         # beside the page it chose, and with both on the same ground the two
@@ -2072,14 +2103,14 @@ class Panel:
         content outgrows the room and goes away again when it fits, so on a
         screen with the height for it the panel looks exactly as it did.
         """
-        holder = ttk.Frame(notebook)
+        holder = ttk.Frame(notebook, style="Page.TFrame")
         canvas = tk.Canvas(holder, highlightthickness=0, borderwidth=0,
-                           background=self.roles["surface"])
+                           background=self.roles["_page"])
         bar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=bar.set)
         canvas.pack(side="left", fill="both", expand=True)
 
-        inner = ttk.Frame(canvas)
+        inner = ttk.Frame(canvas, style="Page.TFrame")
         window = canvas.create_window(0, 0, window=inner, anchor="nw")
         build(inner).pack(fill="both", expand=True)
 
@@ -2190,22 +2221,22 @@ class Panel:
         because it answers the question somebody has while looking at any of
         them - a page of LED settings is worth less if nothing is listening.
         """
-        bar = self.statusbar = ttk.Frame(parent)
+        bar = self.statusbar = ttk.Frame(parent, style="Page.TFrame")
         bar.pack(side="bottom", fill="x",
                  padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, GROUP_GAP))
         self.link_dot = tk.Canvas(bar, width=STATUS_DOT * 2,
                                   height=STATUS_DOT * 2, highlightthickness=0,
                                   borderwidth=0,
-                                  background=self.roles["surface"])
+                                  background=self.roles["_page"])
         self.link_dot.pack(side="left", padx=(0, ROW_GAP))
         self._dot = self.link_dot.create_oval(
             1, 1, STATUS_DOT * 2 - 1, STATUS_DOT * 2 - 1, width=0,
             fill=self.roles["on_surface_variant"])
         self.link_said = ttk.Label(bar, text="Looking for the bar...",
-                                   style="Muted.TLabel")
+                                   style="Page.Muted.TLabel")
         self.link_said.pack(side="left")
         ttk.Label(bar, text="SteamOS LED bar v%s" % VERSION,
-                  style="Muted.TLabel").pack(side="right")
+                  style="Page.Muted.TLabel").pack(side="right")
 
     def _say_link(self, connected, detail=""):
         """Colour the dot and say what it means. Three states, not two.
@@ -2501,13 +2532,13 @@ class Panel:
         window spent on nothing. What is left when it is closed is one line
         saying where it went.
         """
-        holder = ttk.Frame(parent)
+        holder = ttk.Frame(parent, style="Page.TFrame")
         holder.pack(side="bottom", fill="x",
                     padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, ROW_GAP))
         # Both flags before the handle is named: naming it reads them.
         self._output_open = False
         self._output_unread = False
-        self.output_toggle = ttk.Button(holder, style="Text.TButton",
+        self.output_toggle = ttk.Button(holder, style="Page.Text.TButton",
                                         command=self.toggle_output)
         self.output_toggle.pack(anchor="w")
         self._label_output()
@@ -2615,26 +2646,37 @@ class Panel:
         themselves when they apply. Under rather than over: it explains what
         you have just read.
         """
-        outer = ttk.Frame(parent)
-        grid = ttk.Frame(outer)
-        grid.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
-        # The slack goes to the last of the control columns, not the first.
-        # On the first it would push the colour menus away from the switches
-        # they belong to; here a slider still has somewhere to stretch into,
-        # because a slider spans all three.
-        grid.columnconfigure(SHAPE_COLUMN, weight=1)
+        outer = ttk.Frame(parent, style="Page.TFrame")
+        grids = []
 
         row = 0
         headed = False
         for index, (title, entries) in enumerate(groups):
+            # A card per group. One grid for the whole page would keep the
+            # label column aligned by itself, which is why it used to be one -
+            # but a page of thirty settings on one flat field is what made the
+            # light theme read as a wall, and the cards are what the eye rests
+            # against. The alignment is put back below instead, by hand.
+            card = ttk.Frame(outer, style="Card.TFrame")
+            card.pack(fill="x", padx=SIDE_MARGIN,
+                      pady=(ROW_GAP if index == 0 else GROUP_GAP, 0))
+            grid = ttk.Frame(card)
+            grid.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+            grids.append(grid)
+            # The slack goes to the last of the control columns, not the
+            # first. On the first it would push the colour menus away from the
+            # switches they belong to; here a slider still has somewhere to
+            # stretch into, because a slider spans all three.
+            grid.columnconfigure(SHAPE_COLUMN, weight=1)
+            row = 0
             if title:
                 ttk.Label(grid, text=title, style="Section.TLabel").grid(
                     row=row, column=0, columnspan=2, sticky="w",
-                    pady=(0 if index == 0 else GROUP_GAP, ROW_GAP))
+                    pady=(0, ROW_GAP))
                 row += 1
-            # Once, over the first group that has them. One grid for the whole
-            # tab means the columns line up all the way down, so a second set
-            # of headings further on would only be repeating itself.
+            # Once, over the first group that has them. The columns line up
+            # all the way down - see _align below - so a second set of
+            # headings further on would only be repeating itself.
             if not headed and any(entry[2] == FLASH for entry in entries):
                 headed = True
                 for column, heading in ((COLOUR_COLUMN, "Colour"),
@@ -2668,10 +2710,30 @@ class Panel:
                 self._build_row(grid, row, *entry,
                                 lead=BLOCK_GAP if position and fenced else 0)
                 row += 1
+        self._align(grids)
         if note:
-            self._note(outer, note).pack(anchor="w", padx=SIDE_MARGIN,
-                                         pady=(GROUP_GAP, 0))
+            # On the page under the cards, not inside one: it is about the
+            # page as a whole rather than about the last group on it.
+            said = self._note(outer, note, page=True)
+            said.pack(anchor="w", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
         return outer
+
+    @staticmethod
+    def _align(grids):
+        """One label column width across every card on the page.
+
+        What a single grid used to do for free. A grid sizes its first column
+        to its own longest label, so cards left to themselves start their
+        controls at a different x apiece - which is several ragged columns
+        down a page whose whole point is that it is a list.
+        """
+        widest = 0
+        for grid in grids:
+            for child in grid.grid_slaves(column=0):
+                if int(child.grid_info().get("columnspan", 1)) == 1:
+                    widest = max(widest, child.winfo_reqwidth())
+        for grid in grids:
+            grid.columnconfigure(0, minsize=widest + GROUP_GAP)
 
     @staticmethod
     def _switches(need):
@@ -3032,14 +3094,18 @@ class Panel:
         if key in self._widgets:
             self._show_swatch(key)
 
-    def _note(self, parent, text, **kwargs):
+    def _note(self, parent, text, page=False, **kwargs):
         """A line of explanation that wraps at the window's width, not at 580.
 
         A fixed wraplength breaks mid-sentence on a wide window and leaves the
         right half of it empty, which is what made this page look ragged.
+
+        `page` is for the ones that stand under the cards rather than inside
+        one, which need the ground behind them to match.
         """
         label = ttk.Label(parent, text=text, justify="left",
-                          style="Muted.TLabel", wraplength=560, **kwargs)
+                          style="Page.Muted.TLabel" if page
+                          else "Muted.TLabel", wraplength=560, **kwargs)
         self._wrapped.append(label)
         return label
 
@@ -3108,7 +3174,7 @@ class Panel:
         moved everything below it by that height on every tab change, which
         is a whole window shifting under the pointer.
         """
-        self.apply_row = ttk.Frame(parent)
+        self.apply_row = ttk.Frame(parent, style="Page.TFrame")
         self.apply_row.pack(side="bottom", fill="x",
                             padx=SIDE_MARGIN + SIDE_MARGIN // 2,
                             pady=(GROUP_GAP, GROUP_GAP))
@@ -3135,17 +3201,18 @@ class Panel:
             # Right-hand ones in reverse: pack puts each new one to the left of
             # the last, so this is what reads Save, Load across the page.
             ("right", ttk.Button(self.apply_row, text="Load profile...",
-                                 style="Outlined.TButton",
+                                 style="Page.Outlined.TButton",
                                  command=self.load_profile)),
             ("right", ttk.Button(self.apply_row, text="Save profile...",
-                                 style="Outlined.TButton",
+                                 style="Page.Outlined.TButton",
                                  command=self.save_profile)),
         ]
         # What is in the window but not yet in the file. A settings window that
         # does not say whether it has been saved is asking you to remember, and
         # nobody does - so Apply goes dead when there is nothing to apply, and
         # this says how much there is when there is.
-        self.unsaved = ttk.Label(self.apply_row, style="Muted.TLabel")
+        self.unsaved = ttk.Label(self.apply_row,
+                                 style="Page.Muted.TLabel")
         self._show_apply(True)
         self._refresh_unsaved()
 
@@ -4358,7 +4425,7 @@ class Panel:
         # twice to someone already looking at it.
         self.headline.configure(
             text=ledpanel.repair_summary(checks),
-            style="Bad.TLabel" if broken else "Good.TLabel")
+            style="Page.Bad.TLabel" if broken else "Page.Good.TLabel")
         # And the foot of the window, which asks the narrower question - see
         # ledpanel.bar_is_live.
         self._say_link(ledpanel.bar_is_live(checks))
