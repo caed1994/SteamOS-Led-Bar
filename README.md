@@ -523,7 +523,7 @@ editing the file by hand:
 systemctl --user restart steamos-led-phone
 ```
 
-*Status & repair* then shows two more rows: the bridge running, and KDE Connect
+*Status & Repair* then shows two more rows: the bridge running, and KDE Connect
 naming your phone. Both have to be there for anything to flash.
 
 To watch it work, as yourself and not with `sudo`:
@@ -554,7 +554,7 @@ To try the bar on its own, without involving the phone:
 **Game Mode works too**, with one thing to set up. KDE Connect's daemon dies
 with the desktop session, so the bridge starts it again itself &mdash; but your
 systemd has to keep running when no session is open, or the bridge is not there
-either. `install.sh` turns that on and *Status & repair* checks it:
+either. `install.sh` turns that on and *Status & Repair* checks it:
 
 ```bash
 sudo loginctl enable-linger $USER
@@ -586,6 +586,7 @@ enough settings to need it, has its own list of pages inside.
 | **EPP & Governor** | performance and power. Not built yet |
 | **HDMI CEC Mods** | talking to the television over HDMI. Not built yet |
 | **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
+| **Status & Repair** | what is installed and running, one button that puts it back, and [updating](#updating-and-removing) |
 | **About** | version, licence and credits, at the foot of the list |
 
 | LED Strip page | What is on it |
@@ -595,8 +596,7 @@ enough settings to need it, has its own list of pages inside.
 | **Notifications** | one line per thing that can flash - switch, colour, shape - grouped by where it comes from, and how long a flash lasts |
 | **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
 | **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
-| **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists |
-| **Status & repair** | what is installed and running, one button that puts it back, [updating](#updating-and-removing), flashing the firmware |
+| **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists &mdash; and flash the ESP |
 
 The window is dark whatever your desktop is; only the accent colour follows
 Plasma. It is a panel for a strip of light, and a white window round a preview
@@ -717,7 +717,7 @@ Follow the log with `journalctl -u steamos-led-serial -f`.
 
 ## Updating and removing
 
-From the control panel: *Status & repair* > *Update*, pick a branch, **Check for
+From the control panel: *Status & Repair* > *Update*, pick a branch, **Check for
 updates**, then **Update and install**. Local edits or commits of your own stop
 it with a message naming them, rather than being resolved behind your back.
 

@@ -1061,11 +1061,12 @@ class PanelSettingsTest(unittest.TestCase):
         # What you set, then what you rarely set, then what those settings
         # look like, then what you do - which is also the order of how often
         # they are opened. These are the LED strip's own pages: the keyboard
-        # layout used to be among them and is a section of its own now, which
-        # is the whole point of there being two levels.
+        # layout and Status & repair used to be among them and are sections of
+        # their own now, which is the whole point of there being two levels.
+        # What is left is exactly the pages that are about the bar.
         self.assertEqual([title.strip() for title in self._tab_titles()],
                          ["Strip", "Desktop mode", "Notifications", "Advanced",
-                          "Preview", "Test", "Status & repair"])
+                          "Preview", "Test"])
 
     def test_the_sections_are_in_the_order_the_sidebar_lists_them(self):
         """The outer level: what kind of thing you are configuring.
@@ -1079,10 +1080,10 @@ class PanelSettingsTest(unittest.TestCase):
         assigned = self._assignments()
         sections = ast.literal_eval(assigned["SECTIONS"])
         self.assertEqual([entry[0] for entry in sections],
-                         ["strip", "power", "cec", "keyboard"])
+                         ["strip", "power", "cec", "keyboard", "status"])
         self.assertEqual([entry[1] for entry in sections],
                          ["LED Strip", "EPP & Governor", "HDMI CEC Mods",
-                          "Keyboard Layout"])
+                          "Keyboard Layout", "Status & Repair"])
         self.assertEqual(ast.literal_eval(assigned["ABOUT"])[0], "about")
         # Every one of them says what it is for. A sidebar of five titles with
         # a blank line under one of them is a sidebar that failed to draw.

@@ -1310,18 +1310,87 @@ class LiveWindowTest(unittest.TestCase):
         """
         for key, wanted in (("strip", True), ("power", False),
                             ("cec", False), ("keyboard", True),
-                            ("about", False)):
+                            ("status", False), ("about", False)):
             self.panel._open_section(key)
             self.root.update()
             self.assertEqual(self.panel._apply_shown, wanted, key)
 
         self.panel._open_section("strip")
         for title, wanted in (("Strip", True), ("Advanced", True),
-                              ("Preview", False), ("Test", False),
-                              ("Status & repair", False)):
+                              ("Preview", False), ("Test", False)):
             self.panel.notebook.select(self._page_named(title))
             self.root.update()
             self.assertEqual(self.panel._apply_shown, wanted, title)
+
+    def _labels_under(self, widget):
+        """Every piece of text under a widget, however deeply nested."""
+        found = []
+        for child in widget.winfo_children():
+            if child.winfo_class() in ("TLabel", "TButton"):
+                try:
+                    found.append(str(child.cget("text")))
+                except tk.TclError:                         # pragma: no cover
+                    pass
+            found += self._labels_under(child)
+        return found
+
+    def test_the_installation_and_the_board_are_on_different_pages(self):
+        """Where the three blocks of the old Status & repair page went.
+
+        Checking the installation and updating it are about the whole toolbox
+        and are a section now. Flashing the ESP is the one block that was only
+        ever about the strip, and it is on the Test page - beside the
+        self-test, which is what tells you the board needs reflashing.
+
+        Read off the built window rather than off the source, because what
+        this is about is which page a person finds the button on.
+        """
+        self.panel._open_section("status")
+        self.root.update()
+        status = self._labels_under(
+            self.root.nametowidget(self.panel._section_pages["status"]))
+        self.assertIn("Rebuild and reinstall", status)
+        self.assertTrue(any("update" in text.lower() for text in status),
+                        status)
+        self.assertFalse(any("flash" in text.lower() and "bar" not in
+                             text.lower() for text in status), status)
+
+        self.panel._open_section("strip")
+        self.panel.notebook.select(self._page_named("Test"))
+        self.root.update()
+        tests = self._labels_under(
+            self.root.nametowidget(self.panel.notebook.select()))
+        self.assertIn("Self-test", tests)
+        self.assertTrue(any("firmware" in text.lower() for text in tests),
+                        tests)
+        self.assertNotIn("Rebuild and reinstall", tests)
+
+    def test_the_checklist_still_folds_where_the_page_now_lives(self):
+        """It opens, it closes, and the window stays on the screen.
+
+        Not the window's height: _details_change works out how much taller to
+        make it, but that is about the *smoothness* of the fold - _fit_window
+        settles the size afterwards either way, and on a screen this short the
+        window is already at the cap where neither can grow it. What has to
+        hold is that the list appears and goes away, on a page that has just
+        moved out of one notebook and into another.
+        """
+        self.panel._open_section("status")
+        # Closed first, and deliberately: refresh_status unfolds the list on a
+        # machine with something wrong with it, which this one has - so the
+        # window opens with it already down and "open it" would be a no-op.
+        for show in (False, True, False):
+            self.panel._show_details(show)
+            for _ in range(4):
+                self.root.update()
+            self.assertEqual(bool(self.panel.checklist.winfo_ismapped()),
+                             show)
+            self.assertLessEqual(self.root.winfo_height(),
+                                 self.root.winfo_screenheight())
+        # And the arithmetic is asked of the notebook the page is in. Against
+        # the strip's, which is what it used to read, this is a number about a
+        # stack the checklist is not in.
+        self.assertIsInstance(self.panel._details_change(True), int)
 
     def test_the_wheel_scrolls_the_section_in_front_of_you(self):
         """Not the strip's page, which is what one notebook meant.

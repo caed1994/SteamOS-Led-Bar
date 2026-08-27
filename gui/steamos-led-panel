@@ -310,6 +310,14 @@ SECTIONS = (
     ("power", "EPP & Governor", "Performance and power", "bolt"),
     ("cec", "HDMI CEC Mods", "Control and tweaks", "screen"),
     ("keyboard", "Keyboard Layout", "Layout for the session", "keys"),
+    # Not a page of the LED strip's, which is where it used to be. What it
+    # reports is the *installation* - the kernel module, the units, the udev
+    # rule, whether anything survives Game Mode - and what it offers is
+    # reinstalling and updating, which bring the whole clone up to date rather
+    # than the lighting half of it. Two of its three blocks were already about
+    # more than the bar before there was a second thing in this window, and
+    # every section added from here brings checks of its own to the same list.
+    ("status", "Status & Repair", "Installation and updates", "wrench"),
 )
 
 # Sits at the foot of the sidebar rather than in the list: it is not a thing
@@ -468,6 +476,12 @@ SIDEBAR_TEXT_X = 56
 
 # The dot at the foot of the window that says whether the bar is there.
 STATUS_DOT = 5
+
+# What a vertical scrollbar takes off the side of a page. Measured on the
+# built window at this theme's own metrics; a couple of pixels over, because
+# being generous here costs a slightly narrower paragraph and being short
+# costs a sentence with its last word cut off. See Panel._rewrap.
+SCROLLBAR_ROOM = 16
 
 # How wide a page's content is allowed to get, whatever the monitor is. These
 # pages are a column of label-and-control, and a column read past about this
@@ -1635,6 +1649,11 @@ class SidebarEntry:
                                               width=1.6))
             solid(self.canvas.create_line(left + 5, middle + 3, left + 13,
                                           middle + 3, fill=colour, width=1.6))
+        elif name == "wrench":                  # putting it right
+            solid(self.canvas.create_line(left + 2, middle + 8, left + 11,
+                                          middle - 1, fill=colour, width=3))
+            drawn(self.canvas.create_oval(left + 8, middle - 9, left + 17,
+                                          middle, outline=colour, width=2))
         else:                                   # about
             drawn(self.canvas.create_oval(left, middle - 9, left + 18,
                                           middle + 9, outline=colour,
@@ -1858,8 +1877,6 @@ class Panel:
         self.preview_tab = self._page(notebook, self._build_preview)
         notebook.add(self.preview_tab, text="Preview")
         notebook.add(self._page(notebook, self._build_tests), text="Test")
-        self.status_tab = self._page(notebook, self._build_status)
-        notebook.add(self.status_tab, text="Status & repair")
         self._build_rail()
 
         # And the sections themselves, in the order the sidebar lists them.
@@ -1873,6 +1890,8 @@ class Panel:
             self._add_section(key, self._page(
                 self.sections, lambda where, t=table, n=note:
                 self._build_settings(where, t, n)))
+        self.status_tab = self._page(self.sections, self._build_status)
+        self._add_section("status", self.status_tab)
         self._add_section("about", self._page(self.sections,
                                               self._build_about))
         self._build_sidebar()
@@ -2805,7 +2824,21 @@ class Panel:
         # request, so the window opened two and a half thousand pixels wide.
         if event.widget not in (self.notebook, self.sections):
             return
-        width = max(320, min(event.width, CONTENT_MAX) - 3 * SIDE_MARGIN)
+        # Less the scrollbar, whether this page has one or not.
+        #
+        # A page long enough to scroll gives its bar fourteen pixels off the
+        # side, and the notebook's width does not know that - so text on a
+        # scrolling page was laid out that much wider than the room it had,
+        # and a label wider than its slot is not wrapped, it is cut off. It
+        # showed up as exactly one pixel over, because a wrap only fails when
+        # a word happens to straddle the edge; the error was fourteen all
+        # along and this was the first page long enough to reveal it.
+        #
+        # Reserved on every page rather than only where a bar is showing:
+        # whether one is depends on the window height, so wrapping would
+        # otherwise change when the window is made shorter.
+        width = max(320, min(event.width, CONTENT_MAX)
+                    - 3 * SIDE_MARGIN - SCROLLBAR_ROOM)
         if width == self._wrap_width:
             return
         self._wrap_width = width
@@ -3674,6 +3707,11 @@ class Panel:
                 ledpanel.load_command()))))
         self._note(strip, "The self-test stops the service briefly."
                    ).pack(anchor="w", pady=(0, GROUP_GAP))
+        # Flashing the board, which used to be the third block of Status &
+        # repair. It belongs where the rest of "poke the hardware and see" is:
+        # the self-test above says whether the board answers, and when it does
+        # not this is the next thing you reach for.
+        self._build_firmware(outer)
         return outer
 
     def flash_colour(self):
@@ -3684,11 +3722,17 @@ class Panel:
     # -- status and repair ------------------------------------------------
 
     def _build_status(self, parent):
-        """Three things you might do here, each one row: check, update, flash.
+        """Two things you might do here: check the installation, or update it.
 
         The checklist used to be nine lines of "yes" whenever nothing was
         wrong, which is nearly always. It folds away instead, and unfolds
         itself the moment something is not in order.
+
+        Flashing the ESP used to be the third block and is on the Test page
+        now. This section is about the installation, which is every part of
+        the toolbox; the board on the end of the USB cable is the one thing
+        here that was only ever about the strip - and "the self test failed,
+        reflash it" is a sentence that should not span two sections.
         """
         outer = ttk.Frame(parent)
 
@@ -3720,7 +3764,6 @@ class Panel:
         self._details_open = False
 
         self.update_box = self._build_update(outer)
-        self._build_firmware(outer)
         return outer
 
     def toggle_details(self):
@@ -3764,14 +3807,19 @@ class Panel:
         already provides. If the arithmetic is ever off, _fit_window puts it
         right afterwards; it is only the smoothness that depends on this.
         """
+        # Against the notebook the checklist actually lives in, which is the
+        # outer one now: asked of the strip's pages the answer would be the
+        # slack in a stack this page is not in, and the window would jump by
+        # whatever that happened to be.
+        book = self.sections
         gain = self.checklist.winfo_reqheight() + DETAILS_GAP
-        tabs = [self.root.nametowidget(name) for name in self.notebook.tabs()]
+        tabs = [self.root.nametowidget(name) for name in book.tabs()]
         heights = [tab.winfo_reqheight() for tab in tabs]
         others = max(height for tab, height in zip(tabs, heights)
                      if tab is not self.status_tab)
         wanted = self.status_tab.winfo_reqheight() + (gain if show else -gain)
-        trim = self.notebook.winfo_reqheight() - max(heights)
-        return max(others, wanted) + trim - self.notebook.winfo_reqheight()
+        trim = book.winfo_reqheight() - max(heights)
+        return max(others, wanted) + trim - book.winfo_reqheight()
 
     def _fit_window(self):
         """Give the window the height its content needs, and no more.
