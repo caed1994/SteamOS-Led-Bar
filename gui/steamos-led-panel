@@ -16,6 +16,7 @@ and restarting the service, which go through pkexec one prompt at a time.
 from __future__ import annotations
 
 import os
+import itertools
 import queue
 import re
 import subprocess
@@ -44,6 +45,7 @@ import kdetheme                                             # noqa: E402
 import material                                             # noqa: E402
 import roundrect                                            # noqa: E402
 import ledpanel                                             # noqa: E402
+import appsettings                                          # noqa: E402
 import preview as preview_module                            # noqa: E402
 import syssettings                                          # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
@@ -299,9 +301,23 @@ POWER_NOTE = (
     "range - the performance governor pins it and the kernel refuses the "
     "setting. Leaving both alone is the default and touches nothing.")
 
+# The panel's own preferences. Its own table for the same reason it has its
+# own file: nothing outside this window reads it - see appsettings.
+APP = [
+    ("Appearance", [
+        ("THEME", "Colours", "theme", None, None, None),
+    ]),
+]
+
+APP_NOTE = (
+    "Takes effect at once, and is remembered for next time. The preview "
+    "stage stays dark whichever you pick: it is a strip of light in a dim "
+    "room, and drawn against a pale window it would be a washed-out one.")
+
 SECTION_SETTINGS = {
     "keyboard": (SYSTEM, SYSTEM_NOTE),
     "power": (POWER, POWER_NOTE),
+    "app": (APP, APP_NOTE),
 }
 
 # Which of the settings on those pages belong to the machine rather than to
@@ -316,6 +332,12 @@ SYSTEM_KEYS = frozenset(syssettings.DEFAULTS)
 # SYSTEM_KEYS for exactly that reason: those two sets differ in who may write
 # them, which is the only distinction the window has to make.
 POWER_KEYS = frozenset(power.DEFAULTS)
+
+# And the window's own, which are the odd ones out in every way: no file in
+# /etc, no root, and no Apply either. A look you have to press a button to see
+# is a look you are choosing blind, so these take effect the moment they are
+# picked - see Panel._theme_chosen.
+APP_KEYS = frozenset(appsettings.DEFAULTS)
 
 # -- the window's top level -------------------------------------------------
 #
@@ -344,6 +366,9 @@ SECTIONS = (
     # more than the bar before there was a second thing in this window, and
     # every section added from here brings checks of its own to the same list.
     ("status", "Status & Repair", "Installation and updates", "wrench"),
+    # Last of the run, and the only one that is about this window rather than
+    # about the machine. Above About, which is not a thing you configure.
+    ("app", "App Settings", "How this window looks", "sliders"),
 )
 
 # Sits at the foot of the sidebar rather than in the list: it is not a thing
@@ -960,16 +985,50 @@ def dress(style, roles, sizes):
     attempt("the fields", fields)
 
 
-def apply_theme(root):
+# One ttk theme per dressing, counted rather than named after the look: the
+# same look can be applied twice in a session - dark, light, dark - and the
+# second pass needs a namespace the first one is not still holding.
+_THEMES_MADE = itertools.count()
+_THEME_NAME = [None]
+
+
+def _theme_name(fresh=False):
+    if fresh or _THEME_NAME[0] is None:
+        _THEME_NAME[0] = "material%d" % next(_THEMES_MADE)
+    return _THEME_NAME[0]
+
+
+def wants_dark(mode, desktop):
+    """Whether to build a dark scheme, given the setting and the desktop.
+
+    The one place the three answers become two. Dark and light say so; the
+    third asks the desktop, which is what this window did before its look was
+    rebuilt around a dark one.
+    """
+    if mode == appsettings.THEME_LIGHT:
+        return False
+    if mode == appsettings.THEME_SYSTEM:
+        return kdetheme.is_dark(desktop)
+    return True
+
+
+def apply_theme(root, mode=appsettings.THEME_DARK):
     """Dress the window in Material 3, seeded from the desktop's accent.
 
     ttk ships no theme resembling a modern desktop and cannot ask one either,
     so the scheme is worked out and painted on. clam is the base: the only
     built-in theme that honours colour options rather than drawing fixed
     bitmaps. Returns the roles, for the parts ttk cannot reach.
+
+    Called again whenever the look changes, which is why each call works in a
+    ttk theme of its own. Element names are per theme and cannot be redefined
+    within one: a second pass over the same theme raises "Duplicate element"
+    for every picture in dress() - and dress swallows what it cannot draw, so
+    the window would have kept its old colours and said nothing.
     """
     desktop = kdetheme.read()
-    roles = material.scheme(desktop["selection"], dark=DARK,
+    roles = material.scheme(desktop["selection"],
+                            dark=wants_dark(mode, desktop),
                             error=desktop["negative"],
                             positive=desktop["positive"])
     surface = roles["surface"]
@@ -978,9 +1037,13 @@ def apply_theme(root):
 
     style = ttk.Style()
     try:
-        style.theme_use("clam")
+        style.theme_create(_theme_name(fresh=True), parent="clam")
+        style.theme_use(_theme_name())
     except tk.TclError:                                     # pragma: no cover
-        pass
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
 
     family, size = desktop["font"] or ("TkDefaultFont", 10)
     root.option_add("*Font", (family, size))
@@ -1693,6 +1756,15 @@ class SidebarEntry:
                                               width=1.6))
             solid(self.canvas.create_line(left + 5, middle + 3, left + 13,
                                           middle + 3, fill=colour, width=1.6))
+        elif name == "sliders":                 # this window's own settings
+            for step, across in enumerate((5, 11)):
+                spot = middle - 5 + step * 10
+                solid(self.canvas.create_line(left, spot, left + 18, spot,
+                                              fill=colour, width=1.6))
+                drawn(self.canvas.create_oval(left + across - 3, spot - 3,
+                                              left + across + 3, spot + 3,
+                                              outline=colour, width=1.6,
+                                              fill=self.roles["surface"]))
         elif name == "wrench":                  # putting it right
             solid(self.canvas.create_line(left + 2, middle + 8, left + 11,
                                           middle - 1, fill=colour, width=3))
@@ -1801,7 +1873,10 @@ class Panel:
         root.geometry("%dx%d" % (START_WIDTH, START_HEIGHT))
         self._set_window_icon()
 
-        self.roles = apply_theme(root)
+        # Read before anything is drawn, because it decides how it is drawn.
+        # Its own file and its own reader: this one is about the window.
+        self.app = appsettings.read()
+        self.roles = apply_theme(root, self.app[appsettings.THEME])
         self.config = self._load_config()
         # The machine's own settings, kept beside the service's rather than
         # merged into them: they come from different files, they are written
@@ -2272,6 +2347,90 @@ class Panel:
         return Dialog(self.root, title, message, confirm=confirm,
                       deny=deny).answer
 
+    def _theme_chosen(self):
+        """The look was picked. Save it and wear it, without an Apply.
+
+        A look you have to press a button to see is a look you are choosing
+        blind. It is also the one setting in this window where being wrong
+        costs nothing: pick the other one back.
+        """
+        wanted = self._value_for("THEME", self.vars["THEME"][0].get())
+        if wanted == self.app.get(appsettings.THEME):
+            return                              # the trace fires on rebuild too
+        settings = dict(self.app, **{appsettings.THEME: wanted})
+        try:
+            appsettings.write(settings)
+        except (appsettings.SettingError, OSError) as exc:
+            self._say("Appearance", "Could not save it:\n%s" % exc)
+            return
+        self.app = settings
+        self.rebuild()
+
+    def rebuild(self):
+        """Build the window again, in whatever the settings now say.
+
+        Rebuilt rather than repainted, and that is a considered choice. Half
+        of this window is not ttk: the sidebar's pills, its icons, the
+        progress rule, the status dot, every page's canvas and every colour
+        swatch are pictures with their colours already baked in. Repainting
+        would mean a second path that has to reach all of them - and this
+        session has already produced two bugs from one picture drawn against
+        the wrong ground. Construction is the path that is tested.
+
+        What survives is what the window cannot read back off disk: the page
+        you were on and the edits you had not applied. Everything else comes
+        from the files again, which is where it came from the first time.
+        """
+        unsaved = {}
+        for key, (variable, _kind) in self.vars.items():
+            try:
+                unsaved[key] = variable.get()
+            except (ValueError, tk.TclError):                # pragma: no cover
+                pass
+        section = getattr(self, "section", None)
+        page = self.notebook.tab(self.notebook.select(), "text")
+        # Out of the widget, not out of the Runner: the Runner keeps only
+        # what a command printed, and most of what is in the log was put there
+        # by the window itself.
+        try:
+            log = self.output.get("1.0", "end-1c")
+        except tk.TclError:                                  # pragma: no cover
+            log = ""
+
+        self._teardown()
+        self.__init__(self.root)                # the one construction path
+
+        if section is not None:
+            self._open_section(section)
+        for tab in self.notebook.tabs():
+            if self.notebook.tab(tab, "text") == page:
+                self.notebook.select(tab)
+        for key, value in unsaved.items():
+            if key in self.vars:
+                try:
+                    self.vars[key][0].set(value)
+                except (ValueError, tk.TclError):            # pragma: no cover
+                    pass
+        if log:
+            self._write(log)
+        self._catch_up()
+
+    def _teardown(self):
+        """Everything the old window booked or bound, before it is replaced.
+
+        A destroyed *child* fires no <Destroy> on the window, so the two
+        cleanups that hang off that binding - the timers and the Runner's
+        drain - have to be asked directly. And bind_all is on the interpreter
+        rather than on a widget: left alone, every rebuild would add another
+        wheel handler pointing at a window that no longer exists.
+        """
+        self._stop_timers()
+        self.runner._stop()
+        for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.root.unbind_all(wheel)
+        for child in self.root.winfo_children():
+            child.destroy()
+
     def _close(self):
         self._stop_timers()
         self.root.destroy()
@@ -2605,7 +2764,7 @@ class Panel:
                           sticky="w", padx=(LOOK_GAP, 0),
                           pady=(ROW_PAD + lead, ROW_PAD))
                 occupies.append(said)
-        elif kind in ("choice", "sensor", "named", "power"):
+        elif kind in ("choice", "sensor", "named", "power", "theme"):
             # Entries that are labels for something else - see the menu
             # helpers in ledpanel. A "choice" is the case where the label and
             # the value are the same word. "sensor" and "power" are the two
@@ -2617,6 +2776,7 @@ class Panel:
             choices = (ledpanel.sensor_choices(*ledpanel.read_sensors(),
                                                current=str(value))
                        if kind == "sensor"
+                       else appsettings.theme_choices() if kind == "theme"
                        else ledpanel.power_choices(
                            power.governors() if key == "CPU_GOVERNOR"
                            else power.epp_values(),
@@ -2626,12 +2786,20 @@ class Panel:
                        else [(entry, entry) for entry in low]
                        if kind == "choice" else list(low))
             self._menu(grid, row, key, variable, choices, str(value),
-                       width=(SENSOR_WIDTH if kind in ("sensor", "power")
+                       width=(SENSOR_WIDTH
+                              if kind in ("sensor", "power", "theme")
                               else MENU_WIDTH),
                        lead=ROW_PAD + lead)
             controls.append(self._widgets[key])
             occupies.append(self._widgets[key])
             self._follow(variable)
+            if kind == "theme":
+                # Not through _follow's unsaved count: this one has no Apply
+                # to wait for. after_idle so the menu has finished closing
+                # itself before the window it is standing in is replaced.
+                variable.trace_add(
+                    "write",
+                    lambda *_a: self.root.after_idle(self._theme_chosen))
         else:
             variable = tk.DoubleVar(value=float(value))
             scale, readout, holder = self._scale(grid, row, variable, low,
@@ -2719,6 +2887,8 @@ class Panel:
             return self.system.get(key, syssettings.DEFAULTS[key])
         if key in POWER_KEYS:
             return self.power.get(key, power.DEFAULTS[key])
+        if key in APP_KEYS:
+            return self.app.get(key, appsettings.DEFAULTS[key])
         return self.config.get(key, config_module.DEFAULTS[key])
 
     def _differences(self):
@@ -2737,7 +2907,7 @@ class Panel:
                 continue
             if kind == "bool":
                 same = bool(raw) == bool(saved)
-            elif kind in ("sensor", "named", "power"):
+            elif kind in ("sensor", "named", "power", "theme"):
                 # What is shown against what the file's value would show, so a
                 # colour written in capitals in the file is not a change.
                 same = raw == self._label_for(key, str(saved))
@@ -2804,7 +2974,7 @@ class Panel:
         variable, kind = self.vars[switch]
         # A menu holds the label it shows, not the value it stands for.
         shown = variable.get()
-        if kind in ("sensor", "named", "power"):
+        if kind in ("sensor", "named", "power", "theme"):
             shown = self._value_for(switch, shown)
         if isinstance(wanted, tuple):
             return shown in wanted
@@ -3035,7 +3205,13 @@ class Panel:
         if getattr(self, "section", None) is None:
             return False
         if self.section in SECTION_SETTINGS:
-            return True
+            # Unless everything on it takes effect the moment it is picked,
+            # which is the App Settings page. An Apply row under a page whose
+            # only setting has already applied itself is a button that says
+            # there is something outstanding when there is not.
+            table, _note = SECTION_SETTINGS[self.section]
+            return any(row[0] not in APP_KEYS
+                       for _title, rows in table for row in rows)
         if self.section != "strip":
             return False
         return self.notebook.select() in self._settings_tabs
@@ -3262,14 +3438,14 @@ class Panel:
         """
         values = {}
         for key, (variable, kind) in self.vars.items():
-            if key in SYSTEM_KEYS or key in POWER_KEYS:
+            if key in SYSTEM_KEYS or key in POWER_KEYS or key in APP_KEYS:
                 continue
             raw = variable.get()
             values[key] = (bool(raw) if kind == "bool"
                            else int(round(raw)) if kind == "int"
                            else float(raw) if kind == "float"
                            else self._value_for(key, raw)
-                           if kind in ("sensor", "named", "power")
+                           if kind in ("sensor", "named", "power", "theme")
                            else str(raw))
         # The idle rate cannot exceed the active one, which two independent
         # sliders cannot express. Pulling FPS below IDLE_FPS is an obvious
@@ -3427,7 +3603,7 @@ class Panel:
             value = values[key]
             variable.set(bool(value) if kind == "bool"
                          else self._label_for(key, str(value))
-                         if kind in ("sensor", "named", "power")
+                         if kind in ("sensor", "named", "power", "theme")
                          else str(value) if kind == "choice"
                          else float(value))
             shown += 1
@@ -3756,7 +3932,7 @@ class Panel:
                                else int(round(raw)) if kind == "int"
                                else float(raw) if kind == "float"
                                else self._value_for(key, raw)
-                               if kind in ("sensor", "named", "power")
+                               if kind in ("sensor", "named", "power", "theme")
                                else str(raw))
             except (ValueError, TypeError, KeyError, tk.TclError):
                 continue

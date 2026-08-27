@@ -26,6 +26,7 @@ import kdetheme  # noqa: E402
 import ledpanel  # noqa: E402
 import roundrect  # noqa: E402
 import syssettings  # noqa: E402
+import appsettings  # noqa: E402
 from steamos_led import power  # noqa: E402
 from steamos_led import config as config_module  # noqa: E402
 from steamos_led import desktop  # noqa: E402
@@ -1081,10 +1082,12 @@ class PanelSettingsTest(unittest.TestCase):
         assigned = self._assignments()
         sections = ast.literal_eval(assigned["SECTIONS"])
         self.assertEqual([entry[0] for entry in sections],
-                         ["strip", "power", "cec", "keyboard", "status"])
+                         ["strip", "power", "cec", "keyboard", "status",
+                          "app"])
         self.assertEqual([entry[1] for entry in sections],
                          ["LED Strip", "EPP & Governor", "HDMI CEC Mods",
-                          "Keyboard Layout", "Status & Repair"])
+                          "Keyboard Layout", "Status & Repair",
+                          "App Settings"])
         self.assertEqual(ast.literal_eval(assigned["ABOUT"])[0], "about")
         # Every one of them says what it is for. A sidebar of five titles with
         # a blank line under one of them is a sidebar that failed to draw.
@@ -1315,6 +1318,7 @@ class PanelSettingsTest(unittest.TestCase):
         known = dict(config_module.DEFAULTS)
         known.update(syssettings.DEFAULTS)
         known.update(power.DEFAULTS)
+        known.update(appsettings.DEFAULTS)
         for key in self._settings():
             self.assertIn(key, known, key)
 

@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
+import appsettings                                          # noqa: E402
 import kdetheme                                             # noqa: E402
 import syssettings                                          # noqa: E402
 
@@ -1310,7 +1311,8 @@ class LiveWindowTest(unittest.TestCase):
         """
         for key, wanted in (("strip", True), ("power", True),
                             ("cec", False), ("keyboard", True),
-                            ("status", False), ("about", False)):
+                            ("status", False), ("app", False),
+                            ("about", False)):
             self.panel._open_section(key)
             self.root.update()
             self.assertEqual(self.panel._apply_shown, wanted, key)
@@ -1755,6 +1757,158 @@ class SystemPageTest(unittest.TestCase):
         self.assertLessEqual(popup.winfo_reqheight(),
                              popup.winfo_screenheight(),
                              "the last entries are off the bottom edge")
+
+
+@unittest.skipUnless(_has_display(), "no tkinter or no display")
+class AppearanceTest(unittest.TestCase):
+    """Switching the window's colours, which rebuilds it.
+
+    In a home of its own, because the preference is saved the moment it is
+    picked and the real one belongs to whoever is running the suite.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        import tempfile
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.home = holder.name
+        was = os.environ.get("HOME")
+        os.environ["HOME"] = self.home
+        self.addCleanup(lambda: os.environ.__setitem__("HOME", was)
+                        if was is not None else os.environ.pop("HOME", None))
+        self.root = tk.Tk()
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        if self.root is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _pick(self, theme):
+        label = dict((value, label) for label, value
+                     in appsettings.theme_choices())[theme]
+        self.panel._open_section("app")
+        self.root.update()
+        self.panel.vars["THEME"][0].set(label)
+        for _ in range(8):
+            self.root.update()
+
+    def _dark(self):
+        return kdetheme.luminance(self.panel.roles["surface"]) < 0.2
+
+    # -- the switch --------------------------------------------------------
+
+    def test_the_window_opens_dark_and_can_be_made_light(self):
+        self.assertTrue(self._dark(), "it did not open dark")
+        self._pick(appsettings.THEME_LIGHT)
+        self.assertFalse(self._dark(), "it stayed dark")
+
+    def test_and_back_again(self):
+        """Twice over, which is what the theme names are counted for.
+
+        ttk element names live in a theme and cannot be redefined within one.
+        A second dressing that reused the theme would raise Duplicate element
+        for every picture, and dress() swallows what it cannot draw - so the
+        window would have kept the old colours and said nothing.
+        """
+        self._pick(appsettings.THEME_LIGHT)
+        self.assertFalse(self._dark())
+        self._pick(appsettings.THEME_DARK)
+        self.assertTrue(self._dark(), "the second switch did not take")
+
+    def test_following_the_desktop_is_the_third_answer(self):
+        # This machine reports Breeze light - kdetheme falls back to it when
+        # there is no Plasma - so following it means a light window here.
+        self.assertFalse(kdetheme.is_dark(kdetheme.read()))
+        self._pick(appsettings.THEME_SYSTEM)
+        self.assertFalse(self._dark())
+
+    def test_the_choice_is_remembered(self):
+        self._pick(appsettings.THEME_LIGHT)
+        self.assertEqual(appsettings.read(self.home)[appsettings.THEME],
+                         appsettings.THEME_LIGHT)
+
+    def test_it_needs_no_apply(self):
+        # A look you have to press a button to see is a look you are choosing
+        # blind, so the row is not offered on this page at all.
+        self.panel._open_section("app")
+        self.root.update()
+        self.assertFalse(self.panel._apply_shown)
+
+    # -- what the rebuild has to carry -------------------------------------
+
+    def test_the_page_you_were_on_is_still_open(self):
+        self._pick(appsettings.THEME_LIGHT)
+        self.assertEqual(self.panel.section, "app")
+
+    def test_an_unapplied_edit_survives_it(self):
+        """The one thing the new window cannot read back off disk.
+
+        Everything else comes from the files again. An edit that had not been
+        applied is only in the widgets, so throwing the widgets away would
+        throw it away - and a look setting that quietly discards your unsaved
+        work is a trap.
+        """
+        self.panel._open_section("strip")
+        self.root.update()
+        self.panel.vars["LED_COUNT"][0].set(42)
+        self.root.update()
+        self._pick(appsettings.THEME_LIGHT)
+        self.assertEqual(int(self.panel.vars["LED_COUNT"][0].get()), 42)
+        self.assertIn("LED_COUNT", self.panel._differences())
+
+    def test_the_log_is_not_lost(self):
+        self.panel._write("something worth keeping\n")
+        self._pick(appsettings.THEME_LIGHT)
+        self.assertIn("something worth keeping",
+                      self.panel.output.get("1.0", "end-1c"))
+
+    # -- what it must not leave behind -------------------------------------
+
+    def test_the_wheel_is_not_bound_twice(self):
+        """bind_all is on the interpreter, not on a widget.
+
+        Left alone, every rebuild would add another handler pointing at a
+        window that no longer exists - so the wheel would scroll a destroyed
+        page, and Tk would report an invalid command name for each one.
+        """
+        # By how many there are, not by what they say: each rebuild binds a
+        # method of a freshly built window, so the script differs every time
+        # even when there is exactly one.
+        def handlers():
+            return self.root.bind_all("<MouseWheel>").count("_wheel")
+
+        before = handlers()
+        self.assertEqual(before, 1, "the window did not bind the wheel")
+        self._pick(appsettings.THEME_LIGHT)
+        self._pick(appsettings.THEME_DARK)
+        self.assertEqual(handlers(), before)
+
+    def test_the_old_window_leaves_no_widgets_behind(self):
+        # One sidebar, not three: the children are destroyed rather than
+        # merely unpacked, or every switch would stack another window's worth
+        # of widgets under the root.
+        def frames(widget):
+            return sum(1 for child in widget.winfo_children()) + sum(
+                frames(child) for child in widget.winfo_children())
+
+        before = frames(self.root)
+        self._pick(appsettings.THEME_LIGHT)
+        self._pick(appsettings.THEME_DARK)
+        self.assertLess(abs(frames(self.root) - before), before // 4,
+                        "the window grew across rebuilds")
+
+    def test_the_theme_never_reaches_the_service_config_or_a_profile(self):
+        values = self.panel._collect()
+        self.assertNotIn("THEME", values)
+        self.assertNotIn("THEME", self.panel_module.ledpanel.profile_text(
+            values))
 
 
 if __name__ == "__main__":

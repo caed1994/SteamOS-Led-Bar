@@ -587,6 +587,7 @@ enough settings to need it, has its own list of pages inside.
 | **HDMI CEC Mods** | talking to the television over HDMI. Not built yet |
 | **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
 | **Status & Repair** | what is installed and running, one button that puts it back, and [updating](#updating-and-removing) |
+| **App Settings** | how this window looks &mdash; see [Light and dark](#light-and-dark) |
 | **About** | version, licence and credits, at the foot of the list |
 
 | LED Strip page | What is on it |
@@ -598,10 +599,28 @@ enough settings to need it, has its own list of pages inside.
 | **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists &mdash; and flash the ESP |
 
-The window is dark whatever your desktop is; only the accent colour follows
-Plasma. It is a panel for a strip of light, and a white window round a preview
-of lit LEDs is the preview washed out. A line across the foot says whether the
-bar is being driven, and which version this is.
+A line across the foot says whether the bar is being driven, and which version
+this is.
+
+### Light and dark
+
+**App Settings > Colours**, three answers:
+
+| | |
+| --- | --- |
+| **Dark** | the default, and what the window is designed for |
+| **Light** | regardless of the desktop |
+| **Follow the desktop** | dark or light as your Plasma theme is |
+
+The accent colour comes from Plasma in all three. The choice takes effect at
+once &mdash; there is no Apply for it &mdash; and is remembered in
+`~/.config/steamos-led-panel.conf`. Nothing outside this window reads that
+file.
+
+**The preview stage stays dark whichever you pick.** A canvas has no alpha, so
+the glow around each LED is drawn as a colour already mixed with the
+background behind it, and that only works against one known colour. A strip of
+light judged against a pale window would be a washed-out one anyway.
 
 **Apply and Reload sit under all of them.** Apply writes every setting from
 every page and is greyed out while the window and the files agree. It asks for
