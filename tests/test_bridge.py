@@ -866,8 +866,13 @@ class StandbyQuietTest(unittest.TestCase):
         runner.link = StandbyTest.FakeLink()
         return runner
 
-    def _drive(self, runner, seconds=0.3, seq=None, writes=None, every=0.02):
+    def _drive(self, runner, seconds=0.3, seq=None, writes=None, every=0.02,
+               effect=None):
         """Run the real loop against a FIFO fed with snapshots.
+
+        `effect` is what Steam is asking for, which only matters to a test
+        about Game Mode: the default is one still colour, and a rainbow is the
+        one effect whose meaning another setting can change.
 
         `every` is how long the feed waits between two of them, which is what
         a test about the frame rate needs to vary: nothing about the loop's
@@ -900,8 +905,9 @@ class StandbyQuietTest(unittest.TestCase):
                 fd = os.open(path, os.O_WRONLY)
             except OSError:
                 return
-            snapshot = shim_module.make_snapshot(shim_module.EFFECT_MANUAL,
-                                                 (10, 200, 30))
+            snapshot = shim_module.make_snapshot(
+                shim_module.EFFECT_MANUAL if effect is None else effect,
+                (10, 200, 30))
             counter = service.UNTOUCHED_SEQ
             written = 0
             try:
@@ -1172,6 +1178,43 @@ class DesktopSceneTest(StandbyQuietTest):
         self._drive(runner)
         self.assertTrue(any(frame[0] > frame[2] for frame in runner.link.sent),
                         "the flash never got over the scene")
+
+    def test_the_scene_picks_its_own_effect_and_not_the_rainbow_slot_s(self):
+        """Reported: on the desktop the four should stand on their own.
+
+        Through the loop rather than through the renderer, because the loop is
+        where the two answers meet: Game Mode's slot is a setting on the
+        renderer and the desktop's is a property of the scene, and only the
+        frame going out says which of them won.
+
+        Fire against aurora, with the slot set to neither, so a scene that
+        went on reading RAINBOW_SHOWS would draw the same bar for both.
+        """
+        frames = {}
+        for scene in ("fire", "aurora", "rainbow"):
+            runner = self._runner(scene=scene, RAINBOW_SHOWS="load",
+                                  MAPPING="stretch")
+            self._drive(runner)
+            self.assertTrue(runner.link.sent, "nothing was sent at all")
+            # The whole frame rather than its first LED. All three of these
+            # move, so the frame that happens to be last is whatever the clock
+            # said - and two effects can share one pixel at some instant
+            # without being remotely the same picture.
+            frames[scene] = runner.link.sent[-1]
+        self.assertEqual(len(set(frames.values())), len(frames), frames)
+
+    def test_a_game_mode_rainbow_still_shows_what_the_slot_holds(self):
+        # The other half. Nothing the desktop does may reach a snapshot Steam
+        # wrote, or the slot - which is the only way to have these effects in
+        # a game at all - would have stopped working.
+        held = self._runner(scene="fire", RAINBOW_SHOWS="aurora",
+                            running="gamescope")
+        plain = self._runner(scene="fire", RAINBOW_SHOWS="rainbow",
+                             running="gamescope")
+        for runner in (held, plain):
+            self._drive(runner, effect=shim.EFFECT_RAINBOW)
+            self.assertTrue(runner.link.sent, "nothing was sent at all")
+        self.assertNotEqual(held.link.sent[-1], plain.link.sent[-1])
 
     def test_the_frame_rate_follows_what_is_on_the_bar(self):
         """Which is not what Steam last said, while a scene is up.

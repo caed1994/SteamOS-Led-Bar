@@ -132,6 +132,28 @@ def build_scene(config):
                                   config["DESKTOP_SPEED"])
 
 
+def warn_scene_split(config):
+    """Say so once if a config file used to mean something else here.
+
+    Desktop Mode's rainbow scene used to be the same slot as Game Mode's, so
+    DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire put fire on the desktop. Now
+    that the desktop has a fire scene of its own, that pair means the rainbow
+    - which is what it says, but not what the bar was doing yesterday.
+
+    Not migrated silently. Either reading of that file is defensible and only
+    the person who wrote it knows which they meant, and a setting that changes
+    itself is worse than one that says what it now means. Logged rather than
+    refused for the same reason: nothing here is broken.
+    """
+    if (config["DESKTOP_SCENE"] != desktop.SCENE_RAINBOW
+            or config["RAINBOW_SHOWS"] == render.SHOWS_RAINBOW):
+        return
+    LOG.info("DESKTOP_SCENE=rainbow now means Steam's rainbow, not the %s "
+             "the rainbow slot holds in Game Mode; set DESKTOP_SCENE=%s for "
+             "that on the desktop", config["RAINBOW_SHOWS"],
+             config["RAINBOW_SHOWS"])
+
+
 def notification_colors(config):
     """The named triggers whose colour the configuration can change."""
     return {kind: notify.parse_color(config[prefix + "_COLOR"])
@@ -182,6 +204,12 @@ class Runner:
         # whether it is. Both None when DESKTOP_SCENE says to leave it alone,
         # which is what keeps the loop's ordinary path exactly as it was.
         self.scene = build_scene(config)
+        # And, for the scenes drawn out of the renderer's substitutable slot,
+        # which of them this one is. Game Mode's answer is a setting on the
+        # renderer; the desktop's is the scene itself, so it travels with the
+        # snapshot - see _shows.
+        self.scene_shows = desktop.scene_shows(config["DESKTOP_SCENE"])
+        warn_scene_split(config)
         self.ownership = None if self.scene is None else desktop.Ownership()
         self.trigger = None
         self.source = None
@@ -356,6 +384,15 @@ class Runner:
             return snapshot
         return self.scene
 
+    def _shows(self, showing):
+        """What the frame about to be drawn puts in the rainbow's slot.
+
+        None whenever Steam has the bar, which is what leaves the renderer on
+        RAINBOW_SHOWS: that setting is Steam's menu's, and Steam's menu is
+        still what a Game Mode rainbow was picked from.
+        """
+        return None if showing is not self.scene else self.scene_shows
+
     def _loop(self):
         started = time.monotonic()
         snapshot = None
@@ -386,7 +423,8 @@ class Runner:
             # Asked about what is on the bar rather than about what Steam last
             # said, which are not the same thing while a scene is up.
             if (showing is not None
-                    and not self.renderer.is_animated(showing)
+                    and not self.renderer.is_animated(showing,
+                                                      self._shows(showing))
                     and not self.overlay.active):
                 interval = 1.0 / self.config["IDLE_FPS"]
             # Never wait past the moment a frame is due. Without this the wait
@@ -478,7 +516,8 @@ class Runner:
                 self._hold_for_steam()
                 continue
             if payload is None:
-                payload = self.renderer.render(showing, now - started)
+                payload = self.renderer.render(showing, now - started,
+                                               self._shows(showing))
             if self._breathing_for_steam:
                 LOG.info("%s; taking the strip back",
                          "Steam set the LEDs" if showing is snapshot
@@ -533,8 +572,7 @@ def run_desktop(config):
               % desktop.describe(config["DESKTOP_SCENE"],
                                  config["DESKTOP_COLOR"],
                                  config["DESKTOP_BRIGHTNESS"],
-                                 config["DESKTOP_SPEED"],
-                                 config["RAINBOW_SHOWS"]))
+                                 config["DESKTOP_SPEED"]))
 
     found = desktop.running_game_mode()
     print("Right now: %s"

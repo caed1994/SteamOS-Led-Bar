@@ -266,6 +266,42 @@ class LiveWindowTest(unittest.TestCase):
                              self._shown("TEMPERATURE_MIN"),
                              "the marks and the sensor are one decision too")
 
+    def test_a_desktop_scene_brings_the_same_rows_back(self):
+        """Two places ask for these gauges, and either one puts them in play.
+
+        The rainbow slot is Game Mode's, and since the desktop's scenes came
+        off that slot there is a second way to ask for the temperature gauge:
+        pick it as the scene. Its marks and its sensor are what that scene
+        reads, so hiding them because the *other* mode is showing something
+        else would be hiding the settings the bar is actually using - on a
+        different page from the one that was changed, where nobody would think
+        to look for them.
+        """
+        self.panel.notebook.select(self._page_named("Strip"))
+        self.root.update()
+        slot = self.panel.vars["RAINBOW_SHOWS"][0]
+        scene = self.panel.vars["DESKTOP_SCENE"][0]
+        slot.set("Fire")                # neither block, as far as Game Mode goes
+        self.root.update()
+        self.assertFalse(self._shown("TEMPERATURE_MIN"))
+        self.assertFalse(self._shown("LOAD_CPU_COLOR"))
+
+        for label, wanted in (("Temperature", (True, False)),
+                              ("CPU and GPU load", (False, True)),
+                              ("Steam's rainbow", (False, False)),
+                              ("Breath", (False, False))):
+            scene.set(label)
+            self.root.update()
+            self.assertEqual((self._shown("TEMPERATURE_MIN"),
+                              self._shown("LOAD_CPU_COLOR")), wanted, label)
+
+        # And either one is enough on its own, which is the half a rule
+        # written as "both" would get wrong the other way round.
+        scene.set("Breath")
+        slot.set("Temperature")
+        self.root.update()
+        self.assertTrue(self._shown("TEMPERATURE_MIN"))
+
     def test_a_row_taken_away_comes_back_where_it_was(self):
         """grid_remove rather than grid_forget, and the difference matters.
 
@@ -334,7 +370,9 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         scene = self.panel.vars["DESKTOP_SCENE"][0]
         for label, wanted in (("One colour", False), ("Breath", False),
-                              ("Patrol", False), ("Rainbow", True),
+                              ("Patrol", False), ("Steam's rainbow", True),
+                              ("Fire", True), ("Aurora", True),
+                              ("Temperature", True), ("CPU and GPU load", True),
                               ("Off", True), ("Leave it to Steam", True)):
             scene.set(label)
             self.root.update()
@@ -344,18 +382,24 @@ class LiveWindowTest(unittest.TestCase):
         """Because no two of them apply to the same set of scenes.
 
         A rainbow has a brightness and a speed but no colour of yours; one
-        colour standing still has a colour and a brightness but no speed.
-        Greying all three together would put two settings that do something
-        out of reach, which is the same to look at as a knob that is broken.
+        colour standing still has a colour and a brightness but no speed; the
+        temperature gauge has a brightness and nothing else, and the load
+        gauge answers to none of the three. Greying them together would put
+        settings that do something out of reach, which is the same to look at
+        as a knob that is broken.
         """
         self.panel.notebook.select(self._page_named("Desktop mode"))
         self.root.update()
         scene = self.panel.vars["DESKTOP_SCENE"][0]
-        #                       colour brightness speed
+        #                       colour brightness speed   - True means hidden
         for label, wanted in (("One colour", (False, False, True)),
                               ("Breath", (False, False, False)),
                               ("Patrol", (False, False, False)),
-                              ("Rainbow", (True, False, False)),
+                              ("Steam's rainbow", (True, False, False)),
+                              ("Fire", (True, False, False)),
+                              ("Aurora", (True, False, False)),
+                              ("Temperature", (True, False, True)),
+                              ("CPU and GPU load", (True, True, True)),
                               ("Off", (True, True, True)),
                               ("Leave it to Steam", (True, True, True))):
             scene.set(label)
@@ -445,7 +489,7 @@ class LiveWindowTest(unittest.TestCase):
         self.panel.notebook.select(self._page_named("Desktop mode"))
         scene = self.panel.vars["DESKTOP_SCENE"][0]
         field = self.panel._widgets["DESKTOP_COLOR"]
-        scene.set("Rainbow")
+        scene.set("Steam's rainbow")
         self.root.update()
         scene.set("Breath")
         self.root.update()

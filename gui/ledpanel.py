@@ -687,11 +687,19 @@ def desktop_choices(names):
     wording is here. "steam" needs the most of it - what it stands for is the
     bar carrying on with whatever the last Game Mode session left, which is
     what it did before this page existed.
+
+    The four this project added are worded as the rainbow slot words them, and
+    "rainbow" is Steam's own for the same reason it is up there: here they are
+    five separate scenes rather than one slot with a tenant, and a menu
+    offering "Rainbow" next to "Fire" should not leave anybody wondering
+    whether the first of them is the second in disguise.
     """
     labels = {
         "steam": "Leave it to Steam",
         "off": "Off",
         "color": "One colour",
+        "rainbow": "Steam's rainbow",
+        "load": "CPU and GPU load",
     }
     return tuple((labels.get(name, name.capitalize()), name) for name in names)
 

@@ -175,6 +175,155 @@ class SteadyLoad:
         return (0.7, 0.3)
 
 
+class SteadyTemperature:
+    """A sensor that always reads the same, for the same reason as above."""
+
+    def celsius(self):
+        return 61.0
+
+
+class ScenesOfTheirOwnTest(unittest.TestCase):
+    """Reported: the desktop's effects should not hang off the rainbow slot.
+
+    Game Mode has one slot to put these four in, because Steam's LED menu is
+    built into the client and cannot be extended. Desktop Mode is not picking
+    from that menu at all, so the four are scenes there - and this is the pair
+    of facts that has to keep being true: each one draws itself, and none of
+    them looks at RAINBOW_SHOWS to find out which one it is.
+    """
+
+    def _renderer(self, **options):
+        options.setdefault("rainbow_shows", render.SHOWS_RAINBOW)
+        return render.Renderer(led_count=17, temperature=SteadyTemperature(),
+                               load=SteadyLoad(), **options)
+
+    def _lit(self, renderer, scene, elapsed=0.4):
+        return renderer.render(
+            desktop.scene_snapshot(scene, "#00b0ff", 128), elapsed,
+            desktop.scene_shows(scene))
+
+    def test_each_of_the_four_draws_a_different_strip(self):
+        # The whole of the feature in one line: four scenes, four pictures.
+        # Before this they were one scene showing whatever the slot held, so
+        # picking a different one of them changed nothing at all.
+        renderer = self._renderer()
+        drawn = {scene: self._lit(renderer, scene)
+                 for scene in (desktop.SCENE_RAINBOW, desktop.SCENE_FIRE,
+                               desktop.SCENE_AURORA,
+                               desktop.SCENE_TEMPERATURE, desktop.SCENE_LOAD)}
+        self.assertEqual(len(set(drawn.values())), len(drawn), sorted(drawn))
+
+    def test_the_scene_wins_over_the_slot(self):
+        """A desktop scene draws itself whatever Game Mode's slot holds.
+
+        Both ways round, because either alone would pass on an accident: a
+        scene that ignored the setting entirely and one that read it would
+        agree wherever the two happen to name the same effect.
+        """
+        for shows in render.RAINBOW_CHOICES:
+            renderer = self._renderer(rainbow_shows=shows)
+            for scene in (desktop.SCENE_RAINBOW, desktop.SCENE_FIRE,
+                          desktop.SCENE_AURORA, desktop.SCENE_TEMPERATURE,
+                          desktop.SCENE_LOAD):
+                self.assertEqual(self._lit(renderer, scene),
+                                 self._lit(self._renderer(), scene),
+                                 "%s under a %s slot" % (scene, shows))
+
+    def test_the_rainbow_scene_is_steams_rainbow(self):
+        """And nothing else - which is the one thing that used to be true.
+
+        DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire drew fire on the
+        desktop. Now that fire has a scene of its own, the rainbow means the
+        rainbow; the service says so at startup - see warn_scene_split.
+        """
+        renderer = self._renderer(rainbow_shows=render.SHOWS_FIRE)
+        self.assertEqual(self._lit(renderer, desktop.SCENE_RAINBOW),
+                         renderer.render(shim.make_snapshot(
+                             shim.EFFECT_RAINBOW, color=(0, 0xb0, 0xff),
+                             brightness=128,
+                             delay=desktop.delay_for(1.0)), 0.4,
+                             render.SHOWS_RAINBOW))
+        self.assertNotEqual(self._lit(renderer, desktop.SCENE_RAINBOW),
+                            self._lit(renderer, desktop.SCENE_FIRE))
+
+    def test_game_mode_still_follows_the_slot(self):
+        """Nothing about the desktop reaches a snapshot Steam wrote.
+
+        The slot is the whole reason RAINBOW_SHOWS exists, and a scene passing
+        its own answer down must not become the answer for everything: what
+        Steam calls a rainbow is still whatever the slot holds.
+        """
+        steam = shim.make_snapshot(shim.EFFECT_RAINBOW, brightness=128)
+        plain = self._renderer().render(steam, 0.4)
+        for shows in (render.SHOWS_FIRE, render.SHOWS_AURORA,
+                      render.SHOWS_TEMPERATURE, render.SHOWS_LOAD):
+            self.assertNotEqual(
+                self._renderer(rainbow_shows=shows).render(steam, 0.4),
+                plain, shows)
+
+    def test_the_frame_rate_follows_the_scene_too(self):
+        """is_animated is asked the same question, and has to hear the same.
+
+        Missed, the temperature scene would be drawn sixty times a second to
+        send the same bytes, and the load gauge - which glides - would be
+        stepped four times a second, which is exactly what it exists to avoid.
+        """
+        renderer = self._renderer(rainbow_shows=render.SHOWS_TEMPERATURE)
+        for scene, moving in ((desktop.SCENE_TEMPERATURE, False),
+                              (desktop.SCENE_LOAD, True),
+                              (desktop.SCENE_FIRE, True),
+                              (desktop.SCENE_RAINBOW, True)):
+            snapshot = desktop.scene_snapshot(scene, "#00b0ff", 128)
+            self.assertEqual(
+                renderer.is_animated(snapshot, desktop.scene_shows(scene)),
+                moving, scene)
+
+    def test_a_scene_that_draws_no_slot_asks_for_none(self):
+        # None rather than a name, so the renderer is left on its own setting
+        # for every snapshot that was never going to substitute anyway.
+        for scene in (desktop.SCENE_STEAM, desktop.SCENE_OFF,
+                      desktop.SCENE_COLOR, desktop.SCENE_BREATH,
+                      desktop.SCENE_PATROL):
+            self.assertIsNone(desktop.scene_shows(scene), scene)
+
+    def test_every_scene_that_draws_one_names_an_effect_the_renderer_has(self):
+        for scene, shows in desktop.SCENE_SHOWS.items():
+            self.assertIn(scene, desktop.SCENES, scene)
+            self.assertIn(shows, render.RAINBOW_CHOICES, shows)
+            self.assertEqual(desktop.SCENE_EFFECTS[scene],
+                             shim.EFFECT_RAINBOW, scene)
+
+    def _warned(self, **overrides):
+        settings = dict(config_module.DEFAULTS, **overrides)
+        with self.assertLogs(service.LOG, level="INFO") as caught:
+            service.warn_scene_split(settings)
+            # assertLogs fails an empty block, so there is always one line.
+            service.LOG.info("end")
+        return [line for line in caught.output if "end" not in line]
+
+    def test_a_file_that_used_to_mean_something_else_is_told_so(self):
+        """The one config file this change reads differently than it did.
+
+        DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire drew fire on the
+        desktop yesterday and draws the rainbow today. Migrating it silently
+        either way would be guessing which of the two was meant, so the
+        service says what it now means and names the setting that gets the
+        old behaviour back.
+        """
+        said = self._warned(DESKTOP_SCENE="rainbow", RAINBOW_SHOWS="fire")
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("DESKTOP_SCENE=fire", said[0])
+
+    def test_and_a_file_that_did_not_is_left_alone(self):
+        # Every other pairing means today what it meant yesterday, and a
+        # startup line about a setting nobody has to change is noise.
+        for scene, shows in (("rainbow", "rainbow"), ("fire", "aurora"),
+                             ("breath", "load"), ("steam", "temperature")):
+            self.assertEqual(
+                self._warned(DESKTOP_SCENE=scene, RAINBOW_SHOWS=shows), [],
+                "%s / %s" % (scene, shows))
+
+
 class DescribeTest(unittest.TestCase):
     """What --desktop says a scene is doing, which is how a knob is trusted."""
 
@@ -223,38 +372,46 @@ class DescribeTest(unittest.TestCase):
         doing something and going unmentioned is what "the slider does
         nothing" was, and a setting mentioned while doing nothing is how
         somebody comes to move it and see no change.
+
+        Every scene is drawn the way the service draws it: the scene's own
+        `shows` handed down with the snapshot, which for the four this project
+        added is the whole of what tells them apart. Both sensors are here so
+        each of them draws itself rather than falling back to the rainbow -
+        the fallback is a different effect, and it answers to different
+        settings.
         """
-        shows = renderer_options.get("rainbow_shows", render.SHOWS_RAINBOW)
-        renderer = render.Renderer(led_count=17, **renderer_options)
+        renderer = render.Renderer(led_count=17, temperature=SteadyTemperature(),
+                                   load=SteadyLoad(), **renderer_options)
 
         def lit(scene, color="#00b0ff", brightness=90, speed=2.0):
             return renderer.render(
-                desktop.scene_snapshot(scene, color, brightness, speed), 0.4)
+                desktop.scene_snapshot(scene, color, brightness, speed), 0.4,
+                desktop.scene_shows(scene))
 
         for name in desktop.SCENES:
             if name == desktop.SCENE_STEAM:
                 continue
-            said = desktop.describe(name, "#00b0ff", 90, 2.0, shows)
+            said = desktop.describe(name, "#00b0ff", 90, 2.0)
             for word, other in (("colour", lit(name, color="#ff0000")),
                                 ("brightness", lit(name, brightness=30)),
                                 ("speed", lit(name, speed=0.5))):
                 self.assertEqual(word in said, other != lit(name),
-                                 "%s showing %s: %s" % (name, shows, word))
+                                 "%s: %s" % (name, word))
 
     def test_a_setting_is_named_exactly_when_it_changes_the_bar(self):
         self._named_when_it_matters()
 
-    def test_the_gauge_in_the_rainbow_slot_answers_to_neither(self):
+    def test_the_gauge_answers_to_neither_slider(self):
         """Reported: the two sliders must not reach the CPU and GPU gauge.
 
-        A rainbow scene shows whatever RAINBOW_SHOWS puts in that slot, and
-        with the load gauge there the bar is drawing a reading - so brightness
-        and speed would change what it says rather than how it looks. The
-        report has to stop naming them at the same moment they stop working,
-        which is what the walk above checks for every scene at once.
+        A load scene draws a reading, so brightness and speed would change
+        what it says rather than how it looks. The report has to stop naming
+        them at the same moment they stop working, which is what the walk
+        above checks for every scene at once - and it now walks the load
+        gauge, so this is the walk with the rainbow slot set the other way to
+        prove the scene is not quietly reading that instead.
         """
-        self._named_when_it_matters(load=SteadyLoad(),
-                                    rainbow_shows=render.SHOWS_LOAD)
+        self._named_when_it_matters(rainbow_shows=render.SHOWS_FIRE)
 
 
 class GameModeTest(unittest.TestCase):

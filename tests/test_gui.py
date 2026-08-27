@@ -26,6 +26,7 @@ import kdetheme  # noqa: E402
 import ledpanel  # noqa: E402
 import roundrect  # noqa: E402
 from steamos_led import config as config_module  # noqa: E402
+from steamos_led import desktop  # noqa: E402
 
 
 class FakeProbe:
@@ -1062,6 +1063,39 @@ class PanelSettingsTest(unittest.TestCase):
             for group in table.elts:
                 self.assertTrue(group.elts[1].elts)
 
+    def test_the_scene_lists_agree_with_the_service(self):
+        """The three lists of scenes on the Desktop page, against desktop.py.
+
+        They are written out in the panel because the tests read that table
+        literally, so they are three chances to disagree with the module that
+        decides what a scene actually does - and disagreeing is invisible: the
+        page greys a slider the bar answers to, or offers one it ignores, and
+        the suite is green either way. This is the one place the two meet.
+
+        Which is also why the service's own are derived from render.py rather
+        than listed: an effect added there arrives here without anybody having
+        written its name down three times.
+        """
+        assigned = self._assignments()
+        for name, theirs in (
+                ("SCENE_HAS_COLOUR", desktop.SCENES_WITH_COLOUR),
+                ("SCENE_IS_LIT", desktop.SCENES_LIT),
+                ("SCENE_MOVES", desktop.SCENES_THAT_MOVE)):
+            self.assertIn(name, assigned, "%s not found in the panel" % name)
+            key, wanted = ast.literal_eval(assigned[name])
+            self.assertEqual(key, "DESKTOP_SCENE", name)
+            self.assertEqual(set(wanted), set(theirs), name)
+
+    def test_every_scene_the_service_has_is_offered(self):
+        # And under a name of its own. A scene the panel cannot reach is one
+        # nobody finds, and two scenes sharing a label is worse: the menu
+        # would look like it had a duplicate in it.
+        offered = ledpanel.desktop_choices(config_module.DESKTOP_SCENES)
+        self.assertEqual([value for _label, value in offered],
+                         list(desktop.SCENES))
+        labels = [label for label, _value in offered]
+        self.assertEqual(len(set(labels)), len(labels), labels)
+
     def test_what_a_switch_governs_is_a_real_setting(self):
         # The greying-out map names keys on both sides; a typo in either would
         # quietly leave a row enabled forever - and in the entries that want a
@@ -1092,18 +1126,24 @@ class PanelSettingsTest(unittest.TestCase):
                     entry = ast.literal_eval(need)
                 switch, wanted = (entry if isinstance(entry, tuple)
                                   else (entry, None))
-                self.assertIn(switch, shown, switch)
+                # An entry may watch several settings, any one of which being
+                # set to the value will do - so every one of them has to be a
+                # setting, and to be one that can hold it.
+                switches = switch if isinstance(switch, tuple) else (switch,)
+                for switch in switches:
+                    self.assertIn(switch, shown, switch)
                 if wanted is None:
                     continue
                 # A value the service would refuse is one this row can never
                 # be ungreyed by, however carefully it is spelled here. An
                 # entry may name several, any one of which will do, and every
                 # one of them has to be a value the setting can hold.
-                for value in (wanted if isinstance(wanted, tuple)
-                              else (wanted,)):
-                    settings = dict(config_module.DEFAULTS)
-                    settings[switch] = value
-                    config_module.validate(settings)
+                for switch in switches:
+                    for value in (wanted if isinstance(wanted, tuple)
+                                  else (wanted,)):
+                        settings = dict(config_module.DEFAULTS)
+                        settings[switch] = value
+                        config_module.validate(settings)
 
     def _firmware_max_leds(self):
         path = os.path.join(HERE, "..", "firmware", "led-client",

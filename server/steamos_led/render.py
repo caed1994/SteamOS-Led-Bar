@@ -427,12 +427,22 @@ TAKES_BOTH = frozenset((TAKES_BRIGHTNESS, TAKES_SPEED))
 # strip may draw, which is not a matter of taste.
 TAKES_NOTHING = frozenset()
 
+# The temperature gauge answers to brightness and not to speed. It is the whole
+# bar in one colour, redrawn when the sensor moves - there is no cycle for a
+# multiplier to scale, which is why is_animated calls it still. Dimming it is
+# a dimmer bar of the same colour, and the colour is the whole of the reading,
+# so unlike the load gauge that one does not change what it says.
+#
+# With no sensor it falls back to the rainbow, which does move. That is an
+# error path with a log line under it, not a speed setting.
+TAKES_LIGHT = frozenset((TAKES_BRIGHTNESS,))
+
 # Which renderer each choice puts in the rainbow's place; the Renderer
 # attribute that has to be there for the choice to mean anything, for the two
 # that read hardware; and which of the bar's settings reach it. config
 # validates against this table, so a new entry is all a further effect needs.
 _SUBSTITUTES = {
-    SHOWS_TEMPERATURE: (_temperature, "temperature", TAKES_BOTH),
+    SHOWS_TEMPERATURE: (_temperature, "temperature", TAKES_LIGHT),
     SHOWS_LOAD: (_load, "load", TAKES_NOTHING),
     SHOWS_FIRE: (_fire, None, TAKES_BOTH),
     SHOWS_AURORA: (_aurora, None, TAKES_BOTH),
@@ -544,7 +554,19 @@ class Renderer:
                              else self.load.fractions())
         return self._reading
 
-    def _substitute(self, snapshot):
+    def shown_by(self, shows):
+        """Which effect a `shows` argument asks for; the setting by default.
+
+        Every entry point takes `shows` so that one caller can say what a
+        frame is of without that being a property of the renderer. Game Mode
+        never does - what it draws is whatever the rainbow slot was set to,
+        which is the whole reason the slot exists. Desktop Mode does, because
+        there is no slot there to be limited by: the desktop picks its scene
+        outright, and passes it down a frame at a time.
+        """
+        return self.rainbow_shows if shows is None else shows
+
+    def _substitute(self, snapshot, shows=None):
         """The renderer standing in for the rainbow here, or None.
 
         None also covers a choice whose hardware is missing, and a load gauge
@@ -558,7 +580,7 @@ class Renderer:
         """
         if snapshot.effect != shim.EFFECT_RAINBOW:
             return None
-        effect, needs, _takes = _SUBSTITUTES.get(self.rainbow_shows,
+        effect, needs, _takes = _SUBSTITUTES.get(self.shown_by(shows),
                                                  (None, None, TAKES_BOTH))
         if effect is None or (needs and getattr(self, needs) is None):
             return None
@@ -566,7 +588,7 @@ class Renderer:
             return None
         return effect
 
-    def is_animated(self, snapshot):
+    def is_animated(self, snapshot, shows=None):
         """Whether this scene changes from frame to frame.
 
         The temperature gauge does not: it redraws when the sensor moves,
@@ -579,20 +601,20 @@ class Renderer:
         draw every frame - and at the idle rate that glide would be four jumps
         a second, which is exactly what it exists to avoid.
         """
-        effect = self._substitute(snapshot)
+        effect = self._substitute(snapshot, shows)
         if effect is _temperature:
             return self.temperature.celsius() is None
         if effect is not None:
             return True
         return snapshot.is_animated
 
-    def render_logical(self, snapshot, elapsed):
+    def render_logical(self, snapshot, elapsed, shows=None):
         """The 17 logical LEDs of the Steam Machine bar, floats in 0..255."""
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
         # Before anything asks what is being drawn, and once for the frame.
         self.reading(fresh=True)
-        effect = (self._substitute(snapshot)
+        effect = (self._substitute(snapshot, shows)
                   or _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL]))
         return effect(snapshot, elapsed, self)
 
@@ -621,19 +643,21 @@ class Renderer:
             frame.reverse()
         return frame
 
-    def render(self, snapshot, elapsed):
+    def render(self, snapshot, elapsed, shows=None):
         """Return the RGB byte payload for the physical strip.
 
         The frame first, because what was drawn decides how bright it goes
         out: a gauge whose brightness is its reading is not dimmed by the
         setting that dims everything else - see rainbow_takes.
         """
-        frame = self._map_to_strip(self.render_logical(snapshot, elapsed))
+        frame = self._map_to_strip(
+            self.render_logical(snapshot, elapsed, shows))
 
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             level = 0
-        elif (self._substitute(snapshot) is not None
-                and TAKES_BRIGHTNESS not in rainbow_takes(self.rainbow_shows)):
+        elif (self._substitute(snapshot, shows) is not None
+                and TAKES_BRIGHTNESS
+                not in rainbow_takes(self.shown_by(shows))):
             level = 255
         else:
             level = max(snapshot.brightness_scale, self.min_brightness)

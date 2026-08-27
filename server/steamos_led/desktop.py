@@ -18,7 +18,9 @@ would have built one, and handed to the same renderer that draws Steam's:
 "breath in this colour" is the same eight lines of maths whoever asked for
 it, and an effect that looked one way in a game and another on the desktop
 would be a bug nobody could explain. That is also why the scenes are exactly
-the effects the bar already has - see shim.EFFECT_*.
+the effects the bar already has: Steam's own - see shim.EFFECT_* - and this
+project's four, which the desktop offers one apiece because it is not picking
+them out of Steam's menu and so is not held to its one free slot.
 
 The one genuinely hard part is knowing which mode the machine is in. The
 service is a *system* service: it has no session of its own to ask, and the
@@ -53,32 +55,77 @@ SCENE_BREATH = "breath"
 SCENE_PATROL = "patrol"
 SCENE_RAINBOW = "rainbow"
 
+# And this project's own four, which in Game Mode have to share one slot.
+#
+# That sharing is a limit of Steam's menu, not of the effects: the entries in
+# it are built into the client, so a new one has to take over the rainbow, and
+# RAINBOW_SHOWS is which of the four gets it. Nothing on the desktop is
+# choosing from that menu, so nothing here has to share - each of the four is
+# a scene of its own, and "rainbow" here means the rainbow.
+SCENE_FIRE = "fire"
+SCENE_AURORA = "aurora"
+SCENE_TEMPERATURE = "temperature"
+SCENE_LOAD = "load"
+
 # Which effect each scene draws with. The renderer is handed a snapshot, so
 # this table is the whole of the translation - and a scene that is not in it
 # is not a scene, which is what the validator says.
+#
+# The last five share an effect because they share the slot the renderer
+# substitutes into: what tells those five apart is SCENE_SHOWS below, handed
+# to the renderer alongside the snapshot.
 SCENE_EFFECTS = {
     SCENE_OFF: shim.EFFECT_OFF,
     SCENE_COLOR: shim.EFFECT_MANUAL,
     SCENE_BREATH: shim.EFFECT_BREATH,
     SCENE_PATROL: shim.EFFECT_PATROL,
     SCENE_RAINBOW: shim.EFFECT_RAINBOW,
+    SCENE_FIRE: shim.EFFECT_RAINBOW,
+    SCENE_AURORA: shim.EFFECT_RAINBOW,
+    SCENE_TEMPERATURE: shim.EFFECT_RAINBOW,
+    SCENE_LOAD: shim.EFFECT_RAINBOW,
+}
+
+# What each of those five puts in the slot. A scene that names one is saying
+# so outright, which is the whole difference from Game Mode: there the slot's
+# tenant is a setting somewhere else, and here it is the scene you picked.
+SCENE_SHOWS = {
+    SCENE_RAINBOW: render.SHOWS_RAINBOW,
+    SCENE_FIRE: render.SHOWS_FIRE,
+    SCENE_AURORA: render.SHOWS_AURORA,
+    SCENE_TEMPERATURE: render.SHOWS_TEMPERATURE,
+    SCENE_LOAD: render.SHOWS_LOAD,
 }
 
 SCENES = (SCENE_STEAM,) + tuple(SCENE_EFFECTS)
 
-# Scenes whose colour is the colour you set. The rainbow makes its own and
-# "off" has none, so offering the picker against those two would be offering
-# a setting that does nothing.
+# Scenes whose colour is the colour you set. The four that make their own and
+# "off", which has none, are left out: offering the picker against those would
+# be offering a setting that does nothing.
 SCENES_WITH_COLOUR = (SCENE_COLOR, SCENE_BREATH, SCENE_PATROL)
 
+
+def _scenes_taking(what):
+    """The slot scenes that answer to one of the bar's two sliders.
+
+    Read off render.rainbow_takes rather than listed, so the answer here and
+    the answer in Game Mode cannot drift apart: the load gauge ignores both
+    sliders wherever it is drawn, and a page that greyed them in one mode and
+    not the other would be the page lying in one of them.
+    """
+    return tuple(scene for scene, shows in SCENE_SHOWS.items()
+                 if what in render.rainbow_takes(shows))
+
+
 # Scenes that light the strip at all, which is what brightness is about - the
-# rainbow included, since it has a brightness even though it picks its own
-# colours.
-SCENES_LIT = SCENES_WITH_COLOUR + (SCENE_RAINBOW,)
+# four included, since they have a brightness even though they pick their own
+# colours. All but the load gauge, whose brightness is what it is saying.
+SCENES_LIT = SCENES_WITH_COLOUR + _scenes_taking(render.TAKES_BRIGHTNESS)
 
 # And the ones that move, which is what speed is about. One colour standing
 # still has a speed the way a photograph has a frame rate.
-SCENES_THAT_MOVE = (SCENE_BREATH, SCENE_PATROL, SCENE_RAINBOW)
+SCENES_THAT_MOVE = ((SCENE_BREATH, SCENE_PATROL)
+                    + _scenes_taking(render.TAKES_SPEED))
 
 # How often to ask whether Game Mode is running. Cheap - one directory
 # listing and a short read per process - but not free, and nothing here
@@ -196,8 +243,22 @@ def scene_snapshot(scene, color, brightness, speed=1.0):
         delay=delay_for(speed))
 
 
-def describe(scene, color, brightness, speed,
-             rainbow_shows=render.SHOWS_RAINBOW):
+def scene_shows(scene):
+    """What this scene puts in the renderer's substitutable slot, or None.
+
+    None for the scenes that are not drawn out of that slot at all, where the
+    renderer's own setting is moot: it only ever substitutes into a rainbow
+    snapshot, so there is nothing for an answer here to change.
+
+    Handed to the renderer a frame at a time rather than built into one. There
+    is a single renderer, and it is Steam's as much as the desktop's - the two
+    modes disagreeing about what the rainbow slot holds is the point, and a
+    renderer can only hold one answer.
+    """
+    return SCENE_SHOWS.get(scene)
+
+
+def describe(scene, color, brightness, speed):
     """One scene in a line, naming every setting that is doing something.
 
     And only those. A report that left one out reads as a setting that is not
@@ -205,10 +266,10 @@ def describe(scene, color, brightness, speed,
     one lit scene that has no colour of yours, and "the slider does nothing"
     is what came back.
 
-    Which is also why the rainbow slot's tenant has a say. A rainbow scene
-    showing the load gauge answers to neither brightness nor speed: what it
-    draws is a reading, and both would change what it says rather than how it
-    looks - see render.rainbow_takes.
+    Which is also why the four that draw themselves have a say. A load gauge
+    answers to neither brightness nor speed: what it draws is a reading, and
+    both would change what it says rather than how it looks - see
+    render.rainbow_takes.
 
     Named as the settings name it rather than as the protocol does: "color" is
     what you picked and "manual" is what the shim calls the effect it becomes,
@@ -216,17 +277,13 @@ def describe(scene, color, brightness, speed,
     """
     if scene == SCENE_STEAM:
         return scene
-    takes = (render.rainbow_takes(rainbow_shows) if scene == SCENE_RAINBOW
-             else render.TAKES_BOTH)
     doing = []
     if scene in SCENES_WITH_COLOUR:
         doing.append("colour %s" % color)
-    if scene in SCENES_LIT and render.TAKES_BRIGHTNESS in takes:
+    if scene in SCENES_LIT:
         doing.append("brightness %d" % brightness)
-    if scene in SCENES_THAT_MOVE and render.TAKES_SPEED in takes:
+    if scene in SCENES_THAT_MOVE:
         doing.append("speed %g (delay %d)" % (speed, delay_for(speed)))
-    if scene == SCENE_RAINBOW and rainbow_shows != render.SHOWS_RAINBOW:
-        doing.append("showing %s" % rainbow_shows)
     return scene + (", " + ", ".join(doing) if doing else "")
 
 

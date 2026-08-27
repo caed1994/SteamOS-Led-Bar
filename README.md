@@ -130,6 +130,7 @@ The restart is required, nothing happens without it.
 | Show the temperature instead of the rainbow | `RAINBOW_SHOWS=temperature` |
 | Show how busy the CPU and GPU are | `RAINBOW_SHOWS=load` |
 | An effect of your own in Desktop Mode | `DESKTOP_SCENE=breath` |
+| A different effect on the desktop than in a game | `DESKTOP_SCENE=aurora` |
 | Strip stays dark although an effect is on | `MIN_BRIGHTNESS=40` |
 | Dimmed colours look blotchy | `GAMMA=2.2` |
 | A fixed port instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` |
@@ -155,7 +156,7 @@ sudo systemctl start steamos-led-serial
 | `SPEED` | `1.0` | animation speed (`0.5` is half as fast) |
 | `PATROL_DOTS` | `1` | dots in the patrol effect |
 | `STANDBY_PULSE` | `1` | breathe white while suspended |
-| `DESKTOP_SCENE` | `steam` | what the bar shows in [Desktop Mode](#desktop-mode): `steam`, `off`, `color`, `breath`, `patrol`, `rainbow` |
+| `DESKTOP_SCENE` | `steam` | what the bar shows in [Desktop Mode](#desktop-mode): `steam`, `off`, `color`, `breath`, `patrol`, `rainbow`, `fire`, `aurora`, `temperature`, `load` |
 | `DESKTOP_COLOR` / `DESKTOP_BRIGHTNESS` | `#ffffff` / `128` | the colour and brightness that scene uses |
 | `DESKTOP_SPEED` | `1.0` | how fast that scene runs, the way Steam's own speed slider works |
 | `RAINBOW_SHOWS` | `rainbow` | what the [rainbow entry](#the-rainbow-slot) shows: `rainbow`, `temperature`, `load`, `fire` or `aurora` |
@@ -202,10 +203,22 @@ mode** page:
 
 | Setting | Meaning |
 | ------- | ------- |
-| `DESKTOP_SCENE` | `steam` (default), `off`, `color`, `breath`, `patrol`, `rainbow` |
+| `DESKTOP_SCENE` | `steam` (default), `off`, `color`, `breath`, `patrol`, `rainbow`, `fire`, `aurora`, `temperature`, `load` |
 | `DESKTOP_COLOR` | the colour for `color`, `breath` and `patrol` (`#ffffff`) |
-| `DESKTOP_BRIGHTNESS` | 0&ndash;255 (`128`) |
-| `DESKTOP_SPEED` | how fast it runs (`1.0`) |
+| `DESKTOP_BRIGHTNESS` | 0&ndash;255 (`128`) &mdash; not for `load`, whose brightness is part of the reading |
+| `DESKTOP_SPEED` | how fast it runs (`1.0`) &mdash; not for `temperature`, which stands still, nor for `load` |
+
+**Every effect, not just Steam's.** `fire`, `aurora`, `temperature` and `load`
+are the four that have to share the [rainbow slot](#the-rainbow-slot) in Game
+Mode, because Steam's LED menu cannot be extended. Nothing on the desktop is
+picking from that menu, so here each of them is a scene of its own and
+`RAINBOW_SHOWS` has no say: `DESKTOP_SCENE=rainbow` is Steam's rainbow, and
+`DESKTOP_SCENE=fire` is fire whatever the slot is set to. The two modes can
+show different effects, which is the point of them being separate settings.
+
+`temperature` and `load` read the same `TEMPERATURE_*` and `LOAD_*` settings
+here as they do in the slot, and the panel keeps those rows on the Strip page
+as soon as either mode asks for the gauge.
 
 **Game Mode stays Steam's.** Switch over and the bar goes back to Steam's own
 LED settings, untouched. Notifications still flash over a scene, and a download
@@ -275,6 +288,10 @@ gives the rainbow back. To look at one without going into Game Mode, stop the
 service and run `--simulate rainbow`. If a choice cannot work on your machine
 &mdash; `temperature` with no sensor, `load` with no counters &mdash; the
 rainbow is drawn instead and the log says why.
+
+**The slot is a Game Mode limitation only.** On the desktop these four are
+[scenes of their own](#desktop-mode), so `RAINBOW_SHOWS` and `DESKTOP_SCENE`
+can name different effects and both get what they asked for.
 
 ### Temperature
 

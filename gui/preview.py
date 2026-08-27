@@ -3,8 +3,9 @@
 
 """What our own effects look like, for the panel to draw before you commit.
 
-Only the ones this project added: the four that can stand in the rainbow slot
-and the six notification shapes. Steam's own effects are not here - you can
+Only the ones this project added: its four effects - the rainbow slot's
+tenant in Game Mode, a scene apiece on the desktop - and the six notification
+shapes. Steam's own effects are not here - you can
 already see those by picking them - and neither are the standby and startup
 breaths, which are states the machine puts itself into rather than settings.
 
@@ -104,7 +105,7 @@ class Preview:
         """How many LEDs the strip has, as the window currently says."""
         return max(1, int(self.setting("LED_COUNT")))
 
-    # -- the four that can stand in the rainbow slot -----------------------
+    # -- the four this project added ---------------------------------------
 
     def _renderer(self, shows):
         """Built the way the service builds it, from the same settings.

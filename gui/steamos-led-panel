@@ -266,17 +266,29 @@ SETTINGS_TABS = (
 #
 # An entry is either a key, which has to be switched on, or (key, value),
 # which has to be set to exactly that - the temperature settings mean nothing
-# unless the rainbow slot is showing the temperature in particular.
+# unless something is showing the temperature in particular.
 # An entry's value may also be several, meaning any one of them will do - a
-# desktop scene has a colour to set under three of the five, and spelling that
+# desktop scene has a colour to set under three of the nine, and spelling that
 # as three separate rules is not something DEPENDS_ON can say. The scenes are
 # written out rather than taken from the service because this table is read
 # literally by the tests; a value that is not a scene is caught there.
-TEMPERATURE_SHOWN = ("RAINBOW_SHOWS", "temperature")
-LOAD_SHOWN = ("RAINBOW_SHOWS", "load")
+#
+# And an entry's *key* may be several, meaning any one of them being set to it
+# will do. There are two places to ask for the temperature gauge - the rainbow
+# slot in Game Mode, the scene in Desktop Mode - and its marks are in play if
+# either does. One rule per place would be two rules that had to be met at
+# once, which is the opposite of what is meant; hiding the marks under only
+# the first would be hiding the setting a desktop scene was reading from.
+TEMPERATURE_SHOWN = (("RAINBOW_SHOWS", "DESKTOP_SCENE"), "temperature")
+LOAD_SHOWN = (("RAINBOW_SHOWS", "DESKTOP_SCENE"), "load")
 SCENE_HAS_COLOUR = ("DESKTOP_SCENE", ("color", "breath", "patrol"))
-SCENE_IS_LIT = ("DESKTOP_SCENE", ("color", "breath", "patrol", "rainbow"))
-SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow"))
+SCENE_IS_LIT = ("DESKTOP_SCENE", ("color", "breath", "patrol", "rainbow",
+                                  "fire", "aurora", "temperature"))
+# Not the temperature gauge, which is one colour standing still: it redraws
+# when the sensor moves and there is no cycle for the slider to scale. Not the
+# load gauge either, whose brightness is half of what it is saying.
+SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow", "fire",
+                                 "aurora"))
 DEPENDS_ON = {
     "DESKTOP_COLOR": (SCENE_HAS_COLOUR,),
     "DESKTOP_BRIGHTNESS": (SCENE_IS_LIT,),
@@ -1887,10 +1899,15 @@ class Panel:
         return outer
 
     @staticmethod
-    def _wanted(needs, switch):
+    def _switches(need):
+        """The keys one rule watches, as a tuple - one of them, or several."""
+        return need[0] if isinstance(need[0], tuple) else (need[0],)
+
+    @classmethod
+    def _wanted(cls, needs, switch):
         """Which answers from `switch` this row accepts, as a set."""
         for need in needs:
-            if isinstance(need, tuple) and need[0] == switch:
+            if isinstance(need, tuple) and switch in cls._switches(need):
                 value = need[1]
                 return set(value if isinstance(value, tuple) else (value,))
         return set()
@@ -1905,7 +1922,8 @@ class Panel:
         the same choice that share nothing, so they are two.
         """
         needs, theirs = DEPENDS_ON.get(key, ()), DEPENDS_ON.get(other, ())
-        for switch in {need[0] for need in needs if isinstance(need, tuple)}:
+        for switch in {switch for need in needs if isinstance(need, tuple)
+                       for switch in self._switches(need)}:
             mine, yours = self._wanted(needs, switch), self._wanted(theirs,
                                                                    switch)
             if yours and not (mine & yours):
@@ -2113,22 +2131,34 @@ class Panel:
         """Whether one DEPENDS_ON entry is met.
 
         Switched on, set to this, or set to any one of these - the last
-        because a menu with five entries can have three of them mean the same
+        because a menu with nine entries can have three of them mean the same
         thing to the row below, and three rules saying so would each have to
         be met at once.
+
+        A rule watching more than one menu is met if any of them says so, for
+        the same reason the other way round: the temperature marks are in play
+        whether Game Mode's slot or the desktop's scene is showing the gauge.
         """
         wanted = None
         if isinstance(need, tuple):
             need, wanted = need
-        if need not in self.vars:
-            return True                 # not on any tab, so nothing to hang off
-        variable, kind = self.vars[need]
         if wanted is None:
-            return bool(variable.get())
+            if need not in self.vars:
+                return True             # not on any tab, nothing to hang off
+            return bool(self.vars[need][0].get())
+        switches = [switch for switch in self._switches((need, wanted))
+                    if switch in self.vars]
+        if not switches:
+            return True
+        return any(self._answers(switch, wanted) for switch in switches)
+
+    def _answers(self, switch, wanted):
+        """Whether one menu is set to the value, or to one of the values."""
+        variable, kind = self.vars[switch]
         # A menu holds the label it shows, not the value it stands for.
         shown = variable.get()
         if kind in ("sensor", "named"):
-            shown = self._value_for(need, shown)
+            shown = self._value_for(switch, shown)
         if isinstance(wanted, tuple):
             return shown in wanted
         return shown == wanted
@@ -2739,7 +2769,11 @@ class Panel:
         self.preview_choice.trace_add("write",
                                       lambda *_a: self._preview_chosen())
 
-        groups = (("In the rainbow slot", "slot"),
+        # Not "in the rainbow slot" any more: the slot is where these four go
+        # in Game Mode, and on the desktop each of them is a scene of its own.
+        # Naming one of the two places would send whoever is looking at the
+        # other one hunting for a heading that is not there.
+        groups = (("Our effects", "slot"),
                   ("Notification shapes", "shape"))
         for column, (title, wanted) in enumerate(groups):
             box = ttk.Frame(picker)
