@@ -561,10 +561,20 @@ CEC_FIRST_LOOK = 200
 PROBLEM_TEXT = ("A command failed. Start the panel from a terminal to see "
                 "why.")
 
-# What a vertical scrollbar takes off the side of a page. Measured on the
-# built window at this theme's own metrics; a couple of pixels over, because
-# being generous here costs a slightly narrower paragraph and being short
-# costs a sentence with its last word cut off. See Panel._rewrap.
+# The scrollbar, which is drawn here rather than left to clam: an arrow
+# button with a bevelled edge on top of a boxed trough, with grip lines down
+# the middle of the thumb. What replaces it is a pill in the margin - no
+# arrows, no trough anyone can see, the same shape language as everything
+# else. SCROLL_WIDTH is the whole margin the bar occupies and SCROLL_THUMB
+# the pill inside it, so the pill has air on both sides instead of running
+# along the window's edge.
+SCROLL_WIDTH = 12
+SCROLL_THUMB = 6
+
+# What a vertical scrollbar takes off the side of a page. A little over
+# SCROLL_WIDTH on purpose: being generous here costs a slightly narrower
+# paragraph and being short costs a sentence with its last word cut off. See
+# Panel._rewrap, and the live test that measures the built bar against it.
 SCROLLBAR_ROOM = 16
 
 # How wide a page's content is allowed to get, whatever the monitor is. These
@@ -1027,6 +1037,58 @@ def dress(style, roles, sizes):
                                         ("Button.label",
                                          {"sticky": "w"})]})]})])
 
+    def scrollbars():
+        """A pill in the page's margin, with nothing else to it.
+
+        clam's scrollbar is the one widget in this window that still looks
+        like 2004: a bevelled arrow button on top, a sunken box for a trough,
+        and three grip lines down the thumb. None of that is kept. The trough
+        is painted the page's own colour so it disappears, the arrows are left
+        out of the layout entirely - a wheel and a drag are how anyone moves a
+        page, and two 12-pixel buttons are not - and the thumb is the same
+        rounded bar as everything else here.
+
+        Both pictures are drawn against the page, which is what the bar always
+        stands on: it is packed into a page's holder, beside the canvas.
+        """
+        radius = SCROLL_THUMB / 2.0
+        side = (SCROLL_WIDTH - SCROLL_THUMB) // 2
+
+        def bar(colour):
+            # Tall enough for a corner at each end plus a few rows to stretch,
+            # and padded out to the full width so the pill sits centred in a
+            # margin rather than against the window's edge.
+            pill = roundrect.rows(SCROLL_THUMB, SCROLL_THUMB + 4, radius,
+                                  colour, page, border_width=0)
+            return _photo([[page] * side + row + [page] * side
+                           for row in pill])
+
+        # Nothing to see: it is here because ttk::scrollbar needs a trough to
+        # measure the thumb against, and because it is what fixes the width.
+        style.element_create(
+            "Material.Scroll.trough", "image",
+            _photo([[page] * SCROLL_WIDTH]), sticky="ns", border=0, padding=0)
+        style.element_create(
+            "Material.Scroll.thumb", "image", bar(roles["outline_variant"]),
+            # hover, not active: ttk's scrollbar bindings set no state at all
+            # on the part under the pointer - there is nothing in
+            # scrollbar.tcl that does - so an "active" picture here would
+            # simply never be drawn. What the widget does get is the plain
+            # hover every ttk widget gets on <Enter>, which brightens the
+            # whole bar rather than the thumb alone, and is what is wanted:
+            # a thin bar is easier to find when it answers the pointer.
+            ("hover", bar(roles["outline"])),
+            border=(0, int(radius) + 1, 0, int(radius) + 1),
+            sticky="nsew", padding=0)
+        # The element names have to end in "trough" and "thumb": both the
+        # widget, which finds the part it has to move by that suffix, and the
+        # Tcl bindings, which match *thumb and *trough to tell a drag from a
+        # page-jump. Named anything else the bar draws and does nothing.
+        style.layout("Vertical.TScrollbar", [
+            ("Material.Scroll.trough", {"sticky": "ns", "children": [
+                ("Material.Scroll.thumb", {"sticky": "nsew"})]})])
+        grounds["Vertical.TScrollbar"] = page
+
     attempt("the rail", rail)
     attempt("the panels", panels)
     attempt("the buttons", buttons)
@@ -1035,6 +1097,7 @@ def dress(style, roles, sizes):
     attempt("the sliders", sliders)
     attempt("the arrows", arrows)
     attempt("the fields", fields)
+    attempt("the scrollbars", scrollbars)
 
 
 # One ttk theme per dressing, counted rather than named after the look: the
@@ -1252,6 +1315,9 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
 
     style.configure("Horizontal.TScale", background=surface,
                     troughcolor=roles["surface_container_highest"])
+    # The fallback look, for a Tk that will not take the image elements
+    # dress() tries to give the scrollbar: clam's own parts, in this window's
+    # colours rather than in clam's greys.
     style.configure("TScrollbar", background=roles["surface_container_highest"],
                     troughcolor=page, bordercolor=page,
                     arrowcolor=variant, relief="flat")

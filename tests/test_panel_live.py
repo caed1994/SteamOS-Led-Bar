@@ -723,6 +723,65 @@ class LiveWindowTest(unittest.TestCase):
         self.assertFalse(self._bar(page).winfo_ismapped(),
                          "a page with room to spare still shows a scrollbar")
 
+    def _long_page(self):
+        """A page with more in it than the window can show, scrolled to."""
+        self.root.geometry("%dx%d" % (self.panel_module.MIN_WIDTH,
+                                      self.panel_module.MIN_HEIGHT))
+        page = self._page_named("Notifications")        # the longest
+        self.panel.notebook.select(page)
+        for _ in range(8):
+            self.root.update()
+        return page
+
+    def test_the_scrollbar_is_ours_and_carries_no_arrow_buttons(self):
+        # clam's scrollbar is a bevelled arrow button at each end of a sunken
+        # box, with grip lines down the thumb - the one widget left in this
+        # window from another decade. What replaces it is a pill in the
+        # margin, so what has to hold is that the parts on screen are the
+        # ones dress() drew and that neither end is a button.
+        page = self._long_page()
+        bar = self._bar(page)
+        self.assertTrue(bar.winfo_ismapped())
+        drawn = str(ttk.Style(self.root).layout("Vertical.TScrollbar"))
+        self.assertIn("Material.Scroll.thumb", drawn)
+        self.assertNotIn("arrow", drawn.lower(),
+                         "the scrollbar still has arrow buttons")
+        # And from the other side: what the pointer finds at either end.
+        for y in (1, bar.winfo_height() - 2):
+            self.assertIn(bar.identify(bar.winfo_width() // 2, y),
+                          ("Material.Scroll.thumb", "Material.Scroll.trough"),
+                          "an unexpected part at y=%d" % y)
+
+    def test_the_scrollbar_thumb_can_still_be_dragged(self):
+        # ttk finds the part it has to move, and its bindings tell a drag from
+        # a page-jump, by matching the *end* of the element's name: *thumb,
+        # *trough, *uparrow. Named anything else - Material.Scroll.bar, say -
+        # the new bar draws perfectly and does nothing at all when pulled.
+        page = self._long_page()
+        bar, canvas = self._bar(page), self.panel._scrollers[page]
+        canvas.yview_moveto(0)
+        self.root.update()
+        start = canvas.yview()[0]
+        middle = bar.winfo_width() // 2
+        bar.event_generate("<Button-1>", x=middle, y=10)
+        self.root.update()
+        bar.event_generate("<B1-Motion>", x=middle,
+                           y=10 + bar.winfo_height() // 3)
+        self.root.update()
+        bar.event_generate("<ButtonRelease-1>", x=middle, y=10)
+        self.root.update()
+        self.assertGreater(canvas.yview()[0], start,
+                           "dragging the thumb moved nothing")
+
+    def test_the_scrollbar_fits_the_room_the_pages_reserve_for_it(self):
+        # _rewrap wraps a page's paragraphs to the width left over once the
+        # bar has taken its side. Reserve less than the bar actually takes and
+        # the last word of a sentence goes under it.
+        page = self._long_page()
+        self.assertLessEqual(self._bar(page).winfo_width(),
+                             self.panel_module.SCROLLBAR_ROOM,
+                             "the scrollbar is wider than the room kept free")
+
     def test_the_foot_of_the_window_keeps_its_place_on_a_short_screen(self):
         # Pack hands out room in the order it was asked for it. With the pages
         # asking first and taking the lot, a window too short for them had no
