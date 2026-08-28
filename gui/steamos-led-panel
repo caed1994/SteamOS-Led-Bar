@@ -2622,11 +2622,16 @@ class Panel:
         self._tab_changed()
 
     def _build_statusbar(self, parent):
-        """The line across the foot: is the bar there, and which version.
+        """The line across the foot: whether the hardware is there.
 
         At the very bottom of the window rather than on the status page,
         because it answers the question somebody has while looking at any of
         them - a page of LED settings is worth less if nothing is listening.
+
+        Only that. The version used to sit at the right-hand end and is on
+        the About page instead: it is a thing you go and look up once, not a
+        thing you keep an eye on, and the foot of every page is for the
+        second kind.
         """
         bar = self.statusbar = ttk.Frame(parent, style="Page.TFrame")
         bar.pack(side="bottom", fill="x",
@@ -2645,8 +2650,6 @@ class Panel:
         # nothing.
         self.problem = ttk.Label(bar, text="\u26a0 " + PROBLEM_TEXT,
                                  style="Page.Bad.TLabel")
-        ttk.Label(bar, text="SteamOS LED bar v%s" % VERSION,
-                  style="Page.Muted.TLabel").pack(side="right")
 
     def _say_link(self, connected, detail=""):
         self.link.say(connected,

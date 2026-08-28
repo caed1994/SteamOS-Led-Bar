@@ -1256,10 +1256,10 @@ class LiveWindowTest(unittest.TestCase):
         """Deliberately, and this is the test for the decision.
 
         It used to show the failing command's own last line. That line shares
-        a bar with two indicators and the version, so a real error had to be
-        cut to fit - and what got cut was the end, which is the half that says
-        what went wrong. A pointer that is always whole beats a reason that is
-        sometimes truncated, and the reason is still on stderr.
+        a bar with two indicators, so a real error had to be cut to fit - and
+        what got cut was the end, which is the half that says what went wrong.
+        A pointer that is always whole beats a reason that is sometimes
+        truncated, and the reason is still on stderr.
         """
         seen = set()
         for output in ("cp: cannot create regular file: Permission denied\n",
@@ -1283,9 +1283,9 @@ class LiveWindowTest(unittest.TestCase):
 
         It used to be cut to the room the bar had. A fixed sentence needs no
         cutting - but only while it fits, and the room is what is left after
-        two indicators and the version. Measured at the narrowest window this
-        panel opens to there are about fifty pixels to spare, which is thin
-        enough to be worth failing here rather than in somebody's window.
+        the two indicators. Measured at the narrowest window this panel opens
+        to, which is thin enough to be worth failing here rather than in
+        somebody's window.
         """
         self.panel._set_busy(False, 1)
         self.root.geometry("%dx900" % self.panel_module.MIN_WIDTH)
@@ -1298,6 +1298,35 @@ class LiveWindowTest(unittest.TestCase):
         # move every page above it.
         self.assertEqual(self.panel.statusbar.winfo_height(),
                          self.panel.link.label.winfo_reqheight())
+
+    def test_the_foot_reports_and_does_not_label(self):
+        """The version used to sit at the right-hand end of this bar.
+
+        Asked for, and it is the right call: the foot of every page is for
+        the things that change while you are looking at them - is the bar
+        plugged in, did the last command fail. A version number is neither,
+        and it is still on the About page and on the status page, which is
+        where you go to look one up.
+        """
+        said = " ".join(child.cget("text")
+                        for child in self.panel.statusbar.winfo_children()
+                        if isinstance(child, ttk.Label))
+        self.assertNotIn(self.panel_module.VERSION, said, said)
+        self.assertNotIn("SteamOS LED bar", said, said)
+
+    def test_but_the_version_is_still_somewhere_to_be_found(self):
+        # Removing the label must not be removing the number: it is the first
+        # thing anybody is asked for when they report something.
+        self.panel._open_section("app")
+        for _ in range(4):
+            self.root.update()
+        said = []
+        for widget in self._every_widget():
+            try:
+                said.append(str(widget.cget("text")))
+            except tk.TclError:                 # not a widget that carries any
+                continue
+        self.assertIn(self.panel_module.VERSION, " ".join(said))
 
     def test_a_terminal_that_went_away_does_not_break_the_window(self):
         """The README tells people to start this from a terminal.
