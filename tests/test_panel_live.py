@@ -2199,6 +2199,28 @@ class CecPageTest(unittest.TestCase):
         self.assertTrue(self.panel.cec_present.winfo_ismapped())
         self.assertFalse(self.panel.cec_missing.winfo_ismapped())
 
+    def test_reading_the_status_takes_the_headline_with_it(self):
+        """The line under the title is drawn from this answer, and drawn first.
+
+        The first read is booked for a moment after the window opens, so the
+        headline is built while the status is still None - which cec_part
+        reports as a toolkit that will not say how it is, a problem counted
+        on every page. Left standing, the foot of the window says HDMI CEC is
+        ready an inch below a title bar that says it is broken, and the page's
+        own "look again" does not clear it either.
+        """
+        # The state the window opens in: the toolkit is there, nobody has
+        # asked it anything yet.
+        self.panel._cec = None
+        self.panel.refresh_status()
+        self.assertIn("HDMI CEC", self.panel.headline.cget("text"),
+                      "not the state this is about")
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertNotIn("HDMI CEC", self.panel.headline.cget("text"),
+                         "the answer arrived and the headline kept the "
+                         "unasked-yet reading")
+
     # -- the switches ------------------------------------------------------
 
     def test_every_feature_gets_a_switch(self):

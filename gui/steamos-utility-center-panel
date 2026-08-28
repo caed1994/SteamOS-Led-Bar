@@ -5116,6 +5116,17 @@ class Panel:
             self._write("The CEC toolkit could not be read: %s\n\n" % exc)
         self._cec_asked = True
         self._show_cec()
+        # The status page and the line under the title read this same answer,
+        # through _read_parts - so the moment it changes here is the moment
+        # they are out of date. Done from here rather than from each caller
+        # because the first read is booked for after the window is up, which
+        # is after the headline has already been drawn from a status of None:
+        # a toolkit nobody has asked yet reads as "installed, but it will not
+        # say how it is", and that is counted as a problem on every page,
+        # beside a foot light that says HDMI CEC is ready. Every caller wanted
+        # this and none of them said so; one place cannot be forgotten by the
+        # next one.
+        self.refresh_status()
         if then is not None:
             then()
 
