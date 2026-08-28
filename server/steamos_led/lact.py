@@ -53,6 +53,16 @@ import socket
 # up for.
 SOCKET_PATH = "/run/lactd.sock"
 
+# Every function below takes `path=None` and resolves it here rather than
+# writing `path=SOCKET_PATH` in its signature. A default in a signature is
+# bound once, when the module is imported - so the constant above could never
+# be changed afterwards, by a test or by anything else, and the change would
+# be silently ignored rather than refused.
+
+
+def _where(path):
+    return path or SOCKET_PATH
+
 # Long enough for a daemon that is busy applying something, short enough that
 # a wedged one does not hold the window. Every call here is one short round
 # trip to a local socket; a second is already generous.
@@ -96,7 +106,7 @@ class LactError(Exception):
     """The daemon is not there, would not answer, or refused what was asked."""
 
 
-def available(path=SOCKET_PATH):
+def available(path=None):
     """Whether there is a socket to talk to at all.
 
     A file test rather than a connection, so this can be asked often and from
@@ -106,7 +116,7 @@ def available(path=SOCKET_PATH):
     Being there is not the same as answering: a socket file outlives a daemon
     that was killed. `ping` is what settles that, and the page asks it once.
     """
-    return os.path.exists(path)
+    return os.path.exists(_where(path))
 
 
 def request(name, args=None):
@@ -147,7 +157,7 @@ def read_answer(text):
     return found.get("data")
 
 
-def talk(name, path=SOCKET_PATH, args=None, timeout=TIMEOUT):
+def talk(name, path=None, args=None, timeout=TIMEOUT):
     """Send one request and read one answer.
 
     A fresh connection per request rather than a kept one. The daemon is happy
@@ -156,6 +166,7 @@ def talk(name, path=SOCKET_PATH, args=None, timeout=TIMEOUT):
     which is state to get wrong for no gain on a request that takes
     milliseconds.
     """
+    path = _where(path)
     said = json.dumps(request(name, args)) + "\n"
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as link:
@@ -199,12 +210,12 @@ def _read_line(link):
 # -- what the daemon can be asked -------------------------------------------
 
 
-def devices(path=SOCKET_PATH):
+def devices(path=None):
     found = talk("list_devices", path)
     return list(found) if isinstance(found, list) else []
 
 
-def first_device(path=SOCKET_PATH):
+def first_device(path=None):
     """The card to show. The first one, and this panel shows only that.
 
     A machine with two graphics cards is a machine whose owner wants LACT's
@@ -216,19 +227,19 @@ def first_device(path=SOCKET_PATH):
     return found[0].get("id", "") if found else ""
 
 
-def stats(gpu, path=SOCKET_PATH):
+def stats(gpu, path=None):
     return talk("device_stats", path, {"id": gpu}) or {}
 
 
-def clocks_info(gpu, path=SOCKET_PATH):
+def clocks_info(gpu, path=None):
     return talk("device_clocks_info", path, {"id": gpu}) or {}
 
 
-def gpu_config(gpu, path=SOCKET_PATH):
+def gpu_config(gpu, path=None):
     return talk("get_gpu_config", path, {"id": gpu}) or {}
 
 
-def set_gpu_config(gpu, config, path=SOCKET_PATH):
+def set_gpu_config(gpu, config, path=None):
     """Apply a configuration. Returns how long there is to confirm it.
 
     The number is the daemon's, not ours - it is configurable there - so it is
@@ -241,7 +252,7 @@ def set_gpu_config(gpu, config, path=SOCKET_PATH):
         return CONFIRM_SECONDS
 
 
-def confirm(path=SOCKET_PATH, keep=True):
+def confirm(path=None, keep=True):
     """Keep the pending configuration, or put the old one back now.
 
     Reverting explicitly rather than waiting out the clock: somebody who has
@@ -251,7 +262,7 @@ def confirm(path=SOCKET_PATH, keep=True):
                 {"command": "confirm" if keep else "revert"})
 
 
-def profiles(path=SOCKET_PATH):
+def profiles(path=None):
     """The profiles LACT has, and which one is on.
 
     Returned as (names, current). The daemon reports this in more than one
@@ -268,7 +279,7 @@ def profiles(path=SOCKET_PATH):
     return [], ""
 
 
-def set_profile(name, path=SOCKET_PATH):
+def set_profile(name, path=None):
     """Switch to a saved profile. The default one is spelled as no name."""
     return talk("set_profile", path, {"name": name} if name else None)
 
@@ -378,8 +389,9 @@ def offered(config, clocks, found_stats):
                 continue
             span = (int(power["min"]), int(power["max"]))
             value = config.get(key)
-            if value is None:
-                value = power["current"]
+            # What the card is set to right now, which for the power cap is a
+            # thing the card reports whether or not LACT has written it.
+            fallback = power["current"] or power["default"] or span[1]
         elif source == "vddc_offset":
             # An offset, not an absolute: its range is not the card's voltage
             # range and LACT does not report one, so this is the window either
@@ -388,14 +400,24 @@ def offered(config, clocks, found_stats):
                 continue
             span = (-250, 250)
             value = (config.get("clocks_configuration") or {}).get(key)
+            fallback = 0                # no offset is the untouched state
         else:
             if source not in spans:
                 continue
             span = spans[source]
             value = (config.get("clocks_configuration") or {}).get(key)
+            # A maximum nobody has set is the card's own maximum. Starting
+            # such a slider at the *bottom* of its range would draw an
+            # untouched card as one clamped to its lowest clock, which is a
+            # lie about the machine and the kind somebody acts on.
+            fallback = span[1]
         out.append({"key": key, "label": label, "unit": unit,
                     "min": span[0], "max": span[1],
-                    "value": None if value is None else float(value)})
+                    "value": None if value is None else float(value),
+                    # Where the slider starts when nothing is set. Kept apart
+                    # from `value` so "set to this" and "not set, and this is
+                    # what that means" stay different questions.
+                    "start": float(value if value is not None else fallback)})
     return out
 
 

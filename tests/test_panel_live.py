@@ -26,6 +26,9 @@ import appsettings                                          # noqa: E402
 import kdetheme                                             # noqa: E402
 import syssettings                                          # noqa: E402
 from steamos_led import cec                                 # noqa: E402
+from steamos_led import lact                                # noqa: E402
+from test_lact import (FakeDaemon, DEVICES, STATS, CLOCKS,  # noqa: E402
+                       CONFIG)
 
 try:
     import tkinter as tk
@@ -2416,6 +2419,324 @@ class CecPageTest(unittest.TestCase):
         self.panel._reread_cec()
         self.root.update()
         self.assertTrue(self.panel.cec_missing.winfo_ismapped())
+
+
+class GpuBlockTest(unittest.TestCase):
+    """The graphics card block, against a fake lactd on a real socket.
+
+    The daemon is not mocked out - the fixture is a unix socket answering the
+    same protocol - so what is tested is the page's use of the whole path:
+    read five things, draw from them, collect what is on screen, send it back.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.daemon = FakeDaemon(answers=dict(self._answers()))
+        self.addCleanup(self.daemon.close)
+        self._point_at(self.daemon.path)
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        # Recorded rather than shown. A modal dialog in a test has nobody to
+        # close it, so the suite hangs instead of failing - which is how the
+        # frozen socket path below was found, and it took a stack dump to see
+        # rather than a failure to read.
+        self.said = []
+        self.panel._say = lambda title, message: self.said.append(message)
+        self.root.update()
+        self.panel._open_section("power")
+        self.root.update()
+
+    def _answers(self, clocks=None):
+        return {
+            "list_devices": DEVICES,
+            "device_stats": STATS,
+            "device_clocks_info": CLOCKS if clocks is None else clocks,
+            "get_gpu_config": CONFIG,
+            "list_profiles": {"profiles": ["quiet", "loud"],
+                              "current_profile": "quiet"},
+            "set_gpu_config": 5,
+            "confirm_pending_config": None,
+            "set_profile": None,
+        }
+
+    def _point_at(self, path):
+        """Aim both copies of the module at the fake daemon's socket."""
+        for module in (lact, self.panel_module.lact,
+                       self.panel_module.ledpanel.lact_module):
+            was = module.SOCKET_PATH
+            module.SOCKET_PATH = path
+            self.addCleanup(
+                lambda m=module, w=was: setattr(m, "SOCKET_PATH", w))
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _cards(self):
+        return self.panel.gpu_box.winfo_children()
+
+    # -- whether the block is there at all ---------------------------------
+
+    def test_a_machine_without_lact_gets_no_block(self):
+        """Not an empty one, and not a message. Nothing.
+
+        Most machines will never run LACT, and a permanent "LACT is not
+        installed" under the CPU settings would be the page reporting an
+        absence nobody asked about - the same rule the second status light
+        follows.
+        """
+        self._point_at("/nonexistent/lactd.sock")
+        self.panel._reread_gpu()
+        self.root.update()
+        self.assertEqual(self._cards(), [])
+
+    def test_a_daemon_that_will_not_answer_says_so_rather_than_hiding(self):
+        """Installed and unhappy is not the same as absent.
+
+        Hiding the block would leave somebody who *has* LACT wondering why the
+        panel does not see it, which is the case a message is for.
+        """
+        broken = FakeDaemon(answers={})
+        self.addCleanup(broken.close)
+        self._point_at(broken.path)
+        self.panel._reread_gpu()
+        self.root.update()
+        self.assertTrue(self._cards())
+        self.assertTrue(self.panel._gpu_error)
+
+    def test_a_card_that_is_there_is_named(self):
+        self.assertTrue(self._cards())
+        self.assertEqual(self.panel._gpu["name"], DEVICES[0]["name"])
+
+    def test_it_does_not_ask_until_the_section_is_opened(self):
+        # Five round trips on the construction path would be five on every
+        # window open and every theme change, for a page most people never
+        # visit - the same reason the CEC read is deferred.
+        self._destroy()
+        self.root = tk.Tk()
+        panel = self.panel_module.Panel(self.root)
+        self.assertFalse(panel._gpu_asked)
+        panel._open_section("power")
+        self.assertTrue(panel._gpu_asked)
+
+    # -- the knobs ---------------------------------------------------------
+
+    def test_every_knob_the_card_reported_gets_a_slider(self):
+        for key, _label, _unit, _source in lact.KNOBS:
+            self.assertIn(key, self.panel._gpu_vars, key)
+
+    def test_a_card_with_no_clocks_table_gets_only_the_power_slider(self):
+        """Which is most integrated graphics, and may be this machine.
+
+        Four sliders that write nowhere would be worse than one that works:
+        somebody would set a clock, see it accepted, and wonder why nothing
+        changed.
+        """
+        bare = FakeDaemon(answers=dict(self._answers(clocks={})))
+        self.addCleanup(bare.close)
+        self._point_at(bare.path)
+        self.panel._reread_gpu()
+        self.root.update()
+        self.assertIn(lact.POWER_CAP, self.panel._gpu_vars)
+        self.assertNotIn("max_core_clock", self.panel._gpu_vars)
+
+    def test_an_unset_maximum_starts_at_the_card_s_own_maximum(self):
+        """Not at the bottom of the range, which is what it first did.
+
+        A slider at 200 MHz draws an untouched card as one clamped to its
+        lowest clock. That is a lie about the machine, and the kind somebody
+        acts on.
+        """
+        self.assertEqual(round(self.panel._gpu_vars["max_core_clock"].get()),
+                         1600)
+        self.assertEqual(round(self.panel._gpu_vars["voltage_offset"].get()), 0)
+
+    def test_the_power_slider_starts_at_what_the_card_is_set_to(self):
+        self.assertEqual(round(self.panel._gpu_vars[lact.POWER_CAP].get()), 15)
+
+    # -- the fan -----------------------------------------------------------
+
+    def test_the_curve_and_the_fixed_speed_are_never_both_shown(self):
+        for mode, curve_shown in ((lact.FAN_CURVE, True),
+                                  (lact.FAN_STATIC, False)):
+            self.panel._gpu_vars["fan_enabled"].set(True)
+            self.panel._gpu_vars["fan_mode"].set(
+                dict((value, label) for label, value in
+                     [("Curve", lact.FAN_CURVE),
+                      ("Fixed speed", lact.FAN_STATIC)])[mode])
+            self.panel._gpu_fan_changed()
+            self.root.update()
+            self.assertEqual(
+                bool(self.panel.gpu_fan_curve.winfo_ismapped()), curve_shown,
+                mode)
+            self.assertEqual(
+                bool(self.panel.gpu_fan_static.winfo_ismapped()),
+                not curve_shown, mode)
+
+    def test_the_mode_is_read_as_lact_spells_it_not_as_the_menu_shows_it(self):
+        """The drop-downs here hold the label that is showing.
+
+        Compared against LACT's own word, that matches nothing - and the page
+        drew the fixed-speed slider while the menu said Curve.
+        """
+        self.panel._gpu_vars["fan_mode"].set("Curve")
+        self.assertEqual(self.panel._gpu_mode(), lact.FAN_CURVE)
+        self.panel._gpu_vars["fan_mode"].set("Fixed speed")
+        self.assertEqual(self.panel._gpu_mode(), lact.FAN_STATIC)
+
+    def test_nothing_about_the_fan_shows_while_it_is_not_controlled(self):
+        # Off means the card's firmware drives it, and every value below is
+        # inert until it is on.
+        self.panel._gpu_vars["fan_enabled"].set(False)
+        self.panel._gpu_fan_changed()
+        self.root.update()
+        self.assertFalse(self.panel.gpu_fan_curve.winfo_ismapped())
+        self.assertFalse(self.panel.gpu_fan_static.winfo_ismapped())
+
+    def test_the_curve_opens_on_what_the_card_has(self):
+        self.assertEqual(self.panel._gpu_curve.curve, {40: 0.3, 80: 1.0})
+
+    def test_the_curve_canvas_gets_the_height_it_asks_for(self):
+        """Measured, because it did not.
+
+        A page's inner frame is a canvas window item pinned to the size the
+        scroller last gave it, so packing the curve into it does not make it
+        grow - the graph asked for 200 pixels, was given 120, and was drawn
+        with its bottom half missing. See _refit_page.
+        """
+        self.panel._gpu_vars["fan_enabled"].set(True)
+        self.panel._gpu_fan_changed()
+        for _ in range(4):
+            self.root.update()
+        canvas = self.panel._gpu_curve.canvas
+        self.assertEqual(canvas.winfo_height(), canvas.winfo_reqheight())
+
+    # -- sending it back ---------------------------------------------------
+
+    def test_what_is_collected_is_the_whole_config_not_a_patch(self):
+        """set_gpu_config replaces the document rather than patching it.
+
+        So a setting this page does not show has to be carried across
+        untouched, or applying a fan curve silently turns off whatever else
+        was configured on that card.
+        """
+        self.panel._gpu_vars[lact.POWER_CAP].set(20)
+        made = self.panel._collect_gpu()
+        self.assertEqual(made["power_cap"], 20.0)
+        self.assertEqual(made["fan_control_settings"]["temperature_key"],
+                         CONFIG["fan_control_settings"]["temperature_key"])
+
+    def test_the_curve_on_screen_is_what_gets_sent(self):
+        self.panel._gpu_curve.curve = {45: 0.4, 90: 1.0}
+        made = self.panel._collect_gpu()
+        self.assertEqual(made["fan_control_settings"]["curve"],
+                         {"45": 0.4, "90": 1.0})
+
+    def test_applying_asks_whether_to_keep_it(self):
+        """The daemon reverts unless confirmed, so the window has to ask.
+
+        Not asking would mean either sending a confirmation nobody agreed to -
+        which is the safety feature thrown away - or never confirming, which
+        makes every setting undo itself five seconds later.
+        """
+        asked = []
+        self.panel_module.CountdownDialog = (
+            lambda parent, seconds: (asked.append(seconds),
+                                     type("A", (), {"answer": True})())[1])
+        self.panel._apply_gpu()
+        self.assertEqual(asked, [5], "it did not ask, or ignored the daemon's "
+                                     "own number of seconds")
+        sent = [one for one in self.daemon.asked
+                if one["command"] == "confirm_pending_config"]
+        self.assertEqual(sent[-1]["args"], {"command": "confirm"})
+
+    def test_saying_no_puts_the_settings_back_at_once(self):
+        # Rather than waiting the clock out: somebody who has decided should
+        # not have to watch a countdown finish.
+        self.panel_module.CountdownDialog = (
+            lambda parent, seconds: type("A", (), {"answer": False})())
+        self.panel._apply_gpu()
+        sent = [one for one in self.daemon.asked
+                if one["command"] == "confirm_pending_config"]
+        self.assertEqual(sent[-1]["args"], {"command": "revert"})
+
+    def test_a_card_that_refuses_the_settings_says_so_and_asks_nothing(self):
+        refusing = FakeDaemon(answers=dict(self._answers()), refuse=True)
+        self.addCleanup(refusing.close)
+        self._point_at(refusing.path)
+        asked = []
+        self.panel_module.CountdownDialog = (
+            lambda parent, seconds: (asked.append(seconds),
+                                     type("A", (), {"answer": True})())[1])
+        self.panel._apply_gpu()
+        self.assertTrue(self.said, "it failed silently")
+        self.assertEqual(asked, [], "it asked about settings that never landed")
+
+    # -- profiles ----------------------------------------------------------
+
+    def test_the_profiles_lact_has_are_offered_with_the_default(self):
+        # The default one has no name in LACT, and a menu with a blank entry
+        # is a menu with a bug in it.
+        labels = [label for label, _value
+                  in self.panel._menus["gpu-profile"]]
+        self.assertIn("Default", labels)
+        self.assertIn("quiet", labels)
+
+    def test_choosing_one_switches_at_once_rather_than_waiting_for_apply(self):
+        """A profile carries its own settings, so it replaces everything.
+
+        Queuing it behind Apply would mean the sliders below showing one
+        profile's values while another was chosen above them.
+        """
+        self.panel._gpu_vars["profile"].set("loud")
+        self.root.update()
+        self.assertEqual(self.said, [])
+        sent = [one for one in self.daemon.asked
+                if one["command"] == "set_profile"]
+        self.assertEqual(sent[-1]["args"], {"name": "loud"})
+
+
+class CountdownTest(unittest.TestCase):
+    """The dialog that keeps a bad setting from being permanent."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.addCleanup(self.root.destroy)
+
+    def test_nobody_answering_is_answered_as_no(self):
+        """Which is the case the daemon's own timer exists for.
+
+        A clock the card cannot hold makes the screen go black, and then
+        nobody is going to press anything. The dialog closing itself with "put
+        them back" is what makes that survivable - and it has to agree with
+        what the daemon has already done.
+        """
+        made = self.panel_module.CountdownDialog(self.root, 1)
+        self.assertFalse(made.answer)
+
+    def test_it_counts_down_in_the_seconds_it_was_given(self):
+        seen = []
+        was = self.panel_module.CountdownDialog._tick
+
+        def watch(self):
+            seen.append(self.left)
+            was(self)
+
+        self.panel_module.CountdownDialog._tick = watch
+        try:
+            self.panel_module.CountdownDialog(self.root, 2)
+        finally:
+            self.panel_module.CountdownDialog._tick = was
+        self.assertEqual(seen[:3], [2, 1, 0])
 
 
 class AppearanceTest(unittest.TestCase):

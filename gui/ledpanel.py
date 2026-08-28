@@ -16,6 +16,7 @@ import subprocess
 
 from steamos_led import cec as cec_module
 from steamos_led import config as config_module
+from steamos_led import lact as lact_module
 from steamos_led import phone
 from steamos_led import power as power_module
 from steamos_led import temperature
@@ -1147,3 +1148,76 @@ def _run_quietly(command):
     except (OSError, subprocess.SubprocessError):
         return None
     return done.stdout if done.returncode == 0 else None
+
+
+# -- the graphics card, through LACT -----------------------------------------
+#
+# Read in one go rather than a call at a time: five short round trips to a
+# local socket, and a page built from four of them separately would draw
+# itself from four moments. What comes back is one document, the same shape
+# the CEC page gets, so everything downstream is a pure function of it.
+
+
+def gpu_state(path=None, ask=None):
+    """Everything the GPU block needs, or None when there is no daemon.
+
+    None rather than an empty document, and the difference is the whole of
+    what the page does with it: no daemon means the block is not drawn at all,
+    where an empty document would mean a card that reports nothing - which is
+    a page of empty sliders.
+    """
+    where = path or lact_module.SOCKET_PATH
+    if not lact_module.available(where):
+        return None
+    talk = ask or (lambda name, args=None: lact_module.talk(name, where, args))
+    # A LactError from any of these reaches the caller. The page turns it into
+    # a block that says the daemon would not answer, which is a different
+    # thing from there being no daemon and has to stay different.
+    found = talk("list_devices")
+    devices = list(found) if isinstance(found, list) else []
+    if not devices:
+        # A daemon with no card is a daemon with nothing to configure -
+        # reported as a state of its own so the page can say so rather than
+        # showing an empty card picker.
+        return {"gpu": "", "name": "", "devices": []}
+    gpu = devices[0].get("id", "")
+    state = {
+        "gpu": gpu,
+        "name": devices[0].get("name", ""),
+        "devices": devices,
+        "config": talk("get_gpu_config", {"id": gpu}) or {},
+        "stats": talk("device_stats", {"id": gpu}) or {},
+        "clocks": talk("device_clocks_info", {"id": gpu}) or {},
+    }
+    # Profiles on their own: an older daemon that does not have them should
+    # cost the page its profile picker, not the whole block.
+    try:
+        state["profiles"], state["profile"] = lact_module.profiles(where)
+    except lact_module.LactError:
+        state["profiles"], state["profile"] = [], ""
+    return state
+
+
+def gpu_knobs(state):
+    """The sliders to draw, from what the card reported."""
+    if not state or not state.get("gpu"):
+        return []
+    return lact_module.offered(state.get("config") or {},
+                               state.get("clocks") or {},
+                               state.get("stats") or {})
+
+
+def gpu_summary(state):
+    """One line about the card, for the status page and the block's heading."""
+    if state is None:
+        return "LACT is not running."
+    if not state.get("gpu"):
+        return "LACT is running, but reports no graphics card."
+    knobs = gpu_knobs(state)
+    fan = lact_module.fan(state.get("config") or {})
+    said = state.get("name") or state["gpu"]
+    if not knobs:
+        return "%s - nothing on it can be set from here." % said
+    return "%s, %d setting(s)%s." % (said, len(knobs),
+                                     ", fan under control" if fan["enabled"]
+                                     else "")

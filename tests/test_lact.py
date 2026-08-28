@@ -233,6 +233,50 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(daemon.asked[-1]["args"], {"command": "revert"})
 
 
+class SocketPathTest(unittest.TestCase):
+    """Where it looks, and when it decides.
+
+    Every function here takes `path=None` and falls back to SOCKET_PATH at
+    call time rather than naming the constant in its signature. A default in a
+    signature is bound once, when the module is imported - so with
+    `path=SOCKET_PATH` the constant could not be changed afterwards by
+    anything, and the change was accepted and ignored rather than refused.
+
+    That is not only a test's problem. It cost a stack dump to find, because
+    the panel's error path opens a modal dialog: the suite hung instead of
+    failing.
+    """
+
+    def test_setting_the_constant_moves_where_it_looks(self):
+        daemon = FakeDaemon(answers={"list_devices": DEVICES})
+        self.addCleanup(daemon.close)
+        was = lact.SOCKET_PATH
+        lact.SOCKET_PATH = daemon.path
+        self.addCleanup(lambda: setattr(lact, "SOCKET_PATH", was))
+        # No path given: it has to pick up the constant as it is now.
+        self.assertEqual(lact.devices(), DEVICES)
+        self.assertTrue(lact.available())
+
+    def test_a_path_given_outright_still_wins(self):
+        daemon = FakeDaemon(answers={"list_devices": DEVICES})
+        self.addCleanup(daemon.close)
+        was = lact.SOCKET_PATH
+        lact.SOCKET_PATH = "/nonexistent/lactd.sock"
+        self.addCleanup(lambda: setattr(lact, "SOCKET_PATH", was))
+        self.assertEqual(lact.devices(daemon.path), DEVICES)
+
+    def test_every_entry_point_honours_it(self):
+        # One left with a frozen default would be one call in the page that
+        # quietly talks to the wrong socket - or to none.
+        import inspect
+        for name in ("available", "talk", "devices", "first_device", "stats",
+                     "clocks_info", "gpu_config", "set_gpu_config", "confirm",
+                     "profiles", "set_profile"):
+            found = inspect.signature(getattr(lact, name))
+            self.assertIsNone(found.parameters["path"].default,
+                              "%s binds its socket path at import" % name)
+
+
 class AnswerTest(unittest.TestCase):
     """Unwrapping, apart from the socket."""
 
@@ -375,17 +419,31 @@ class OfferedTest(unittest.TestCase):
             self.assertTrue(knob["unit"], knob["key"])
             self.assertTrue(knob["label"], knob["key"])
 
-    def test_the_power_slider_starts_at_what_the_card_is_set_to(self):
-        found = {knob["key"]: knob for knob in
-                 lact.offered({}, CLOCKS, STATS)}
-        self.assertEqual(found[lact.POWER_CAP]["value"], 15.0)
+    def test_a_knob_nobody_has_set_has_no_value_but_still_has_a_start(self):
+        """Two questions, and the page needs both separately.
 
-    def test_a_knob_nobody_has_set_has_no_value_rather_than_zero(self):
-        # Zero is a setting. "Not set" is the card's own default, and the two
-        # must not look the same on a voltage offset.
+        `value` is "LACT has been told this"; `start` is where the slider
+        goes when it has not been. Zero is a setting and "not set" is the
+        card's own default, so on a voltage offset the two must not look the
+        same - and a slider has to sit somewhere either way.
+        """
         found = {knob["key"]: knob for knob in
                  lact.offered({}, CLOCKS, STATS)}
         self.assertIsNone(found["max_core_clock"]["value"])
+        # The card's own maximum. At the bottom of the range it would draw an
+        # untouched card as one clamped to its lowest clock.
+        self.assertEqual(found["max_core_clock"]["start"], 1600)
+        self.assertEqual(found["voltage_offset"]["start"], 0)
+        # And the power cap, which the card reports whether or not LACT wrote
+        # it, starts at what it is actually running.
+        self.assertEqual(found[lact.POWER_CAP]["start"], 15.0)
+
+    def test_a_knob_that_is_set_starts_where_it_is_set(self):
+        found = {knob["key"]: knob for knob in
+                 lact.offered({"clocks_configuration": {
+                     "max_core_clock": 1200}}, CLOCKS, STATS)}
+        self.assertEqual(found["max_core_clock"]["value"], 1200)
+        self.assertEqual(found["max_core_clock"]["start"], 1200)
 
 
 class FanTest(unittest.TestCase):

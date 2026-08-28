@@ -50,6 +50,7 @@ import preview as preview_module                            # noqa: E402
 import syssettings                                          # noqa: E402
 from steamos_led import cec                                 # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
+from steamos_led import lact                                # noqa: E402
 from steamos_led import notify                              # noqa: E402
 from steamos_led import power                               # noqa: E402
 from steamos_led import render                              # noqa: E402
@@ -1639,6 +1640,59 @@ class BirthdayDialog(Dialog):
 # -- end of easter egg --------------------------------------------------------
 
 
+class CountdownDialog(Dialog):
+    """Keep these settings, or let them be put back.
+
+    LACT applies a change and reverts it unless it is confirmed within a few
+    seconds. That is the feature, not an obstacle: a clock the card cannot
+    hold or a voltage it cannot run makes the screen go black, and a machine
+    that undoes it on its own is one you can still use. So this asks, and
+    answers "no" by itself if nobody is there to - which is exactly the case
+    the daemon's timer exists for.
+    """
+
+    def __init__(self, parent, seconds):
+        self.left = max(1, int(seconds))
+        self.job = None
+        Dialog.__init__(
+            self, parent, "Keep these settings?",
+            "The graphics card has been set. If the screen has gone wrong or "
+            "nothing is responding, wait - LACT puts the old settings back on "
+            "its own.",
+            confirm="Keep", deny="Put them back")
+
+    def build(self, body):
+        self.left_said = ttk.Label(body, style="Section.TLabel")
+        self.left_said.pack(anchor="w", pady=(ROW_GAP, 0))
+        self._tick()
+
+    def _tick(self):
+        self.left_said.configure(
+            text="Putting them back in %d second%s"
+                 % (self.left, "" if self.left == 1 else "s"))
+        if self.left <= 0:
+            # Not confirmed, so the daemon has already done it. Closing with
+            # "no" keeps the window's idea of the card and the card itself
+            # saying the same thing.
+            self._deny()
+            return
+        self.left -= 1
+        self.job = self.window.after(1000, self._tick)
+
+    def _confirm(self):
+        self._stop()
+        Dialog._confirm(self)
+
+    def _deny(self):
+        self._stop()
+        Dialog._deny(self)
+
+    def _stop(self):
+        if self.job is not None:
+            self.window.after_cancel(self.job)
+            self.job = None
+
+
 class ColourDialog(Dialog):
     """Pick a colour to flash: a grid of them, or type one in.
 
@@ -1991,6 +2045,173 @@ class Indicator:
         self.label.configure(text=text)
 
 
+class FanCurve:
+    """The fan curve, as a graph you can take hold of.
+
+    Temperature across, fan speed up. A point is dragged in both directions
+    and cannot pass its neighbours, which is what keeps the curve a function
+    of temperature rather than a shape - LACT stores it as a map keyed by
+    degrees, so two points at the same temperature is not something that can
+    be written down.
+
+    Drawn on a canvas because there is nothing in ttk that is a graph, and
+    because the alternative - a column of numbers with sliders - answers "what
+    is the speed at 60 degrees" without ever answering "what shape is this".
+    The shape is the reason somebody opens a fan curve.
+    """
+
+    LOW, HIGH = 20, 100                 # the degrees the graph spans
+    # Room for the labels round the plot. Measured rather than guessed: 26 cut
+    # the leading digit off "100%", which reads as a graph that starts at 0.
+    PAD = 40
+    GRAB = 9                            # how near a point you have to press
+    HEIGHT = 200
+
+    def __init__(self, parent, roles, curve, on_change=None):
+        self.roles = roles
+        self.on_change = on_change or (lambda: None)
+        self.curve = dict(curve)
+        self.held = None
+        self.canvas = tk.Canvas(parent, height=self.HEIGHT,
+                                highlightthickness=0, borderwidth=0,
+                                background=roles["surface_container_lowest"])
+        self.canvas.bind("<Configure>", lambda _event: self.draw())
+        self.canvas.bind("<Button-1>", self._press)
+        self.canvas.bind("<B1-Motion>", self._drag)
+        self.canvas.bind("<ButtonRelease-1>", self._release)
+
+    # -- where a point sits on screen, and the way back ---------------------
+
+    def _plot(self):
+        width = max(self.canvas.winfo_width(), 2 * self.PAD + 40)
+        return (self.PAD, self.PAD // 2,
+                width - self.PAD // 2, self.HEIGHT - self.PAD)
+
+    def _at(self, degrees, fraction):
+        left, top, right, bottom = self._plot()
+        across = (degrees - self.LOW) / float(self.HIGH - self.LOW)
+        return (left + across * (right - left),
+                bottom - fraction * (bottom - top))
+
+    def _from(self, x, y):
+        left, top, right, bottom = self._plot()
+        degrees = self.LOW + (x - left) / float(right - left) * (
+            self.HIGH - self.LOW)
+        fraction = (bottom - y) / float(bottom - top)
+        return (int(round(max(self.LOW, min(self.HIGH, degrees)))),
+                max(0.0, min(1.0, fraction)))
+
+    # -- drawing ------------------------------------------------------------
+
+    def draw(self):
+        canvas = self.canvas
+        canvas.delete("all")
+        left, top, right, bottom = self._plot()
+        grid = self.roles["outline_variant"]
+        # Gridlines and their labels, so the shape can be read rather than
+        # only felt: a curve with no scale is a picture of a curve.
+        for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
+            y = bottom - fraction * (bottom - top)
+            canvas.create_line(left, y, right, y, fill=grid, width=1)
+            canvas.create_text(left - 6, y, text="%d%%" % (fraction * 100),
+                               anchor="e", fill=self.roles["on_surface_variant"],
+                               font=("TkDefaultFont", 7))
+        for degrees in range(self.LOW, self.HIGH + 1, 20):
+            x, _ = self._at(degrees, 0)
+            canvas.create_line(x, top, x, bottom, fill=grid, width=1)
+            canvas.create_text(x, bottom + 10, text="%d°" % degrees,
+                               fill=self.roles["on_surface_variant"],
+                               font=("TkDefaultFont", 7))
+
+        points = sorted(self.curve.items())
+        if not points:
+            return
+        line = []
+        for degrees, fraction in points:
+            line.extend(self._at(degrees, fraction))
+        if len(line) >= 4:
+            canvas.create_line(*line, fill=self.roles["primary"], width=2,
+                               smooth=False)
+        for index, (degrees, fraction) in enumerate(points):
+            x, y = self._at(degrees, fraction)
+            held = self.held == index
+            canvas.create_oval(x - 5, y - 5, x + 5, y + 5, width=0,
+                               fill=self.roles["on_primary"] if held
+                               else self.roles["primary"])
+            if held:
+                canvas.create_text(
+                    x, y - 14, text="%d° %d%%" % (degrees, fraction * 100),
+                    fill=self.roles["on_surface"],
+                    font=("TkDefaultFont", 8))
+
+    # -- taking hold of it --------------------------------------------------
+
+    def _nearest(self, x, y):
+        for index, (degrees, fraction) in enumerate(sorted(self.curve.items())):
+            at_x, at_y = self._at(degrees, fraction)
+            if abs(at_x - x) <= self.GRAB and abs(at_y - y) <= self.GRAB:
+                return index
+        return None
+
+    def _press(self, event):
+        self.held = self._nearest(event.x, event.y)
+        self.draw()
+
+    def _drag(self, event):
+        if self.held is None:
+            return
+        points = sorted(self.curve.items())
+        degrees, fraction = self._from(event.x, event.y)
+        # Between its neighbours, never past them. LACT keys the curve by
+        # temperature, so a point dragged over its neighbour would not swap
+        # places with it - it would land on the same key and one of the two
+        # would cease to exist.
+        low = points[self.held - 1][0] + 1 if self.held > 0 else self.LOW
+        high = (points[self.held + 1][0] - 1
+                if self.held + 1 < len(points) else self.HIGH)
+        degrees = max(low, min(high, degrees))
+        self.curve = dict(points[:self.held] + [(degrees, fraction)]
+                          + points[self.held + 1:])
+        self.draw()
+
+    def _release(self, _event):
+        if self.held is not None:
+            self.held = None
+            self.draw()
+            self.on_change()
+
+    # -- adding and taking away ---------------------------------------------
+
+    def add(self):
+        """A point in the widest gap, which is where one is wanted."""
+        points = sorted(self.curve)
+        if len(points) < 2:
+            self.curve[(self.LOW + self.HIGH) // 2] = 0.5
+        else:
+            widest = max(zip(points, points[1:]),
+                         key=lambda pair: pair[1] - pair[0])
+            if widest[1] - widest[0] < 2:
+                return                  # no room between any two of them
+            middle = (widest[0] + widest[1]) // 2
+            self.curve[middle] = (self.curve[widest[0]]
+                                  + self.curve[widest[1]]) / 2
+        self.draw()
+        self.on_change()
+
+    def remove(self):
+        """The last point, unless there are only two left.
+
+        Two is the fewest a curve can be drawn from, and LACT wants a curve
+        rather than a point - so this stops there rather than letting the
+        graph become something that cannot be applied.
+        """
+        if len(self.curve) <= 2:
+            return
+        self.curve.pop(max(self.curve))
+        self.draw()
+        self.on_change()
+
+
 class Panel:
     def __init__(self, root):
         self.root = root
@@ -2145,8 +2366,9 @@ class Panel:
                 continue
             if key in SECTION_SETTINGS:
                 table, note = SECTION_SETTINGS[key]
-                build = (self._build_app if key == "app"
-                         else self._build_settings)
+                build = {"app": self._build_app,
+                         "power": self._build_power}.get(
+                             key, self._build_settings)
                 page = self._page(self.sections,
                                   lambda where, b=build, t=table, n=note:
                                   b(where, t, n))
@@ -2324,6 +2546,8 @@ class Panel:
             (entry[0], entry[1]) for entry in SECTIONS + (ABOUT,))[key])
         if key == "cec":
             self._catch_up_cec()
+        elif key == "power":
+            self._catch_up_gpu()
         self._tab_changed()
 
     def _build_statusbar(self, parent):
@@ -3380,6 +3604,28 @@ class Panel:
             self._preview_started = time.monotonic()
             self._preview_tick()
 
+    def _refit_page(self):
+        """Tell the open page's scroller that its content changed height.
+
+        A page's inner frame is a canvas window item, so it is exactly the
+        size the scroller last gave it: packing something into it does not
+        make it grow, and the scroller only recomputes when its size changes.
+        Nothing closes that loop on its own, so a fold that makes a page
+        taller leaves its new content squeezed into the height the page had
+        before - measured, a fan curve asking for 200 pixels was given 120 and
+        drawn with its bottom half missing.
+
+        Not the same as _fit_window, which resizes the *window*: on a window
+        already at the height the screen allows, that changes nothing and no
+        Configure ever arrives.
+        """
+        canvas = self._scrollers.get(str(self._open_page()))
+        if canvas is None:
+            return
+        self.root.update_idletasks()
+        for child in canvas.winfo_children():
+            child.event_generate("<Configure>")
+
     def _open_page(self):
         """The scrolling page actually on screen, of either notebook.
 
@@ -4214,6 +4460,272 @@ class Panel:
         if chosen:
             self.runner.start(ledpanel.notify_command(chosen))
 
+    # -- the graphics card, through LACT -----------------------------------
+
+    def _build_power(self, where, table, note):
+        """The CPU settings, and the graphics card underneath them.
+
+        Two halves that do not share an Apply, deliberately. The CPU half is
+        this project's own configuration file and goes through the window's
+        Apply with everything else; the GPU half is somebody else's daemon,
+        applies at once, and has to be confirmed within seconds or it puts
+        itself back. Putting them behind one button would mean either the CPU
+        settings inheriting a countdown they have no need of, or the GPU ones
+        losing the countdown that keeps a bad voltage survivable.
+        """
+        outer = self._build_settings(where, table, note)
+        self._gpu = None                # the last read, or None for no daemon
+        self._gpu_asked = False
+        self._gpu_error = ""
+        self._gpu_vars = {}
+        self._gpu_curve = None
+        self.gpu_box = ttk.Frame(outer, style="Page.TFrame")
+        self.gpu_box.pack(fill="x")
+        return outer
+
+    def _catch_up_gpu(self):
+        """Read the card the first time somebody opens this section."""
+        if not self._gpu_asked:
+            self._reread_gpu()
+
+    def _reread_gpu(self):
+        """Ask LACT about the card again and draw the block from the answer."""
+        self._gpu_error = ""
+        try:
+            self._gpu = ledpanel.gpu_state()
+        except lact.LactError as exc:
+            # Installed and unhappy is not the same as absent, and the block
+            # says which - "no daemon" hides the page, "would not answer" is a
+            # fault worth reading.
+            self._gpu = None
+            self._gpu_error = str(exc)
+        self._gpu_asked = True
+        self._draw_gpu()
+
+    def _draw_gpu(self):
+        """Rebuild the block. Cheap enough to do rather than to update."""
+        for child in self.gpu_box.winfo_children():
+            child.destroy()
+        self._forget_dead_labels()
+        self._gpu_vars = {}
+        self._gpu_curve = None
+        if self._gpu is None and not self._gpu_error:
+            return                      # no LACT: no block at all
+        card = ttk.Frame(self.gpu_box, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ttk.Label(inner, text="Graphics card", style="Section.TLabel").pack(
+            anchor="w", pady=(0, ROW_GAP))
+
+        said = ttk.Label(inner, justify="left", wraplength=CARD_WRAP,
+                         text=self._gpu_error or ledpanel.gpu_summary(self._gpu),
+                         style="Bad.TLabel" if self._gpu_error else "TLabel")
+        said.pack(anchor="w")
+        self._wrapped.append(said)
+        self._wrap_insets[str(said)] = 2 * GROUP_GAP
+        if self._gpu_error or not (self._gpu or {}).get("gpu"):
+            self._buttons(inner, [("Check again", self._reread_gpu)])
+            return
+
+        self._build_gpu_profiles(inner)
+        self._build_gpu_knobs(inner)
+        self._build_gpu_fan(inner)
+        self._buttons(inner, [("Apply to the card", self._apply_gpu),
+                              ("Check again", self._reread_gpu)])
+        self._refit_page()
+        self._note(inner,
+                   "Applied through LACT, which puts the old settings back "
+                   "by itself unless the change is confirmed - so a setting "
+                   "this card will not take undoes itself.").pack(
+                       anchor="w", pady=(ROW_GAP, 0))
+
+    def _build_gpu_profiles(self, inner):
+        """LACT's own saved profiles, if it has any.
+
+        Listed rather than edited. Making one is choosing settings, naming
+        them and deciding when they switch themselves on - which is LACT's
+        window's job, and copying it here would be a second, worse one.
+        """
+        names = (self._gpu or {}).get("profiles") or []
+        if not names:
+            return
+        row = ttk.Frame(inner, style="OnCard.TFrame")
+        row.pack(fill="x", pady=(GROUP_GAP, 0))
+        ttk.Label(row, text="Profile").pack(side="left", padx=(0, GROUP_GAP))
+        variable = tk.StringVar()
+        self._gpu_vars["profile"] = variable
+        current = self._gpu.get("profile") or ""
+        # The default one has no name of its own in LACT, so it is given one
+        # here - a menu with a blank entry in it is a menu with a bug in it.
+        choices = [("Default", "")] + [(name, name) for name in names]
+        self._field(row, "gpu-profile", variable, choices, current,
+                    width=BRANCH_WIDTH).pack(side="left")
+        variable.trace_add("write", lambda *_a: self._gpu_profile_chosen())
+
+    def _build_gpu_knobs(self, inner):
+        """One slider per knob this card actually reported."""
+        knobs = ledpanel.gpu_knobs(self._gpu)
+        if not knobs:
+            return
+        grid = ttk.Frame(inner, style="OnCard.TFrame")
+        grid.pack(fill="x", pady=(GROUP_GAP, 0))
+        grid.columnconfigure(1, weight=1)
+        for row, knob in enumerate(knobs):
+            ttk.Label(grid, text=knob["label"]).grid(
+                row=row, column=0, sticky="w", padx=(0, GROUP_GAP),
+                pady=(0 if row == 0 else ROW_GAP, 0))
+            variable = tk.DoubleVar(value=knob["start"])
+            self._gpu_vars[knob["key"]] = variable
+            ttk.Scale(grid, from_=knob["min"], to=knob["max"],
+                      variable=variable).grid(
+                          row=row, column=1, sticky="ew",
+                          pady=(0 if row == 0 else ROW_GAP, 0))
+            reading = ttk.Label(grid, style="Muted.TLabel", width=10)
+            reading.grid(row=row, column=2, sticky="e", padx=(GROUP_GAP, 0),
+                         pady=(0 if row == 0 else ROW_GAP, 0))
+
+            def show(*_args, box=reading, unit=knob["unit"], var=variable):
+                box.configure(text="%d %s" % (round(var.get()), unit))
+
+            variable.trace_add("write", show)
+            show()
+
+    def _build_gpu_fan(self, inner):
+        """The fan: off, a fixed speed, or a curve.
+
+        Off means the card's firmware drives it, which is what it does on a
+        machine nobody has touched - so that is the state this opens in and
+        the one the rest of the block is greyed behind.
+        """
+        fan = lact.fan((self._gpu or {}).get("config") or {})
+        holder = ttk.Frame(inner, style="OnCard.TFrame")
+        holder.pack(fill="x", pady=(GROUP_GAP, 0))
+
+        row = ttk.Frame(holder, style="OnCard.TFrame")
+        row.pack(fill="x")
+        enabled = tk.BooleanVar(value=fan["enabled"])
+        self._gpu_vars["fan_enabled"] = enabled
+        ttk.Checkbutton(row, variable=enabled,
+                        command=self._gpu_fan_changed).pack(side="left")
+        ttk.Label(row, text="Control the fan").pack(side="left",
+                                                    padx=(ROW_GAP, GROUP_GAP))
+        mode = tk.StringVar(value=fan["mode"])
+        self._gpu_vars["fan_mode"] = mode
+        self._field(row, "gpu-fan-mode", mode,
+                    [("Curve", lact.FAN_CURVE), ("Fixed speed",
+                                                 lact.FAN_STATIC)],
+                    fan["mode"], width=BRANCH_WIDTH).pack(side="left")
+        mode.trace_add("write", lambda *_a: self._gpu_fan_changed())
+
+        self.gpu_fan_body = ttk.Frame(holder, style="OnCard.TFrame")
+        self.gpu_fan_body.pack(fill="x", pady=(ROW_GAP, 0))
+
+        speed = tk.DoubleVar(value=fan["static_speed"] * 100)
+        self._gpu_vars["fan_speed"] = speed
+        self.gpu_fan_static = ttk.Frame(self.gpu_fan_body,
+                                        style="OnCard.TFrame")
+        ttk.Label(self.gpu_fan_static, text="Speed").pack(side="left",
+                                                          padx=(0, GROUP_GAP))
+        ttk.Scale(self.gpu_fan_static, from_=0, to=100,
+                  variable=speed).pack(side="left", fill="x", expand=True)
+        reading = ttk.Label(self.gpu_fan_static, style="Muted.TLabel", width=6)
+        reading.pack(side="left", padx=(GROUP_GAP, 0))
+        speed.trace_add("write",
+                        lambda *_a: reading.configure(
+                            text="%d%%" % round(speed.get())))
+        reading.configure(text="%d%%" % round(speed.get()))
+
+        self.gpu_fan_curve = ttk.Frame(self.gpu_fan_body,
+                                       style="OnCard.TFrame")
+        self._gpu_curve = FanCurve(self.gpu_fan_curve, self.roles,
+                                   fan["curve"])
+        self._gpu_curve.canvas.pack(fill="x")
+        self._buttons(self.gpu_fan_curve,
+                      [("Add a point", self._gpu_curve.add),
+                       ("Remove one", self._gpu_curve.remove)])
+        self._gpu_fan_changed()
+
+    def _gpu_fan_changed(self):
+        """Show the half of the fan settings the chosen mode uses."""
+        on = bool(self._gpu_vars["fan_enabled"].get())
+        # Through _value_for: the drop-downs in this window hold the label
+        # that is showing, not the value behind it, so comparing the variable
+        # to LACT's own word matches nothing and the wrong half is drawn.
+        curve = self._gpu_mode() == lact.FAN_CURVE
+        for frame, wanted in ((self.gpu_fan_static, on and not curve),
+                              (self.gpu_fan_curve, on and curve)):
+            if wanted:
+                frame.pack(fill="x")
+            else:
+                frame.pack_forget()
+        self._refit_page()
+        self._fit_window()
+
+    def _gpu_mode(self):
+        """Which fan mode is chosen, as LACT spells it."""
+        return self._value_for("gpu-fan-mode",
+                               self._gpu_vars["fan_mode"].get())
+
+    def _gpu_profile_chosen(self):
+        """Switching profile is not a setting to apply - it happens now.
+
+        LACT's profiles carry their own settings, so choosing one replaces
+        everything below it. The block is read again afterwards rather than
+        left showing what the last profile had.
+        """
+        wanted = self._value_for("gpu-profile", self._gpu_vars["profile"].get())
+        if wanted == (self._gpu or {}).get("profile", ""):
+            return                              # the trace fires on redraw too
+        try:
+            lact.set_profile(wanted)
+        except lact.LactError as exc:
+            self._say("Graphics card", "Could not switch profile:\n%s" % exc)
+        self._reread_gpu()
+
+    def _collect_gpu(self):
+        """The whole config, with what is on screen written into it.
+
+        The whole of it, because that is LACT's interface: set_gpu_config
+        replaces the document rather than patching it, so anything not carried
+        across is a setting silently turned off on somebody's card.
+        """
+        config = (self._gpu or {}).get("config") or {}
+        for knob in ledpanel.gpu_knobs(self._gpu):
+            variable = self._gpu_vars.get(knob["key"])
+            if variable is not None:
+                config = lact.with_knob(config, knob["key"],
+                                        round(variable.get()))
+        curve = self._gpu_curve.curve if self._gpu_curve else None
+        return lact.with_fan(
+            config,
+            enabled=bool(self._gpu_vars["fan_enabled"].get()),
+            mode=self._gpu_mode(),
+            static_speed=self._gpu_vars["fan_speed"].get() / 100.0,
+            curve=curve)
+
+    def _apply_gpu(self):
+        """Send it, then ask whether to keep it before the daemon takes it back."""
+        gpu = (self._gpu or {}).get("gpu")
+        if not gpu:
+            return
+        try:
+            seconds = lact.set_gpu_config(gpu, self._collect_gpu())
+        except lact.LactError as exc:
+            self._say("Graphics card", "The card would not take it:\n%s" % exc)
+            self._reread_gpu()
+            return
+        keep = CountdownDialog(self.root, seconds).answer
+        try:
+            lact.confirm(keep=keep)
+        except lact.LactError as exc:
+            # Confirming can fail because the window already closed and the
+            # daemon put the settings back on its own - which is the outcome
+            # the dialog was offering anyway, so it is worth saying once and
+            # not worth a fault.
+            self._write("LACT did not take the confirmation: %s\n" % exc)
+        self._reread_gpu()
+
     # -- HDMI CEC ----------------------------------------------------------
 
     def _build_cec(self, parent):
@@ -4446,6 +4958,8 @@ class Panel:
         # The foot of the window reports the same adapter from every page, so
         # it is redrawn by whatever redrew this one.
         self._say_cec_link()
+        # And the page it is on has just changed height - see _refit_page.
+        self._refit_page()
 
     def _say_cec_needs(self):
         """Name what the machine has not got, or say nothing when it has."""
@@ -4705,6 +5219,7 @@ class Panel:
     def _fold_part(self, key):
         self._open_parts.symmetric_difference_update({key})
         self.refresh_status()
+        self._refit_page()
         self._fit_window()
 
     def _repair(self, name):
