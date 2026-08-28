@@ -324,12 +324,12 @@ class ShownSettingsTest(unittest.TestCase):
                                "config", "steamos-cec-toolkit.conf.example")
         with open(example) as handle:
             text = handle.read()
-        for key, _label, _said in cec.SHOWN:
+        for key, _label, _said, _choices in cec.SHOWN:
             self.assertIn("\n%s=" % key, text,
                           "%s is not a setting the toolkit reads" % key)
 
     def test_each_one_is_labelled_and_explained(self):
-        for key, label, said in cec.SHOWN:
+        for key, label, said, _choices in cec.SHOWN:
             self.assertNotEqual(label, key)
             self.assertTrue(said.strip())
 

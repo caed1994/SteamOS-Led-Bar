@@ -534,6 +534,13 @@ CARD_RADIUS = material.SHAPE_MEDIUM
 # desktop's own font size, and tall enough for two lines with air round them -
 # both measured against the entries rather than guessed, see the tests.
 SIDEBAR_WIDTH = 268
+# What the rail may grow to when the desktop's font needs more, and the room
+# left after the longest name in it. The two lines in an entry are canvas
+# text, which neither wraps nor shortens: it is cut off at the edge of the
+# canvas, so a rail that is too narrow takes the ends off every subtitle at
+# once - see Panel._sidebar_width.
+SIDEBAR_WIDTH_MAX = 420
+SIDEBAR_TEXT_PAD = 20
 SIDEBAR_ENTRY_HEIGHT = 60
 SIDEBAR_RADIUS = material.SHAPE_MEDIUM
 SIDEBAR_ICON_X = 20
@@ -1867,15 +1874,17 @@ class SidebarEntry:
     hand. That is three bindings, and it is the price of the second line.
     """
 
-    def __init__(self, parent, roles, fonts, entry, on_pick):
+    def __init__(self, parent, roles, fonts, entry, on_pick,
+                 width=SIDEBAR_WIDTH):
         self.roles = roles
         self.key, title, subtitle, icon = entry
         self.on_pick = on_pick
         self.selected = False
         self.hovering = False
+        self.width = width
 
         self.canvas = tk.Canvas(
-            parent, width=SIDEBAR_WIDTH, height=SIDEBAR_ENTRY_HEIGHT,
+            parent, width=width, height=SIDEBAR_ENTRY_HEIGHT,
             highlightthickness=0, borderwidth=0, background=roles["_page"])
         # The pill behind it, in each of the three shades it takes. Drawn once
         # apiece and swapped, rather than redrawn on every pointer crossing:
@@ -1884,7 +1893,7 @@ class SidebarEntry:
         # down the list.
         self._grounds = {
             state: _photo(roundrect.rows(
-                SIDEBAR_WIDTH, SIDEBAR_ENTRY_HEIGHT, SIDEBAR_RADIUS,
+                width, SIDEBAR_ENTRY_HEIGHT, SIDEBAR_RADIUS,
                 colour, roles["_page"]))
             for state, colour in (
                 ("rest", roles["_page"]),
@@ -2548,17 +2557,41 @@ class Panel:
         family, size = self.roles["_font"]
         fonts = {"title": (family, size, "bold"),
                  "subtitle": (family, size + TYPE_SUPPORT)}
+        width = self._sidebar_width(fonts)
         self._sidebar_entries = {}
         about = SidebarEntry(self.sidebar, self.roles, fonts, ABOUT,
-                             self._open_section)
+                             self._open_section, width)
         about.pack(side="bottom", anchor="w")
         self._sidebar_entries[ABOUT[0]] = about
         for entry in SECTIONS:
             made = SidebarEntry(self.sidebar, self.roles, fonts, entry,
-                                self._open_section)
+                                self._open_section, width)
             made.pack(side="top", anchor="w", pady=(0, 2))
             self._sidebar_entries[entry[0]] = made
         self._open_section(SECTIONS[0][0])
+
+    def _sidebar_width(self, fonts):
+        """How wide the rail has to be for the names it is holding.
+
+        Measured rather than fixed, for the same reason the control heights
+        are: how wide a name draws is the desktop's font, not ours. At
+        Plasma's default the fixed 268 was enough, and a wider face or a
+        larger size took the end off every subtitle in the list at once -
+        canvas text is cut at the edge of its canvas, with no wrap and no
+        ellipsis to say that it was.
+
+        Never narrower than it was, so a machine with a narrow font gets the
+        rail this window was drawn around, and capped, so an enormous one
+        gets a wider rail rather than a window that is all rail.
+        """
+        measures = dict((which, tkfont.Font(root=self.root, font=font))
+                        for which, font in fonts.items())
+        want = 0
+        for _key, title, subtitle, _icon in SECTIONS + (ABOUT,):
+            want = max(want, measures["title"].measure(title),
+                       measures["subtitle"].measure(subtitle))
+        return min(SIDEBAR_WIDTH_MAX,
+                   max(SIDEBAR_WIDTH, SIDEBAR_TEXT_X + want + SIDEBAR_TEXT_PAD))
 
     def _open_section(self, key):
         """Show a section, and make the window say which one is open."""
@@ -2572,6 +2605,8 @@ class Panel:
             self._catch_up_cec()
         elif key == "power":
             self._catch_up_gpu()
+        # Once this page has a geometry, and not before - see _relay_wrapping.
+        self.root.after_idle(self._relay_wrapping)
         self._tab_changed()
 
     def _build_statusbar(self, parent):
@@ -3531,8 +3566,55 @@ class Panel:
             return
         self._wrap_width = width
         for label in self._wrapped:
+            label.configure(wraplength=max(160, width - self._inset_of(label)))
+
+    def _relay_wrapping(self):
+        """Set the wraplengths again once the page has been laid out.
+
+        The insets are measured off the widget each line stands under, and at
+        the moment the notebook first reports its width nothing on the page
+        has a position yet - so the first pass falls back to the constant and
+        the long lines go out too wide. Booked for after a section is opened,
+        when its geometry is real; on a page that was already right it sets
+        every label to what it already had.
+        """
+        if not self._wrap_width:
+            return
+        # The geometry first: an idle callback can be queued ahead of the one
+        # that lays the page out, and measuring then gives every widget the
+        # nothing it starts at - which is the fallback, which is the constant
+        # this exists to stop using.
+        self.root.update_idletasks()
+        for label in self._wrapped:
             label.configure(wraplength=max(
-                160, width - self._wrap_insets.get(str(label), 0)))
+                160, self._wrap_width - self._inset_of(label)))
+
+    def _inset_of(self, label):
+        """How much less room this label has than the page it stands on.
+
+        A number where the indent is fixed, and the widget the line is written
+        under where it is not. A switch and a column of setting names are both
+        as wide as the desktop's font draws them, so a constant measured
+        against one font is, on another, a label laid out wider than the card
+        it is in - and a label wider than its slot is not wrapped, it is cut
+        off at the card's edge. That is what sent the ends of these
+        explanations off the side of the window.
+        """
+        found = self._wrap_insets.get(str(label), 0)
+        if isinstance(found, int):
+            return found
+        try:
+            lead = found.winfo_x()
+        except tk.TclError:                                 # pragma: no cover
+            return CEC_INDENT
+        # Before the first layout every widget sits at nothing and is one
+        # pixel wide; wrapping to that would be a column of single words that
+        # a later pass would have to undo.
+        if lead <= 1:
+            return CEC_INDENT
+        # The same ground a note inside a card is given - see _note - plus
+        # however far in this line actually starts.
+        return lead + 2 * GROUP_GAP
 
     def _build_apply(self, parent):
         """Apply and Reload, once, below the tabs that have settings.
@@ -4845,6 +4927,11 @@ class Panel:
         self._cec_vars = {}
         self._cec_rows = {}
         self._cec_entries = {}
+        # The settings that are a choice rather than a typed value.
+        # Kept apart from the boxes because what a drop-down of ours
+        # holds is the label, and the file wants the value - see
+        # _value_for.
+        self._cec_menus = {}
         # Set while the switches are being put back in line with a status
         # read. Without it, writing a variable fires the same handler a click
         # does, and a refresh after a toggle would toggle everything again.
@@ -4967,7 +5054,9 @@ class Panel:
             explain.grid(row=1, column=1, sticky="w", padx=(ROW_GAP, 0),
                          pady=(2, 0))
             self._wrapped.append(explain)
-            self._wrap_insets[str(explain)] = CEC_INDENT
+            # Under the name, so the name is what says how far in it starts -
+            # which is the switch's own width, and that is the font's.
+            self._wrap_insets[str(explain)] = named
             self._cec_vars[name] = variable
             self._cec_rows[name] = (switch, named, explain)
 
@@ -5005,19 +5094,32 @@ class Panel:
         grid = ttk.Frame(inner, style="OnCard.TFrame")
         grid.pack(fill="x")
         grid.columnconfigure(1, weight=1)
-        for row, (key, label, said) in enumerate(cec.SHOWN):
+        for row, (key, label, said, choices) in enumerate(cec.SHOWN):
             ttk.Label(grid, text=label).grid(
                 row=row * 2, column=0, sticky="w",
                 padx=(0, GROUP_GAP), pady=(0 if row == 0 else ROW_GAP, 0))
-            entry = ttk.Entry(grid, style="Material.TEntry")
-            entry.grid(row=row * 2, column=1, sticky="ew",
-                       pady=(0 if row == 0 else ROW_GAP, 0))
-            self._cec_entries[key] = entry
+            if choices:
+                # A field of ours rather than a combobox, for the reasons in
+                # _field - and it takes a value the file already holds that
+                # the list does not offer, which a set of radio buttons could
+                # not have done.
+                variable = tk.StringVar()
+                widget = self._field(grid, key, variable, choices,
+                                     choices[0][1])
+                self._cec_menus[key] = variable
+            else:
+                widget = ttk.Entry(grid, style="Material.TEntry")
+                self._cec_entries[key] = widget
+            widget.grid(row=row * 2, column=1,
+                        sticky="w" if choices else "ew",
+                        pady=(0 if row == 0 else ROW_GAP, 0))
             explain = ttk.Label(grid, text=said, style="Muted.TLabel", justify="left",
                                 wraplength=CARD_WRAP - CEC_INDENT)
             explain.grid(row=row * 2 + 1, column=1, sticky="w", pady=(2, 0))
             self._wrapped.append(explain)
-            self._wrap_insets[str(explain)] = CEC_INDENT
+            # Under the box, and the column of setting names in front of it is
+            # a good deal wider than the switch CEC_INDENT was measured from.
+            self._wrap_insets[str(explain)] = widget
 
         ttk.Button(inner, text="Save these", style="Tonal.TButton",
                    command=self._save_cec_config).pack(anchor="w",
@@ -5107,6 +5209,14 @@ class Panel:
         for key, entry in self._cec_entries.items():
             entry.delete(0, "end")
             entry.insert(0, values.get(key, ""))
+        # A setting the file does not carry is the toolkit's own default,
+        # which is the first answer offered - so the field opens on what the
+        # machine actually does rather than on nothing.
+        fallbacks = dict((key, choices[0][1])
+                         for key, _l, _s, choices in cec.SHOWN if choices)
+        for key, variable in self._cec_menus.items():
+            variable.set(self._label_for(
+                key, values.get(key) or fallbacks.get(key, "")))
 
     def _reread_cec(self, then=None):
         """Ask the toolkit about itself again, and redraw from the answer."""
@@ -5172,6 +5282,8 @@ class Panel:
         """
         values = {key: entry.get().strip()
                   for key, entry in self._cec_entries.items()}
+        values.update((key, self._value_for(key, variable.get()))
+                      for key, variable in self._cec_menus.items())
         self.runner.start(cec.set_config_command(values),
                           lambda _code: self._reread_cec())
 
@@ -5656,8 +5768,7 @@ class Panel:
         for label in self._wrapped:
             if self._wrap_width:
                 label.configure(wraplength=max(
-                    160, self._wrap_width - self._wrap_insets.get(str(label),
-                                                                  0)))
+                    160, self._wrap_width - self._inset_of(label)))
 
     def reinstall(self):
         if not os.path.exists(os.path.join(SOURCE_DIR, "install.sh")):

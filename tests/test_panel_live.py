@@ -2327,7 +2327,55 @@ class CecPageTest(unittest.TestCase):
         self.assertEqual(command[1], "set-config")
         sent = json.loads(command[2])
         self.assertEqual(sent["CEC_DEVICE"], "/dev/cec1")
-        self.assertEqual(sorted(sent), sorted(k for k, _l, _s in cec.SHOWN))
+        self.assertEqual(sorted(sent), sorted(k for k, _l, _s, _c in cec.SHOWN))
+
+    def test_the_sleep_action_is_a_choice_and_not_a_typed_word(self):
+        """Two answers, one of them spelled inactive-source.
+
+        Typed into a box that is a setting which does nothing at all when the
+        hyphen is missed, with the page reporting it saved - and there is no
+        third answer for anybody to want.
+        """
+        self.assertIn("CEC_SLEEP_TV_ACTION", self.panel._cec_menus)
+        self.assertEqual(
+            [value for _label, value
+             in self.panel._menus["CEC_SLEEP_TV_ACTION"]],
+            ["standby", "inactive-source"])
+
+    def test_a_setting_the_file_does_not_carry_opens_on_the_default(self):
+        # Not on a blank: the toolkit does something when the value is not in
+        # the file, and that something is what the field has to say.
+        self.assertEqual(
+            self.panel._cec_menus["CEC_SLEEP_TV_ACTION"].get(), "Standby")
+
+    def test_saving_a_choice_sends_the_value_and_not_the_label(self):
+        """The file wants inactive-source; the window shows Inactive source.
+
+        Sending what is on screen writes a word the toolkit does not know,
+        and every part of this page would report it saved.
+        """
+        import json
+        self.panel._cec_menus["CEC_SLEEP_TV_ACTION"].set("Inactive source")
+        self.panel._save_cec_config()
+        self.assertEqual(
+            json.loads(self.ran[-1][0][2])["CEC_SLEEP_TV_ACTION"],
+            "inactive-source")
+
+    def test_a_value_the_list_does_not_offer_is_kept_rather_than_replaced(self):
+        # Editing the file by hand is how the other forty settings are meant
+        # to be used, and a value this window has never heard of is not one to
+        # quietly swap for the default.
+        self.said["config"]["CEC_SLEEP_TV_ACTION"] = "whatever-they-wrote"
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertEqual(self.panel._cec_menus["CEC_SLEEP_TV_ACTION"].get(),
+                         "whatever-they-wrote")
+
+    def test_the_delay_is_a_box_of_its_own(self):
+        # The other half of "sleep when the television switches away", which
+        # was a number in a file and nowhere on the page.
+        self.assertIn("INPUT_INACTIVE_SUSPEND_DELAY_SECONDS",
+                      self.panel._cec_entries)
 
     def test_a_box_with_spaces_round_it_is_trimmed(self):
         # A trailing space in CEC_DEVICE is a device node that does not exist,
@@ -2872,6 +2920,159 @@ class GpuBlockTest(unittest.TestCase):
         sent = [one for one in self.daemon.asked
                 if one["command"] == "set_profile"]
         self.assertEqual(sent[-1]["args"], {"name": "loud"})
+
+
+class WrappingTest(unittest.TestCase):
+    """No line of explanation laid out wider than the card it is in.
+
+    A ttk label is not shortened when it does not fit and it does not wrap on
+    its own: it is drawn to whatever wraplength says and cut off at the edge
+    of what is holding it. The wraplengths here are the page's width less how
+    far in each line starts, and that second number used to be a constant -
+    one written for the width of a switch and then borrowed for a column of
+    setting names, which is a good deal wider. Every long explanation on the
+    CEC page ran off the side of its card.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        was = cec.installed
+        cec.installed = lambda home=None: True
+        self.addCleanup(lambda: setattr(cec, "installed", was))
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: {
+                "cec_device": {"device": "/dev/cec0", "exists": True,
+                               "readable": True, "writable": True},
+                "services": {}, "system_services": {},
+                "external_volume": {"enabled": False},
+                "config": {"CEC_DEVICE": "/dev/cec0"}})
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _card_of(self, widget):
+        up = widget.master
+        while up is not None:
+            try:
+                if str(up.cget("style")) == "Card.TFrame":
+                    return up
+            except tk.TclError:
+                pass
+            up = getattr(up, "master", None)
+        return None
+
+    def _too_wide(self, key):
+        self.panel._open_section(key)
+        for _ in range(4):
+            self.root.update_idletasks()
+            self.root.update()
+        out = []
+        for label in self.panel._wrapped:
+            if not label.winfo_ismapped():
+                continue
+            card = self._card_of(label)
+            if card is None:
+                continue
+            room = (card.winfo_rootx() + card.winfo_width()
+                    - label.winfo_rootx())
+            if label.winfo_reqwidth() > room:
+                out.append((label.cget("text")[:40],
+                            label.winfo_reqwidth() - room))
+        return out
+
+    def test_nothing_on_the_cec_page_runs_off_its_card(self):
+        # The page this was found on: the settings there stand behind a whole
+        # column of names, and the constant said a switch.
+        self.assertEqual(self._too_wide("cec"), [])
+
+    def test_nor_on_the_pages_that_were_already_right(self):
+        for key in ("strip", "power", "keyboard"):
+            self.assertEqual(self._too_wide(key), [], key)
+
+
+class SidebarWidthTest(unittest.TestCase):
+    """The rail is as wide as the names in it need.
+
+    Its two lines are canvas text, which neither wraps nor shortens - it is
+    cut at the edge of the canvas - and how wide they draw is the desktop's
+    font. The fixed width was enough for Plasma's default and took the ends
+    off every subtitle at once on anything larger.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _fonts(self, size):
+        return {"title": ("DejaVu Sans", size, "bold"),
+                "subtitle": ("DejaVu Sans",
+                             size + self.panel_module.TYPE_SUPPORT)}
+
+    def test_a_bigger_font_gets_a_wider_rail(self):
+        small = self.panel._sidebar_width(self._fonts(9))
+        large = self.panel._sidebar_width(self._fonts(16))
+        self.assertGreater(large, small)
+
+    def test_it_is_never_narrower_than_the_window_was_drawn_for(self):
+        # A narrow font gets the rail this window was laid out around rather
+        # than a rail that hugs the words.
+        self.assertGreaterEqual(self.panel._sidebar_width(self._fonts(6)),
+                                self.panel_module.SIDEBAR_WIDTH)
+
+    def test_nor_wider_than_the_window_can_spare(self):
+        self.assertLessEqual(self.panel._sidebar_width(self._fonts(40)),
+                             self.panel_module.SIDEBAR_WIDTH_MAX)
+
+    def test_no_name_is_cut_off_at_a_font_this_machine_does_not_use(self):
+        """The case the fixed width lost, built here rather than waited for.
+
+        This container's font fits the old 268 either way, so the rail can
+        only be caught being too narrow by drawing it at a size somebody
+        else's desktop would ask for.
+        """
+        fonts = self._fonts(16)
+        width = self.panel._sidebar_width(fonts)
+        for entry in self.panel_module.SECTIONS + (self.panel_module.ABOUT,):
+            made = self.panel_module.SidebarEntry(
+                self.root, self.panel.roles, fonts, entry,
+                lambda _key: None, width)
+            self.root.update_idletasks()
+            for item in made.canvas.find_all():
+                if made.canvas.type(item) != "text":
+                    continue
+                self.assertLessEqual(
+                    made.canvas.bbox(item)[2], width,
+                    "%s: %r" % (entry[0], made.canvas.itemcget(item, "text")))
+
+    def test_no_name_in_the_rail_is_cut_off(self):
+        for key, entry in self.panel._sidebar_entries.items():
+            for item in entry.canvas.find_all():
+                if entry.canvas.type(item) != "text":
+                    continue
+                right = entry.canvas.bbox(item)[2]
+                self.assertLessEqual(
+                    right, entry.width,
+                    "%s: %r" % (key, entry.canvas.itemcget(item, "text")))
 
 
 class NewerCardBlockTest(unittest.TestCase):

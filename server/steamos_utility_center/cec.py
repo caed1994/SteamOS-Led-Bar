@@ -128,14 +128,35 @@ NEEDS = (
 # are the ones whose wrong value stops CEC working at all, and the rest are
 # tuning for particular televisions and controllers that belongs in the file
 # with its comments around it.
+# (key, label, explanation, choices)
+#
+# `choices` is (label, value) pairs for a setting that has a fixed set of
+# answers, and empty for one that is typed. The first pair is what the
+# toolkit does when the setting is not in the file at all, so a drop-down
+# opens on the behaviour somebody would get anyway rather than on a blank.
+#
+# The last two belong to a switch on the same page rather than to the adapter,
+# and say so: a feature whose behaviour is decided by a value in a file is a
+# feature half of which is not on the page, which is what sent somebody to the
+# config file with a text editor.
 SHOWN = (
     ("CEC_DEVICE", "CEC adapter",
-     "The adapter's device node, usually /dev/cec0."),
+     "The adapter's device node, usually /dev/cec0.", ()),
     ("CEC_AUDIO_LOGICAL_ADDRESS", "Which device has the volume",
      "5 is an amplifier or soundbar. Use 0 when the television itself makes "
-     "the sound."),
+     "the sound.", ()),
     ("HDMI_ALSA_CARD_NAME", "HDMI sound card",
-     "The PipeWire card the television is on. Discover Audio fills this in."),
+     "The PipeWire card the television is on. Discover Audio fills this in.",
+     ()),
+    ("CEC_SLEEP_TV_ACTION", "What sleep sends the television",
+     "For \u201cTurn the television off with the machine\u201d. Standby turns "
+     "most televisions and receivers off; Inactive source is for the sets "
+     "that cold-boot from a standby instead, some Philips ones among them.",
+     (("Standby", "standby"), ("Inactive source", "inactive-source"))),
+    ("INPUT_INACTIVE_SUSPEND_DELAY_SECONDS", "Wait before sleeping (seconds)",
+     "For \u201cSleep when the television switches away\u201d: how long the "
+     "television has to have been on another input first. 60 when it is not "
+     "set.", ()),
 )
 
 
