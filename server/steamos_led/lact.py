@@ -102,6 +102,34 @@ FAN_CURVE = "curve"
 STARTING_CURVE = {40: 0.3, 50: 0.35, 60: 0.5, 70: 0.75, 80: 1.0}
 
 
+# The fan settings that live in the card's *firmware* rather than in LACT's
+# own control loop - RDNA3 and newer. Each entry is
+#
+#     (reported-as, written-as, label, unit)
+#
+# and the two names differ for four of the six, which is the thing to get
+# wrong here: the daemon reports `target_temp` and accepts `target_temperature`,
+# reports `zero_rpm_enable` and accepts `zero_rpm`, reports
+# `zero_rpm_temperature` and accepts `zero_rpm_threshold`. Written out as one
+# table so there is a single place they can disagree.
+#
+# The labels and units are LACT's own words, so somebody reading its window
+# and this one is reading the same names for the same things.
+FIRMWARE = (
+    ("zero_rpm_enable", "zero_rpm", "Zero RPM", ""),
+    ("zero_rpm_temperature", "zero_rpm_threshold",
+     "Zero RPM stop temperature", "\u00b0C"),
+    ("target_temp", "target_temperature", "Target temperature", "\u00b0C"),
+    ("acoustic_limit", "acoustic_limit", "Acoustic limit", "RPM"),
+    ("acoustic_target", "acoustic_target", "Acoustic target", "RPM"),
+    ("minimum_pwm", "minimum_pwm", "Minimum fan speed", "%"),
+)
+
+# Where they sit in the config document, and where the card reports them.
+FIRMWARE_CONFIG = "pmfw_options"
+FIRMWARE_REPORT = "pmfw_info"
+
+
 class LactError(Exception):
     """The daemon is not there, would not answer, or refused what was asked."""
 
@@ -444,6 +472,65 @@ def fan(config):
         "curve": curve or dict(STARTING_CURVE),
         "temperature_key": settings.get("temperature_key") or "edge",
     }
+
+
+def firmware(found_stats):
+    """The firmware fan settings this card actually has.
+
+    The card is asked, and the asking is the capability test: the daemon
+    reads each of these out of sysfs and reports the ones whose file exists,
+    so a card without them - anything before RDNA3 - reports nothing and gets
+    no controls rather than controls that write nowhere. It is upstream's own
+    rule; its window gates them the same way.
+
+    Reported whether or not LACT is driving the fan, because these are the
+    firmware's settings rather than LACT's: they apply while the card is
+    looking after its own fan, which is the state most people leave it in.
+    """
+    info = ((found_stats or {}).get("fan") or {}).get(FIRMWARE_REPORT) or {}
+    out = []
+    for key, writes, label, unit in FIRMWARE:
+        if key not in info or info[key] is None:
+            continue
+        said = info[key]
+        if isinstance(said, bool):
+            out.append({"key": writes, "label": label, "unit": unit,
+                        "switch": True, "value": said})
+            continue
+        if not isinstance(said, dict):
+            continue
+        current = _number(said.get("current"))
+        span = said.get("allowed_range")
+        if isinstance(span, (list, tuple)) and len(span) == 2:
+            low, high = _number(span[0]), _number(span[1])
+        else:
+            # What upstream falls back to when the card reports a value with
+            # no range: from nothing up to where it is now.
+            low, high = 0, current
+        if low is None or high is None or high <= low:
+            continue
+        out.append({"key": writes, "label": label, "unit": unit,
+                    "switch": False, "value": current,
+                    "min": int(low), "max": int(high)})
+    return out
+
+
+def with_firmware(config, values):
+    """A copy of the config with the firmware fan settings written in.
+
+    Into their own block, which is neither where the fan curve lives nor the
+    top level - a third place, and the only reason this function exists is so
+    that nothing else has to know which.
+    """
+    made = dict(config or {})
+    options = dict(made.get(FIRMWARE_CONFIG) or {})
+    for key, value in values.items():
+        if value is None:
+            options.pop(key, None)
+        else:
+            options[key] = bool(value) if isinstance(value, bool) else int(value)
+    made[FIRMWARE_CONFIG] = options
+    return made
 
 
 def with_fan(config, enabled=None, mode=None, static_speed=None, curve=None):

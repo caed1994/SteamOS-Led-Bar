@@ -507,6 +507,159 @@ class FanTest(unittest.TestCase):
             self.assertEqual(made["fan_control_settings"]["mode"], mode)
 
 
+# What an RDNA3+ card reports beside its fan stats. Older cards report none of
+# it: the daemon reads each out of sysfs and keeps the ones whose file exists.
+RDNA3_FAN = {"fan": {"pmfw_info": {
+    "zero_rpm_enable": True,
+    "zero_rpm_temperature": {"current": 50, "allowed_range": [0, 100]},
+    "target_temp": {"current": 83, "allowed_range": [25, 105]},
+    "acoustic_limit": {"current": 3200, "allowed_range": [500, 3200]},
+    "acoustic_target": {"current": 1450, "allowed_range": [500, 3200]},
+    "minimum_pwm": {"current": 15, "allowed_range": [0, 100]},
+}}}
+
+
+class FirmwareFanTest(unittest.TestCase):
+    """The settings that live in the card's firmware, RDNA3 and newer."""
+
+    def test_an_older_card_reports_none_of_it_and_gets_nothing(self):
+        """Which is the whole detection, and it is upstream's own.
+
+        The daemon reads each of these out of sysfs and keeps the ones whose
+        file exists, so a 6000-series card reports an empty block. Drawing
+        them anyway would be six controls that write nowhere.
+        """
+        for empty in ({}, {"fan": {}}, {"fan": {"pmfw_info": {}}}, None):
+            self.assertEqual(lact.firmware(empty), [], empty)
+
+    def test_a_newer_card_gets_all_six(self):
+        found = lact.firmware(RDNA3_FAN)
+        self.assertEqual(len(found), len(lact.FIRMWARE))
+
+    def test_zero_rpm_is_a_switch_and_the_rest_are_numbers(self):
+        found = {one["key"]: one for one in lact.firmware(RDNA3_FAN)}
+        self.assertTrue(found["zero_rpm"]["switch"])
+        self.assertTrue(found["zero_rpm"]["value"])
+        self.assertFalse(found["target_temperature"]["switch"])
+
+    def test_each_number_carries_the_range_the_card_allows(self):
+        found = {one["key"]: one for one in lact.firmware(RDNA3_FAN)}
+        self.assertEqual((found["acoustic_limit"]["min"],
+                          found["acoustic_limit"]["max"]), (500, 3200))
+        self.assertEqual(found["acoustic_limit"]["value"], 3200)
+
+    def test_a_card_reporting_only_some_of_them_gets_only_those(self):
+        # Not all of RDNA3 exposes all six, and a partial answer is the
+        # ordinary case rather than a broken one.
+        found = lact.firmware({"fan": {"pmfw_info": {
+            "zero_rpm_enable": False,
+            "target_temp": {"current": 83, "allowed_range": [25, 105]}}}})
+        self.assertEqual([one["key"] for one in found],
+                         ["zero_rpm", "target_temperature"])
+
+    def test_a_value_with_no_range_gets_one_from_nothing_up_to_itself(self):
+        # What upstream falls back to, so the two windows agree.
+        found = lact.firmware({"fan": {"pmfw_info": {
+            "acoustic_limit": {"current": 3000}}}})
+        self.assertEqual((found[0]["min"], found[0]["max"]), (0, 3000))
+
+    def test_a_range_that_cannot_be_a_range_is_left_out(self):
+        # Nothing to move a slider through, so nothing to draw. A value of
+        # zero with no range is the case that matters: 0 to 0 is not a range.
+        for bad in ({"current": 0}, {"current": 50, "allowed_range": [80, 20]},
+                    "nonsense", 5):
+            found = lact.firmware({"fan": {"pmfw_info": {
+                "acoustic_limit": bad}}})
+            self.assertEqual(found, [], bad)
+
+    def test_a_range_of_the_wrong_shape_falls_back_like_a_missing_one(self):
+        """Rather than dropping the control.
+
+        The value is real either way - only the range is not what was
+        expected - and 0 up to where it is now is both upstream's own fallback
+        and a range somebody can use. Refusing would hide a setting the card
+        genuinely has because of a field this panel misread.
+        """
+        found = lact.firmware({"fan": {"pmfw_info": {
+            "acoustic_limit": {"current": 50, "allowed_range": "nonsense"}}}})
+        self.assertEqual((found[0]["min"], found[0]["max"]), (0, 50))
+
+    def test_it_is_reported_whether_or_not_lact_drives_the_fan(self):
+        """These are the firmware's settings, not LACT's control loop.
+
+        They apply while the card is looking after its own fan, which is the
+        state most people leave it in - so gating them on fan control being
+        switched on would hide them from exactly the people they are for.
+        """
+        self.assertTrue(lact.firmware(RDNA3_FAN))
+
+    def test_the_two_names_for_each_setting_are_kept_apart(self):
+        """Four of the six are reported under one name and written under
+        another, which is the thing to get wrong here.
+        """
+        reported = {key for key, _w, _l, _u in lact.FIRMWARE}
+        written = {writes for _k, writes, _l, _u in lact.FIRMWARE}
+        self.assertIn("zero_rpm_enable", reported)
+        self.assertIn("zero_rpm", written)
+        self.assertNotIn("zero_rpm_enable", written)
+        self.assertEqual(len(written), len(lact.FIRMWARE),
+                         "two settings write to the same key")
+
+    def test_every_setting_we_name_is_one_a_card_actually_reports(self):
+        # LACT is not vendored, so there is no schema here to read the names
+        # off. What can be checked is that the recorded shape of a real card's
+        # answer covers every one of them - a name invented here would show up
+        # as a control that never appears on any hardware.
+        for key, _writes, _label, _unit in lact.FIRMWARE:
+            self.assertIn(key, RDNA3_FAN["fan"]["pmfw_info"], key)
+
+    def test_each_one_is_labelled_and_carries_its_unit(self):
+        for key, writes, label, unit in lact.FIRMWARE:
+            self.assertTrue(label.strip(), key)
+            self.assertNotEqual(label, writes, key)
+            # Zero RPM is a switch and has no unit; everything else does.
+            self.assertEqual(bool(unit), writes != "zero_rpm", key)
+
+
+class FirmwareWritingTest(unittest.TestCase):
+
+    def test_they_go_into_their_own_block(self):
+        """A third place, neither the top level nor the fan settings.
+
+        Which is the only reason this function exists: everything else in the
+        page can then write a firmware setting without knowing where it lives.
+        """
+        made = lact.with_firmware(CONFIG, {"zero_rpm": True,
+                                           "acoustic_limit": 2000})
+        self.assertEqual(made[lact.FIRMWARE_CONFIG],
+                         {"zero_rpm": True, "acoustic_limit": 2000})
+        self.assertNotIn("zero_rpm", made)
+
+    def test_the_rest_of_the_config_survives(self):
+        made = lact.with_firmware(CONFIG, {"zero_rpm": True})
+        self.assertEqual(made["fan_control_settings"],
+                         CONFIG["fan_control_settings"])
+        self.assertEqual(made["power_cap"], CONFIG["power_cap"])
+
+    def test_a_switch_stays_a_boolean_and_a_number_becomes_one(self):
+        # The daemon refuses the document if a boolean field carries 1.
+        made = lact.with_firmware({}, {"zero_rpm": True,
+                                       "acoustic_limit": 2000.7})
+        self.assertIs(made[lact.FIRMWARE_CONFIG]["zero_rpm"], True)
+        self.assertEqual(made[lact.FIRMWARE_CONFIG]["acoustic_limit"], 2000)
+
+    def test_clearing_one_takes_the_key_out_rather_than_writing_zero(self):
+        made = lact.with_firmware(
+            lact.with_firmware({}, {"acoustic_limit": 2000}),
+            {"acoustic_limit": None})
+        self.assertNotIn("acoustic_limit", made[lact.FIRMWARE_CONFIG])
+
+    def test_the_original_is_not_changed(self):
+        before = json.dumps(CONFIG, sort_keys=True)
+        lact.with_firmware(CONFIG, {"zero_rpm": True})
+        self.assertEqual(json.dumps(CONFIG, sort_keys=True), before)
+
+
 class KnobWritingTest(unittest.TestCase):
 
     def test_the_power_cap_is_a_field_of_its_own(self):

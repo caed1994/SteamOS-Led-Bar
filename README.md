@@ -804,12 +804,21 @@ things people reach for are in the same window as everything else.
 | **Maximum GPU clock** / **Maximum VRAM clock** | ceilings, not targets |
 | **Voltage offset** | undervolting, in millivolts either side of stock |
 | **Fan** | off, a fixed speed, or a curve you drag by its points |
+| **The card's own fan settings** | Zero RPM and its stop temperature, target temperature, acoustic limit and target, minimum fan speed &mdash; **RDNA3 and newer only**, see below |
 
 **Only what your card actually reports is drawn.** The ranges come from LACT's
 own description of that GPU, so a card with no clocks table &mdash; which is
 most integrated graphics, and may be this machine &mdash; gets a power slider
 and nothing else. Four sliders that write nowhere would be worse than one that
 works.
+
+**The last row is the firmware's, not LACT's.** Those settings live in the
+card itself and apply whether or not the switch above them is on &mdash; which
+is the point, since leaving the card to look after its own fan is what most
+people do. They appear only on cards that have them: LACT reads each one out
+of sysfs and reports the ones whose file exists, so a 6000-series card shows
+none of them and a 7000 or 9000 series shows what it has. Not every RDNA3 card
+exposes all six, and a partial answer is ordinary rather than a fault.
 
 **Clocks and voltage need overdrive turned on in the amdgpu driver**, which is
 a modprobe option and a reboot. LACT's own window has the switch for it and

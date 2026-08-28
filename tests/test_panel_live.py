@@ -28,7 +28,7 @@ import syssettings                                          # noqa: E402
 from steamos_led import cec                                 # noqa: E402
 from steamos_led import lact                                # noqa: E402
 from test_lact import (FakeDaemon, DEVICES, STATS, CLOCKS,  # noqa: E402
-                       CONFIG)
+                       CONFIG, RDNA3_FAN)
 
 try:
     import tkinter as tk
@@ -2615,6 +2615,85 @@ class GpuBlockTest(unittest.TestCase):
             self.root.update()
         canvas = self.panel._gpu_curve.canvas
         self.assertEqual(canvas.winfo_height(), canvas.winfo_reqheight())
+
+    # -- the card's own fan settings ---------------------------------------
+
+    def _with_firmware(self):
+        """Redraw the block as if the card were an RDNA3 one."""
+        answers = dict(self._answers())
+        answers["device_stats"] = dict(STATS, **RDNA3_FAN)
+        newer = FakeDaemon(answers=answers)
+        self.addCleanup(newer.close)
+        self._point_at(newer.path)
+        self.panel._reread_gpu()
+        self.root.update()
+        return newer
+
+    def test_an_older_card_gets_none_of_the_firmware_settings(self):
+        """The 6000-series case, and the whole point of the detection.
+
+        LACT reads each of these out of sysfs and reports the ones whose file
+        exists, so an older card reports none - and the block is absent rather
+        than a row of controls that write nowhere.
+        """
+        firmware = [key for key in self.panel._gpu_vars
+                    if key.startswith("fw:")]
+        self.assertEqual(firmware, [])
+
+    def test_a_newer_card_gets_all_six(self):
+        self._with_firmware()
+        firmware = sorted(key[3:] for key in self.panel._gpu_vars
+                          if key.startswith("fw:"))
+        self.assertEqual(firmware,
+                         sorted(writes for _k, writes, _l, _u
+                                in lact.FIRMWARE))
+
+    def test_the_switch_and_the_sliders_open_on_what_the_card_reports(self):
+        self._with_firmware()
+        self.assertTrue(self.panel._gpu_vars["fw:zero_rpm"].get())
+        self.assertEqual(
+            round(self.panel._gpu_vars["fw:acoustic_limit"].get()), 3200)
+
+    def test_they_are_written_under_the_names_the_daemon_accepts(self):
+        """Four of the six are reported under one name and set under another.
+
+        A page that sent back what it read would write `zero_rpm_enable`,
+        which the daemon does not know - and would accept the document, since
+        it is an unknown key rather than a bad one.
+        """
+        self._with_firmware()
+        made = self.panel._collect_gpu()
+        block = made[lact.FIRMWARE_CONFIG]
+        self.assertIn("zero_rpm", block)
+        self.assertNotIn("zero_rpm_enable", block)
+        self.assertIn("target_temperature", block)
+        self.assertNotIn("target_temp", block)
+
+    def test_they_go_back_even_while_lact_is_not_driving_the_fan(self):
+        """They are the firmware's settings, not LACT's control loop.
+
+        Collected only when the switch above is on, they would be
+        unreachable for exactly the people they are for: somebody leaving the
+        card to look after its own fan.
+        """
+        self._with_firmware()
+        self.panel._gpu_vars["fan_enabled"].set(False)
+        made = self.panel._collect_gpu()
+        self.assertFalse(made["fan_control_enabled"])
+        self.assertIn("zero_rpm", made[lact.FIRMWARE_CONFIG])
+
+    def test_a_card_reporting_only_some_of_them_gets_only_those(self):
+        answers = dict(self._answers())
+        answers["device_stats"] = dict(STATS, **{"fan": {"pmfw_info": {
+            "zero_rpm_enable": False}}})
+        partial = FakeDaemon(answers=answers)
+        self.addCleanup(partial.close)
+        self._point_at(partial.path)
+        self.panel._reread_gpu()
+        self.root.update()
+        firmware = [key for key in self.panel._gpu_vars
+                    if key.startswith("fw:")]
+        self.assertEqual(firmware, ["fw:zero_rpm"])
 
     # -- sending it back ---------------------------------------------------
 

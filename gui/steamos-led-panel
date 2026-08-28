@@ -4649,7 +4649,67 @@ class Panel:
         self._buttons(self.gpu_fan_curve,
                       [("Add a point", self._gpu_curve.add),
                        ("Remove one", self._gpu_curve.remove)])
+        self._build_gpu_firmware(holder)
         self._gpu_fan_changed()
+
+    def _build_gpu_firmware(self, holder):
+        """The card's own fan settings, on the cards that have them.
+
+        Outside the "control the fan" switch above, deliberately: these live
+        in the firmware rather than in LACT's control loop, so they apply
+        while the card is looking after its own fan - which is the state most
+        people leave it in, and so exactly the people these are for.
+
+        Drawn only for what the card reports. LACT reads each of them out of
+        sysfs and reports the ones whose file exists, so anything before RDNA3
+        reports none and gets none - and this block is not there at all rather
+        than empty.
+        """
+        offered = lact.firmware((self._gpu or {}).get("stats") or {})
+        if not offered:
+            return
+        ttk.Label(holder, text="The card's own fan settings",
+                  style="Section.TLabel").pack(anchor="w",
+                                               pady=(GROUP_GAP, ROW_GAP))
+        said = self._note(
+            holder,
+            "These are the firmware's, not LACT's, so they apply whether or "
+            "not the switch above is on. Only the ones this card reports are "
+            "shown.")
+        said.pack(anchor="w", pady=(0, ROW_GAP))
+
+        grid = ttk.Frame(holder, style="OnCard.TFrame")
+        grid.pack(fill="x")
+        grid.columnconfigure(1, weight=1)
+        for row, one in enumerate(offered):
+            if one["switch"]:
+                variable = tk.BooleanVar(value=bool(one["value"]))
+                box = ttk.Frame(grid, style="OnCard.TFrame")
+                box.grid(row=row, column=0, columnspan=3, sticky="w",
+                         pady=(0 if row == 0 else ROW_GAP, 0))
+                ttk.Checkbutton(box, variable=variable).pack(side="left")
+                ttk.Label(box, text=one["label"]).pack(side="left",
+                                                       padx=(ROW_GAP, 0))
+                self._gpu_vars["fw:" + one["key"]] = variable
+                continue
+            ttk.Label(grid, text="%s (%s)" % (one["label"], one["unit"])).grid(
+                row=row, column=0, sticky="w", padx=(0, GROUP_GAP),
+                pady=(0 if row == 0 else ROW_GAP, 0))
+            variable = tk.DoubleVar(value=one["value"])
+            self._gpu_vars["fw:" + one["key"]] = variable
+            ttk.Scale(grid, from_=one["min"], to=one["max"],
+                      variable=variable).grid(
+                          row=row, column=1, sticky="ew",
+                          pady=(0 if row == 0 else ROW_GAP, 0))
+            reading = ttk.Label(grid, style="Muted.TLabel", width=8)
+            reading.grid(row=row, column=2, sticky="e", padx=(GROUP_GAP, 0),
+                         pady=(0 if row == 0 else ROW_GAP, 0))
+
+            def show(*_args, box=reading, var=variable):
+                box.configure(text="%d" % round(var.get()))
+
+            variable.trace_add("write", show)
+            show()
 
     def _gpu_fan_changed(self):
         """Show the half of the fan settings the chosen mode uses."""
@@ -4701,6 +4761,11 @@ class Panel:
             if variable is not None:
                 config = lact.with_knob(config, knob["key"],
                                         round(variable.get()))
+        # The firmware's own settings, which are a third place in the document
+        # and are collected whether or not LACT is driving the fan.
+        config = lact.with_firmware(config, {
+            key[len("fw:"):]: variable.get() for key, variable
+            in self._gpu_vars.items() if key.startswith("fw:")})
         curve = self._gpu_curve.curve if self._gpu_curve else None
         return lact.with_fan(
             config,
