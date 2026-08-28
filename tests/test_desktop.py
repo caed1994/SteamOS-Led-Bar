@@ -413,6 +413,26 @@ class SourcesForTheSceneTest(unittest.TestCase):
                             "the temperature scene is still drawing the "
                             "rainbow")
 
+    def test_every_pairing_of_the_two_settings_draws_the_scene(self):
+        """All of them, because which pairing broke was not obvious.
+
+        It was reported as happening with RAINBOW_SHOWS=temperature and
+        DESKTOP_SCENE=load - one pairing out of ten, which sounds like
+        something about those two effects together. It was not: every pairing
+        was broken *except* the two where both settings happen to name the
+        same effect, and those two are the ones anybody testing this reaches
+        for. So the shape of the bug was the whole grid minus its diagonal,
+        and a test that checked a case or two could sit on that diagonal
+        without meaning to. This walks the grid.
+        """
+        for shows in render.RAINBOW_CHOICES:
+            for scene in (desktop.SCENE_LOAD, desktop.SCENE_TEMPERATURE):
+                self.assertNotEqual(
+                    self._drawn(scene, RAINBOW_SHOWS=shows),
+                    self._drawn(desktop.SCENE_RAINBOW, RAINBOW_SHOWS=shows),
+                    "DESKTOP_SCENE=%s with RAINBOW_SHOWS=%s draws the rainbow"
+                    % (scene, shows))
+
     def test_the_gauges_look_the_same_whichever_mode_asked_for_them(self):
         """And the fix did not make the desktop's gauge a different gauge.
 
