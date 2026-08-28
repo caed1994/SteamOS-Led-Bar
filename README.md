@@ -583,7 +583,7 @@ enough settings to need it, has its own list of pages inside.
 | Section | What is in it |
 | ------- | ------------- |
 | **LED Strip** | everything about the bar. Seven pages, below |
-| **EPP & Governor** | the CPU governor and the energy preference &mdash; see [CPU power](#cpu-power) |
+| **CPU & GPU power** | the CPU governor and energy preference, and the graphics card if [LACT](#the-graphics-card) is running &mdash; see [CPU power](#cpu-power) |
 | **HDMI CEC Mods** | talking to the television over HDMI &mdash; see [HDMI CEC](#hdmi-cec) |
 | **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
 | **Status** | how every part of the toolbox is doing, each with the button that repairs it |
@@ -617,8 +617,9 @@ which is the better place to watch it:
 
 ### Status
 
-One block per part of the toolbox &mdash; the LED bar, CPU power, HDMI CEC,
-the keyboard layout and the panel itself &mdash; each with a light, a sentence
+One block per part of the toolbox &mdash; the LED bar, CPU power, the
+[graphics card](#the-graphics-card), HDMI CEC, the keyboard layout and the
+panel itself &mdash; each with a light, a sentence
 saying how it is, a fold for the detail behind it, and the one button that
 repairs *that* part. The repairs stay here rather than moving to the pages
 they belong to: this is where you find out something is broken, and walking to
@@ -684,7 +685,7 @@ a PNG in as `gui/steamos-led-panel.png` and run `sudo ./install.sh --yes`.
 
 ### CPU power
 
-Two settings on the **EPP & Governor** page, both read off your own machine
+Two settings at the top of the **CPU & GPU power** page, both read off your own machine
 rather than from a list:
 
 | | |
@@ -785,6 +786,47 @@ something worth keeping, `vendor/steamos-cec-toolkit/UPSTREAM` records the
 commit the tree came from, which is what makes a later upstream merge a
 three-way diff rather than a guess &mdash; and upstream is a better home for a
 fix than this fork is.
+
+### The graphics card
+
+Under the CPU settings, and **only when [LACT](https://github.com/ilya-zlobintsev/LACT)
+is running**. LACT is somebody else's daemon and nothing here installs it: if
+`/run/lactd.sock` is not there, this part of the page is not either.
+
+None of the graphics work is this project's. What the panel adds is a block
+that reads the card through LACT's socket and writes back through it, so the
+things people reach for are in the same window as everything else.
+
+| | |
+| --- | --- |
+| **Profile** | switches between the profiles you made in LACT. Choosing one takes effect at once, because a profile carries its own settings and replaces everything below it |
+| **Power limit** | the card's TDP, in watts |
+| **Maximum GPU clock** / **Maximum VRAM clock** | ceilings, not targets |
+| **Voltage offset** | undervolting, in millivolts either side of stock |
+| **Fan** | off, a fixed speed, or a curve you drag by its points |
+
+**Only what your card actually reports is drawn.** The ranges come from LACT's
+own description of that GPU, so a card with no clocks table &mdash; which is
+most integrated graphics, and may be this machine &mdash; gets a power slider
+and nothing else. Four sliders that write nowhere would be worse than one that
+works.
+
+**Clocks and voltage need overdrive turned on in the amdgpu driver**, which is
+a modprobe option and a reboot. LACT's own window has the switch for it and
+its wiki has the
+[page](https://github.com/ilya-zlobintsev/LACT/wiki/Overclocking-(AMD)).
+Until then those sliders may be there and refused.
+
+**Applying asks whether to keep it.** LACT puts the old settings back by
+itself unless the change is confirmed within a few seconds, so the panel shows
+a countdown and answers "put them back" if nobody presses anything &mdash;
+which is exactly the case that timer exists for. A clock the card cannot hold
+makes the screen go black, and then nobody is going to press anything.
+
+**No password.** LACT's daemon gives its socket to the `wheel` group, which on
+SteamOS the desktop user is in. If yours is set up differently, `admin_group`
+in `/etc/lact/config.yaml` names the group that may talk to it, and the block
+says so rather than failing quietly.
 
 ### Keyboard layout
 
@@ -973,6 +1015,12 @@ records. Every part of [HDMI CEC](#hdmi-cec) is that project's work; this one
 adds the installation and the switches. Its Decky plugin and screenshots were
 left out, nothing else. The copyright and the MIT terms stay with it, in
 [vendor/steamos-cec-toolkit/LICENSE](vendor/steamos-cec-toolkit/LICENSE).
+
+The graphics card settings are **[LACT](https://github.com/ilya-zlobintsev/LACT)**
+by **Ilya Zlobintsev**, MIT-licensed. None of it is included here and nothing
+installs it: the panel talks to its daemon over the socket it already listens
+on, and shows nothing at all when it is not running. Every bit of the
+knowing-what-a-GPU-will-take is that project's.
 
 The firmware is built on **[NeoPixelBus](https://github.com/Makuna/NeoPixelBus)**
 by Michael C. Miller (LGPL-3.0-or-later), which clocks the WS2812 protocol, and

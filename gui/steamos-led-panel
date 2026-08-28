@@ -357,7 +357,7 @@ APP_KEYS = frozenset(appsettings.DEFAULTS)
 # SidebarEntry, which is where the names are answered.
 SECTIONS = (
     ("strip", "LED Strip", "Configure the lighting", "strip"),
-    ("power", "EPP & Governor", "Performance and power", "bolt"),
+    ("power", "CPU & GPU power", "Governor, EPP and the card", "bolt"),
     ("cec", "HDMI CEC Mods", "Control and tweaks", "screen"),
     ("keyboard", "Keyboard Layout", "Layout for the session", "keys"),
     # Not a page of the LED strip's, which is where it used to be. What it
@@ -396,6 +396,11 @@ ABOUT_LINES = (
      "Every part of it is the SteamOS CEC Toolkit by Twsts, MIT-licensed, "
      "kept in this repository under vendor/. This panel installs it and "
      "switches its features on and off; none of the CEC work is ours."),
+    ("Graphics card",
+     "LACT by Ilya Zlobintsev, MIT-licensed. Nothing here installs it and "
+     "nothing here is copied from it - the panel talks to its daemon over "
+     "the socket it already listens on, and shows nothing when it is not "
+     "running."),
     ("Thanks",
      "Everyone who worked out what the Steam Machine's LED protocol actually "
      "says, and the FastLED and KDE Connect projects this leans on."),
@@ -5138,6 +5143,7 @@ class Panel:
         return [
             ledpanel.led_part(checks),
             ledpanel.power_part(self.power, power.available()),
+            ledpanel.gpu_part(self._gpu, self._gpu_error),
             ledpanel.cec_part(self._cec, cec.installed()),
             ledpanel.layout_part(self.system.get(syssettings.LAYOUT, ""),
                                  dict((value, label) for label, value

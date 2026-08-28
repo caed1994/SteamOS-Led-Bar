@@ -195,6 +195,69 @@ class CecPartTest(unittest.TestCase):
         self.assertIn("steam-button", [n for n, _k, _l, _s in cec.FEATURES])
 
 
+class GpuPartTest(unittest.TestCase):
+
+    def _state(self, **changes):
+        found = {"gpu": "1002:163F", "name": "VanGogh [AMD Custom GPU]",
+                 "config": {"fan_control_enabled": False},
+                 "stats": {"power": {"cap_current": 15.0, "cap_max": 25.0,
+                                     "cap_min": 4.0}},
+                 "clocks": {}, "profiles": [], "profile": ""}
+        found.update(changes)
+        return found
+
+    def test_no_lact_is_not_installed_rather_than_broken(self):
+        """Most machines will never run it, and it is not ours to install.
+
+        Counted as a fault, every one of them would carry a red number over
+        every page about a tool they chose not to have.
+        """
+        self.assertIsNone(ledpanel.gpu_part(None).ok)
+
+    def test_a_daemon_that_would_not_answer_is_a_fault_with_its_own_words(self):
+        part = ledpanel.gpu_part(None, "the socket refused this user")
+        self.assertFalse(part.ok)
+        self.assertIn("refused", part.verdict)
+
+    def test_a_daemon_with_no_card_is_a_fault_too(self):
+        # It is running and has nothing to manage, which is worth saying:
+        # silence would look like the block failing to draw.
+        part = ledpanel.gpu_part(self._state(gpu="", name=""))
+        self.assertFalse(part.ok)
+        self.assertIn("no graphics card", part.verdict)
+
+    def test_a_card_that_answers_is_in_order_and_named(self):
+        part = ledpanel.gpu_part(self._state())
+        self.assertTrue(part.ok)
+        self.assertIn("VanGogh", part.verdict)
+
+    def test_the_detail_says_what_can_actually_be_set(self):
+        """Which on an integrated card may be one thing or nothing.
+
+        The status page is where somebody looks when the block upstairs has
+        fewer sliders than they expected.
+        """
+        part = ledpanel.gpu_part(self._state())
+        self.assertIn("Power limit", " ".join(part.detail))
+        self.assertIn("Card:", " ".join(part.detail))
+
+    def test_a_card_with_nothing_settable_says_that_rather_than_nothing(self):
+        part = ledpanel.gpu_part(self._state(stats={}))
+        self.assertIn("nothing", " ".join(part.detail))
+
+    def test_it_says_who_is_driving_the_fan(self):
+        left = ledpanel.gpu_part(self._state())
+        self.assertIn("firmware", " ".join(left.detail))
+        taken = ledpanel.gpu_part(self._state(
+            config={"fan_control_enabled": True}))
+        self.assertIn("LACT", " ".join(taken.detail))
+
+    def test_it_offers_no_repair(self):
+        # Nothing here installs LACT, so there is nothing this window could
+        # press a button to fix.
+        self.assertEqual(ledpanel.gpu_part(self._state()).repair, "")
+
+
 class LayoutPartTest(unittest.TestCase):
 
     def test_it_is_never_a_fault(self):

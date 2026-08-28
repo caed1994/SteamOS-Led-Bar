@@ -1134,7 +1134,7 @@ class PanelSettingsTest(unittest.TestCase):
                          ["strip", "power", "cec", "keyboard", "status",
                           "app"])
         self.assertEqual([entry[1] for entry in sections],
-                         ["LED Strip", "EPP & Governor", "HDMI CEC Mods",
+                         ["LED Strip", "CPU & GPU power", "HDMI CEC Mods",
                           "Keyboard Layout", "Status", "App Settings"])
         self.assertEqual(ast.literal_eval(assigned["ABOUT"])[0], "about")
         # Every one of them says what it is for. A sidebar of five titles with
@@ -1148,7 +1148,7 @@ class PanelSettingsTest(unittest.TestCase):
         # that has quietly failed to load. Each says what it is for and what
         # is in the way, so a placeholder cannot be added as a bare promise.
         #
-        # Empty now: EPP & Governor was one of these and is built, and HDMI
+        # Empty now: the power section was one of these and is built, and HDMI
         # CEC was the last one left. The check stays because the table and the
         # branch that reaches it are how the next section starts.
         assigned = self._assignments()

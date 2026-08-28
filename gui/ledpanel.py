@@ -399,6 +399,33 @@ def cec_part(status, installed):
                 % (device.get("device"), len(on)), detail)
 
 
+def gpu_part(state, error=""):
+    """The graphics card, when there is a daemon that owns it.
+
+    Not installed when LACT is not running, which is most machines - it is
+    somebody else's tool and nothing here installs it, so its absence is not a
+    fault and is not counted as one.
+    """
+    if error:
+        return Part("gpu", "Graphics card", False, error)
+    if state is None:
+        return Part("gpu", "Graphics card", None, "LACT is not running.")
+    if not state.get("gpu"):
+        return Part("gpu", "Graphics card", False,
+                    "LACT is running, but reports no graphics card.")
+    fan = lact_module.fan(state.get("config") or {})
+    knobs = gpu_knobs(state)
+    detail = ["Card: %s" % (state.get("name") or state["gpu"]),
+              "Settable here: %s" % (", ".join(knob["label"]
+                                               for knob in knobs) or "nothing")]
+    if state.get("profile"):
+        detail.append("Profile: %s" % state["profile"])
+    detail.append("Fan: %s" % ("under LACT's control" if fan["enabled"]
+                               else "left to the card's firmware"))
+    return Part("gpu", "Graphics card", True,
+                gpu_summary(state), detail)
+
+
 def layout_part(layout, labels=None):
     """The keyboard layout, which is a setting rather than an installation.
 
