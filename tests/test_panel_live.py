@@ -1278,6 +1278,29 @@ class LiveWindowTest(unittest.TestCase):
         self.assertNotIn("disabled", self.panel.details.state())
         self.panel._set_busy(False, 0)
 
+    def test_the_easter_egg_is_not_on_the_construction_path(self):
+        """Part of the easter egg, and deleted with it - see BirthdayDialog.
+
+        A modal dialog waits on its own event loop. Put up from Panel.__init__
+        it would wait forever in every test that builds a window, and the
+        suite would hang rather than fail - which is the worst way for this to
+        go wrong, because a hang says nothing about what caused it. It is also
+        why rebuild() cannot be allowed to reach it: that calls the
+        constructor again, so a theme change would bring the cake back.
+        """
+        # Read out of the file rather than through inspect: this module is
+        # loaded by path, under a name inspect cannot map back to a file.
+        with open(self.panel_module.__file__) as handle:
+            text = handle.read()
+        # To the next thing at the top level, not to the end of the file -
+        # main() comes after Panel and is exactly where the call belongs.
+        panel = text[text.index("\nclass Panel:"):text.index("\ndef main(")]
+        self.assertIn("Birthday", text, "the easter egg is gone - so is this "
+                                        "test's reason to exist, delete it")
+        self.assertNotIn("Birthday", panel,
+                         "the birthday dialog is inside Panel, which will "
+                         "hang every live test here")
+
     def test_the_window_animates_nothing_while_a_command_runs(self):
         """The rule is gone, and nothing was left booking frames for it.
 
