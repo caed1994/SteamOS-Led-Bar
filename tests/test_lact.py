@@ -1,0 +1,492 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+"""Talking to LACT, tested against a socket rather than a mock.
+
+No machine here runs lactd, and it is not needed: the protocol is one JSON
+line in and one out over a unix socket, which a test can be on the other end
+of. So the client is exercised for real - it connects, sends, reads a reply
+that arrives in pieces, and handles a daemon that hangs up, refuses, or
+answers rubbish.
+
+Mocking the socket would have tested that the code calls the functions it
+calls. What is interesting here is the other end.
+"""
+
+import json
+import os
+import socket
+import sys
+import tempfile
+import threading
+import time
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "server"))
+
+from steamos_led import lact                                 # noqa: E402
+
+
+class FakeDaemon:
+    """A unix socket that answers like lactd does.
+
+    `answers` maps a command name to what its data should be; anything else
+    gets an error response, which is what the real daemon does with a command
+    it does not know.
+    """
+
+    def __init__(self, answers=None, hang=False, split=False, refuse=False):
+        self.answers = answers or {}
+        self.hang = hang                # accept and never reply
+        self.split = split              # reply in two packets
+        self.refuse = refuse            # answer status=error
+        self.asked = []
+        self.holder = tempfile.mkdtemp()
+        self.path = os.path.join(self.holder, "lactd.sock")
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(self.path)
+        self._server.listen(4)
+        self._stop = False
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self):
+        while not self._stop:
+            try:
+                link, _ = self._server.accept()
+            except OSError:
+                return
+            with link:
+                try:
+                    self._answer(link)
+                except OSError:                              # pragma: no cover
+                    pass
+
+    def _answer(self, link):
+        link.settimeout(5)
+        got = b""
+        while b"\n" not in got:
+            block = link.recv(4096)
+            if not block:
+                return
+            got += block
+        self.asked.append(json.loads(got.decode()))
+        if self.hang:
+            import time
+            time.sleep(5)
+            return
+        name = self.asked[-1]["command"]
+        if self.refuse:
+            said = json.dumps({"status": "error",
+                               "data": "no such device"}) + "\n"
+        elif name in self.answers:
+            said = json.dumps({"status": "ok",
+                               "data": self.answers[name]}) + "\n"
+        else:
+            said = json.dumps({
+                "status": "error",
+                "data": "Failed to deserialize request: unknown variant"}) + "\n"
+        raw = said.encode()
+        if self.split:
+            # The device list of a machine with two cards already exceeds one
+            # packet. Read as if a recv were a message, the JSON is truncated
+            # and the error blames the daemon.
+            link.sendall(raw[:len(raw) // 2])
+            import time
+            time.sleep(0.05)
+            link.sendall(raw[len(raw) // 2:])
+        else:
+            link.sendall(raw)
+
+    def close(self):
+        self._stop = True
+        try:
+            self._server.close()
+        except OSError:                                      # pragma: no cover
+            pass
+        try:
+            os.remove(self.path)
+        except OSError:                                      # pragma: no cover
+            pass
+        try:
+            os.rmdir(self.holder)
+        except OSError:                                      # pragma: no cover
+            pass
+
+
+DEVICES = [{"id": "1002:163F-0000:04:00.0", "name": "VanGogh [AMD Custom GPU]"}]
+
+STATS = {"power": {"cap_current": 15.0, "cap_max": 25.0, "cap_min": 4.0,
+                   "cap_default": 15.0}}
+
+CLOCKS = {
+    "max_sclk": 1600, "max_mclk": 1400, "max_voltage": 1200,
+    "table": {"type": "amd", "value": {
+        "od_range": {"sclk": {"min": 200, "max": 1600},
+                     "mclk": {"min": 400, "max": 1400},
+                     "vddc": {"min": 700, "max": 1200}}}},
+}
+
+CONFIG = {"fan_control_enabled": False,
+          "fan_control_settings": {"mode": "curve", "static_speed": 0.5,
+                                   "temperature_key": "edge",
+                                   "interval_ms": 500,
+                                   "curve": {"40": 0.3, "80": 1.0}},
+          "power_cap": 15.0,
+          "clocks_configuration": {}}
+
+
+class DaemonTest(unittest.TestCase):
+    """The client, against something on the other end of the socket."""
+
+    def _daemon(self, **kwargs):
+        made = FakeDaemon(**kwargs)
+        self.addCleanup(made.close)
+        return made
+
+    def test_a_round_trip_comes_back_parsed(self):
+        daemon = self._daemon(answers={"list_devices": DEVICES})
+        self.assertEqual(lact.devices(daemon.path), DEVICES)
+        self.assertEqual(daemon.asked[-1], {"command": "list_devices"})
+
+    def test_a_command_with_arguments_sends_them_under_args(self):
+        daemon = self._daemon(answers={"device_stats": STATS})
+        lact.stats("gpu-1", daemon.path)
+        self.assertEqual(daemon.asked[-1],
+                         {"command": "device_stats", "args": {"id": "gpu-1"}})
+
+    def test_a_command_without_arguments_sends_no_args_key(self):
+        # The daemon rejects an empty args object on commands that take none.
+        daemon = self._daemon(answers={"list_devices": DEVICES})
+        lact.devices(daemon.path)
+        self.assertNotIn("args", daemon.asked[-1])
+
+    def test_an_answer_that_arrives_in_pieces_is_still_one_answer(self):
+        """A recv is not a message.
+
+        Two graphics cards already put the device list over one packet, and
+        read as if a single recv were the whole reply, the JSON is truncated
+        and the error blames the daemon for the client's mistake.
+        """
+        daemon = self._daemon(answers={"list_devices": DEVICES}, split=True)
+        self.assertEqual(lact.devices(daemon.path), DEVICES)
+
+    def test_a_daemon_that_refuses_says_what_it_said(self):
+        daemon = self._daemon(refuse=True)
+        with self.assertRaises(lact.LactError) as caught:
+            lact.devices(daemon.path)
+        self.assertIn("no such device", str(caught.exception))
+
+    def test_a_command_it_does_not_know_is_an_error_not_an_empty_answer(self):
+        daemon = self._daemon(answers={})
+        with self.assertRaises(lact.LactError):
+            lact.devices(daemon.path)
+
+    def test_a_daemon_that_never_answers_times_out_rather_than_hanging(self):
+        """The window's own thread is what calls this.
+
+        A daemon mid-apply that never replies would otherwise freeze the
+        panel, which is a worse failure than not showing the GPU page.
+        """
+        daemon = self._daemon(answers={}, hang=True)
+        started = time.monotonic()
+        with self.assertRaises(lact.LactError) as caught:
+            lact.talk("list_devices", daemon.path, timeout=0.3)
+        # The seconds, not just "did not answer" - which is also how the
+        # not-JSON error begins, so the loose version of this passed with the
+        # timeout taken out entirely: the socket blocked until the daemon hung
+        # up, and an empty answer raised the other error.
+        self.assertIn("within 0.3 seconds", str(caught.exception))
+        self.assertLess(time.monotonic() - started, 2.0,
+                        "it waited for the daemon rather than timing out")
+
+    def test_no_socket_at_all_is_an_error_naming_the_path(self):
+        with self.assertRaises(lact.LactError) as caught:
+            lact.devices("/nonexistent/lactd.sock")
+        self.assertIn("/nonexistent/lactd.sock", str(caught.exception))
+
+    def test_available_is_a_file_test_and_not_a_connection(self):
+        # Asked on every visit to the page, so it has to be cheap - and a
+        # socket file outlives a daemon that was killed, which is why ping
+        # exists and this is not the whole answer.
+        daemon = self._daemon(answers={"ping": None})
+        self.assertTrue(lact.available(daemon.path))
+        self.assertFalse(lact.available("/nonexistent/lactd.sock"))
+
+    def test_the_confirm_window_is_the_daemon_s_number(self):
+        daemon = self._daemon(answers={"set_gpu_config": 9})
+        self.assertEqual(lact.set_gpu_config("gpu-1", {}, daemon.path), 9)
+
+    def test_an_answer_with_no_number_falls_back_rather_than_crashing(self):
+        # Guessed low on purpose: too high leaves the window claiming a
+        # setting is pending after the daemon has already put it back.
+        daemon = self._daemon(answers={"set_gpu_config": None})
+        self.assertEqual(lact.set_gpu_config("gpu-1", {}, daemon.path),
+                         lact.CONFIRM_SECONDS)
+
+    def test_keeping_and_reverting_are_the_same_command_with_two_words(self):
+        daemon = self._daemon(answers={"confirm_pending_config": None})
+        lact.confirm(daemon.path, keep=True)
+        self.assertEqual(daemon.asked[-1]["args"], {"command": "confirm"})
+        lact.confirm(daemon.path, keep=False)
+        self.assertEqual(daemon.asked[-1]["args"], {"command": "revert"})
+
+
+class AnswerTest(unittest.TestCase):
+    """Unwrapping, apart from the socket."""
+
+    def test_ok_gives_the_data(self):
+        self.assertEqual(
+            lact.read_answer('{"status":"ok","data":{"a":1}}'), {"a": 1})
+
+    def test_an_error_carries_the_daemon_s_own_words(self):
+        with self.assertRaises(lact.LactError) as caught:
+            lact.read_answer('{"status":"error","data":"overdrive disabled"}')
+        self.assertIn("overdrive disabled", str(caught.exception))
+
+    def test_output_that_is_not_json_is_an_error(self):
+        with self.assertRaises(lact.LactError):
+            lact.read_answer("thread 'main' panicked")
+
+    def test_nothing_at_all_is_an_error_too(self):
+        # What a daemon that hung up mid-answer leaves behind.
+        with self.assertRaises(lact.LactError):
+            lact.read_answer("")
+
+
+class ProfileTest(unittest.TestCase):
+
+    def _daemon(self, answer):
+        made = FakeDaemon(answers={"list_profiles": answer})
+        self.addCleanup(made.close)
+        return made
+
+    def test_a_document_naming_the_current_one_is_read(self):
+        daemon = self._daemon({"profiles": ["quiet", "loud"],
+                               "current_profile": "quiet"})
+        self.assertEqual(lact.profiles(daemon.path), (["quiet", "loud"],
+                                                      "quiet"))
+
+    def test_a_bare_list_from_an_older_daemon_is_read_too(self):
+        """Two shapes across versions, and neither is assumed.
+
+        This is somebody else's daemon on somebody else's machine, updated on
+        its own schedule - so the older shape is not a thing to drop support
+        for on the day it stops being current.
+        """
+        daemon = self._daemon(["quiet", "loud"])
+        self.assertEqual(lact.profiles(daemon.path), (["quiet", "loud"], ""))
+
+    def test_the_default_profile_has_no_name_and_is_sent_as_none(self):
+        daemon = FakeDaemon(answers={"set_profile": None})
+        self.addCleanup(daemon.close)
+        lact.set_profile("", daemon.path)
+        self.assertNotIn("args", daemon.asked[-1])
+        lact.set_profile("quiet", daemon.path)
+        self.assertEqual(daemon.asked[-1]["args"], {"name": "quiet"})
+
+
+class RangeTest(unittest.TestCase):
+    """What a card will accept, read out of the daemon's own report."""
+
+    def test_the_ranges_are_found_wherever_the_table_puts_them(self):
+        """The table is a tagged union, one shape per vendor and generation.
+
+        Tracking every one would be tracking somebody else's schema version by
+        version, and being wrong means a slider that writes a clock the card
+        refuses. So the ranges are looked for rather than read from a path.
+        """
+        found = lact.ranges(CLOCKS)
+        self.assertEqual(found["sclk"], (200, 1600))
+        self.assertEqual(found["mclk"], (400, 1400))
+        self.assertEqual(found["vddc"], (700, 1200))
+
+    def test_a_table_nested_deeper_is_still_found(self):
+        found = lact.ranges({"table": {"type": "amd", "value": {"gcn": {
+            "od_range": {"sclk": {"min": 300, "max": 2000}}}}}})
+        self.assertEqual(found["sclk"], (300, 2000))
+
+    def test_a_card_with_no_table_offers_nothing_rather_than_zero(self):
+        # Which is most integrated graphics. A range of (0, 0) would be a
+        # slider with no travel where there should be no slider.
+        self.assertEqual(lact.ranges({}), {})
+        self.assertEqual(lact.ranges({"table": None}), {})
+
+    def test_a_range_that_is_not_a_range_is_ignored(self):
+        for bad in ({"min": 100}, {"max": 100}, {"min": 100, "max": 100},
+                    {"min": 500, "max": 100}, "nonsense", None):
+            found = lact.ranges({"table": {"od_range": {"sclk": bad}}})
+            self.assertNotIn("sclk", found, bad)
+
+    def test_a_document_that_loops_does_not_hang_the_window(self):
+        # The daemon's, not ours, and a window drawing a slider should not be
+        # the thing that discovers a malformed one the hard way.
+        looping = {"table": {}}
+        looping["table"]["self"] = looping
+        lact.ranges(looping)
+
+    def test_the_plain_maxima_are_a_fallback_for_a_table_with_no_range(self):
+        self.assertEqual(lact.ranges({"max_sclk": 2400})["sclk"], (0, 2400))
+
+    def test_a_table_range_wins_over_the_plain_maximum(self):
+        # The table is the specific answer; max_sclk is what LACT reports
+        # beside it for cards whose table has nothing to say.
+        self.assertEqual(lact.ranges(CLOCKS)["sclk"], (200, 1600))
+
+
+class PowerRangeTest(unittest.TestCase):
+
+    def test_the_watts_come_from_the_card_s_own_stats(self):
+        found = lact.power_range(STATS)
+        self.assertEqual((found["min"], found["max"]), (4.0, 25.0))
+        self.assertEqual(found["current"], 15.0)
+
+    def test_a_card_that_reports_no_cap_reports_none(self):
+        for empty in ({}, {"power": {}}, None):
+            self.assertIsNone(lact.power_range(empty)["max"])
+
+
+class OfferedTest(unittest.TestCase):
+    """Only the knobs this card actually has."""
+
+    def test_a_card_with_everything_offers_everything(self):
+        found = lact.offered(CONFIG, CLOCKS, STATS)
+        self.assertEqual([knob["key"] for knob in found],
+                         [key for key, _l, _u, _s in lact.KNOBS])
+
+    def test_a_card_with_no_clocks_table_offers_only_the_power_limit(self):
+        """Which is most integrated graphics, and the Steam Machine may be one.
+
+        Drawing the clock sliders anyway would be offering settings that write
+        nowhere and report success - the same rule the governor page follows:
+        the machine is asked, not remembered.
+        """
+        found = lact.offered(CONFIG, {}, STATS)
+        self.assertEqual([knob["key"] for knob in found], [lact.POWER_CAP])
+
+    def test_a_card_with_no_power_cap_does_not_get_a_power_slider(self):
+        found = lact.offered(CONFIG, CLOCKS, {})
+        self.assertNotIn(lact.POWER_CAP, [knob["key"] for knob in found])
+
+    def test_each_knob_carries_its_range_and_its_unit(self):
+        for knob in lact.offered(CONFIG, CLOCKS, STATS):
+            self.assertLess(knob["min"], knob["max"], knob["key"])
+            self.assertTrue(knob["unit"], knob["key"])
+            self.assertTrue(knob["label"], knob["key"])
+
+    def test_the_power_slider_starts_at_what_the_card_is_set_to(self):
+        found = {knob["key"]: knob for knob in
+                 lact.offered({}, CLOCKS, STATS)}
+        self.assertEqual(found[lact.POWER_CAP]["value"], 15.0)
+
+    def test_a_knob_nobody_has_set_has_no_value_rather_than_zero(self):
+        # Zero is a setting. "Not set" is the card's own default, and the two
+        # must not look the same on a voltage offset.
+        found = {knob["key"]: knob for knob in
+                 lact.offered({}, CLOCKS, STATS)}
+        self.assertIsNone(found["max_core_clock"]["value"])
+
+
+class FanTest(unittest.TestCase):
+
+    def test_an_untouched_card_reads_as_firmware_driven(self):
+        found = lact.fan(CONFIG)
+        self.assertFalse(found["enabled"])
+
+    def test_the_curve_comes_back_as_numbers(self):
+        # LACT keys it by temperature as a string, which sorts as text: 100
+        # would come before 40 in any list built from it directly.
+        found = lact.fan(CONFIG)
+        self.assertEqual(found["curve"], {40: 0.3, 80: 1.0})
+        self.assertTrue(all(isinstance(at, int) for at in found["curve"]))
+
+    def test_a_card_with_no_curve_gets_points_to_move_rather_than_a_blank(self):
+        self.assertEqual(lact.fan({})["curve"], lact.STARTING_CURVE)
+
+    def test_switching_it_on_keeps_everything_else(self):
+        """set_gpu_config replaces the document rather than patching it.
+
+        So anything dropped on the way through is a setting silently turned
+        off on somebody's card - which is why every caller reads the current
+        config and hands it back changed.
+        """
+        made = lact.with_fan(CONFIG, enabled=True)
+        self.assertTrue(made["fan_control_enabled"])
+        self.assertEqual(made["power_cap"], CONFIG["power_cap"])
+        self.assertEqual(made["fan_control_settings"]["curve"],
+                         CONFIG["fan_control_settings"]["curve"])
+
+    def test_a_settings_block_always_has_the_keys_lact_requires(self):
+        # One missing and the daemon refuses the whole document.
+        made = lact.with_fan({}, enabled=True)
+        for needed in ("mode", "static_speed", "temperature_key",
+                       "interval_ms", "curve"):
+            self.assertIn(needed, made["fan_control_settings"])
+
+    def test_a_curve_goes_back_as_strings_in_order(self):
+        made = lact.with_fan(CONFIG, curve={80: 1.0, 40: 0.25, 60: 0.5})
+        curve = made["fan_control_settings"]["curve"]
+        self.assertEqual(list(curve), ["40", "60", "80"])
+        self.assertEqual(curve["40"], 0.25)
+
+    def test_a_speed_outside_the_range_is_brought_back_into_it(self):
+        # The daemon takes a fraction. A slider that sent 150% would be
+        # refused, and one that sent -1 is a fan told to stop.
+        for asked, wanted in ((1.5, 1.0), (-0.2, 0.0), (0.4, 0.4)):
+            made = lact.with_fan(CONFIG, static_speed=asked)
+            self.assertEqual(made["fan_control_settings"]["static_speed"],
+                             wanted)
+
+    def test_a_curve_point_outside_the_range_is_too(self):
+        made = lact.with_fan(CONFIG, curve={40: 2.0, 80: -1.0})
+        self.assertEqual(made["fan_control_settings"]["curve"],
+                         {"40": 1.0, "80": 0.0})
+
+    def test_both_modes_are_the_toolkit_s_own_words(self):
+        for mode in (lact.FAN_STATIC, lact.FAN_CURVE):
+            made = lact.with_fan(CONFIG, mode=mode)
+            self.assertEqual(made["fan_control_settings"]["mode"], mode)
+
+
+class KnobWritingTest(unittest.TestCase):
+
+    def test_the_power_cap_is_a_field_of_its_own(self):
+        made = lact.with_knob(CONFIG, lact.POWER_CAP, 20)
+        self.assertEqual(made["power_cap"], 20.0)
+        self.assertEqual(made["clocks_configuration"], {})
+
+    def test_a_clock_goes_into_the_clocks_block(self):
+        """Two places, and only this function knows which.
+
+        A page that guessed would write a clock into a key nothing reads, and
+        the daemon would accept the document and report success.
+        """
+        made = lact.with_knob(CONFIG, "max_core_clock", 1500)
+        self.assertEqual(made["clocks_configuration"]["max_core_clock"], 1500)
+        self.assertNotIn("max_core_clock", set(made) - {"clocks_configuration"})
+
+    def test_clearing_a_clock_takes_the_key_out(self):
+        # Rather than writing zero, which is a clock of zero.
+        made = lact.with_knob(
+            lact.with_knob(CONFIG, "max_core_clock", 1500),
+            "max_core_clock", None)
+        self.assertNotIn("max_core_clock", made["clocks_configuration"])
+
+    def test_the_rest_of_the_config_survives(self):
+        made = lact.with_knob(CONFIG, "max_core_clock", 1500)
+        self.assertEqual(made["fan_control_settings"],
+                         CONFIG["fan_control_settings"])
+
+    def test_the_original_is_not_changed(self):
+        # Every caller reads, changes and sends. A function that edited in
+        # place would make "what is on the card" and "what is on screen" the
+        # same object, and the revert would have nothing to go back to.
+        before = json.dumps(CONFIG, sort_keys=True)
+        lact.with_knob(CONFIG, "max_core_clock", 1500)
+        lact.with_fan(CONFIG, enabled=True)
+        self.assertEqual(json.dumps(CONFIG, sort_keys=True), before)
+
+
+if __name__ == "__main__":                                  # pragma: no cover
+    unittest.main()
