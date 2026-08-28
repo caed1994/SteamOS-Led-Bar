@@ -584,7 +584,7 @@ enough settings to need it, has its own list of pages inside.
 | ------- | ------------- |
 | **LED Strip** | everything about the bar. Seven pages, below |
 | **EPP & Governor** | the CPU governor and the energy preference &mdash; see [CPU power](#cpu-power) |
-| **HDMI CEC Mods** | talking to the television over HDMI. Not built yet |
+| **HDMI CEC Mods** | talking to the television over HDMI &mdash; see [HDMI CEC](#hdmi-cec) |
 | **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
 | **Status & Repair** | what is installed and running, one button that puts it back, and [updating](#updating-and-removing) |
 | **App Settings** | how this window looks &mdash; see [Light and dark](#light-and-dark) |
@@ -708,6 +708,62 @@ install changes nothing. What you pick is applied straight away and written to
 every boot, and is only enabled once you have set a governor. Uninstalling
 disables it and stops reapplying, but does not put the governor back &mdash;
 nothing recorded what it was before.
+
+### HDMI CEC
+
+CEC is the channel already in the HDMI cable that lets devices on it turn each
+other on and switch each other's inputs. With an adapter that exposes it, this
+machine can behave like a console: press a controller's Steam button and the
+television wakes and switches to it; put the machine to sleep and the
+television goes with it.
+
+**None of the CEC work is this project's.** It is the
+[SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit) by Twsts,
+MIT-licensed, kept in this repository under `vendor/steamos-cec-toolkit/` at
+the tag recorded in that directory's `UPSTREAM` file. What this project adds
+is the installation and the switches. The toolkit's own Decky plugin is not
+installed and is not needed; both it and this panel drive the same
+`steamos-cec-toolkitctl` helper.
+
+**What it needs.** A CEC adapter the kernel exposes as `/dev/cec0` &mdash; a
+DisplayPort-to-HDMI adapter with CEC support, since the machine's own output
+usually is not one &mdash; plus `cec-ctl` from v4l-utils, `varlinkctl` from
+systemd, and the python `dbus_next` module. The section names whichever of
+those are missing before you install rather than after.
+
+**Installing** asks for your password once and switches nothing on. Each
+feature then gets a switch that takes effect as you click it: the toolkit's
+installer leaves a sudoers rule covering exactly the helpers those switches
+use, so there is no password and no Apply after the first time.
+
+| Switch | What it does |
+| ------ | ------------ |
+| **Steam button wakes the television** | Home or Guide on a controller powers the TV and receiver on and switches the input back here |
+| **Wake the television at start** | The same, when Game Mode starts after a cold boot |
+| **Turn the television off with the machine** | Sends standby before this machine sleeps or shuts down |
+| **Sleep when the television does** | Suspends this machine when the TV broadcasts standby |
+| **Sleep when the television switches away** | Suspends after the TV has been on another input for a while |
+| **Volume buttons control the television** | Game Mode shows `+`/`-` and they change the receiver's volume. Needs a reboot to appear |
+| **Let a controller wake the machine** | Allows Bluetooth radios and controller receivers to wake it from suspend |
+| **Recover Gamescope after a wake** | Restarts Gamescope if the display comes back wrong. A repair for one fault &mdash; leave it off unless you have it |
+
+**Try it** sends a single wake, standby or volume step and leaves nothing
+behind, which is how to find out whether any of it reaches the television
+before switching a feature on and rebooting into it.
+
+Three settings are on the page &mdash; the adapter, which device carries the
+volume, and the HDMI sound card &mdash; and **Discover** fills them in by
+asking the bus and the sound server. The other forty live in
+`/etc/steamos-cec-toolkit.conf` with a paragraph of explanation each; the
+page writes to a user file that shadows it, so what you set here survives the
+toolkit being installed over the top.
+
+**Debugging it.** The toolkit is in the repository rather than fetched, so
+its scripts can be read and changed like everything else here. If you change
+something worth keeping, `vendor/steamos-cec-toolkit/UPSTREAM` records the
+commit the tree came from, which is what makes a later upstream merge a
+three-way diff rather than a guess &mdash; and upstream is a better home for a
+fix than this fork is.
 
 ### Keyboard layout
 
@@ -888,6 +944,14 @@ applies to that directory on its own terms: anyone changing the code in there ha
 to release those changes under GPL-2.0+ as well. The vendored commit, the
 checksums and the full licence text are in
 [leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
+
+`vendor/steamos-cec-toolkit/` is the
+**[SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit)** by
+**Twsts**, licensed **MIT** and vendored at the commit its `UPSTREAM` file
+records. Every part of [HDMI CEC](#hdmi-cec) is that project's work; this one
+adds the installation and the switches. Its Decky plugin and screenshots were
+left out, nothing else. The copyright and the MIT terms stay with it, in
+[vendor/steamos-cec-toolkit/LICENSE](vendor/steamos-cec-toolkit/LICENSE).
 
 The firmware is built on **[NeoPixelBus](https://github.com/Makuna/NeoPixelBus)**
 by Michael C. Miller (LGPL-3.0-or-later), which clocks the WS2812 protocol, and

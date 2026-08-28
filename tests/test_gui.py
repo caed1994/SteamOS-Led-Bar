@@ -97,6 +97,55 @@ class HealthyInstallationTest(unittest.TestCase):
         self.assertEqual(ledpanel.broken(checks), [])
 
 
+class LeftoverCecRuleTest(unittest.TestCase):
+    """A grant that outlived the install it was for.
+
+    scripts/install-cec.sh lends the desktop user a sudo rule for the length
+    of a CEC install and takes it away in a trap. The one exit that trap
+    cannot see is the signal that does not run traps, and what is left then is
+    a file granting five programs as root that nothing is using.
+    """
+
+    def _checks(self, present):
+        probe = healthy()
+        if present:
+            probe.present = set(probe.present) | {ledpanel.CEC_INSTALL_RULE}
+        return ledpanel.run_checks(probe=probe)
+
+    def test_a_machine_without_one_is_not_told_about_it(self):
+        # Listed unconditionally this would be a green line about HDMI CEC on
+        # every machine that has never installed it - a checklist reporting on
+        # something that is not part of the installation it is checking.
+        names = [check.name for check in self._checks(present=False)]
+        self.assertEqual([n for n in names if "CEC" in n], [])
+
+    def test_one_left_behind_is_reported_as_a_problem(self):
+        broken = ledpanel.broken(self._checks(present=True))
+        self.assertEqual(len(broken), 1)
+        self.assertIn("CEC", broken[0].name)
+
+    def test_it_says_how_to_be_rid_of_it(self):
+        # A problem with no next step in it is a problem somebody lives with.
+        found = ledpanel.broken(self._checks(present=True))[0]
+        self.assertIn(ledpanel.CEC_INSTALL_RULE, found.detail)
+        self.assertIn("delete", found.detail)
+
+    def test_rebuild_and_reinstall_is_not_offered_for_it(self):
+        """That button reinstalls the LED service and would not touch it.
+
+        Marking it repairable would put the problem behind a button that
+        cannot solve it, which is worse than the problem: you press it, the
+        line stays, and now the checklist is the thing that looks broken.
+        """
+        found = ledpanel.broken(self._checks(present=True))[0]
+        self.assertFalse(found.repairable)
+
+    def test_the_path_is_the_one_the_script_actually_writes(self):
+        # Two files have to agree about it and neither imports the other.
+        with open(os.path.join(HERE, "..", "scripts", "install-cec.sh")) as f:
+            self.assertIn('RULE="%s"' % ledpanel.CEC_INSTALL_RULE, f.read())
+
+
 class AfterASteamUpdateTest(unittest.TestCase):
     """The case this panel exists for.
 
@@ -1098,14 +1147,15 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_unbuilt_sections_say_what_they_will_do(self):
         # A section that only says "coming soon" is indistinguishable from one
         # that has quietly failed to load. Each says what it is for and what
-        # is in the way, and both are checked here so a third placeholder
-        # cannot be added as a bare promise.
+        # is in the way, so a placeholder cannot be added as a bare promise.
+        #
+        # Empty now: EPP & Governor was one of these and is built, and HDMI
+        # CEC was the last one left. The check stays because the table and the
+        # branch that reaches it are how the next section starts.
         assigned = self._assignments()
         soon = ast.literal_eval(assigned["SOON"])
         sections = [entry[0] for entry
                     in ast.literal_eval(assigned["SECTIONS"])]
-        # Only HDMI CEC now: EPP & Governor was one of these and is built.
-        self.assertEqual(sorted(soon), ["cec"])
         for key, lines in soon.items():
             self.assertIn(key, sections, key)
             self.assertEqual(len(lines), 3, key)

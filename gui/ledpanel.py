@@ -25,6 +25,13 @@ BINARY = os.path.join(INSTALL_DIR, "steamos-led-serial")
 CONFIG_PATH = "/etc/steamos-led-serial.conf"
 UNIT_PATH = "/etc/systemd/system/steamos-led-serial.service"
 UDEV_PATH = "/etc/udev/rules.d/99-steamos-led-serial.rules"
+
+# Not something that should be installed - something that should not be left
+# behind. scripts/install-cec.sh lends the desktop user a sudo rule for the
+# length of a CEC install and removes it in a trap; the one way out that trap
+# cannot cover is the signal it cannot see. Nothing else in the window would
+# ever mention it, so the checklist is where it belongs.
+CEC_INSTALL_RULE = "/etc/sudoers.d/zz-steamos-led-cec-install"
 SHIM_DEVICE = "/dev/valve-leds-shim"
 MODULE_NAME = "leds-valve-shim"
 SERVICE = "steamos-led-serial.service"
@@ -215,6 +222,22 @@ def run_checks(probe=None, config=None):
             % (", ".join(found) if found else "your phone"), bool(found), why,
             # Pairing happens on the phone, which no amount of reinstalling
             # here can do.
+            repairable=False))
+
+    # Only when it is there, and it never should be. Listed unconditionally it
+    # would be a green line about HDMI CEC on every machine that has never
+    # installed it, which is a checklist reporting on something that is not
+    # part of the installation it is checking.
+    if probe.exists(CEC_INSTALL_RULE):
+        checks.append(Check(
+            "No sudo rule left over from a CEC install", False,
+            "%s is still there from an HDMI CEC install that was killed part "
+            "way through. It grants this user five programs as root and "
+            "nothing needs it now - installing or removing HDMI CEC again "
+            "clears it, or delete the file." % CEC_INSTALL_RULE,
+            # Rebuild and reinstall is about the LED service and would not
+            # touch it, so offering that button here would be a promise the
+            # button does not keep.
             repairable=False))
 
     # Last, because it is the one that explains the others going quiet rather

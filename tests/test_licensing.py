@@ -25,9 +25,11 @@ SUFFIXES = (".py", ".sh", ".cpp", ".h")
 SCRIPTS = ("server/steamos-led-serial", "gui/steamos-led-panel",
            "systemd-sleep/steamos-led-serial")
 
-# Somebody else's code, under somebody else's licence. It carries its own SPDX
-# line saying GPL-2.0+, and this project does not get to relabel it.
-VENDORED = "leds-valve-shim"
+# Somebody else's code, under somebody else's licence, which this project does
+# not get to relabel. The kernel shim carries its own SPDX line saying GPL-2.0+;
+# vendor/ holds whole upstream trees, each with its own LICENCE file - see
+# vendor/README.md, and NotRelabelledTest below for what is checked instead.
+VENDORED = ("leds-valve-shim", "vendor")
 
 
 def tracked():
@@ -39,7 +41,7 @@ def tracked():
 
 def ours():
     for name in tracked():
-        if name.split("/")[0] == VENDORED:
+        if name.split("/")[0] in VENDORED:
             continue
         if name.endswith(SUFFIXES) or name in SCRIPTS:
             yield name
@@ -83,10 +85,43 @@ class SpdxHeaderTest(unittest.TestCase):
 
     def test_the_vendored_module_keeps_its_own_licence(self):
         # GPL-2.0+, not ours to change - see leds-valve-shim/PROVENANCE.md.
-        path = os.path.join(REPO, VENDORED, "leds-valve-shim.c")
+        path = os.path.join(REPO, "leds-valve-shim", "leds-valve-shim.c")
         with open(path) as handle:
             self.assertIn("SPDX-License-Identifier: GPL-2.0+",
                           handle.readline())
+
+    def test_every_vendored_tree_carries_its_own_licence_and_its_provenance(self):
+        """Left out of the header sweep, so checked for the other thing.
+
+        A vendored tree is not ours to put a GPL-3 header on, and the reason
+        that is safe rather than sloppy is that the tree says what it is under
+        and where it came from. Without both, an excluded directory is just
+        code with no licence anybody can find.
+        """
+        where = os.path.join(REPO, "vendor")
+        trees = sorted(name for name in os.listdir(where)
+                       if os.path.isdir(os.path.join(where, name)))
+        self.assertTrue(trees, "vendor/ has nothing in it - drop the "
+                               "exclusion rather than leaving it open")
+        for tree in trees:
+            for needed in ("LICENSE", "UPSTREAM"):
+                self.assertTrue(
+                    os.path.exists(os.path.join(where, tree, needed)),
+                    "vendor/%s has no %s" % (tree, needed))
+
+    def test_the_vendored_trees_are_not_quietly_relabelled(self):
+        # The failure this is about is somebody running a formatter or a
+        # header-adder across the repository: our line appearing in somebody
+        # else's file is a licence claim on work that is not ours.
+        for name in tracked():
+            if name.split("/")[0] != "vendor":
+                continue
+            if name == "vendor/README.md":
+                continue                    # ours, about the directory itself
+            with open(os.path.join(REPO, name), "rb") as handle:
+                text = handle.read().decode("utf-8", "replace")
+            self.assertNotIn("SPDX-License-Identifier: " + LICENCE, text,
+                             "%s has been given this project's licence" % name)
 
     def test_the_licence_text_is_actually_there(self):
         # A header pointing at a licence the repository does not carry is

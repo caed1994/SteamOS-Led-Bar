@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 import appsettings                                          # noqa: E402
 import kdetheme                                             # noqa: E402
 import syssettings                                          # noqa: E402
+from steamos_led import cec                                 # noqa: E402
 
 try:
     import tkinter as tk
@@ -1562,6 +1563,72 @@ class LiveWindowTest(unittest.TestCase):
                 % (named, grounds[named], on))
         self.assertGreater(checked, 10, "hardly anything was checked")
 
+    def test_no_label_is_drawn_on_a_ground_it_does_not_stand_on(self):
+        """The same bug one layer up from the pictures, and a fifth instance.
+
+        The test above walks nine-slices. This walks the other half of the
+        same rule: a label's background, however it got one. There are two
+        ways to get it wrong and this catches both - passing a colour by hand
+        that is not the parent's, and wearing a style whose ground is the
+        page while standing on a card.
+
+        Found by measuring rather than by looking: the About page, both
+        placeholder pages and the new CEC page all passed
+        surface_container_low to labels sitting on a card whose colour is
+        surface_container_lowest, so every explanation on those pages had a
+        band of a third colour behind it. Three pages wrong the same way is
+        not three mistakes but one habit, which is why it is checked here
+        instead of fixed and remembered.
+        """
+        style = ttk.Style(self.root)
+
+        def ground(widget):
+            # A tk widget has no style to fall back on and is meant to be told
+            # its colour; a themed one takes its style's unless it was given
+            # one, which is the case this is looking for.
+            if isinstance(widget, (tk.Canvas, tk.Text, tk.Listbox)):
+                return ""
+            try:
+                own = str(widget.cget("background"))
+            except tk.TclError:
+                own = ""                # no such option: it has only a style
+            if not own:
+                try:
+                    named = str(widget.cget("style"))
+                except tk.TclError:                          # pragma: no cover
+                    return ""
+                own = str(style.lookup(named or widget.winfo_class(),
+                                       "background"))
+            return own.lower()
+
+        # Keyed by widget, because _every_widget walks the whole window
+        # rather than the open section - so one bad label would otherwise be
+        # reported once for each section visited.
+        checked, wrong = 0, {}
+        for section, _t, _s, _i in self.panel_module.SECTIONS + (
+                self.panel_module.ABOUT,):
+            self.panel._open_section(section)
+            self.root.update()
+            for widget in self._every_widget():
+                if not isinstance(widget, ttk.Label):
+                    continue
+                mine = ground(widget)
+                theirs = ground(widget.nametowidget(widget.winfo_parent()))
+                if not mine or not theirs:
+                    continue
+                checked += 1
+                if mine != theirs:
+                    # Every one, not the first. They come in habits rather
+                    # than singly - six of them turned up the day this was
+                    # written - and a test that stops at one turns a sweep
+                    # into six runs.
+                    wrong[str(widget)] = (
+                        "%r drawn on %s, stands on %s"
+                        % (str(widget.cget("text"))[:48], mine, theirs))
+        self.assertEqual(sorted(wrong.values()), [],
+                         "\n" + "\n".join(sorted(wrong.values())))
+        self.assertGreater(checked, 20, "hardly any label was checked")
+
     def test_no_card_stands_on_another_card(self):
         """Reported: dark notches inside the corners of the placeholder cards.
 
@@ -1835,6 +1902,290 @@ class SystemPageTest(unittest.TestCase):
 
 
 @unittest.skipUnless(_has_display(), "no tkinter or no display")
+class CecPageTest(unittest.TestCase):
+    """The switches, and what they believe.
+
+    Nothing here has a CEC adapter or the toolkit installed, and none of that
+    is needed: the page reads a status document and runs commands, so the
+    document is handed to it and the commands are recorded instead of run.
+
+    What is being tested is the one thing a page of live switches gets wrong -
+    whether it shows the machine or shows the last click.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.said = self._status()
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.ran = []
+        # Recorded rather than run, and the recording is the assertion: what
+        # this page does is entirely "which command, with which arguments".
+        self.panel.runner.start = lambda command, done=None: (
+            self.ran.append((command, done)), True)[1]
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: self.said)
+        self.root.update()
+        self.panel._open_section("cec")
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _status(self, **changes):
+        found = {
+            "ok": True, "version": "v0.1.26",
+            "config": {"CEC_DEVICE": "/dev/cec0",
+                       "CEC_AUDIO_LOGICAL_ADDRESS": "5",
+                       "HDMI_ALSA_CARD_NAME": "alsa_card.pci-0000_03_00.1"},
+            "cec_device": {"device": "/dev/cec0", "exists": True,
+                           "readable": True, "writable": True},
+            "external_volume": {"enabled": False},
+            "services": {name: {"is_enabled": False}
+                         for name, kind, _l, _s in cec.FEATURES
+                         if kind == cec.USER_SERVICE},
+            "system_services": {name: {"is_enabled": False}
+                                for name, kind, _l, _s in cec.FEATURES
+                                if kind == cec.SYSTEM_SERVICE},
+        }
+        found.update(changes)
+        return found
+
+    def _finish(self, code=0):
+        """Let the last recorded command's callback run, as the Runner would."""
+        _command, done = self.ran[-1]
+        if done is not None:
+            done(code)
+        self.root.update()
+
+    # -- which half of the page ------------------------------------------
+
+    def test_with_no_toolkit_it_offers_to_install_rather_than_showing_switches(self):
+        self.panel_module.ledpanel.cec_status = lambda home=None, run=None: None
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertTrue(self.panel.cec_missing.winfo_ismapped())
+        self.assertFalse(self.panel.cec_present.winfo_ismapped())
+
+    def test_installing_while_the_window_is_open_swaps_the_halves(self):
+        """Installing is a thing that happens with the page in front of you.
+
+        Built both ways up front and packed one at a time, so the page can
+        catch up on its own - a page that could only tell the truth at
+        construction would need the whole window rebuilt around it.
+        """
+        self.panel_module.ledpanel.cec_status = lambda home=None, run=None: None
+        self.panel._reread_cec()
+        self.root.update()
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: self.said)
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertTrue(self.panel.cec_present.winfo_ismapped())
+        self.assertFalse(self.panel.cec_missing.winfo_ismapped())
+
+    def test_it_does_not_ask_the_machine_until_somebody_looks(self):
+        """Every section's page is built when the window is.
+
+        Reading the status at construction would put a subprocess on the path
+        of every window open and every theme change, for a page most people
+        never visit.
+        """
+        # The window from setUp goes first: two live Tk interpreters in one
+        # process cannot share the images this window makes, and the second
+        # one fails on the icon before it reaches anything worth testing.
+        self._destroy()
+        asked = []
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: (asked.append(1), self.said)[1])
+        self.root = tk.Tk()
+        panel = self.panel_module.Panel(self.root)
+        self.root.update()
+        self.assertEqual(asked, [], "the CEC page read the machine while the "
+                                    "window was being built")
+        panel._open_section("cec")
+        self.root.update()
+        self.assertEqual(len(asked), 1)
+
+    # -- the switches ------------------------------------------------------
+
+    def test_every_feature_gets_a_switch(self):
+        self.assertEqual(sorted(self.panel._cec_vars),
+                         sorted(name for name, _k, _l, _s in cec.FEATURES))
+
+    def test_the_switches_open_where_the_machine_says(self):
+        self.said["services"]["steam-button"]["is_enabled"] = True
+        self.said["external_volume"]["enabled"] = True
+        self.panel._reread_cec()
+        self.root.update()
+        on = {n for n, v in self.panel._cec_vars.items() if v.get()}
+        self.assertEqual(on, {"steam-button", "external-volume"})
+
+    def test_clicking_one_runs_its_own_command(self):
+        self.panel._cec_vars["tv-standby"].set(True)
+        self.panel._cec_toggled("tv-standby")
+        command, _done = self.ran[-1]
+        self.assertEqual(command[1:], ["set-service", "tv-standby", "on"])
+
+    def test_a_system_service_goes_the_other_way_round(self):
+        self.panel._cec_vars["usb-wake"].set(True)
+        self.panel._cec_toggled("usb-wake")
+        self.assertEqual(self.ran[-1][0][1:],
+                         ["set-system-service", "usb-wake", "on"])
+
+    def test_settling_the_switches_does_not_set_them_all_going(self):
+        """Writing a variable fires the same handler a click does.
+
+        Without the guard, reading the status back after one toggle would
+        toggle every other switch on the page - and each of those would read
+        the status again. This is the test for the loop, not for the guard.
+        """
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertEqual(self.ran, [], "settling the page ran commands")
+
+    def test_a_switch_that_did_not_take_goes_back_where_it_was(self):
+        """The machine's answer wins over the click.
+
+        A toggle can be refused - a helper that is not there, a unit that will
+        not start - and the toolkit reports the state either way. A switch
+        left where the pointer put it would be this window's opinion.
+        """
+        self.panel._cec_vars["tv-standby"].set(True)
+        self.panel._cec_toggled("tv-standby")
+        # The command ran and the machine still says off, which is what a
+        # refused toggle looks like from here.
+        self._finish(code=1)
+        self.assertFalse(self.panel._cec_vars["tv-standby"].get())
+
+    def test_a_switch_clicked_while_something_else_runs_is_put_back(self):
+        # The Runner takes one command at a time. The switch has already moved
+        # under the pointer and nothing is going to happen to justify it.
+        self.panel.runner.start = lambda command, done=None: False
+        self.panel._cec_vars["boot-wake"].set(True)
+        self.panel._cec_toggled("boot-wake")
+        self.assertFalse(self.panel._cec_vars["boot-wake"].get())
+
+    # -- the adapter -------------------------------------------------------
+
+    def test_a_working_adapter_is_said_in_the_colour_of_good_news(self):
+        self.assertIn("/dev/cec0", self.panel.cec_adapter.cget("text"))
+        self.assertEqual(str(self.panel.cec_adapter.cget("style")),
+                         "Good.TLabel")
+
+    def test_an_adapter_that_is_there_but_shut_says_which_of_the_two_it_is(self):
+        """Not the same problem as having no adapter, and not the same fix.
+
+        The toolkit ships a helper and a udev rule for exactly this, and it is
+        what a suspend or a SteamOS update leaves behind - so "reinstall" is
+        the answer here and "buy an adapter" is the answer to the other.
+        """
+        self.said["cec_device"]["writable"] = False
+        self.panel._reread_cec()
+        self.root.update()
+        said = self.panel.cec_adapter.cget("text")
+        self.assertIn("cannot write", said)
+        self.assertIn("Reinstalling", said)
+        self.assertEqual(str(self.panel.cec_adapter.cget("style")),
+                         "Bad.TLabel")
+
+    def test_no_adapter_says_that_instead(self):
+        self.said["cec_device"] = {"device": "/dev/cec0", "exists": False,
+                                   "readable": False, "writable": False}
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertIn("not there", self.panel.cec_adapter.cget("text"))
+
+    # -- the rest ----------------------------------------------------------
+
+    def test_the_config_boxes_open_on_what_the_toolkit_has(self):
+        self.assertEqual(self.panel._cec_entries["CEC_DEVICE"].get(),
+                         "/dev/cec0")
+
+    def test_saving_the_boxes_sends_every_one_of_them(self):
+        import json
+        box = self.panel._cec_entries["CEC_DEVICE"]
+        box.delete(0, "end")
+        box.insert(0, "/dev/cec1")
+        self.panel._save_cec_config()
+        command, _done = self.ran[-1]
+        self.assertEqual(command[1], "set-config")
+        sent = json.loads(command[2])
+        self.assertEqual(sent["CEC_DEVICE"], "/dev/cec1")
+        self.assertEqual(sorted(sent), sorted(k for k, _l, _s in cec.SHOWN))
+
+    def test_a_box_with_spaces_round_it_is_trimmed(self):
+        # A trailing space in CEC_DEVICE is a device node that does not exist,
+        # and nothing on the page would say why.
+        import json
+        box = self.panel._cec_entries["CEC_DEVICE"]
+        box.delete(0, "end")
+        box.insert(0, "  /dev/cec1  ")
+        self.panel._save_cec_config()
+        self.assertEqual(json.loads(self.ran[-1][0][2])["CEC_DEVICE"],
+                         "/dev/cec1")
+
+    def test_an_action_runs_and_changes_nothing_that_needs_saving(self):
+        self.panel._cec_action("wake")
+        self.assertEqual(self.ran[-1][0][1:], ["wake"])
+
+    def test_the_page_reads_the_machine_again_after_anything_it_ran(self):
+        """Every command here can change what the page shows.
+
+        A toggle obviously; an action less so - discover-cec writes the
+        adapter into the config, and the boxes above would still be showing
+        the old one.
+        """
+        for start in (lambda: self.panel._cec_action("discover-cec"),
+                      lambda: self.panel._save_cec_config(),
+                      lambda: self.panel._cec_toggled("boot-wake")):
+            self.ran = []
+            start()
+            self.assertIsNotNone(self.ran[-1][1],
+                                 "%s left nothing to read the status back"
+                                 % self.ran[-1][0])
+
+    def test_installing_asks_first_and_then_runs_our_bridge(self):
+        asked = []
+        self.panel._ask = lambda *a, **k: (asked.append(a), True)[1]
+        self.panel._install_cec()
+        self.assertTrue(asked, "it installed without asking")
+        command, _done = self.ran[-1]
+        self.assertEqual(command[0], "pkexec")
+        self.assertTrue(command[1].endswith("install-cec.sh"))
+        self.assertEqual(command[2], "install")
+
+    def test_saying_no_to_the_question_installs_nothing(self):
+        self.panel._ask = lambda *a, **k: False
+        self.panel._install_cec()
+        self.assertEqual(self.ran, [])
+
+    def test_removing_asks_too(self):
+        self.panel._ask = lambda *a, **k: False
+        self.panel._remove_cec()
+        self.assertEqual(self.ran, [])
+        self.panel._ask = lambda *a, **k: True
+        self.panel._remove_cec()
+        self.assertEqual(self.ran[-1][0][2], "remove")
+
+    def test_a_toolkit_that_answers_rubbish_is_not_installed_as_far_as_this_goes(self):
+        # read_status raises rather than returning an empty document, and the
+        # page must not turn that into eight switches all showing off.
+        def broken(home=None, run=None):
+            raise cec.CecError("no JSON came back")
+
+        self.panel_module.ledpanel.cec_status = broken
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertTrue(self.panel.cec_missing.winfo_ismapped())
+
+
 class AppearanceTest(unittest.TestCase):
     """Switching the window's colours, which rebuilds it.
 

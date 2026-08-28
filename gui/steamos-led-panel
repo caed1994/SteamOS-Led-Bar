@@ -48,6 +48,7 @@ import ledpanel                                             # noqa: E402
 import appsettings                                          # noqa: E402
 import preview as preview_module                            # noqa: E402
 import syssettings                                          # noqa: E402
+from steamos_led import cec                                 # noqa: E402
 from steamos_led import config as config_module             # noqa: E402
 from steamos_led import notify                              # noqa: E402
 from steamos_led import power                               # noqa: E402
@@ -376,9 +377,6 @@ SECTIONS = (
 # for the setting it holds.
 ABOUT = ("about", "About", "Info and credits", "info")
 
-# What the two unbuilt sections say for themselves. Named here rather than
-# written into the builder so the tests can read them, and so the two are
-# obviously the same shape of promise.
 # What the About section says. A table rather than prose in the builder so it
 # reads as the short list of facts it is, and so a line can be added without
 # touching layout code.
@@ -391,22 +389,22 @@ ABOUT_LINES = (
     ("Project", "github.com/caed1994/SteamOS-Led-Bar"),
     ("Licence",
      "GPL-3.0-or-later. The firmware, the kernel shim, the service and this "
-     "panel are all in the one repository."),
+     "panel are all in the one repository. Two directories are somebody "
+     "else's under their own terms - see vendor/ and leds-valve-shim/."),
+    ("HDMI CEC",
+     "Every part of it is the SteamOS CEC Toolkit by Twsts, MIT-licensed, "
+     "kept in this repository under vendor/. This panel installs it and "
+     "switches its features on and off; none of the CEC work is ours."),
     ("Thanks",
      "Everyone who worked out what the Steam Machine's LED protocol actually "
      "says, and the FastLED and KDE Connect projects this leans on."),
 )
 
-SOON = {
-    "cec": (
-        "HDMI CEC",
-        "Let the machine talk to the television over the HDMI cable: wake "
-        "the screen with it, switch the input to it, and follow the "
-        "television's own volume.",
-        "Nothing here yet. This one needs a CEC adapter the kernel exposes, "
-        "and it is the section most likely to want a helper of its own - "
-        "which is why it is last."),
-}
+# Sections that are named in the sidebar and not built yet. Empty now that
+# HDMI CEC is built - kept because the next one will want it, and because
+# _build_soon and the branch that reaches it are the pattern for adding a
+# section before it does anything.
+SOON = {}
 
 # Settings that only mean something while something else says so, and what
 # happens to them while it does not. Two answers, because there are two kinds
@@ -644,6 +642,10 @@ PROGRESS_HEIGHT = 4
 # The gap between groups is what replaces the boxes that used to be drawn round
 # them, so it is deliberately larger than any gap inside one.
 SIDE_MARGIN = 4 * material.SPACE
+
+# How wide the switch column on the CEC page is, so a feature's sentence lines
+# up under its own label rather than under the switch.
+CEC_INDENT = 9 * material.SPACE
 GROUP_GAP = 6 * material.SPACE
 ROW_GAP = 2 * material.SPACE
 INDENT_STEP = 5 * material.SPACE
@@ -1653,6 +1655,9 @@ class ProfileDialog(Dialog):
         self.listing = tk.Listbox(
             body, height=min(8, max(3, len(self.names))), activestyle="none",
             borderwidth=0, highlightthickness=0, exportselection=False,
+            # A tk widget, not a themed one: it has no style to take a colour
+            # from and has to be told. Every ttk label in this window already
+            # carries the ground it stands on - see dress().
             background=self.roles["surface_container_low"],
             foreground=self.roles["on_surface"],
             selectbackground=self.roles["secondary_container"],
@@ -1967,6 +1972,13 @@ class Panel:
         self._catching_up = None
         # Explanations that should use the width the window actually has
         self._wrapped = []
+        # How much narrower than the page one of them is, by widget name. A
+        # label indented under a switch has that much less room than the ones
+        # starting at the card's edge, and _rewrap hands the same width to
+        # every label - so without this the indented ones were laid out into
+        # room they do not have, and a label wider than its slot is not
+        # wrapped, it is cut off.
+        self._wrap_insets = {}
         self._wrap_width = 0
 
         # The header says which *section* is open, not what the program is
@@ -2075,6 +2087,8 @@ class Panel:
                 page = self._page(self.sections,
                                   lambda where, t=table, n=note:
                                   self._build_settings(where, t, n))
+            elif key == "cec":
+                page = self._page(self.sections, self._build_cec)
             elif key in SOON:
                 page = self._page(self.sections,
                                   lambda where, k=key: self._build_soon(where,
@@ -2240,6 +2254,8 @@ class Panel:
         self.section = key
         self.section_title.configure(text=dict(
             (entry[0], entry[1]) for entry in SECTIONS + (ABOUT,))[key])
+        if key == "cec":
+            self._catch_up_cec()
         self._tab_changed()
 
     def _build_statusbar(self, parent):
@@ -2303,15 +2319,12 @@ class Panel:
         card.pack(fill="x")
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
-        ttk.Label(inner, text="Coming soon", style="Section.TLabel",
-                  background=self.roles["surface_container_low"]).pack(
+        ttk.Label(inner, text="Coming soon", style="Section.TLabel").pack(
                       anchor="w")
-        ttk.Label(inner, text=title, style="Heading.TLabel",
-                  background=self.roles["surface_container_low"]).pack(
+        ttk.Label(inner, text=title, style="Heading.TLabel").pack(
                       anchor="w", pady=(ROW_GAP, GROUP_GAP // 2))
         for text in (doing, blocked):
             said = ttk.Label(inner, text=text, style="Muted.TLabel",
-                             background=self.roles["surface_container_low"],
                              justify="left", wraplength=CARD_WRAP)
             said.pack(anchor="w", pady=(0, ROW_GAP))
             self._wrapped.append(said)
@@ -2326,11 +2339,9 @@ class Panel:
         card.pack(fill="x")
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
-        ground = self.roles["surface_container_low"]
-        ttk.Label(inner, text="SteamOS LED bar", style="Heading.TLabel",
-                  background=ground).pack(anchor="w")
+        ttk.Label(inner, text="SteamOS LED bar", style="Heading.TLabel").pack(anchor="w")
         ttk.Label(inner, text="Version %s" % VERSION,
-                  style="Muted.TLabel", background=ground).pack(
+                  style="Muted.TLabel").pack(
                       anchor="w", pady=(2, GROUP_GAP // 2))
         # The label over its text rather than beside it. Beside it, the text
         # column is the card's width less whatever the widest label takes -
@@ -2338,11 +2349,9 @@ class Panel:
         # two of the four lines were drawn past the edge of the card.
         # Stacked, both are the same width and there is nothing to get wrong.
         for label, text in ABOUT_LINES:
-            ttk.Label(inner, text=label, style="Section.TLabel",
-                      background=ground).pack(anchor="w", pady=(GROUP_GAP // 2,
+            ttk.Label(inner, text=label, style="Section.TLabel").pack(anchor="w", pady=(GROUP_GAP // 2,
                                                                 2))
-            said = ttk.Label(inner, text=text, style="Muted.TLabel",
-                             background=ground, justify="left",
+            said = ttk.Label(inner, text=text, style="Muted.TLabel", justify="left",
                              wraplength=CARD_WRAP)
             said.pack(anchor="w")
             self._wrapped.append(said)
@@ -3159,7 +3168,8 @@ class Panel:
             return
         self._wrap_width = width
         for label in self._wrapped:
-            label.configure(wraplength=width)
+            label.configure(wraplength=max(
+                160, width - self._wrap_insets.get(str(label), 0)))
 
     def _build_apply(self, parent):
         """Apply and Reload, once, below the tabs that have settings.
@@ -3806,7 +3816,10 @@ class Panel:
         self._preview_items = []
         self._preview_leds(shim.LOGICAL_LEDS)
 
-        self.preview_blurb = ttk.Label(outer, style="Muted.TLabel")
+        # Page.Muted, not Muted: this line stands under the stage rather than
+        # on it, so the card's ground behind it was a band of the wrong shade
+        # the width of the words.
+        self.preview_blurb = ttk.Label(outer, style="Page.Muted.TLabel")
         self.preview_blurb.pack(anchor="center", pady=(0, 8))
 
         picker = ttk.Frame(outer)
@@ -3836,14 +3849,16 @@ class Panel:
                 ttk.Radiobutton(box, text=label, value=kind + ":" + name,
                                 variable=self.preview_choice).pack(anchor="w")
 
+        # page=True: this one stands under the cards, not in one.
         self._note(
             outer,
             "Drawn by the same code that drives the strip, and on the strip "
             "you have: the length, the mapping, the direction and the "
             "brightness ceiling are the ones currently in this window, so "
             "moving any of them changes what you see here. Nothing is applied "
-            "and the strip itself is not touched.").pack(anchor="w", padx=SIDE_MARGIN,
-                             pady=(GROUP_GAP, GROUP_GAP))
+            "and the strip itself is not touched.",
+            page=True).pack(anchor="w", padx=SIDE_MARGIN,
+                            pady=(GROUP_GAP, GROUP_GAP))
 
         # This page is shorter than the tallest one, and the slack has to land
         # somewhere. Halved between the stage and here, so the room the strip
@@ -4089,6 +4104,366 @@ class Panel:
         chosen = ColourDialog(self.root, self._follow_shade).chosen
         if chosen:
             self.runner.start(ledpanel.notify_command(chosen))
+
+    # -- HDMI CEC ----------------------------------------------------------
+
+    def _build_cec(self, parent):
+        """Talking to the television, if the toolkit for it is installed.
+
+        Two pages in one frame, and which of them you see is the machine's
+        answer rather than a mode this window is in: an offer to install, or
+        the switches. Both are built now and one is packed - see _show_cec -
+        because installing is a thing that happens while the window is open,
+        and a page that could only tell the truth at construction would need
+        the window rebuilt around it to catch up.
+
+        Nothing here queues behind Apply. The toolkit's installer leaves a
+        sudoers rule granting exactly the helpers its own switches use, so
+        every switch on this page is an ordinary command that runs as you
+        click - see server/steamos_led/cec.py. Apply exists on the settings
+        pages because writing /etc needs a password and a service restart;
+        here the machine does not ask, and inventing the ceremony anyway would
+        be this window being formal about nothing.
+        """
+        outer = ttk.Frame(parent, style="Page.TFrame")
+        self._cec = None                    # the last status read, or None
+        self._cec_asked = False             # whether we have looked yet
+        self._cec_vars = {}
+        self._cec_rows = {}
+        self._cec_entries = {}
+        # Set while the switches are being put back in line with a status
+        # read. Without it, writing a variable fires the same handler a click
+        # does, and a refresh after a toggle would toggle everything again.
+        self._cec_settling = False
+
+        self.cec_missing = self._build_cec_offer(outer)
+        self.cec_present = self._build_cec_switches(outer)
+        self._show_cec()
+        return outer
+
+    def _build_cec_offer(self, parent):
+        """What is there before any of it is installed.
+
+        It says what the feature is and what the machine is missing for it,
+        rather than only offering the button. Every requirement here is
+        somebody else's package, and "install failed" three minutes later is a
+        worse way to find out that v4l-utils is not on the machine.
+        """
+        holder = ttk.Frame(parent, style="Page.TFrame")
+        card = ttk.Frame(holder, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+
+        ttk.Label(inner, text="Not installed yet", style="Section.TLabel").pack(anchor="w")
+        for text in (
+                "Lets this machine talk to the television over the HDMI "
+                "cable: wake the screen and switch the input to it, turn it "
+                "off when the machine sleeps, and put the television's own "
+                "volume on Game Mode's volume buttons.",
+                "This installs the SteamOS CEC Toolkit, which is somebody "
+                "else's work kept in this repository under vendor/. Nothing "
+                "is switched on by installing it - each feature gets a "
+                "switch here afterwards."):
+            said = ttk.Label(inner, text=text, style="Muted.TLabel", justify="left",
+                             wraplength=CARD_WRAP)
+            said.pack(anchor="w", pady=(ROW_GAP, 0))
+            self._wrapped.append(said)
+
+        # What the machine has not got, asked of the machine. A list written
+        # down here would be a list that is wrong on the next SteamOS.
+        self.cec_needs = ttk.Label(inner, style="Bad.TLabel", justify="left",
+                                   wraplength=CARD_WRAP)
+        self._wrapped.append(self.cec_needs)
+
+        row = ttk.Frame(inner, style="OnCard.TFrame")
+        row.pack(anchor="w", pady=(GROUP_GAP, 0))
+        ttk.Button(row, text="Install HDMI CEC", style="Filled.TButton",
+                   command=self._install_cec).pack(side="left")
+        ttk.Button(row, text="Check again", style="Text.TButton",
+                   command=self._reread_cec).pack(side="left",
+                                                  padx=(ROW_GAP, 0))
+        return holder
+
+    def _build_cec_switches(self, parent):
+        """The page once it is installed: what works, what is on, and a try."""
+        holder = ttk.Frame(parent, style="Page.TFrame")
+
+        # The adapter first. Every switch below is worthless without it, and
+        # when nothing is happening this is the line that says why.
+        card = ttk.Frame(holder, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ttk.Label(inner, text="The adapter", style="Section.TLabel").pack(anchor="w")
+        self.cec_adapter = ttk.Label(inner, justify="left",
+                                     wraplength=CARD_WRAP)
+        self.cec_adapter.pack(anchor="w", pady=(ROW_GAP, 0))
+        self._wrapped.append(self.cec_adapter)
+        row = ttk.Frame(inner, style="OnCard.TFrame")
+        row.pack(anchor="w", pady=(GROUP_GAP, 0))
+        ttk.Button(row, text="Check again", style="Tonal.TButton",
+                   command=self._reread_cec).pack(side="left")
+        ttk.Button(row, text="Remove HDMI CEC", style="Text.TButton",
+                   command=self._remove_cec).pack(side="left",
+                                                  padx=(ROW_GAP, 0))
+
+        self._build_cec_features(holder)
+        self._build_cec_actions(holder)
+        self._build_cec_config(holder)
+        return holder
+
+    def _build_cec_features(self, parent):
+        """One switch per feature, each with the sentence that explains it.
+
+        Explained rather than only named, and at more length than the settings
+        pages bother with, because these are switches whose effect is on the
+        television and on whether the machine goes to sleep. "TV standby
+        suspend" is a label somebody can only find out the meaning of by
+        turning it on and losing their session.
+        """
+        card = ttk.Frame(parent, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ttk.Label(inner, text="Features", style="Section.TLabel").pack(anchor="w", pady=(0, ROW_GAP))
+
+        for index, (name, _kind, label, said) in enumerate(cec.FEATURES):
+            block = ttk.Frame(inner, style="OnCard.TFrame")
+            block.pack(fill="x", pady=(0 if index == 0 else GROUP_GAP, 0))
+            block.columnconfigure(1, weight=1)
+            variable = tk.BooleanVar(value=False)
+            # The name is a label of its own rather than the switch's text.
+            # ttk leaves no gap between the switch picture and its own label -
+            # measured, the two touched - and that gap is not the switch's to
+            # set: every other switch in this window has its name in the
+            # column beside it, which is what this matches.
+            switch = ttk.Checkbutton(
+                block, variable=variable,
+                command=lambda n=name: self._cec_toggled(n))
+            switch.grid(row=0, column=0, sticky="w")
+            named = ttk.Label(block, text=label)
+            named.grid(row=0, column=1, sticky="w", padx=(ROW_GAP, 0))
+            # Under the name and not beside it: at this length beside it would
+            # set the column of switches against a ragged wall of text, and
+            # the page would stop reading as a list of switches.
+            explain = ttk.Label(block, text=said, style="Muted.TLabel",
+                                justify="left",
+                                wraplength=CARD_WRAP - CEC_INDENT)
+            explain.grid(row=1, column=1, sticky="w", padx=(ROW_GAP, 0),
+                         pady=(2, 0))
+            self._wrapped.append(explain)
+            self._wrap_insets[str(explain)] = CEC_INDENT
+            self._cec_vars[name] = variable
+            self._cec_rows[name] = (switch, named, explain)
+
+    def _build_cec_actions(self, parent):
+        """Four things that happen once and leave nothing behind.
+
+        Which is what makes them the way to find out whether any of this
+        reaches the television, before switching on a feature and rebooting
+        into it to see.
+        """
+        card = ttk.Frame(parent, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ttk.Label(inner, text="Try it", style="Section.TLabel").pack(
+                      anchor="w", pady=(0, ROW_GAP))
+        self._buttons(inner, [
+            (label, lambda k=key: self._cec_action(k))
+            for key, label, _tail in cec.ACTIONS])
+
+    def _build_cec_config(self, parent):
+        """The three settings whose wrong value stops all of it working.
+
+        Three of about forty. The rest are timings and report bytes for
+        particular televisions and controllers, and they belong in the file
+        with the paragraph of explanation each of them has - copied onto a
+        page here they would be forty rows nobody can judge.
+        """
+        card = ttk.Frame(parent, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, GROUP_GAP))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ttk.Label(inner, text="Configuration", style="Section.TLabel").pack(anchor="w", pady=(0, ROW_GAP))
+
+        grid = ttk.Frame(inner, style="OnCard.TFrame")
+        grid.pack(fill="x")
+        grid.columnconfigure(1, weight=1)
+        for row, (key, label, said) in enumerate(cec.SHOWN):
+            ttk.Label(grid, text=label).grid(
+                row=row * 2, column=0, sticky="w",
+                padx=(0, GROUP_GAP), pady=(0 if row == 0 else ROW_GAP, 0))
+            entry = ttk.Entry(grid, style="Material.TEntry")
+            entry.grid(row=row * 2, column=1, sticky="ew",
+                       pady=(0 if row == 0 else ROW_GAP, 0))
+            self._cec_entries[key] = entry
+            explain = ttk.Label(grid, text=said, style="Muted.TLabel", justify="left",
+                                wraplength=CARD_WRAP - CEC_INDENT)
+            explain.grid(row=row * 2 + 1, column=1, sticky="w", pady=(2, 0))
+            self._wrapped.append(explain)
+            self._wrap_insets[str(explain)] = CEC_INDENT
+
+        ttk.Button(inner, text="Save these", style="Tonal.TButton",
+                   command=self._save_cec_config).pack(anchor="w",
+                                                       pady=(GROUP_GAP, 0))
+        said = self._note(
+            inner,
+            "Discovery asks the bus and the sound server what is actually "
+            "there and fills these in, which is easier than reading them off "
+            "the television.")
+        said.pack(anchor="w", pady=(GROUP_GAP, ROW_GAP))
+        self._buttons(inner, [
+            (label, lambda k=key: self._cec_action(k))
+            for key, label, _said in cec.DISCOVERIES])
+
+    # -- what the CEC page does -------------------------------------------
+
+    def _show_cec(self):
+        """Pack whichever half the last status read justifies."""
+        there = self._cec is not None
+        for half, wanted in ((self.cec_present, there),
+                             (self.cec_missing, not there)):
+            if wanted:
+                half.pack(fill="both", expand=True)
+            else:
+                half.pack_forget()
+        if there:
+            self._say_cec_adapter()
+            self._settle_cec_switches()
+        else:
+            self._say_cec_needs()
+
+    def _say_cec_needs(self):
+        """Name what the machine has not got, or say nothing when it has."""
+        absent = cec.missing()
+        if not absent:
+            self.cec_needs.pack_forget()
+            return
+        self.cec_needs.configure(text="Missing on this machine: " + "; ".join(
+            "%s (%s)" % (name, why) for name, why in absent))
+        self.cec_needs.pack(anchor="w", pady=(ROW_GAP, 0))
+
+    def _say_cec_adapter(self):
+        """One line about the adapter, in the colour the news deserves.
+
+        Three states rather than two, because "there but not writable" is a
+        different problem with a different fix: the toolkit ships a helper and
+        a udev rule for exactly that, and it is what a suspend or a SteamOS
+        update leaves behind.
+        """
+        found = cec.device(self._cec)
+        where = found.get("device") or "no adapter configured"
+        if cec.usable(self._cec):
+            said, style = "Ready on %s." % where, "Good.TLabel"
+        elif found.get("exists"):
+            said = ("%s is there but this user cannot write to it, so nothing "
+                    "can be sent. Reinstalling puts the permissions helper "
+                    "and its udev rule back." % where)
+            style = "Bad.TLabel"
+        else:
+            said = ("%s is not there. HDMI CEC needs an adapter the kernel "
+                    "exposes as a /dev/cec device - the machine's own HDMI or "
+                    "DisplayPort output usually is not one." % where)
+            style = "Bad.TLabel"
+        self.cec_adapter.configure(
+            text=said, style=style)
+
+    def _settle_cec_switches(self):
+        """Put every switch and box where the machine says it should be.
+
+        Set from the status rather than left where the click put them. A
+        toggle can be refused - a helper that is not there, a unit that will
+        not start - and a switch that stayed where it was clicked would be
+        this window's opinion rather than the machine's.
+        """
+        self._cec_settling = True
+        try:
+            for name, variable in self._cec_vars.items():
+                variable.set(cec.feature_on(self._cec, name))
+        finally:
+            self._cec_settling = False
+        values = cec.config(self._cec)
+        for key, entry in self._cec_entries.items():
+            entry.delete(0, "end")
+            entry.insert(0, values.get(key, ""))
+
+    def _reread_cec(self, then=None):
+        """Ask the toolkit about itself again, and redraw from the answer."""
+        try:
+            self._cec = ledpanel.cec_status()
+        except cec.CecError as exc:
+            self._cec = None
+            self._write("The CEC toolkit could not be read: %s\n\n" % exc)
+        self._cec_asked = True
+        self._show_cec()
+        if then is not None:
+            then()
+
+    def _catch_up_cec(self):
+        """Read the status the first time the section is opened, not before.
+
+        Every section's page is built when the window is, so reading here at
+        construction would put a subprocess on the path of every window open
+        and every theme change - for a page most people never visit.
+        """
+        if not self._cec_asked:
+            self._reread_cec()
+
+    def _cec_toggled(self, name):
+        """A switch was clicked. Run it, then believe the machine, not the click."""
+        if self._cec_settling:
+            return                          # we are the ones who set it
+        wanted = bool(self._cec_vars[name].get())
+        label = cec.BY_NAME[name][1]
+        self._write("%s %s...\n" % ("Turning on" if wanted else "Turning off",
+                                    label))
+        started = self.runner.start(cec.toggle_command(name, wanted),
+                                    lambda _code: self._reread_cec())
+        if not started:
+            # Refused because something else is running. The switch has
+            # already moved under the pointer, and nothing is going to happen
+            # to justify it - so put it back rather than leave the page
+            # claiming a state nobody applied.
+            self._settle_cec_switches()
+
+    def _cec_action(self, key):
+        if not self.runner.start(cec.action_command(key),
+                                 lambda _code: self._reread_cec()):
+            return
+
+    def _save_cec_config(self):
+        """Write the three boxes back, through the toolkit's own writer.
+
+        Which writes a *user* config that shadows /etc - so this needs no
+        password either, and a value set here survives the toolkit being
+        installed over the top.
+        """
+        values = {key: entry.get().strip()
+                  for key, entry in self._cec_entries.items()}
+        self.runner.start(cec.set_config_command(values),
+                          lambda _code: self._reread_cec())
+
+    def _install_cec(self):
+        if not self._ask("HDMI CEC",
+                         "This installs the SteamOS CEC Toolkit from vendor/ "
+                         "and asks for your password once.\n\nNothing is "
+                         "switched on by installing it.",
+                         confirm="Install"):
+            return
+        self.runner.start(ledpanel.install_cec_command(SOURCE_DIR),
+                          lambda _code: self._reread_cec())
+
+    def _remove_cec(self):
+        if not self._ask("HDMI CEC",
+                         "This removes the CEC toolkit and everything it "
+                         "installed, and asks for your password once.\n\nThe "
+                         "television is left however it is now.",
+                         confirm="Remove"):
+            return
+        self.runner.start(ledpanel.install_cec_command(SOURCE_DIR, remove=True),
+                          lambda _code: self._reread_cec())
 
     # -- status and repair ------------------------------------------------
 
