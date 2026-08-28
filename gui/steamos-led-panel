@@ -538,6 +538,12 @@ SIDEBAR_TEXT_X = 56
 # The dot at the foot of the window that says whether the bar is there.
 STATUS_DOT = 5
 
+# How much of a failure the blip beside that dot shows before it is cut. The
+# status bar is one line tall and shares it with the dot, its sentence and the
+# version; a message long enough to wrap would push every page above it up.
+# The rest of the output is on stderr, which is where a log belongs.
+PROBLEM_CHARS = 90
+
 # What a vertical scrollbar takes off the side of a page. Measured on the
 # built window at this theme's own metrics; a couple of pixels over, because
 # being generous here costs a slightly narrower paragraph and being short
@@ -810,22 +816,16 @@ def dress(style, roles, sizes):
         # A text button stands among text and lines up with it; the padding a
         # filled button needs would hang it off to the right of everything.
         variant("Text.Button", surface, "surface", sides=2)
-        # And the two of them again for a button standing on the page rather
-        # than on a card. These are the two whose fill *is* their ground, so
-        # they are the two whose corners show it: a nine-slice carries its own
-        # corners, and a picture drawn against the wrong one puts a box round
-        # the button. The other two fill themselves and do not care.
-        # All four of them, not only the two whose fill is their ground. A
-        # nine-slice keeps its own corners whatever the fill is, so a filled
-        # button standing on the page had a square of the card's colour
-        # behind its pill - which is exactly what it looked like.
+        # And again for a button standing on the page rather than on a card -
+        # every weight the page uses, not only the ones whose fill *is* their
+        # ground. A nine-slice keeps its own corners whatever the fill is, so
+        # a filled button standing on the page had a square of the card's
+        # colour behind its pill, which is exactly what it looked like.
         variant("Page.Filled.Button", roles["primary"], "_page")
         variant("Page.Tonal.Button", roles["secondary_container"], "_page")
         variant("Page.Outlined.Button", page, "_page", outline=roles["outline"])
-        variant("Page.Text.Button", page, "_page", sides=2)
         for name in ("Filled", "Tonal", "Outlined", "Text",
-                     "Page.Filled", "Page.Tonal", "Page.Outlined",
-                     "Page.Text"):
+                     "Page.Filled", "Page.Tonal", "Page.Outlined"):
             style.layout("%s.TButton" % name, [
                 ("%s.Button" % name, {"sticky": "nsew", "children": [
                     ("Button.label", {"side": "top", "sticky": ""})]})])
@@ -1167,8 +1167,6 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.map("Outlined.TButton", **label_fades("primary"))
     style.configure("Text.TButton", **button("surface", "primary", sides=2))
     style.map("Text.TButton", **label_fades("primary"))
-    style.configure("Page.Text.TButton", **button("_page", "primary", sides=2))
-    style.map("Page.Text.TButton", **label_fades("primary"))
 
     # On the page: a notebook is the stack the pages live in, and its own
     # background shows above and beside whatever the page puts in it - which
@@ -2014,13 +2012,16 @@ class Panel:
         # The foot of the window is claimed before the pages are, and from the
         # bottom up: pack hands out room in the order it was asked, so the
         # pages taking all of it first left a short window with no Apply row
-        # and no log at all - they were packed later and there was nothing
-        # left. The pages scroll and these do not, so these go first.
+        # and no status bar at all - they were packed later and there was
+        # nothing left. The pages scroll and these do not, so these go first.
         #
         # Under the sections, not inside one: one Apply for every setting in
         # the window, whichever section it is on - see apply_settings.
         self._build_statusbar(root)
-        self.output = self._build_output(root)
+        # What a command printed, kept for the one line _say_problem shows and
+        # for the rebuild that carries it across a theme change. The log the
+        # user reads is stderr - see _write.
+        self._log = []
         self.runner = Runner(root, self._write, self._set_busy)
         self._build_apply(root)
         self.sections.pack(fill="both", expand=True)
@@ -2262,6 +2263,11 @@ class Panel:
         self.link_said = ttk.Label(bar, text="Looking for the bar...",
                                    style="Page.Muted.TLabel")
         self.link_said.pack(side="left")
+        # Built here and packed only when there is something to say - see
+        # _say_problem. An empty label sitting in the bar would still take its
+        # padding, and the gap would be the one thing in this line that means
+        # nothing.
+        self.problem = ttk.Label(bar, style="Page.Bad.TLabel")
         ttk.Label(bar, text="SteamOS LED bar v%s" % VERSION,
                   style="Page.Muted.TLabel").pack(side="right")
 
@@ -2393,8 +2399,10 @@ class Panel:
             self._refresh_enabled()
             self._refresh_unsaved()
             self._refresh_update()
-            if code:
-                self._show_output(True)
+            # Cleared on success as firmly as it is set on failure: a warning
+            # left standing beside a command that has just worked is worse
+            # than no warning at all.
+            self._say_problem(self._last_said() if code else "")
 
     def _say(self, title, message):
         """Tell the user something; there is nothing to answer."""
@@ -2447,13 +2455,12 @@ class Panel:
                 pass
         section = getattr(self, "section", None)
         page = self.notebook.tab(self.notebook.select(), "text")
-        # Out of the widget, not out of the Runner: the Runner keeps only
-        # what a command printed, and most of what is in the log was put there
-        # by the window itself.
-        try:
-            log = self.output.get("1.0", "end-1c")
-        except tk.TclError:                                  # pragma: no cover
-            log = ""
+        # The window's own log, not the Runner's: the Runner keeps only what a
+        # command printed, and most of this was put there by the window. Moved
+        # across rather than replayed - replaying it would print the whole
+        # session to stderr a second time for each theme change.
+        log = list(self._log)
+        problem = bool(self.problem.winfo_ismapped())
 
         self._teardown()
         self.__init__(self.root)                # the one construction path
@@ -2469,8 +2476,9 @@ class Panel:
                     self.vars[key][0].set(value)
                 except (ValueError, tk.TclError):            # pragma: no cover
                     pass
-        if log:
-            self._write(log)
+        self._log = log
+        if problem:
+            self._say_problem(self._last_said())
         self._catch_up()
 
     def _teardown(self):
@@ -2498,11 +2506,11 @@ class Panel:
 
         Collected by walking rather than listed: a button added later would be
         left pressable, and the failure - two pkexec prompts stacked on each
-        other - is not one anybody would connect back to a list here. The two
-        that only fold something away stay live, since watching the log is the
-        one thing worth doing while a command runs.
+        other - is not one anybody would connect back to a list here. The one
+        that only folds something away stays live: it starts nothing, so
+        greying it would be the window taking away a control for no reason.
         """
-        folds = {str(self.output_toggle), str(self.details)}
+        folds = {str(self.details)}
         self._busy_buttons = []
 
         def walk(widget):
@@ -2539,104 +2547,70 @@ class Panel:
             return dict(config_module.DEFAULTS)
 
     def _write(self, text, tag=None):
-        self.output.configure(state="normal")
-        self.output.insert("end", text, tag or ())
-        self.output.see("end")
-        self.output.configure(state="disabled")
-        # It does not open itself for this. The bar under the title says that
-        # something is running, so the log opening as well would be the window
-        # rearranging itself to tell you what you can already see. It opens
-        # when a command *fails* - see _set_busy - and until then it puts a
-        # mark on its own handle to say there is something in it.
-        if not self._output_open and not self._output_unread:
-            self._output_unread = True
-            self._label_output()
+        """Keep a line, and put it where a log belongs.
 
-    def _build_output(self, parent):
-        """The command log, folded away until there is something in it.
+        There is no log pane in the window any more. Nine lines of command
+        output were a fifth of the window spent on something almost nobody
+        reads, and the two people who do want it are better served by running
+        the install script in a terminal, where the output is selectable,
+        searchable and does not disappear with the window.
 
-        Nine fixed lines that are empty nearly all the time were a fifth of the
-        window spent on nothing. What is left when it is closed is one line
-        saying where it went.
+        So it goes to stderr - which is where the terminal, the journal and
+        anything wrapping this program are already looking - and a copy stays
+        here for _last_said, which is how a failure gets its one line in the
+        status bar.
+
+        The kept copy comes first and the printing cannot stop it: the README
+        now tells people to start this from a terminal, and a terminal that is
+        closed while the window stays open leaves a broken pipe behind.
+        Writing to it raises, and an exception here would come out of the
+        middle of an install.
         """
-        holder = ttk.Frame(parent, style="Page.TFrame")
-        holder.pack(side="bottom", fill="x",
-                    padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, ROW_GAP))
-        # Both flags before the handle is named: naming it reads them.
-        self._output_open = False
-        self._output_unread = False
-        self.output_toggle = ttk.Button(holder, style="Page.Text.TButton",
-                                        command=self.toggle_output)
-        self.output_toggle.pack(anchor="w")
-        self._label_output()
+        self._log.append(text)
+        try:
+            print(text, end="", file=sys.stderr)
+        except (OSError, ValueError):
+            pass                                # nobody is reading it any more
 
-        # One of the two raised panels in the window: the content is a tk.Text
-        # rather than a themed widget, so it cannot take a background of its
-        # own and the tone has to come from the frame it sits in.
-        self.output_box = ttk.Frame(holder, style="Card.TFrame", padding=6)
-        # tk.Text is not themed, so its colours are set by hand - and it is
-        # the one place a fixed-width font is right: this is command output.
-        text = tk.Text(self.output_box, height=9, wrap="word", state="disabled",
-                       relief="flat", borderwidth=0, padx=10, pady=8,
-                       background=self.roles["surface_container_low"],
-                       foreground=self.roles["on_surface"],
-                       insertbackground=self.roles["on_surface"],
-                       selectbackground=self.roles["secondary_container"],
-                       selectforeground=self.roles["on_secondary_container"],
-                       font=("TkFixedFont",))
-        scroll = ttk.Scrollbar(self.output_box, command=text.yview)
-        text.configure(yscrollcommand=scroll.set)
-        text.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        text.tag_configure("command",
-                           foreground=self.roles["on_surface_variant"])
-        return text
+    def _last_said(self):
+        """The last line worth showing as the reason something failed.
 
-    def _label_output(self):
-        """Name the handle, with a mark when there is something unread in it."""
-        self.output_toggle.configure(
-            text="Output %s%s" % ("\u2022 " if self._output_unread else "",
-                                  "\u25b4" if self._output_open else "\u25be"))
+        What the *command* printed, first. The Runner keeps that on its own,
+        apart from the window's running commentary around it - and the
+        commentary is the wrong thing to report: "Saved 12 settings" is the
+        last line in the log after an Apply that then failed to restart the
+        service, and it is not why.
 
-    def toggle_output(self):
-        self._show_output(not self._output_open)
-
-    def _show_output(self, show):
-        """Open or fold the log, and move the window to suit it.
-
-        The height and the content change in one go, and in the order that
-        never asks for more room than the window has: grow first, then fill it;
-        empty it first, then shrink. The log sits at the foot of the window and
-        the pages above it are what expands, so packing it into a window that
-        had not grown yet took its height out of the pages for a frame - the
-        whole window jumped up and then settled back down as the window caught
-        up. That flinch is what this order avoids, and it is the same order
-        _show_details uses for the checklist.
+        Read from the back, because a program's complaint is the last thing it
+        says before it gives up. The fallback is the window's own log, which is
+        where a command that could not be *started* leaves its reason - there
+        was no process, so the Runner has no transcript of one. Its two
+        bookends are dropped: the echoed command line and the exit code are
+        how the failure was reported, not what went wrong.
         """
-        self._output_open = show
-        width = self.root.winfo_width()
-        # Asked before it is packed: a widget knows the size it wants whether
-        # or not anything is showing it.
-        change = self.output_box.winfo_reqheight() + ROW_GAP
-        if show:
-            room = self.root.winfo_screenheight() - SCREEN_ALLOWANCE
-            self.root.geometry("%dx%d" % (
-                width, min(room, self.root.winfo_height() + change)))
-            self.output_box.pack(fill="x", pady=(ROW_GAP, 0))
-        else:
-            self.output_box.pack_forget()
-            # Let the window settle into its shorter self before it follows:
-            # without this the two reflows overlap and one of them is drawn
-            # with the pages stretched into room that is about to go.
-            self.root.update_idletasks()
-            self.root.geometry("%dx%d" % (
-                width, max(1, self.root.winfo_height() - change)))
-        if show:
-            self._output_unread = False
-        self._label_output()
-        # Arithmetic gets it right to the pixel or it does not; this settles
-        # the difference afterwards, and shows nothing when there is none.
-        self._fit_window()
+        for lines in (self.runner.transcript, self._log):
+            for line in reversed("".join(lines).splitlines()):
+                line = line.strip()
+                if line and not line.startswith(("$ ", "[")):
+                    return line
+        return ""
+
+    def _say_problem(self, said):
+        """Show or clear the blip beside the status dot.
+
+        One line, in the error colour, next to the light that says whether the
+        bar is there - the two things in this window that report a state
+        rather than set one, in the same place. Long output is cut rather than
+        wrapped: the status bar is one line tall, and a message that pushed it
+        to three would move every page above it.
+        """
+        if not said:
+            self.problem.pack_forget()
+            return
+        if len(said) > PROBLEM_CHARS:
+            said = said[:PROBLEM_CHARS - 1].rstrip() + "…"
+        self.problem.configure(text="⚠ " + said)
+        self.problem.pack(side="left", padx=(GROUP_GAP, 0))
 
     # -- the pieces a page is built from ----------------------------------
 
@@ -4184,7 +4158,7 @@ class Panel:
             self.checklist.pack_forget()
             # Let the page settle into its shorter self before the window
             # follows: without this the two reflows overlap and one of them
-            # is drawn with the output pane below the bottom edge.
+            # is drawn with the checklist below the bottom edge.
             self.root.update_idletasks()
             self.root.geometry("%dx%d" % (width, height))
         self.details.configure(text="Details \u25b4" if show

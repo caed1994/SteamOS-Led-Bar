@@ -600,7 +600,17 @@ enough settings to need it, has its own list of pages inside.
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists &mdash; and flash the ESP |
 
 A line across the foot says whether the bar is being driven, and which version
-this is.
+this is. When a command fails, the reason appears there beside the light.
+
+**There is no log pane.** What the window's commands print goes to standard
+error, so running the panel from a terminal shows all of it &mdash; and the
+install and repair work the panel starts is the same work `install.sh` does,
+which is the better place to watch it:
+
+```bash
+./gui/steamos-led-panel          # its commands' output lands in this terminal
+./install.sh                     # the same steps, with all of their output
+```
 
 ### Light and dark
 

@@ -13,6 +13,7 @@ So this file builds the real window when there is something to build it with,
 and skips otherwise. It is the only test here that needs a display.
 """
 
+import io
 import os
 import sys
 import unittest
@@ -721,8 +722,8 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_foot_of_the_window_keeps_its_place_on_a_short_screen(self):
         # Pack hands out room in the order it was asked for it. With the pages
         # asking first and taking the lot, a window too short for them had no
-        # Apply row and no log at all - both were packed later and there was
-        # nothing left to give them.
+        # Apply row and no status bar at all - both were packed later and there
+        # was nothing left to give them.
         self.root.geometry("1100x520")
         self.panel.notebook.select(self._page_named("Notifications"))
         for _ in range(6):
@@ -733,8 +734,8 @@ class LiveWindowTest(unittest.TestCase):
                             "%s was squeezed out" % button.cget("text"))
             self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
                                  bottom, button.cget("text"))
-        self.assertTrue(self.panel.output_toggle.winfo_ismapped(),
-                        "the log went missing")
+        self.assertTrue(self.panel.link_said.winfo_ismapped(),
+                        "the status bar went missing")
 
     def test_a_page_asks_for_the_width_its_content_needs(self):
         # A canvas does not pass on the size of what it holds - it asks for its
@@ -1163,80 +1164,109 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertIn("disabled", self.panel.update_button.state())
 
-    def _log_order(self):
-        """Which of "grow the window" and "fill it" happened first."""
-        order = []
-        pack, forget = self.panel.output_box.pack, self.panel.output_box.pack_forget
-        geometry = self.root.geometry
-
-        def note(what, call):
-            def spy(*args, **kwargs):
-                order.append(what)
-                return call(*args, **kwargs)
-            return spy
-
-        self.panel.output_box.pack = note("log", pack)
-        self.panel.output_box.pack_forget = note("log", forget)
-        self.root.geometry = note("window", geometry)
-        try:
-            self.panel.toggle_output()
-        finally:
-            self.panel.output_box.pack = pack
-            self.panel.output_box.pack_forget = forget
-            self.root.geometry = geometry
-        return order
-
-    def test_the_window_grows_before_the_log_is_put_into_it(self):
-        # The log sits at the foot and the pages are what expands, so packing
-        # it into a window that had not grown yet takes its height out of the
-        # pages until the window catches up - the whole thing jumps up and
-        # then settles back down. Grow first, then fill; empty first, then
-        # shrink.
-        #
-        # The order is what is checked rather than the heights along the way:
-        # with no window manager running, a geometry request takes effect at
-        # once and the squeezed frame never gets drawn, so measuring here
-        # would pass whichever way round the two calls went.
-        self.assertEqual(self._log_order()[:2], ["window", "log"],
-                         "the log is packed before the window has grown")
-        self.assertTrue(self.panel._output_open)
-
-    def test_the_log_is_taken_out_before_the_window_shrinks(self):
-        self.panel._show_output(True)
-        for _ in range(4):
-            self.root.update()
-        self.assertEqual(self._log_order()[:2], ["log", "window"],
-                         "the window shrinks before the log has gone")
-        self.assertFalse(self.panel._output_open)
-
-    def test_the_log_stays_folded_and_marks_its_own_handle(self):
-        # It used to open itself on anything written to it. The bar under the
-        # title now says that something is running, so opening as well would
-        # be the window rearranging itself to tell you what you can see - it
-        # marks its handle instead.
-        self.assertFalse(self.panel._output_open)
-        self.assertFalse(self.panel.output_box.winfo_ismapped())
-        self.assertNotIn("•", self.panel.output_toggle.cget("text"))
-        self.panel._write("something happened\n")
-        self.root.update_idletasks()
-        self.assertFalse(self.panel._output_open, "the log opened by itself")
-        self.assertIn("•", self.panel.output_toggle.cget("text"))
-
-    def test_opening_the_log_clears_the_mark(self):
-        self.panel._write("something happened\n")
-        self.panel._show_output(True)
-        self.root.update_idletasks()
-        self.assertNotIn("•", self.panel.output_toggle.cget("text"))
-
-    def test_a_command_that_fails_opens_the_log_at_the_reason(self):
-        # The one thing worth interrupting you for. A command that worked has
-        # nothing to say that the bar under the title did not already.
+    def test_a_command_that_fails_says_so_beside_the_status_light(self):
+        # The window has no log pane: what a command printed goes to stderr,
+        # and what is left in here is one line saying that something went
+        # wrong, next to the light that says whether the bar is there.
+        self.panel._write("Running the installer\n")
+        self.panel._write("cp: cannot create regular file: Permission denied\n")
         self.panel._set_busy(False, 0)
-        self.root.update_idletasks()
-        self.assertFalse(self.panel._output_open)
+        self.root.update()
+        self.assertFalse(self.panel.problem.winfo_ismapped(),
+                         "a command that worked left a warning behind")
         self.panel._set_busy(False, 1)
-        self.root.update_idletasks()
-        self.assertTrue(self.panel._output_open)
+        self.root.update()
+        self.assertTrue(self.panel.problem.winfo_ismapped(),
+                        "nothing said the command failed")
+        self.assertIn("Permission denied", self.panel.problem.cget("text"))
+
+    def test_the_next_command_that_works_takes_the_warning_away(self):
+        # A warning left standing beside a command that has just worked is
+        # worse than no warning at all.
+        self.panel._write("it broke\n")
+        self.panel._set_busy(False, 1)
+        self.root.update()
+        self.assertTrue(self.panel.problem.winfo_ismapped())
+        self.panel._set_busy(False, 0)
+        self.root.update()
+        self.assertFalse(self.panel.problem.winfo_ismapped())
+
+    def test_the_reason_is_the_command_s_last_word_not_the_window_s(self):
+        """What the window says around a command is not what went wrong.
+
+        The Runner keeps the command's own output apart from it, and that is
+        what is read: taking the last line of the log instead would report
+        "Saved 12 settings" as the reason an Apply that saved them and then
+        failed to restart the service had failed.
+        """
+        self.panel.runner.transcript = ["Applying...\n",
+                                        "write error: Invalid argument\n"]
+        self.panel._write("Saved 12 settings to /etc/steamos-led-serial.conf\n")
+        self.assertEqual(self.panel._last_said(),
+                         "write error: Invalid argument")
+
+    def test_a_command_that_never_started_still_says_why(self):
+        # There was no process, so the Runner has no transcript of one - and
+        # "cannot run: no such file" is the whole of what went wrong. The
+        # window's two bookends round it are how the failure was reported,
+        # not what it was.
+        self.panel.runner.transcript = []
+        self.panel._write("$ /usr/local/bin/steamos-led-power --apply\n")
+        self.panel._write("cannot run: [Errno 2] No such file or directory\n")
+        self.panel._write("[exit 1]\n")
+        self.assertEqual(self.panel._last_said(),
+                         "cannot run: [Errno 2] No such file or directory")
+
+    def test_a_command_that_printed_nothing_shows_no_empty_warning(self):
+        self.panel._set_busy(False, 1)
+        self.root.update()
+        self.assertFalse(self.panel.problem.winfo_ismapped(),
+                         "an empty warning is worse than none")
+
+    def test_a_long_reason_is_cut_rather_than_wrapped(self):
+        # The status bar is one line tall and shares it with the dot, its
+        # sentence and the version. A message long enough to wrap would push
+        # every page above it up.
+        tall = self.root.winfo_height()
+        self.panel._write("x" * 400 + "\n")
+        self.panel._set_busy(False, 1)
+        self.root.update()
+        said = self.panel.problem.cget("text")
+        self.assertLessEqual(len(said), self.panel_module.PROBLEM_CHARS + 2)
+        self.assertTrue(said.endswith("\u2026"), said[-8:])
+        self.assertEqual(self.panel.statusbar.winfo_height(),
+                         self.panel.link_said.winfo_reqheight())
+        self.assertEqual(self.root.winfo_height(), tall)
+
+    def test_a_terminal_that_went_away_does_not_break_the_window(self):
+        """The README tells people to start this from a terminal.
+
+        Closing that terminal with the window still open leaves a broken pipe
+        on the other end of stderr, and writing to it raises - which without
+        this would come out of the middle of an install. The line is kept
+        either way: the blip has to work with nobody reading the log.
+        """
+        class Gone:
+            def write(self, _text):
+                raise BrokenPipeError(32, "Broken pipe")
+
+        was, sys.stderr = sys.stderr, Gone()
+        try:
+            self.panel._write("the install carried on\n")
+        finally:
+            sys.stderr = was
+        self.assertIn("the install carried on", "".join(self.panel._log))
+
+    def test_what_a_command_printed_goes_to_stderr(self):
+        # Whoever wants a log runs the install script in a terminal, where the
+        # output is selectable, searchable and outlives the window.
+        said = io.StringIO()
+        was, sys.stderr = sys.stderr, said
+        try:
+            self.panel._write("halfway through\n")
+        finally:
+            sys.stderr = was
+        self.assertEqual(said.getvalue(), "halfway through\n")
 
     def test_a_running_command_shows_a_bar_and_deadens_the_buttons(self):
         self.assertFalse(self.panel.progress.canvas.winfo_ismapped())
@@ -1246,9 +1276,8 @@ class LiveWindowTest(unittest.TestCase):
                         "nothing says a command is running")
         for button in self.panel._busy_buttons:
             self.assertIn("disabled", button.state(), button.cget("text"))
-        # The two that only fold something away stay live: watching the log is
-        # the one thing worth doing while a command runs.
-        self.assertNotIn("disabled", self.panel.output_toggle.state())
+        # The one that only folds something away stays live: it starts
+        # nothing, so greying it would take away a control for no reason.
         self.assertNotIn("disabled", self.panel.details.state())
         self.panel._set_busy(False, 0)          # the bar books its own next step
 
@@ -1909,11 +1938,38 @@ class AppearanceTest(unittest.TestCase):
         self.assertEqual(int(self.panel.vars["LED_COUNT"][0].get()), 42)
         self.assertIn("LED_COUNT", self.panel._differences())
 
-    def test_the_log_is_not_lost(self):
+    def test_the_log_is_carried_across_rather_than_said_again(self):
+        """It survives the rebuild, and stderr does not hear it twice.
+
+        Replaying it through _write would leave the list looking right and
+        print the whole session out again for every theme change - so what is
+        checked is the stderr, which is the half that would go wrong.
+        """
         self.panel._write("something worth keeping\n")
+        said = io.StringIO()
+        was, sys.stderr = sys.stderr, said
+        try:
+            self._pick(appsettings.THEME_LIGHT)
+        finally:
+            sys.stderr = was
+        self.assertIn("something worth keeping", "".join(self.panel._log))
+        self.assertNotIn("worth keeping", said.getvalue())
+
+    def test_a_failure_showing_at_the_foot_is_still_showing_afterwards(self):
+        """The one thing in the status bar that a rebuild could silently drop.
+
+        The dot re-reads the link a moment later on its own, and the version
+        is a constant - the blip is the only part of that line whose reason to
+        be there lives nowhere but in the window that is being thrown away.
+        """
+        self.panel._write("the pipe went away\n")
+        self.panel._set_busy(False, 1)
+        self.root.update()
         self._pick(appsettings.THEME_LIGHT)
-        self.assertIn("something worth keeping",
-                      self.panel.output.get("1.0", "end-1c"))
+        self.root.update()
+        self.assertTrue(self.panel.problem.winfo_ismapped(),
+                        "the warning went with the old window")
+        self.assertIn("the pipe went away", self.panel.problem.cget("text"))
 
     # -- what it must not leave behind -------------------------------------
 
