@@ -735,7 +735,7 @@ class LiveWindowTest(unittest.TestCase):
                             "%s was squeezed out" % button.cget("text"))
             self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
                                  bottom, button.cget("text"))
-        self.assertTrue(self.panel.link_said.winfo_ismapped(),
+        self.assertTrue(self.panel.link.label.winfo_ismapped(),
                         "the status bar went missing")
 
     def test_a_page_asks_for_the_width_its_content_needs(self):
@@ -1236,7 +1236,7 @@ class LiveWindowTest(unittest.TestCase):
         self.assertLessEqual(len(said), self.panel_module.PROBLEM_CHARS + 2)
         self.assertTrue(said.endswith("\u2026"), said[-8:])
         self.assertEqual(self.panel.statusbar.winfo_height(),
-                         self.panel.link_said.winfo_reqheight())
+                         self.panel.link.label.winfo_reqheight())
         self.assertEqual(self.root.winfo_height(), tall)
 
     def test_a_terminal_that_went_away_does_not_break_the_window(self):
@@ -1258,6 +1258,19 @@ class LiveWindowTest(unittest.TestCase):
             sys.stderr = was
         self.assertIn("the install carried on", "".join(self.panel._log))
 
+    def test_a_short_failure_is_not_cut_on_a_wide_window(self):
+        # The other half of the same rule: room enough is room enough, and a
+        # line trimmed anyway would be losing words for nothing.
+        self.root.geometry("1920x900")
+        for _ in range(4):
+            self.root.update()
+        self.panel._write("no such device\n")
+        self.panel._set_busy(False, 1)
+        for _ in range(6):
+            self.root.update()
+        self.assertTrue(self.panel.problem.cget("text").endswith("device"),
+                        self.panel.problem.cget("text"))
+
     def test_what_a_command_printed_goes_to_stderr(self):
         # Whoever wants a log runs the install script in a terminal, where the
         # output is selectable, searchable and outlives the window.
@@ -1269,18 +1282,31 @@ class LiveWindowTest(unittest.TestCase):
             sys.stderr = was
         self.assertEqual(said.getvalue(), "halfway through\n")
 
-    def test_a_running_command_shows_a_bar_and_deadens_the_buttons(self):
-        self.assertFalse(self.panel.progress.canvas.winfo_ismapped())
+    def test_a_running_command_deadens_every_button_that_starts_one(self):
+        # There was a moving rule under the title as well. It said only what
+        # the greyed buttons already say, and said it by animating four pixels
+        # sixty times a second for the length of an install.
         self.panel._set_busy(True)
         self.root.update()
-        self.assertTrue(self.panel.progress.canvas.winfo_ismapped(),
-                        "nothing says a command is running")
         for button in self.panel._busy_buttons:
             self.assertIn("disabled", button.state(), button.cget("text"))
         # The one that only folds something away stays live: it starts
         # nothing, so greying it would take away a control for no reason.
         self.assertNotIn("disabled", self.panel.details.state())
-        self.panel._set_busy(False, 0)          # the bar books its own next step
+        self.panel._set_busy(False, 0)
+
+    def test_the_window_animates_nothing_while_a_command_runs(self):
+        """The rule is gone, and nothing was left booking frames for it.
+
+        A timer that outlives the thing it was drawing is not visible and not
+        harmless: it fires at a canvas that no longer exists, which Tk reports
+        as an invalid command name from somewhere with no stack to speak of.
+        """
+        self.assertFalse(hasattr(self.panel, "progress"))
+        source = self.panel_module.__file__ or ""
+        self.assertTrue(source)
+        with open(source) as handle:
+            self.assertNotIn("Progress", handle.read())
 
     def test_apply_keeps_its_own_reason_to_be_dead_afterwards(self):
         # Everything comes back when a command ends - except Apply, which has
@@ -1449,12 +1475,18 @@ class LiveWindowTest(unittest.TestCase):
         for connected in (None, True, False):
             self.panel._say_link(connected)
             self.root.update()
-            seen[connected] = self.panel.link_dot.itemcget(
-                self.panel._dot, "fill")
-            self.assertTrue(self.panel.link_said.cget("text").strip())
+            seen[connected] = self.panel.link.canvas.itemcget(
+                self.panel.link.dot, "fill")
+            self.assertTrue(self.panel.link.label.cget("text").strip())
         self.assertEqual(len(set(seen.values())), 3, seen)
         self.assertEqual(seen[True], self.panel.roles["positive"])
         self.assertEqual(seen[False], self.panel.roles["error"])
+
+    def test_the_led_indicator_is_always_in_the_bar(self):
+        # It answers a question this whole window is about, so unlike the
+        # HDMI CEC one there is no state in which it has nothing to say.
+        self.assertTrue(self.panel.link.canvas.winfo_ismapped())
+        self.assertTrue(self.panel.link.label.winfo_ismapped())
 
     def _every_widget(self, widget=None, found=None):
         found = [] if found is None else found
@@ -1919,6 +1951,12 @@ class CecPageTest(unittest.TestCase):
 
     def setUp(self):
         self.said = self._status()
+        # There is no toolkit on this machine, and the window asks before it
+        # shows the indicator at the foot - so the answer has to be arranged
+        # before the window is built, not after.
+        was = cec.installed
+        cec.installed = lambda home=None: True
+        self.addCleanup(lambda: setattr(cec, "installed", was))
         self.root = tk.Tk()
         self.addCleanup(self._destroy)
         self.panel = self.panel_module.Panel(self.root)
@@ -1957,6 +1995,25 @@ class CecPageTest(unittest.TestCase):
         found.update(changes)
         return found
 
+    def _not_installed(self):
+        """Pretend the toolkit is not there, for as long as the block lasts."""
+        import contextlib
+
+        @contextlib.contextmanager
+        def pretend():
+            was_status = self.panel_module.ledpanel.cec_status
+            was_installed = cec.installed
+            self.panel_module.ledpanel.cec_status = (
+                lambda home=None, run=None: None)
+            cec.installed = lambda home=None: False
+            try:
+                yield
+            finally:
+                self.panel_module.ledpanel.cec_status = was_status
+                cec.installed = was_installed
+
+        return pretend()
+
     def _finish(self, code=0):
         """Let the last recorded command's callback run, as the Runner would."""
         _command, done = self.ran[-1]
@@ -1989,29 +2046,6 @@ class CecPageTest(unittest.TestCase):
         self.root.update()
         self.assertTrue(self.panel.cec_present.winfo_ismapped())
         self.assertFalse(self.panel.cec_missing.winfo_ismapped())
-
-    def test_it_does_not_ask_the_machine_until_somebody_looks(self):
-        """Every section's page is built when the window is.
-
-        Reading the status at construction would put a subprocess on the path
-        of every window open and every theme change, for a page most people
-        never visit.
-        """
-        # The window from setUp goes first: two live Tk interpreters in one
-        # process cannot share the images this window makes, and the second
-        # one fails on the icon before it reaches anything worth testing.
-        self._destroy()
-        asked = []
-        self.panel_module.ledpanel.cec_status = (
-            lambda home=None, run=None: (asked.append(1), self.said)[1])
-        self.root = tk.Tk()
-        panel = self.panel_module.Panel(self.root)
-        self.root.update()
-        self.assertEqual(asked, [], "the CEC page read the machine while the "
-                                    "window was being built")
-        panel._open_section("cec")
-        self.root.update()
-        self.assertEqual(len(asked), 1)
 
     # -- the switches ------------------------------------------------------
 
@@ -2173,6 +2207,159 @@ class CecPageTest(unittest.TestCase):
         self.panel._ask = lambda *a, **k: True
         self.panel._remove_cec()
         self.assertEqual(self.ran[-1][0][2], "remove")
+
+    def test_the_failure_line_is_recut_when_the_window_narrows(self):
+        """Here rather than beside the other failure-line tests, deliberately.
+
+        With one indicator in the bar there is so much room that the ninety
+        character cap does all the cutting by itself, and a test there passes
+        whether or not anything is measured. With two there is not: measured,
+        the room falls to about seventy characters, so the pixels are what
+        decides and this can tell the difference.
+
+        Both ways of getting it wrong are caught. Never recutting leaves the
+        wide window's text in a narrow one, where the bar clips the end off -
+        and the end of a command's complaint is the part that says what went
+        wrong. Recutting during the resize instead of after is no better: the
+        right-packed version label still reports where it used to be, so the
+        room comes out too large and nothing is cut.
+        """
+        self.panel._reread_cec()
+        self.root.geometry("1600x900")
+        for _ in range(4):
+            self.root.update()
+        self.panel._write("cp: cannot create regular file '/usr/lib/modules/"
+                          "6.11.11-valve1-1-neptune/updates/leds-valve-shim"
+                          ".ko': Read-only file system\n")
+        self.panel._set_busy(False, 1)
+        for _ in range(6):
+            self.root.update()
+        wide = self.panel.problem.cget("text")
+
+        self.root.geometry("%dx900" % self.panel_module.MIN_WIDTH)
+        for _ in range(6):
+            self.root.update()
+        narrow = self.panel.problem.cget("text")
+        self.assertLess(len(narrow), len(wide),
+                        "the same text was kept into a narrower window")
+        line = self.panel.problem
+        self.assertEqual(line.winfo_width(), line.winfo_reqwidth(),
+                         "%r is wider than the room it was given" % narrow)
+        self.assertTrue(narrow.endswith("\u2026"), narrow)
+
+    # -- the indicator at the foot -----------------------------------------
+
+    def _cec_light(self):
+        return self.panel.cec_link.canvas.itemcget(self.panel.cec_link.dot,
+                                                   "fill")
+
+    def test_the_foot_of_the_window_says_whether_cec_can_reach_the_tv(self):
+        """The adapter, not the switches.
+
+        Every feature can be on and none of them work if nothing can be sent,
+        and that is the question worth answering from a page about something
+        else. Which features are on is what you open the section for.
+        """
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertTrue(self.panel.cec_link.canvas.winfo_ismapped())
+        self.assertEqual(self._cec_light(), self.panel.roles["positive"])
+        self.assertIn("ready", self.panel.cec_link.label.cget("text"))
+
+    def test_an_adapter_that_cannot_be_reached_shows_red_down_there_too(self):
+        self.said["cec_device"]["writable"] = False
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertEqual(self._cec_light(), self.panel.roles["error"])
+
+    def test_a_machine_with_no_cec_toolkit_gets_no_second_indicator(self):
+        """Nothing to indicate, so nothing in the bar.
+
+        A permanent grey "HDMI CEC not installed" would be the foot of the
+        window reporting an absence nobody asked about - and it would say it
+        on every page, forever, on every machine that only wants the LEDs.
+        """
+        with self._not_installed():
+            self.panel._reread_cec()
+            self.root.update()
+            self.assertFalse(self.panel.cec_link.canvas.winfo_ismapped())
+            self.assertFalse(self.panel.cec_link.label.winfo_ismapped())
+
+    def test_installing_brings_it_into_the_bar_without_a_restart(self):
+        with self._not_installed():
+            self.panel._reread_cec()
+            self.root.update()
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertTrue(self.panel.cec_link.canvas.winfo_ismapped())
+
+    def test_a_toolkit_that_will_not_answer_is_a_fault_not_a_silence(self):
+        # Installed and not answering is a red light; not looked at yet is a
+        # grey one. Reported the same way, the first would look like the
+        # window still thinking about it.
+        def broken(home=None, run=None):
+            raise cec.CecError("no JSON came back")
+
+        self.panel_module.ledpanel.cec_status = broken
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertEqual(self._cec_light(), self.panel.roles["error"])
+        self.assertIn("not answering",
+                      self.panel.cec_link.label.cget("text"))
+
+    def test_it_comes_after_the_led_light_however_late_it_arrives(self):
+        """Packed with an anchor rather than at the end of the row.
+
+        A window that has already reported a failure has that line packed to
+        the left, so an indicator shown afterwards would land on the far side
+        of it - the two lights split by the sentence about one of them.
+        """
+        with self._not_installed():
+            self.panel._reread_cec()
+            self.panel._write("something broke\n")
+            self.panel._set_busy(False, 1)
+            self.root.update()
+        self.panel._reread_cec()
+        self.root.update()
+        self.assertLess(self.panel.link.label.winfo_x(),
+                        self.panel.cec_link.canvas.winfo_x())
+        self.assertLess(self.panel.cec_link.label.winfo_x(),
+                        self.panel.problem.winfo_x())
+
+    def test_the_two_lights_are_not_pushed_against_each_other(self):
+        # Measured: with no room in front of the second dot the two read as
+        # one sentence with a bullet in the middle of it.
+        self.panel._reread_cec()
+        self.root.update()
+        gap = (self.panel.cec_link.canvas.winfo_x()
+               - (self.panel.link.label.winfo_x()
+                  + self.panel.link.label.winfo_width()))
+        self.assertGreaterEqual(gap, self.panel_module.ROW_GAP, gap)
+
+    def test_it_is_read_once_after_the_window_is_up_not_while_it_is_built(self):
+        """The bar shows this from every page, so it cannot wait to be opened.
+
+        But steamos-cec-toolkitctl runs a handful of systemctl calls, and on
+        the construction path that is a delay on every startup of every
+        machine that has CEC installed. Booked instead, for a moment after.
+        """
+        self._destroy()
+        asked = []
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: (asked.append(1), self.said)[1])
+        self.root = tk.Tk()
+        panel = self.panel_module.Panel(self.root)
+        # Before any update, so what is being asked is whether construction
+        # itself did it. Building this window takes longer than the delay, so
+        # by the first update the timer is due anyway - checking after one
+        # would be checking the clock rather than the code.
+        self.assertEqual(asked, [], "the machine was asked while the window "
+                                    "was being built")
+        self.assertIsNotNone(panel._cec_first, "and nothing was booked to ask")
+        self.root.after(self.panel_module.CEC_FIRST_LOOK + 60,
+                        self.root.quit)
+        self.root.mainloop()
+        self.assertEqual(len(asked), 1)
 
     def test_a_toolkit_that_answers_rubbish_is_not_installed_as_far_as_this_goes(self):
         # read_status raises rather than returning an empty document, and the

@@ -599,8 +599,11 @@ enough settings to need it, has its own list of pages inside.
 | **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
 | **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists &mdash; and flash the ESP |
 
-A line across the foot says whether the bar is being driven, and which version
-this is. When a command fails, the reason appears there beside the light.
+A line across the foot carries a light for the LED bar and, once
+[HDMI CEC](#hdmi-cec) is installed, a second one for the adapter &mdash; each
+grey until it has been read, then green or red. When a command fails, the
+reason appears there beside them, cut to whatever room is left rather than
+wrapped onto a second line.
 
 **There is no log pane.** What the window's commands print goes to standard
 error, so running the panel from a terminal shows all of it &mdash; and the

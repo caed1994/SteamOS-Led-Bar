@@ -533,8 +533,15 @@ SIDEBAR_RADIUS = material.SHAPE_MEDIUM
 SIDEBAR_ICON_X = 20
 SIDEBAR_TEXT_X = 56
 
-# The dot at the foot of the window that says whether the bar is there.
+# The dots at the foot of the window: the LED bar, and HDMI CEC.
 STATUS_DOT = 5
+
+# How long after the window opens before HDMI CEC is asked about itself. The
+# foot of the window shows it from every page, so it cannot wait for somebody
+# to open that section - but steamos-cec-toolkitctl runs a handful of
+# systemctl calls, and doing that on the construction path would slow every
+# startup on the machines that have it. Long enough to be drawn first.
+CEC_FIRST_LOOK = 200
 
 # How much of a failure the blip beside that dot shows before it is cut. The
 # status bar is one line tall and shares it with the dot, its sentence and the
@@ -630,8 +637,6 @@ SCREEN_ALLOWANCE = 120
 # enough for a path, narrow enough that a sentence is not one line.
 DIALOG_WRAP = 460
 
-# How thick the line under the title is while a command runs.
-PROGRESS_HEIGHT = 4
 
 # Everything else a control measures is worked out from the desktop's own font
 # - see material.control_sizes, and the note there on why a fixed size is
@@ -1716,7 +1721,7 @@ class SidebarEntry:
     one face loses the distinction the subtitle exists to make.
 
     A canvas has neither problem, and it is also how everything else in this
-    window that ttk could not draw is drawn: the progress rule, the preview
+    window that ttk could not draw is drawn: the preview
     stage, the swatches. Text items take a font and a fill apiece, so the
     whole entry is four items on one surface.
 
@@ -1869,55 +1874,61 @@ class SidebarEntry:
             self.canvas.itemconfigure(item, **{option: rest})
 
 
-class Progress:
-    """The line under the title while a command runs.
+class Indicator:
+    """A coloured dot and a sentence, at the foot of the window.
 
-    Drawn rather than left to ttk.Progressbar: clam has no say over how thick
-    one is - the option belongs to another theme - and its own eighteen pixels
-    are a bar, not the four pixel rule Material asks for. Squeezing it into a
-    shorter frame clips the moving part out of sight instead of resizing it,
-    so it is a canvas with two rectangles on it.
+    Two of them now: whether the LED bar is being driven, and whether HDMI CEC
+    can reach the television. Both answer a question somebody has while
+    looking at any page, which is why they are at the foot rather than on the
+    page that configures them.
+
+    Three states, and the third is the point. Before anything has been read
+    there is nothing to claim, and a grey dot saying "looking" is honest where
+    a red one saying "not connected" would be a fault report about a question
+    nobody has answered yet.
+
+    The dot is a canvas because a coloured disc is not something ttk draws.
+    The pair is packed and unpacked together - an indicator with no dot is a
+    sentence, and one with no sentence is a dot nobody can read.
     """
 
-    SEGMENT = 0.28              # how much of the width the moving part covers
-    STEP = 0.011                # and how far along it goes each frame
-    FRAME = 16
-
-    def __init__(self, parent, roles, height):
-        self.height = height
-        self.canvas = tk.Canvas(parent, height=height, highlightthickness=0,
+    def __init__(self, parent, roles, text):
+        self.roles = roles
+        self.canvas = tk.Canvas(parent, width=STATUS_DOT * 2,
+                                height=STATUS_DOT * 2, highlightthickness=0,
                                 borderwidth=0, background=roles["_page"])
-        self.track = self.canvas.create_rectangle(
-            0, 0, 1, height, width=0,
-            fill=roles["surface_container_highest"])
-        self.bar = self.canvas.create_rectangle(0, 0, 1, height, width=0,
-                                                fill=roles["primary"])
-        self.at = 0.0
-        self.job = None
-        self.canvas.bind("<Configure>", lambda _event: self._place())
+        self.dot = self.canvas.create_oval(
+            1, 1, STATUS_DOT * 2 - 1, STATUS_DOT * 2 - 1, width=0,
+            fill=roles["on_surface_variant"])
+        self.label = ttk.Label(parent, text=text, style="Page.Muted.TLabel")
 
-    def _place(self):
-        width = self.canvas.winfo_width()
-        self.canvas.coords(self.track, 0, 0, width, self.height)
-        span = width * self.SEGMENT
-        # It runs off one end as it comes on at the other, so the loop has no
-        # seam in it.
-        left = (width + span) * self.at - span
-        self.canvas.coords(self.bar, left, 0, left + span, self.height)
+    def show(self, after=None):
+        """Put it in the bar, in a place that does not depend on when.
 
-    def start(self):
-        if self.job is None:
-            self._step()
+        `after` pins where: an indicator shown later would otherwise land at
+        the end of whatever is packed to the left at that moment, which on a
+        window that has already reported a failure means landing after it.
+        """
+        if self.canvas.winfo_ismapped():
+            return
+        # Room in front of it when it follows another one. Without it the
+        # second dot sits against the first one's last word and the two read
+        # as one long sentence with a bullet in the middle of it.
+        self.canvas.pack(side="left",
+                         padx=(GROUP_GAP if after is not None else 0, ROW_GAP),
+                         **({"after": after} if after is not None else {}))
+        self.label.pack(side="left", after=self.canvas)
 
-    def _step(self):
-        self.at = (self.at + self.STEP) % 1.0
-        self._place()
-        self.job = self.canvas.after(self.FRAME, self._step)
+    def hide(self):
+        self.canvas.pack_forget()
+        self.label.pack_forget()
 
-    def stop(self):
-        if self.job is not None:
-            self.canvas.after_cancel(self.job)
-            self.job = None
+    def say(self, good, text):
+        self.canvas.itemconfigure(self.dot, fill=(
+            self.roles["on_surface_variant"] if good is None
+            else self.roles["positive"] if good
+            else self.roles["error"]))
+        self.label.configure(text=text)
 
 
 class Panel:
@@ -2012,12 +2023,6 @@ class Panel:
         # asks for what its widest child wants, so the repair summary alone
         # decided how wide the window opened.
         self._wrapped.append(self.headline)
-
-        # A line under the title while a command runs, packed and unpacked
-        # rather than left there greyed: at rest it would be a rule across the
-        # window that means nothing.
-        #
-        self.progress = Progress(main, self.roles, PROGRESS_HEIGHT)
 
         self.sections = ttk.Notebook(main)
 
@@ -2129,6 +2134,11 @@ class Panel:
 
         self._register_buttons()
         self.refresh_status()
+        self._say_cec_link()
+        self._cec_first = None
+        if cec.installed():
+            self._cec_first = self.root.after(CEC_FIRST_LOOK,
+                                              self._reread_cec)
         # Open at the height the content needs, so the first thing anyone does
         # is not what resizes the window.
         self._fit_window()
@@ -2268,41 +2278,62 @@ class Panel:
         bar = self.statusbar = ttk.Frame(parent, style="Page.TFrame")
         bar.pack(side="bottom", fill="x",
                  padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, GROUP_GAP))
-        self.link_dot = tk.Canvas(bar, width=STATUS_DOT * 2,
-                                  height=STATUS_DOT * 2, highlightthickness=0,
-                                  borderwidth=0,
-                                  background=self.roles["_page"])
-        self.link_dot.pack(side="left", padx=(0, ROW_GAP))
-        self._dot = self.link_dot.create_oval(
-            1, 1, STATUS_DOT * 2 - 1, STATUS_DOT * 2 - 1, width=0,
-            fill=self.roles["on_surface_variant"])
-        self.link_said = ttk.Label(bar, text="Looking for the bar...",
-                                   style="Page.Muted.TLabel")
-        self.link_said.pack(side="left")
+        self.link = Indicator(bar, self.roles, "Looking for the bar...")
+        self.link.show()
+        # The second one is built here and shown only once there is a toolkit
+        # to report on - see _say_cec_link. A machine that has never installed
+        # HDMI CEC has nothing to indicate, and a permanent grey "not
+        # installed" would be the foot of the window reporting an absence
+        # nobody asked about.
+        self.cec_link = Indicator(bar, self.roles, "Looking for HDMI CEC...")
         # Built here and packed only when there is something to say - see
         # _say_problem. An empty label sitting in the bar would still take its
         # padding, and the gap would be the one thing in this line that means
         # nothing.
         self.problem = ttk.Label(bar, style="Page.Bad.TLabel")
-        ttk.Label(bar, text="SteamOS LED bar v%s" % VERSION,
-                  style="Page.Muted.TLabel").pack(side="right")
+        self._problem_said = ""
+        self._problem_job = None
+        self.version_said = ttk.Label(bar,
+                                      text="SteamOS LED bar v%s" % VERSION,
+                                      style="Page.Muted.TLabel")
+        self.version_said.pack(side="right")
+        # The failure line is cut to whatever is left between the indicators
+        # and the version, so it has to be recut when that changes.
+        bar.bind("<Configure>", self._fit_problem, add="+")
 
     def _say_link(self, connected, detail=""):
-        """Colour the dot and say what it means. Three states, not two.
+        self.link.say(connected,
+                      detail or ("Looking for the bar..." if connected is None
+                                 else "LED bar connected"
+                                 if connected else "LED bar not connected"))
 
-        Unknown is its own: before the first status read there is nothing to
-        claim, and a grey dot saying "looking" is honest where a red one
-        saying "not connected" would be a fault report about a question
-        nobody has answered yet.
+    def _say_cec_link(self):
+        """The same for HDMI CEC, and away entirely when there is none.
+
+        What it reports is the adapter rather than the switches: every feature
+        can be on and none of them work if nothing can be sent, and that is
+        the question worth answering from a page about something else. Which
+        features are on is a thing you go to the section to see.
         """
-        colour = (self.roles["on_surface_variant"] if connected is None
-                  else self.roles["positive"] if connected
-                  else self.roles["error"])
-        self.link_dot.itemconfigure(self._dot, fill=colour)
-        self.link_said.configure(
-            text=detail or ("Looking for the bar..." if connected is None
-                            else "LED bar connected" if connected
-                            else "LED bar not connected"))
+        if not cec.installed():
+            self.cec_link.hide()
+            return
+        self.cec_link.show(after=self.link.label)
+        if self._cec is None:
+            # Asked and got nothing back is not the same as not asked yet. The
+            # first is a toolkit that is installed and will not answer, which
+            # is a fault; the second is a window that has not looked.
+            if self._cec_asked:
+                self.cec_link.say(False, "HDMI CEC is not answering")
+            else:
+                self.cec_link.say(None, "Looking for HDMI CEC...")
+        elif cec.usable(self._cec):
+            self.cec_link.say(True, "HDMI CEC ready")
+        else:
+            found = cec.device(self._cec)
+            self.cec_link.say(False, "HDMI CEC: %s" % (
+                "adapter cannot be written to" if found.get("exists")
+                else "no adapter"))
 
     def _build_soon(self, where, key):
         """A section that is planned but not built.
@@ -2382,20 +2413,15 @@ class Panel:
     def _set_busy(self, busy, code=None):
         """What the window does while a command runs, and when it ends.
 
-        Three things at once, because they are one thought: a bar under the
-        title so something visibly happens, every button that starts a command
-        gone dead so a second one cannot be started - Runner refused it before,
-        but only by writing a line into a log that may well be folded away -
-        and, when it ends badly, the log opened at the reason.
+        Every button that starts a command goes dead, so a second one cannot
+        be started - the Runner refuses it anyway, but only by printing a line
+        nobody is looking at - and when a command ends badly the reason goes
+        beside the status light.
+
+        There was a moving rule under the title as well. It said only what the
+        greyed buttons already say, and it said it by animating four pixels
+        sixty times a second for the length of an install.
         """
-        if busy:
-            self.progress.canvas.pack(side="top", fill="x",
-                                      pady=(0, GROUP_GAP // 2),
-                                      after=self.header)
-            self.progress.start()
-        else:
-            self.progress.stop()
-            self.progress.canvas.pack_forget()
         for button in self._busy_buttons:
             button.state(["disabled"] if busy else ["!disabled"])
         if not busy:
@@ -2446,7 +2472,7 @@ class Panel:
 
         Rebuilt rather than repainted, and that is a considered choice. Half
         of this window is not ttk: the sidebar's pills, its icons, the
-        progress rule, the status dot, every page's canvas and every colour
+        status dot, every page's canvas and every colour
         swatch are pictures with their colours already baked in. Repainting
         would mean a second path that has to reach all of them - and this
         session has already produced two bugs from one picture drawn against
@@ -2605,21 +2631,69 @@ class Panel:
         return ""
 
     def _say_problem(self, said):
-        """Show or clear the blip beside the status dot.
+        """Show or clear the blip beside the status lights.
 
-        One line, in the error colour, next to the light that says whether the
-        bar is there - the two things in this window that report a state
-        rather than set one, in the same place. Long output is cut rather than
-        wrapped: the status bar is one line tall, and a message that pushed it
-        to three would move every page above it.
+        One line, in the error colour, beside the lights that say whether the
+        bar and the television are there - the things in this window that
+        report a state rather than set one, in the same place. It is cut
+        rather than wrapped: the bar is one line tall, and a message that
+        pushed it to three would move every page above it.
         """
+        self._problem_said = said or ""
         if not said:
             self.problem.pack_forget()
             return
-        if len(said) > PROBLEM_CHARS:
-            said = said[:PROBLEM_CHARS - 1].rstrip() + "…"
-        self.problem.configure(text="⚠ " + said)
         self.problem.pack(side="left", padx=(GROUP_GAP, 0))
+        self._fit_problem_now()
+        self._fit_problem()             # and again once it has been laid out
+
+    def _fit_problem(self, _event=None):
+        """Book a recut for the next idle moment, once at most.
+
+        Not done in the Configure itself. A Configure arrives *during* the
+        resize, and measured then the right-packed version label still reports
+        where it used to be - so the room came out wrong and the line was left
+        at its full width, clipped by the bar. Tk runs idle work after the
+        layout has settled and before it redraws, which is both late enough to
+        measure and early enough that nothing wrong is ever seen.
+        """
+        if self._problem_job is None:
+            self._problem_job = self.root.after_idle(self._fit_problem_now)
+
+    def _fit_problem_now(self):
+        """Cut it to the room the bar actually has, and recut when that moves.
+
+        A character count cannot do this. The line is shared with two
+        indicators and the version, the window resizes, and what is left over
+        is pixels rather than letters - measured, ninety characters fitted at
+        1400 and lost its last thirty-eight pixels at the narrowest window
+        this panel opens to. The end of a command's complaint is the part that
+        says what went wrong, so losing it silently is the worst place to lose
+        anything.
+        """
+        self._problem_job = None
+        if not self._problem_said:
+            return
+        mark = "\u26a0 "
+        said = self._problem_said
+        if len(said) > PROBLEM_CHARS:
+            said = said[:PROBLEM_CHARS - 1].rstrip() + "\u2026"
+
+        # The text goes on whether or not there is anything to measure
+        # against, and the measuring is what is skipped. The other way round -
+        # returning early when the label was not yet mapped - is how this
+        # first went wrong: _say_problem packs and calls straight through, and
+        # a widget is not mapped until the next redraw, so the failure line
+        # was set to nothing and stayed there.
+        room = 0
+        if self.problem.winfo_ismapped():
+            room = (self.version_said.winfo_x() - self.problem.winfo_x()
+                    - GROUP_GAP)
+        if room > 0:
+            metric = tkfont.Font(font=self.problem.cget("font"))
+            while len(said) > 4 and metric.measure(mark + said) > room:
+                said = said[:-2].rstrip() + "\u2026"
+        self.problem.configure(text=mark + said)
 
     # -- the pieces a page is built from ----------------------------------
 
@@ -3881,20 +3955,18 @@ class Panel:
 
         All three have something pending most of the time - the preview while
         its page is up, the resize between a fold and the layout pass that
-        follows it, and the progress bar which books its own next step for as
-        long as it is running - and Tk reports a callback that outlives its
-        window as an invalid command name.
+        follows it, and the idle catch-up - and Tk reports a callback that
+        outlives its window as an invalid command name.
         """
         if event is not None and event.widget is not self.root:
             return                              # a child of ours, not the window
-        for job in (self._preview_job, self._refit_job, self._catching_up):
+        for job in (self._preview_job, self._refit_job, self._catching_up,
+                    getattr(self, "_cec_first", None),
+                    getattr(self, "_problem_job", None)):
             if job is not None:
                 self.root.after_cancel(job)
         self._preview_job = self._refit_job = self._catching_up = None
-        try:
-            self.progress.stop()
-        except tk.TclError:                                 # pragma: no cover
-            pass                                # already torn down
+        self._cec_first = self._problem_job = None
 
     def _preview_chosen(self):
         """Restart the clock, so a shape is seen from its beginning."""
@@ -4334,6 +4406,9 @@ class Panel:
             self._settle_cec_switches()
         else:
             self._say_cec_needs()
+        # The foot of the window reports the same adapter from every page, so
+        # it is redrawn by whatever redrew this one.
+        self._say_cec_link()
 
     def _say_cec_needs(self):
         """Name what the machine has not got, or say nothing when it has."""
