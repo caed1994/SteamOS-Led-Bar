@@ -76,16 +76,66 @@ class _Stopped(Exception):
     """Raised internally when a signal asks us to shut down."""
 
 
+def anything_shows(config, shows):
+    """Whether either mode puts `shows` on the bar on this machine.
+
+    Two settings can ask for the same effect, independently. RAINBOW_SHOWS is
+    which of them holds Steam's rainbow slot in Game Mode; DESKTOP_SCENE names
+    one outright on the desktop, where there is no menu to share. So a gauge
+    is wanted here if *either* asks for it - and the sources below are what a
+    gauge has to read.
+
+    Reported, and this is the whole of it: with DESKTOP_SCENE=load and
+    RAINBOW_SHOWS left at the rainbow, nothing built the counters, the load
+    gauge had nothing to read, and render._substitute handed the slot back to
+    Steam's rainbow. So picking the load gauge on the desktop showed a
+    rainbow - the one effect it was chosen instead of. Same for the
+    temperature gauge, by the same two lines.
+
+    Only the two that read hardware need asking about. Fire and the aurora
+    are arithmetic and draw wherever they are named.
+    """
+    return (config["RAINBOW_SHOWS"] == shows
+            or desktop.scene_shows(config["DESKTOP_SCENE"]) == shows)
+
+
+def shown_where(config, shows, name):
+    """Two lines saying which of the modes puts `name` on the bar here.
+
+    Both, always. What the two diagnostics said before was "the rainbow slot
+    shows %r, set RAINBOW_SHOWS=load to put this there" - true, and half the
+    answer: it names the Game Mode setting to someone who may well be asking
+    because their *desktop* is showing the wrong thing, and following it puts
+    the gauge in the one mode they were not looking at.
+    """
+    lines = []
+    if config["RAINBOW_SHOWS"] == shows:
+        lines.append("In Game Mode the rainbow slot holds the %s - pick "
+                     "\"Rainbow\" in Steam's LED menu." % name)
+    else:
+        lines.append("In Game Mode the rainbow slot shows %r; set "
+                     "RAINBOW_SHOWS=%s for the %s there."
+                     % (config["RAINBOW_SHOWS"], shows, name))
+    if desktop.scene_shows(config["DESKTOP_SCENE"]) == shows:
+        lines.append("On the desktop DESKTOP_SCENE=%s, so the %s is on the "
+                     "bar whenever Steam is not." % (shows, name))
+    else:
+        lines.append("On the desktop DESKTOP_SCENE=%s; set DESKTOP_SCENE=%s "
+                     "for the %s there."
+                     % (config["DESKTOP_SCENE"], shows, name))
+    return lines
+
+
 def build_temperature_source(config):
-    """A sensor to read, or None unless the rainbow slot shows the gauge."""
-    if config["RAINBOW_SHOWS"] != render.SHOWS_TEMPERATURE:
+    """A sensor to read, or None unless something on this machine shows it."""
+    if not anything_shows(config, render.SHOWS_TEMPERATURE):
         return None
     return temperature.TemperatureSource(path=config["TEMPERATURE_SENSOR"])
 
 
 def build_load_source(config):
-    """Counters to read, or None unless the rainbow slot shows the load."""
-    if config["RAINBOW_SHOWS"] != render.SHOWS_LOAD:
+    """Counters to read, or None unless something on this machine shows them."""
+    if not anything_shows(config, render.SHOWS_LOAD):
         return None
     return load.LoadSource()
 
@@ -729,9 +779,10 @@ def run_temperature(config):
     print()
     source = build_temperature_source(config)
     if source is None:
-        print("The rainbow slot shows %r, not the temperature gauge."
-              % config["RAINBOW_SHOWS"])
-        print("Set RAINBOW_SHOWS=temperature to put the gauge there instead.")
+        print("Nothing here shows the temperature gauge.")
+        for line in shown_where(config, render.SHOWS_TEMPERATURE,
+                                "temperature gauge"):
+            print(line)
         return 0
 
     celsius = source.celsius()
@@ -759,6 +810,11 @@ def run_temperature(config):
             celsius, config["TEMPERATURE_MIN"], config["TEMPERATURE_MAX"])
         print("Right now: #%02x%02x%02x across all %d LEDs"
               % (int(red), int(green), int(blue), shim.LOGICAL_LEDS))
+
+    print()
+    for line in shown_where(config, render.SHOWS_TEMPERATURE,
+                            "temperature gauge"):
+        print(line)
     return 0
 
 
@@ -804,12 +860,8 @@ def run_load(config):
           % (source.interval, source.smoothing))
 
     print()
-    if config["RAINBOW_SHOWS"] == render.SHOWS_LOAD:
-        print("The rainbow slot shows this - pick \"Rainbow\" in Steam's LED "
-              "menu to see it.")
-    else:
-        print("The rainbow slot shows %r. Set RAINBOW_SHOWS=load to put this "
-              "there." % config["RAINBOW_SHOWS"])
+    for line in shown_where(config, render.SHOWS_LOAD, "load gauge"):
+        print(line)
     return 0
 
 

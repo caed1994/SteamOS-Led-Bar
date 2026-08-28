@@ -324,6 +324,135 @@ class ScenesOfTheirOwnTest(unittest.TestCase):
                 "%s / %s" % (scene, shows))
 
 
+class SourcesForTheSceneTest(unittest.TestCase):
+    """Reported: DESKTOP_SCENE=load showed the rainbow.
+
+    The other half of the class above, and the half that was missing. Those
+    tests hand the renderer a sensor and a load source outright, so they prove
+    the scenes draw once something has built them - and nothing had. The two
+    builders asked RAINBOW_SHOWS and only RAINBOW_SHOWS, which is Steam's
+    menu's setting: with the slot left at the rainbow there were no counters
+    on the renderer, the load gauge had nothing to read, and _substitute did
+    what it does with a gauge that cannot read - handed the slot back to
+    Steam's rainbow.
+
+    So the desktop showed a rainbow when you picked the load gauge, which is
+    the one effect you picked it instead of. Both gauges, by the same two
+    lines; the fire and the aurora were never affected, being arithmetic.
+    """
+
+    def _config(self, **overrides):
+        return dict(config_module.DEFAULTS, **overrides)
+
+    def test_the_desktop_scene_gets_the_counters_it_asks_for(self):
+        # The report, in one line. RAINBOW_SHOWS is left at its default,
+        # which is what everyone who has not changed it has.
+        settings = self._config(DESKTOP_SCENE=desktop.SCENE_LOAD)
+        self.assertEqual(settings["RAINBOW_SHOWS"], render.SHOWS_RAINBOW)
+        self.assertIsNotNone(service.build_load_source(settings))
+
+    def test_and_the_sensor_the_temperature_scene_asks_for(self):
+        # The same two lines, so the same bug: DESKTOP_SCENE=temperature with
+        # the slot elsewhere had no sensor either.
+        settings = self._config(DESKTOP_SCENE=desktop.SCENE_TEMPERATURE)
+        self.assertIsNotNone(service.build_temperature_source(settings))
+
+    def test_game_mode_still_gets_them_on_its_own(self):
+        # The half that always worked, which the fix must not trade away.
+        settings = self._config(RAINBOW_SHOWS=render.SHOWS_LOAD,
+                                DESKTOP_SCENE=desktop.SCENE_STEAM)
+        self.assertIsNotNone(service.build_load_source(settings))
+        settings = self._config(RAINBOW_SHOWS=render.SHOWS_TEMPERATURE,
+                                DESKTOP_SCENE=desktop.SCENE_STEAM)
+        self.assertIsNotNone(service.build_temperature_source(settings))
+
+    def test_nothing_is_read_that_nothing_shows(self):
+        """A machine showing neither gauge opens neither.
+
+        Not a tidiness point. The load source resolves a sysfs path and reads
+        /proc/stat four times a second forever, and the sensor is a file the
+        settings can point anywhere - neither is work to do on behalf of an
+        effect nobody has asked for.
+        """
+        for scene in (desktop.SCENE_STEAM, desktop.SCENE_COLOR,
+                      desktop.SCENE_FIRE, desktop.SCENE_RAINBOW):
+            settings = self._config(DESKTOP_SCENE=scene)
+            self.assertIsNone(service.build_load_source(settings), scene)
+            self.assertIsNone(service.build_temperature_source(settings),
+                              scene)
+
+    def _drawn(self, scene, **overrides):
+        """The frame the service's own renderer draws for a scene.
+
+        Built by build_renderer rather than by hand: what was wrong was the
+        wiring between the settings and the renderer, and a renderer handed
+        its sources directly cannot show it.
+        """
+        settings = self._config(DESKTOP_SCENE=scene, **overrides)
+        with unittest.mock.patch.object(service.load, "LoadSource",
+                                        SteadyLoad), \
+                unittest.mock.patch.object(service.temperature,
+                                           "TemperatureSource",
+                                           lambda path=None:
+                                           SteadyTemperature()):
+            renderer = service.build_renderer(settings)
+        snapshot = service.build_scene(settings)
+        renderer.reading(fresh=True)
+        return renderer.render(snapshot, 0.4, desktop.scene_shows(scene))
+
+    def test_the_load_scene_draws_the_gauge_and_not_a_rainbow(self):
+        # End to end, through the wiring that was broken: settings in, bytes
+        # out, and the bytes are the gauge's.
+        self.assertNotEqual(self._drawn(desktop.SCENE_LOAD),
+                            self._drawn(desktop.SCENE_RAINBOW),
+                            "the load scene is still drawing the rainbow")
+
+    def test_the_temperature_scene_does_too(self):
+        self.assertNotEqual(self._drawn(desktop.SCENE_TEMPERATURE),
+                            self._drawn(desktop.SCENE_RAINBOW),
+                            "the temperature scene is still drawing the "
+                            "rainbow")
+
+    def test_the_gauges_look_the_same_whichever_mode_asked_for_them(self):
+        """And the fix did not make the desktop's gauge a different gauge.
+
+        The slot's setting has no business reaching a scene - see
+        test_the_scene_wins_over_the_slot above, which says the same thing
+        about the drawing. This says it about the wiring: the sources are
+        built from either question and are the same sources.
+        """
+        for scene, shows in ((desktop.SCENE_LOAD, render.SHOWS_LOAD),
+                             (desktop.SCENE_TEMPERATURE,
+                              render.SHOWS_TEMPERATURE)):
+            self.assertEqual(self._drawn(scene),
+                             self._drawn(scene, RAINBOW_SHOWS=shows), scene)
+
+    def test_the_diagnostics_name_the_mode_that_is_showing_it(self):
+        """--load and --temperature told half the truth, which misdirects.
+
+        "Set RAINBOW_SHOWS=load to put this there" is the Game Mode answer,
+        and someone reading it is as likely to be asking because their
+        desktop is showing the wrong thing. Following it puts the gauge in
+        the mode they were not looking at.
+        """
+        # A line each, and each says whether that mode has the gauge or what
+        # to set for it. Checked as "tells me to set it" against "does not",
+        # because the setting's own name appears either way round and an
+        # assertion that only looked for it would pass on both.
+        said = service.shown_where(
+            self._config(DESKTOP_SCENE=desktop.SCENE_LOAD),
+            render.SHOWS_LOAD, "load gauge")
+        self.assertEqual(len(said), 2, said)
+        self.assertIn("set RAINBOW_SHOWS=load", said[0])
+        self.assertNotIn("set DESKTOP_SCENE", said[1])
+        # And the other way round.
+        said = service.shown_where(
+            self._config(RAINBOW_SHOWS=render.SHOWS_LOAD),
+            render.SHOWS_LOAD, "load gauge")
+        self.assertNotIn("set RAINBOW_SHOWS", said[0])
+        self.assertIn("set DESKTOP_SCENE=load", said[1])
+
+
 class DescribeTest(unittest.TestCase):
     """What --desktop says a scene is doing, which is how a knob is trusted."""
 
