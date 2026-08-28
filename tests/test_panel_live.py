@@ -1165,12 +1165,10 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertIn("disabled", self.panel.update_button.state())
 
-    def test_a_command_that_fails_says_so_beside_the_status_light(self):
-        # The window has no log pane: what a command printed goes to stderr,
-        # and what is left in here is one line saying that something went
-        # wrong, next to the light that says whether the bar is there.
-        self.panel._write("Running the installer\n")
-        self.panel._write("cp: cannot create regular file: Permission denied\n")
+    def test_a_command_that_fails_says_so_beside_the_status_lights(self):
+        # The window has no log pane and no longer quotes the command either:
+        # the line beside the lights is one fixed sentence saying where the
+        # whole of it is.
         self.panel._set_busy(False, 0)
         self.root.update()
         self.assertFalse(self.panel.problem.winfo_ismapped(),
@@ -1179,12 +1177,12 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertTrue(self.panel.problem.winfo_ismapped(),
                         "nothing said the command failed")
-        self.assertIn("Permission denied", self.panel.problem.cget("text"))
+        self.assertIn(self.panel_module.PROBLEM_TEXT,
+                      self.panel.problem.cget("text"))
 
     def test_the_next_command_that_works_takes_the_warning_away(self):
         # A warning left standing beside a command that has just worked is
         # worse than no warning at all.
-        self.panel._write("it broke\n")
         self.panel._set_busy(False, 1)
         self.root.update()
         self.assertTrue(self.panel.problem.winfo_ismapped())
@@ -1192,60 +1190,59 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         self.assertFalse(self.panel.problem.winfo_ismapped())
 
-    def test_the_reason_is_the_command_s_last_word_not_the_window_s(self):
-        """What the window says around a command is not what went wrong.
+    def test_it_says_the_same_thing_whatever_failed(self):
+        """Deliberately, and this is the test for the decision.
 
-        The Runner keeps the command's own output apart from it, and that is
-        what is read: taking the last line of the log instead would report
-        "Saved 12 settings" as the reason an Apply that saved them and then
-        failed to restart the service had failed.
+        It used to show the failing command's own last line. That line shares
+        a bar with two indicators and the version, so a real error had to be
+        cut to fit - and what got cut was the end, which is the half that says
+        what went wrong. A pointer that is always whole beats a reason that is
+        sometimes truncated, and the reason is still on stderr.
         """
-        self.panel.runner.transcript = ["Applying...\n",
-                                        "write error: Invalid argument\n"]
-        self.panel._write("Saved 12 settings to /etc/steamos-led-serial.conf\n")
-        self.assertEqual(self.panel._last_said(),
-                         "write error: Invalid argument")
+        seen = set()
+        for output in ("cp: cannot create regular file: Permission denied\n",
+                       "cannot run: [Errno 2] No such file or directory\n",
+                       ""):
+            if output:
+                self.panel._write(output)
+            self.panel._set_busy(False, 1)
+            self.root.update()
+            seen.add(self.panel.problem.cget("text"))
+        self.assertEqual(len(seen), 1, seen)
 
-    def test_a_command_that_never_started_still_says_why(self):
-        # There was no process, so the Runner has no transcript of one - and
-        # "cannot run: no such file" is the whole of what went wrong. The
-        # window's two bookends round it are how the failure was reported,
-        # not what it was.
-        self.panel.runner.transcript = []
-        self.panel._write("$ /usr/local/bin/steamos-led-power --apply\n")
-        self.panel._write("cannot run: [Errno 2] No such file or directory\n")
-        self.panel._write("[exit 1]\n")
-        self.assertEqual(self.panel._last_said(),
-                         "cannot run: [Errno 2] No such file or directory")
+    def test_it_says_where_the_rest_of_it_is(self):
+        # A warning with no next step in it is a warning somebody lives with.
+        said = self.panel_module.PROBLEM_TEXT.lower()
+        self.assertIn("terminal", said)
+        self.assertIn("failed", said)
 
-    def test_a_command_that_printed_nothing_shows_no_empty_warning(self):
+    def test_the_line_fits_the_narrowest_window_with_both_lights_showing(self):
+        """Measured, because nothing trims it any more.
+
+        It used to be cut to the room the bar had. A fixed sentence needs no
+        cutting - but only while it fits, and the room is what is left after
+        two indicators and the version. Measured at the narrowest window this
+        panel opens to there are about fifty pixels to spare, which is thin
+        enough to be worth failing here rather than in somebody's window.
+        """
         self.panel._set_busy(False, 1)
-        self.root.update()
-        self.assertFalse(self.panel.problem.winfo_ismapped(),
-                         "an empty warning is worse than none")
-
-    def test_a_long_reason_is_cut_rather_than_wrapped(self):
-        # The status bar is one line tall and shares it with the dot, its
-        # sentence and the version. A message long enough to wrap would push
-        # every page above it up.
-        tall = self.root.winfo_height()
-        self.panel._write("x" * 400 + "\n")
-        self.panel._set_busy(False, 1)
-        self.root.update()
-        said = self.panel.problem.cget("text")
-        self.assertLessEqual(len(said), self.panel_module.PROBLEM_CHARS + 2)
-        self.assertTrue(said.endswith("\u2026"), said[-8:])
+        self.root.geometry("%dx900" % self.panel_module.MIN_WIDTH)
+        for _ in range(6):
+            self.root.update()
+        line = self.panel.problem
+        self.assertEqual(line.winfo_width(), line.winfo_reqwidth(),
+                         "%r does not fit the bar" % line.cget("text"))
+        # And the bar is still one line tall, which is the thing that would
+        # move every page above it.
         self.assertEqual(self.panel.statusbar.winfo_height(),
                          self.panel.link.label.winfo_reqheight())
-        self.assertEqual(self.root.winfo_height(), tall)
 
     def test_a_terminal_that_went_away_does_not_break_the_window(self):
         """The README tells people to start this from a terminal.
 
         Closing that terminal with the window still open leaves a broken pipe
         on the other end of stderr, and writing to it raises - which without
-        this would come out of the middle of an install. The line is kept
-        either way: the blip has to work with nobody reading the log.
+        this would come out of the middle of an install.
         """
         class Gone:
             def write(self, _text):
@@ -1256,20 +1253,6 @@ class LiveWindowTest(unittest.TestCase):
             self.panel._write("the install carried on\n")
         finally:
             sys.stderr = was
-        self.assertIn("the install carried on", "".join(self.panel._log))
-
-    def test_a_short_failure_is_not_cut_on_a_wide_window(self):
-        # The other half of the same rule: room enough is room enough, and a
-        # line trimmed anyway would be losing words for nothing.
-        self.root.geometry("1920x900")
-        for _ in range(4):
-            self.root.update()
-        self.panel._write("no such device\n")
-        self.panel._set_busy(False, 1)
-        for _ in range(6):
-            self.root.update()
-        self.assertTrue(self.panel.problem.cget("text").endswith("device"),
-                        self.panel.problem.cget("text"))
 
     def test_what_a_command_printed_goes_to_stderr(self):
         # Whoever wants a log runs the install script in a terminal, where the
@@ -2208,45 +2191,6 @@ class CecPageTest(unittest.TestCase):
         self.panel._remove_cec()
         self.assertEqual(self.ran[-1][0][2], "remove")
 
-    def test_the_failure_line_is_recut_when_the_window_narrows(self):
-        """Here rather than beside the other failure-line tests, deliberately.
-
-        With one indicator in the bar there is so much room that the ninety
-        character cap does all the cutting by itself, and a test there passes
-        whether or not anything is measured. With two there is not: measured,
-        the room falls to about seventy characters, so the pixels are what
-        decides and this can tell the difference.
-
-        Both ways of getting it wrong are caught. Never recutting leaves the
-        wide window's text in a narrow one, where the bar clips the end off -
-        and the end of a command's complaint is the part that says what went
-        wrong. Recutting during the resize instead of after is no better: the
-        right-packed version label still reports where it used to be, so the
-        room comes out too large and nothing is cut.
-        """
-        self.panel._reread_cec()
-        self.root.geometry("1600x900")
-        for _ in range(4):
-            self.root.update()
-        self.panel._write("cp: cannot create regular file '/usr/lib/modules/"
-                          "6.11.11-valve1-1-neptune/updates/leds-valve-shim"
-                          ".ko': Read-only file system\n")
-        self.panel._set_busy(False, 1)
-        for _ in range(6):
-            self.root.update()
-        wide = self.panel.problem.cget("text")
-
-        self.root.geometry("%dx900" % self.panel_module.MIN_WIDTH)
-        for _ in range(6):
-            self.root.update()
-        narrow = self.panel.problem.cget("text")
-        self.assertLess(len(narrow), len(wide),
-                        "the same text was kept into a narrower window")
-        line = self.panel.problem
-        self.assertEqual(line.winfo_width(), line.winfo_reqwidth(),
-                         "%r is wider than the room it was given" % narrow)
-        self.assertTrue(narrow.endswith("\u2026"), narrow)
-
     # -- the indicator at the foot -----------------------------------------
 
     def _cec_light(self):
@@ -2476,22 +2420,28 @@ class AppearanceTest(unittest.TestCase):
         self.assertEqual(int(self.panel.vars["LED_COUNT"][0].get()), 42)
         self.assertIn("LED_COUNT", self.panel._differences())
 
-    def test_the_log_is_carried_across_rather_than_said_again(self):
-        """It survives the rebuild, and stderr does not hear it twice.
+    def test_the_rebuild_does_not_reprint_the_session(self):
+        """The window keeps no log to carry across, and must not invent one.
 
-        Replaying it through _write would leave the list looking right and
-        print the whole session out again for every theme change - so what is
-        checked is the stderr, which is the half that would go wrong.
+        It used to hold a copy so the status bar could quote the last line of
+        it. The bar says one fixed sentence now, so the copy went - and with
+        it the way this could go wrong, which was replaying the copy through
+        _write and printing the whole session to stderr again for every theme
+        change. Still checked, because "nothing is kept" is a thing that gets
+        undone by accident.
         """
-        self.panel._write("something worth keeping\n")
+        self.panel._write("something already said\n")
         said = io.StringIO()
         was, sys.stderr = sys.stderr, said
         try:
             self._pick(appsettings.THEME_LIGHT)
         finally:
             sys.stderr = was
-        self.assertIn("something worth keeping", "".join(self.panel._log))
-        self.assertNotIn("worth keeping", said.getvalue())
+        # Nothing at all, rather than "not the line above". Rebuilding is the
+        # window replacing its own widgets; it runs no command, so anything it
+        # prints is something it decided to say on its own - and the only
+        # reason it ever did was a replayed log.
+        self.assertEqual(said.getvalue(), "", "the rebuild printed something")
 
     def test_a_failure_showing_at_the_foot_is_still_showing_afterwards(self):
         """The one thing in the status bar that a rebuild could silently drop.
@@ -2500,14 +2450,12 @@ class AppearanceTest(unittest.TestCase):
         is a constant - the blip is the only part of that line whose reason to
         be there lives nowhere but in the window that is being thrown away.
         """
-        self.panel._write("the pipe went away\n")
         self.panel._set_busy(False, 1)
         self.root.update()
         self._pick(appsettings.THEME_LIGHT)
         self.root.update()
         self.assertTrue(self.panel.problem.winfo_ismapped(),
                         "the warning went with the old window")
-        self.assertIn("the pipe went away", self.panel.problem.cget("text"))
 
     # -- what it must not leave behind -------------------------------------
 

@@ -543,11 +543,17 @@ STATUS_DOT = 5
 # startup on the machines that have it. Long enough to be drawn first.
 CEC_FIRST_LOOK = 200
 
-# How much of a failure the blip beside that dot shows before it is cut. The
-# status bar is one line tall and shares it with the dot, its sentence and the
-# version; a message long enough to wrap would push every page above it up.
-# The rest of the output is on stderr, which is where a log belongs.
-PROBLEM_CHARS = 90
+# What the foot of the window says when a command fails. One fixed sentence
+# rather than the command's own last line, and the reason is that half a
+# sentence is worse than none: the line shares a bar with two indicators and
+# the version, so a real error had to be cut to fit - and what got cut was the
+# end, which is the part that says what went wrong. A pointer that is always
+# whole beats a reason that is sometimes truncated.
+#
+# The reason itself is not lost. It goes to stderr like everything else the
+# window's commands print, which is what this sentence is pointing at.
+PROBLEM_TEXT = ("A command failed. Start the panel from a terminal to see "
+                "why.")
 
 # What a vertical scrollbar takes off the side of a page. Measured on the
 # built window at this theme's own metrics; a couple of pixels over, because
@@ -2035,10 +2041,6 @@ class Panel:
         # Under the sections, not inside one: one Apply for every setting in
         # the window, whichever section it is on - see apply_settings.
         self._build_statusbar(root)
-        # What a command printed, kept for the one line _say_problem shows and
-        # for the rebuild that carries it across a theme change. The log the
-        # user reads is stderr - see _write.
-        self._log = []
         self.runner = Runner(root, self._write, self._set_busy)
         self._build_apply(root)
         self.sections.pack(fill="both", expand=True)
@@ -2290,16 +2292,10 @@ class Panel:
         # _say_problem. An empty label sitting in the bar would still take its
         # padding, and the gap would be the one thing in this line that means
         # nothing.
-        self.problem = ttk.Label(bar, style="Page.Bad.TLabel")
-        self._problem_said = ""
-        self._problem_job = None
-        self.version_said = ttk.Label(bar,
-                                      text="SteamOS LED bar v%s" % VERSION,
-                                      style="Page.Muted.TLabel")
-        self.version_said.pack(side="right")
-        # The failure line is cut to whatever is left between the indicators
-        # and the version, so it has to be recut when that changes.
-        bar.bind("<Configure>", self._fit_problem, add="+")
+        self.problem = ttk.Label(bar, text="\u26a0 " + PROBLEM_TEXT,
+                                 style="Page.Bad.TLabel")
+        ttk.Label(bar, text="SteamOS LED bar v%s" % VERSION,
+                  style="Page.Muted.TLabel").pack(side="right")
 
     def _say_link(self, connected, detail=""):
         self.link.say(connected,
@@ -2437,7 +2433,7 @@ class Panel:
             # Cleared on success as firmly as it is set on failure: a warning
             # left standing beside a command that has just worked is worse
             # than no warning at all.
-            self._say_problem(self._last_said() if code else "")
+            self._say_problem(bool(code))
 
     def _say(self, title, message):
         """Tell the user something; there is nothing to answer."""
@@ -2490,11 +2486,10 @@ class Panel:
                 pass
         section = getattr(self, "section", None)
         page = self.notebook.tab(self.notebook.select(), "text")
-        # The window's own log, not the Runner's: the Runner keeps only what a
-        # command printed, and most of this was put there by the window. Moved
-        # across rather than replayed - replaying it would print the whole
-        # session to stderr a second time for each theme change.
-        log = list(self._log)
+        # Whether a command has failed since the window opened. The only part
+        # of the status bar whose reason to be there lives nowhere but in the
+        # window being thrown away: the lights re-read the machine a moment
+        # later on their own, and the version is a constant.
         problem = bool(self.problem.winfo_ismapped())
 
         self._teardown()
@@ -2511,9 +2506,7 @@ class Panel:
                     self.vars[key][0].set(value)
                 except (ValueError, tk.TclError):            # pragma: no cover
                     pass
-        self._log = log
-        if problem:
-            self._say_problem(self._last_said())
+        self._say_problem(problem)
         self._catch_up()
 
     def _teardown(self):
@@ -2582,118 +2575,49 @@ class Panel:
             return dict(config_module.DEFAULTS)
 
     def _write(self, text, tag=None):
-        """Keep a line, and put it where a log belongs.
+        """Put a line where a log belongs, which is not in this window.
 
-        There is no log pane in the window any more. Nine lines of command
-        output were a fifth of the window spent on something almost nobody
-        reads, and the two people who do want it are better served by running
-        the install script in a terminal, where the output is selectable,
-        searchable and does not disappear with the window.
+        There is no log pane. Nine lines of command output were a fifth of the
+        window spent on something almost nobody reads, and the people who do
+        want it are better served by a terminal, where the output is
+        selectable, searchable and does not disappear with the window. So it
+        goes to stderr, which is where the terminal, the journal and anything
+        wrapping this program are already looking.
 
-        So it goes to stderr - which is where the terminal, the journal and
-        anything wrapping this program are already looking - and a copy stays
-        here for _last_said, which is how a failure gets its one line in the
-        status bar.
+        Nothing is kept here. The window used to hold a copy so the status bar
+        could show the last line of it; the bar says one fixed sentence now -
+        see PROBLEM_TEXT - and a list nobody reads is a session-long leak.
 
-        The kept copy comes first and the printing cannot stop it: the README
-        now tells people to start this from a terminal, and a terminal that is
-        closed while the window stays open leaves a broken pipe behind.
-        Writing to it raises, and an exception here would come out of the
-        middle of an install.
+        It cannot raise. The README tells people to start this from a
+        terminal, and a terminal closed while the window stays open leaves a
+        broken pipe: writing to it throws, and an exception here would come
+        out of the middle of an install.
+
+        `tag` is accepted and ignored. It is the Runner's contract - it marks
+        its own two bookend lines with one - and honouring the signature keeps
+        the Runner usable by anything else that wants a plain writer.
         """
-        self._log.append(text)
         try:
             print(text, end="", file=sys.stderr)
         except (OSError, ValueError):
             pass                                # nobody is reading it any more
 
-    def _last_said(self):
-        """The last line worth showing as the reason something failed.
-
-        What the *command* printed, first. The Runner keeps that on its own,
-        apart from the window's running commentary around it - and the
-        commentary is the wrong thing to report: "Saved 12 settings" is the
-        last line in the log after an Apply that then failed to restart the
-        service, and it is not why.
-
-        Read from the back, because a program's complaint is the last thing it
-        says before it gives up. The fallback is the window's own log, which is
-        where a command that could not be *started* leaves its reason - there
-        was no process, so the Runner has no transcript of one. Its two
-        bookends are dropped: the echoed command line and the exit code are
-        how the failure was reported, not what went wrong.
-        """
-        for lines in (self.runner.transcript, self._log):
-            for line in reversed("".join(lines).splitlines()):
-                line = line.strip()
-                if line and not line.startswith(("$ ", "[")):
-                    return line
-        return ""
-
-    def _say_problem(self, said):
-        """Show or clear the blip beside the status lights.
+    def _say_problem(self, failed):
+        """Show or clear the warning beside the status lights.
 
         One line, in the error colour, beside the lights that say whether the
         bar and the television are there - the things in this window that
-        report a state rather than set one, in the same place. It is cut
-        rather than wrapped: the bar is one line tall, and a message that
-        pushed it to three would move every page above it.
+        report a state rather than set one, in the same place.
+
+        It says the same thing every time. What it used to say was the failing
+        command's own last line, which had to be cut to fit the room left over
+        beside the indicators, and a complaint cut off at the end has had the
+        useful half removed. This points at where the whole of it is instead.
         """
-        self._problem_said = said or ""
-        if not said:
+        if not failed:
             self.problem.pack_forget()
             return
         self.problem.pack(side="left", padx=(GROUP_GAP, 0))
-        self._fit_problem_now()
-        self._fit_problem()             # and again once it has been laid out
-
-    def _fit_problem(self, _event=None):
-        """Book a recut for the next idle moment, once at most.
-
-        Not done in the Configure itself. A Configure arrives *during* the
-        resize, and measured then the right-packed version label still reports
-        where it used to be - so the room came out wrong and the line was left
-        at its full width, clipped by the bar. Tk runs idle work after the
-        layout has settled and before it redraws, which is both late enough to
-        measure and early enough that nothing wrong is ever seen.
-        """
-        if self._problem_job is None:
-            self._problem_job = self.root.after_idle(self._fit_problem_now)
-
-    def _fit_problem_now(self):
-        """Cut it to the room the bar actually has, and recut when that moves.
-
-        A character count cannot do this. The line is shared with two
-        indicators and the version, the window resizes, and what is left over
-        is pixels rather than letters - measured, ninety characters fitted at
-        1400 and lost its last thirty-eight pixels at the narrowest window
-        this panel opens to. The end of a command's complaint is the part that
-        says what went wrong, so losing it silently is the worst place to lose
-        anything.
-        """
-        self._problem_job = None
-        if not self._problem_said:
-            return
-        mark = "\u26a0 "
-        said = self._problem_said
-        if len(said) > PROBLEM_CHARS:
-            said = said[:PROBLEM_CHARS - 1].rstrip() + "\u2026"
-
-        # The text goes on whether or not there is anything to measure
-        # against, and the measuring is what is skipped. The other way round -
-        # returning early when the label was not yet mapped - is how this
-        # first went wrong: _say_problem packs and calls straight through, and
-        # a widget is not mapped until the next redraw, so the failure line
-        # was set to nothing and stayed there.
-        room = 0
-        if self.problem.winfo_ismapped():
-            room = (self.version_said.winfo_x() - self.problem.winfo_x()
-                    - GROUP_GAP)
-        if room > 0:
-            metric = tkfont.Font(font=self.problem.cget("font"))
-            while len(said) > 4 and metric.measure(mark + said) > room:
-                said = said[:-2].rstrip() + "\u2026"
-        self.problem.configure(text=mark + said)
 
     # -- the pieces a page is built from ----------------------------------
 
@@ -3961,12 +3885,11 @@ class Panel:
         if event is not None and event.widget is not self.root:
             return                              # a child of ours, not the window
         for job in (self._preview_job, self._refit_job, self._catching_up,
-                    getattr(self, "_cec_first", None),
-                    getattr(self, "_problem_job", None)):
+                    getattr(self, "_cec_first", None)):
             if job is not None:
                 self.root.after_cancel(job)
         self._preview_job = self._refit_job = self._catching_up = None
-        self._cec_first = self._problem_job = None
+        self._cec_first = None
 
     def _preview_chosen(self):
         """Restart the clock, so a shape is seen from its beginning."""

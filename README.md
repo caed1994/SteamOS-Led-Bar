@@ -601,9 +601,9 @@ enough settings to need it, has its own list of pages inside.
 
 A line across the foot carries a light for the LED bar and, once
 [HDMI CEC](#hdmi-cec) is installed, a second one for the adapter &mdash; each
-grey until it has been read, then green or red. When a command fails, the
-reason appears there beside them, cut to whatever room is left rather than
-wrapped onto a second line.
+grey until it has been read, then green or red. When a command fails, a
+warning appears beside them saying so &mdash; not what went wrong, which is on
+standard error along with everything else the window's commands print.
 
 **There is no log pane.** What the window's commands print goes to standard
 error, so running the panel from a terminal shows all of it &mdash; and the
