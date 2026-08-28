@@ -20,8 +20,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import config, load, notify, render  # noqa: E402
-from steamos_led import sampling, service, shim       # noqa: E402
+from steamos_utility_center import config, load, notify, render  # noqa: E402
+from steamos_utility_center import sampling, service, shim       # noqa: E402
 
 
 class FakeLoad:
@@ -489,7 +489,7 @@ class LoadColourSettingTest(unittest.TestCase):
             self.assertIn(key, str(caught.exception))
 
     def test_the_shipped_file_names_them_all(self):
-        path = os.path.join(HERE, "..", "server", "steamos-led-serial.conf")
+        path = os.path.join(HERE, "..", "server", "steamos-utility-center.conf")
         with open(path) as handle:
             text = handle.read()
         for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR", "LOAD_SWAP"):

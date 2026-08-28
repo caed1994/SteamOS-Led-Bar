@@ -1,12 +1,16 @@
-# SteamOS LED Bar: USB serial bridge
+# SteamOS Utility Center
 
-Mirrors the Steam Machine's LED bar onto a WS2812 strip driven by an **ESP
-connected over USB**. Colour, brightness and effects come straight from the
-Personalization menu in SteamOS Game Mode, download progress included.
+A toolbox for the Steam Machine, run from one window: the LED bar mirrored
+onto a WS2812 strip driven by an **ESP connected over USB**, CPU and GPU
+power, HDMI CEC, and the Game Mode keyboard layout.
+
+The LED half is where it started and is still the largest part of it.
+Colour, brightness and effects come straight from the Personalization menu
+in SteamOS Game Mode, download progress included.
 
 ![the rainbow effect on a 17 LED strip](docs/previews/rainbow.png)
 
-**[Every effect, playing &rarr;](https://caed1994.github.io/SteamOS-Led-Bar/)**
+**[Every effect, playing &rarr;](https://caed1994.github.io/SteamOS-Utility-Center/)**
 &mdash; all twenty of them on a simulated strip, with the explanation beside
 each.
 
@@ -27,8 +31,8 @@ each.
 ## Quick start
 
 ```bash
-git clone https://github.com/caed1994/SteamOS-Led-Bar.git ~/SteamOS-Led-Bar
-cd ~/SteamOS-Led-Bar
+git clone https://github.com/caed1994/SteamOS-Utility-Center.git ~/SteamOS-Utility-Center
+cd ~/SteamOS-Utility-Center
 sudo ./install.sh
 ```
 
@@ -57,7 +61,7 @@ sudo ./install.sh --leds 60 --yes --flash 1   # unless you ask
 Then wire the strip up ([docs/WIRING.md](docs/WIRING.md)), plug the ESP in,
 open **Settings > Personalization** in Game Mode and pick a colour or an
 effect. The strip follows immediately. If it does not, `journalctl -u
-steamos-led-serial -f` says why.
+steamos-utility-center -f` says why.
 
 On a completely fresh SteamOS, `sudo` has no password yet: run `passwd` once
 before anything else. To do the preparation by hand, or if you are not on
@@ -110,12 +114,12 @@ Each flash overwrites the last:
 
 ## Settings
 
-Everything lives in `/etc/steamos-led-serial.conf` as `NAME=value` lines. The
+Everything lives in `/etc/steamos-utility-center.conf` as `NAME=value` lines. The
 [control panel](#the-control-panel) edits the same file with a window.
 
 ```bash
-sudo nano /etc/steamos-led-serial.conf
-sudo systemctl restart steamos-led-serial
+sudo nano /etc/steamos-utility-center.conf
+sudo systemctl restart steamos-utility-center
 ```
 
 The restart is required, nothing happens without it.
@@ -140,9 +144,9 @@ Every option is also a command line switch and an environment variable
 down. The service holds the USB port exclusively, so stop it first:
 
 ```bash
-sudo systemctl stop steamos-led-serial
-sudo /var/lib/steamos-led-serial/steamos-led-serial --leds 60 --reverse -v
-sudo systemctl start steamos-led-serial
+sudo systemctl stop steamos-utility-center
+sudo /var/lib/steamos-utility-center/steamos-utility-center --leds 60 --reverse -v
+sudo systemctl start steamos-utility-center
 ```
 
 | Option | Default | Meaning |
@@ -193,7 +197,7 @@ How fast they run comes from Steam, and `SPEED` scales all of them together.
 
 Every animation on this page comes out of `render.py` frame by frame;
 `python3 tools/make-previews.py` rebuilds them and the
-[interactive catalogue](https://caed1994.github.io/SteamOS-Led-Bar/).
+[interactive catalogue](https://caed1994.github.io/SteamOS-Utility-Center/).
 
 ### Desktop Mode
 
@@ -227,7 +231,7 @@ started on the desktop still shows its progress bar.
 If the bar keeps your scene during a game, or never shows it at all:
 
 ```bash
-steamos-led-serial --desktop
+steamos-utility-center --desktop
 ```
 
 It says which mode it thinks the machine is in, and what it saw before now.
@@ -255,8 +259,8 @@ to stay powered &mdash; a BIOS setting often called *ErP*, *Wake on USB* or
 To try it without suspending anything:
 
 ```bash
-echo standby > /run/steamos-led-serial/notify
-echo resume  > /run/steamos-led-serial/notify
+echo standby > /run/steamos-utility-center/notify
+echo resume  > /run/steamos-utility-center/notify
 ```
 
 If the resume never arrives, the service takes the strip back after half a
@@ -279,8 +283,8 @@ place:
 Set it, then pick **Rainbow** in Steam's LED menu:
 
 ```bash
-sudo sed -i 's/^RAINBOW_SHOWS=.*/RAINBOW_SHOWS=aurora/' /etc/steamos-led-serial.conf
-sudo systemctl restart steamos-led-serial
+sudo sed -i 's/^RAINBOW_SHOWS=.*/RAINBOW_SHOWS=aurora/' /etc/steamos-utility-center.conf
+sudo systemctl restart steamos-utility-center
 ```
 
 Every other effect Steam offers keeps working, and `RAINBOW_SHOWS=rainbow`
@@ -314,7 +318,7 @@ the same 50 C already reads yellow. They have to stay at least 5 degrees apart.
 other things a PC measures. To see what your machine reports:
 
 ```bash
-/var/lib/steamos-led-serial/steamos-led-serial --temperature
+/var/lib/steamos-utility-center/steamos-utility-center --temperature
 ```
 
 ```
@@ -354,7 +358,7 @@ gauge, which is what a strip mounted the other way up needs once `REVERSE` has
 already had its say.
 
 ```bash
-/var/lib/steamos-led-serial/steamos-led-serial --load
+/var/lib/steamos-utility-center/steamos-utility-center --load
 ```
 
 ```
@@ -387,21 +391,21 @@ back to whatever Steam was showing:
 Try it with the service running:
 
 ```bash
-steamos-led-serial --notify achievement
-steamos-led-serial --notify message
-steamos-led-serial --notify '#00ff88'
+steamos-utility-center --notify achievement
+steamos-utility-center --notify message
+steamos-utility-center --notify '#00ff88'
 ```
 
-That writes one word into a named pipe, `/run/steamos-led-serial/notify`.
+That writes one word into a named pipe, `/run/steamos-utility-center/notify`.
 **Anything that can write a line can flash the bar**, no library and no API.
 Known words are `achievement`, `message`, `friend`, `phone` and `warning`;
 anything else is read as a colour (`#rrggbb` or `r,g,b`). Either can carry a shape for that
 one flash:
 
 ```bash
-echo achievement > /run/steamos-led-serial/notify
-echo alternate:achievement > /run/steamos-led-serial/notify
-steamos-led-serial --notify comet:#1a9fff
+echo achievement > /run/steamos-utility-center/notify
+echo alternate:achievement > /run/steamos-utility-center/notify
+steamos-utility-center --notify comet:#1a9fff
 ```
 
 A trigger may also say who it is from, after an `@`. That is what
@@ -409,9 +413,9 @@ A trigger may also say who it is from, after an `@`. That is what
 and somebody else in the same few seconds still gets through:
 
 ```bash
-echo 'phone@anna' > /run/steamos-led-serial/notify
-echo 'phone@anna' > /run/steamos-led-serial/notify   # inside the gap: quiet
-echo 'phone@bob'  > /run/steamos-led-serial/notify   # somebody else: flashes
+echo 'phone@anna' > /run/steamos-utility-center/notify
+echo 'phone@anna' > /run/steamos-utility-center/notify   # inside the gap: quiet
+echo 'phone@bob'  > /run/steamos-utility-center/notify   # somebody else: flashes
 ```
 
 | Option | Default | Meaning |
@@ -424,7 +428,7 @@ echo 'phone@bob'  > /run/steamos-led-serial/notify   # somebody else: flashes
 | `NOTIFY_WARNING` | `1` | watch every sensor for overheating |
 | `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
 | `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again. "The same" means the same `@` tag where a trigger carries one &mdash; for the phone, the same conversation |
-| `NOTIFY_FIFO` | `/run/steamos-led-serial/notify` | the pipe to listen on |
+| `NOTIFY_FIFO` | `/run/steamos-utility-center/notify` | the pipe to listen on |
 | `NOTIFY_STYLE` | `bloom` | default shape |
 | `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` / `PHONE_COLOR` | `#ffff00` / `#8000ff` / `#00ff00` / `#00ffff` | what each one flashes. The panel offers eight hues and white; the file takes any colour |
 | `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` / `PHONE_STYLE` | `default` | shape for that one kind, or `default` to follow `NOTIFY_STYLE` |
@@ -480,20 +484,20 @@ to be initialised as an app. Desktop Mode and Game Mode both work.
 Nothing else to do:
 
 ```bash
-systemctl --user status steamos-led-achievements
-journalctl --user -u steamos-led-achievements -f
+systemctl --user status steamos-utility-center-achievements
+journalctl --user -u steamos-utility-center-achievements -f
 ```
 
 To see what your machine can do, start a game and run these as your normal
 user, not with `sudo`:
 
 ```bash
-/var/lib/steamos-led-serial/steamos-led-serial --steam-check
-steamos-led-serial --probe-messages
+/var/lib/steamos-utility-center/steamos-utility-center --steam-check
+steamos-utility-center --probe-messages
 ```
 
 Pass `--skip-watcher` to the installer to leave it out, or disable it later with
-`systemctl --user disable --now steamos-led-achievements`. The three switches
+`systemctl --user disable --now steamos-utility-center-achievements`. The three switches
 are independent; with all three off the watcher attaches to nothing.
 
 **The log shows it restarting after every game, which is on purpose**: Steam
@@ -520,7 +524,7 @@ phone*, or with `NOTIFY_PHONE=1`. Apply restarts the bridge for you; after
 editing the file by hand:
 
 ```bash
-systemctl --user restart steamos-led-phone
+systemctl --user restart steamos-utility-center-phone
 ```
 
 *Status* then shows two more rows under the LED bar: the bridge running, and KDE Connect
@@ -529,7 +533,7 @@ naming your phone. Both have to be there for anything to flash.
 To watch it work, as yourself and not with `sudo`:
 
 ```bash
-steamos-led-serial --watch-phone --print
+steamos-utility-center --watch-phone --print
 ```
 
 ```
@@ -542,7 +546,7 @@ Reading the phone's notifications from KDE Connect
 That flashes nothing. It names every notification it sees and what it would
 have flashed, and says what would stop the real thing from lighting anything.
 To try the bar on its own, without involving the phone:
-`steamos-led-serial --notify phone`.
+`steamos-utility-center --notify phone`.
 
 | Option | Panel | Meaning |
 | ------ | ----- | ------- |
@@ -564,16 +568,16 @@ There is no terminal in Game Mode, so the bridge writes what it found to the
 journal. Afterwards, back on the desktop:
 
 ```bash
-journalctl --user -u steamos-led-phone --since "1 hour ago"
+journalctl --user -u steamos-utility-center-phone --since "1 hour ago"
 ```
 
 ## The control panel
 
 Everything after the first install has a window. `install.sh` also puts it in
-the application menu as **SteamOS LED bar**.
+the application menu as **SteamOS Utility Center**.
 
 ```bash
-./gui/steamos-led-panel
+./gui/steamos-utility-center-panel
 ```
 
 **Two levels.** The list down the left edge picks a *section* &mdash; what kind
@@ -611,7 +615,7 @@ install and repair work the panel starts is the same work `install.sh` does,
 which is the better place to watch it:
 
 ```bash
-./gui/steamos-led-panel          # its commands' output lands in this terminal
+./gui/steamos-utility-center-panel          # its commands' output lands in this terminal
 ./install.sh                     # the same steps, with all of their output
 ```
 
@@ -646,7 +650,7 @@ re-read every time a command finishes.
 
 The accent colour comes from Plasma in all three. The choice takes effect at
 once &mdash; there is no Apply for it &mdash; and is remembered in
-`~/.config/steamos-led-panel.conf`. Nothing outside this window reads that
+`~/.config/steamos-utility-center-panel.conf`. Nothing outside this window reads that
 file.
 
 **The preview stage stays dark whichever you pick.** A canvas has no alpha, so
@@ -676,7 +680,7 @@ password prompt there &mdash; so add the panel as a non-Steam game for the Test
 tab, and do the rest in Desktop Mode.
 
 The window takes its colours from your Plasma accent. To change its icon, drop
-a PNG in as `gui/steamos-led-panel.png` and run `sudo ./install.sh --yes`.
+a PNG in as `gui/steamos-utility-center-panel.png` and run `sudo ./install.sh --yes`.
 
 > The panel needs Python's `tkinter`. It is present on SteamOS, but a system
 > update can remove it (`sudo pacman -S tk` brings it back). Nothing is only
@@ -707,7 +711,7 @@ the generic cpufreq files, so none of it is written for one vendor. To see
 what yours has:
 
 ```bash
-steamos-led-power --report
+steamos-utility-center-power --report
 ```
 
 **The governor rules the preference.** The preference row is only on the page
@@ -726,7 +730,7 @@ lets the firmware range at all.
 
 The governor defaults to leaving the CPU exactly as SteamOS set it, so a fresh
 install changes nothing. What you pick is applied straight away and written to
-`/etc/steamos-led-power.conf`; `steamos-led-power.service` puts it back at
+`/etc/steamos-utility-center-power.conf`; `steamos-utility-center-power.service` puts it back at
 every boot, and is only enabled once you have set a governor. Uninstalling
 disables it and stops reapplying, but does not put the governor back &mdash;
 nothing recorded what it was before.
@@ -883,22 +887,22 @@ right, the problem sits between Steam and the service; if it does not, it is
 hardware or firmware.
 
 The service holds the serial port exclusively, so stop it first. These all live
-in `/var/lib/steamos-led-serial/`, and `sudo systemctl start
-steamos-led-serial` puts things back afterwards.
+in `/var/lib/steamos-utility-center/`, and `sudo systemctl start
+steamos-utility-center` puts things back afterwards.
 
 | Command | Purpose |
 | ------- | ------- |
-| `steamos-led-serial --self-test` | test patterns, without Steam or the kernel module |
-| `steamos-led-serial --list-ports` | list connected USB serial devices |
-| `steamos-led-serial --simulate rainbow` | show one effect continuously |
-| `steamos-led-serial --dump` | show what Steam writes, without driving the LEDs, and how long since its previous write |
-| `steamos-led-serial --temperature` | list sensors and what the [gauge](#temperature) makes of them |
-| `steamos-led-serial --load` | show which CPU and GPU [load counters](#load) this machine has |
-| `steamos-led-serial --desktop` | the [Desktop Mode](#desktop-mode) scene, who has the bar, and what the service recorded about Game Mode |
-| `steamos-led-serial --check-config` | load the configuration, validate it and print it |
-| `steamos-led-serial -v` | run in the foreground with debug output |
+| `steamos-utility-center --self-test` | test patterns, without Steam or the kernel module |
+| `steamos-utility-center --list-ports` | list connected USB serial devices |
+| `steamos-utility-center --simulate rainbow` | show one effect continuously |
+| `steamos-utility-center --dump` | show what Steam writes, without driving the LEDs, and how long since its previous write |
+| `steamos-utility-center --temperature` | list sensors and what the [gauge](#temperature) makes of them |
+| `steamos-utility-center --load` | show which CPU and GPU [load counters](#load) this machine has |
+| `steamos-utility-center --desktop` | the [Desktop Mode](#desktop-mode) scene, who has the bar, and what the service recorded about Game Mode |
+| `steamos-utility-center --check-config` | load the configuration, validate it and print it |
+| `steamos-utility-center -v` | run in the foreground with debug output |
 
-Follow the log with `journalctl -u steamos-led-serial -f`.
+Follow the log with `journalctl -u steamos-utility-center -f`.
 
 | Symptom | Cause and fix |
 | ------- | ------------- |
@@ -910,7 +914,7 @@ Follow the log with `journalctl -u steamos-led-serial -f`.
 | `sudo` rejects your password on a fresh Deck | there is no password yet, run `passwd` once |
 | `no ESP serial device found` | check `--list-ports`; if empty, try another USB cable, charging cables often have no data wires |
 | Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0: `MIN_BRIGHTNESS=40` |
-| Desktop Mode scene never shows, or shows during a game | `steamos-led-serial --desktop` on the desktop: it reads back whether the service ever recognised a Game Mode session |
+| Desktop Mode scene never shows, or shows during a game | `steamos-utility-center --desktop` on the desktop: it reads back whether the service ever recognised a Game Mode session |
 | Red and green swapped | colour order of the firmware, see [docs/WIRING.md](docs/WIRING.md#colour-order) |
 | Download bar fills from the wrong end | `REVERSE=1` |
 | Dark after switching firmware | the GPIO2 and GPIO14 builds drive different pins, does the firmware match your wiring? |
@@ -929,18 +933,18 @@ it with a message naming them, rather than being resolved behind your back.
 The same thing from the terminal:
 
 ```bash
-cd ~/SteamOS-Led-Bar
+cd ~/SteamOS-Utility-Center
 git pull
 sudo ./install.sh --yes
 ```
 
-Your `/etc/steamos-led-serial.conf` is left untouched. The ESP firmware only
+Your `/etc/steamos-utility-center.conf` is left untouched. The ESP firmware only
 needs reflashing when something in `firmware/` changed.
 
 > **After a SteamOS system update** the kernel module is gone, since the rootfs
 > is reset and a module only ever matches one kernel:
 > ```bash
-> cd ~/SteamOS-Led-Bar && sudo ./install.sh --rebuild-module
+> cd ~/SteamOS-Utility-Center && sudo ./install.sh --rebuild-module
 > ```
 > The service itself lives in `/var/lib/` and survives updates.
 
@@ -959,7 +963,7 @@ sudo ./uninstall.sh --remove-module    # also remove the kernel module
   leds-valve-shim  ->  /dev/valve-leds-shim     (kernel module, 100 byte snapshot)
         |
         v
-  steamos-led-serial   systemd service: reads the snapshot, renders effects,
+  steamos-utility-center   systemd service: reads the snapshot, renders effects,
         |              maps 17 logical LEDs onto the real strip
         |  USB (CDC/UART, framed packets with CRC16)
         v
@@ -980,10 +984,10 @@ and `ProtectSystem=strict`.
 
 ```
 leds-valve-shim/          kernel module (GPL-2.0+, vendored unmodified)
-server/steamos_led/       service: config, shim, render, link, serialport
-server/steamos-led-serial            executable entry point
-server/steamos-led-serial.service    systemd unit template
-server/steamos-led-serial.conf       example configuration
+server/steamos_utility_center/       service: config, shim, render, link, serialport
+server/steamos-utility-center            executable entry point
+server/steamos-utility-center.service    systemd unit template
+server/steamos-utility-center.conf       example configuration
 gui/                      the control panel
 firmware/led-client/      PlatformIO project for ESP8266/ESP32
 tools/make-previews.py    rebuilds the animations on this page

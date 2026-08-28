@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Configuration loading: /etc/steamos-led-serial.conf plus CLI overrides.
+"""Configuration loading: /etc/steamos-utility-center.conf plus CLI overrides.
 
 Plain KEY=value lines, so shell scripts and systemd's EnvironmentFile can read
 the same file.
@@ -20,7 +20,7 @@ from .serialport import BAUD_CONSTANTS
 
 LOG = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = "/etc/steamos-led-serial.conf"
+DEFAULT_CONFIG_PATH = "/etc/steamos-utility-center.conf"
 
 # Options that existed once and no longer do, with what became of them.
 #

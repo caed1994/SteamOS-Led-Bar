@@ -27,9 +27,9 @@ import ledpanel  # noqa: E402
 import roundrect  # noqa: E402
 import syssettings  # noqa: E402
 import appsettings  # noqa: E402
-from steamos_led import power  # noqa: E402
-from steamos_led import config as config_module  # noqa: E402
-from steamos_led import desktop  # noqa: E402
+from steamos_utility_center import power  # noqa: E402
+from steamos_utility_center import config as config_module  # noqa: E402
+from steamos_utility_center import desktop  # noqa: E402
 
 
 class FakeProbe:
@@ -70,7 +70,7 @@ def healthy(release="6.11.11-valve"):
         present=(ledpanel.BINARY, ledpanel.UNIT_PATH, ledpanel.CONFIG_PATH,
                  ledpanel.UDEV_PATH, ledpanel.SHIM_DEVICE,
                  ledpanel.module_path(release)),
-        fifos=("/run/steamos-led-serial/notify",),
+        fifos=("/run/steamos-utility-center/notify",),
         active=(ledpanel.SERVICE,),
         user_active=(ledpanel.WATCHER, ledpanel.PHONE_BRIDGE),
         release=release, linger=True, paired=["Pixel 7"])
@@ -274,7 +274,7 @@ class PhoneNotificationsTest(unittest.TestCase):
         broken = ledpanel.broken(ledpanel.run_checks(probe=probe,
                                                      config=self.ON))
         self.assertEqual(len(broken), 1)
-        self.assertIn("journalctl --user -u steamos-led-phone",
+        self.assertIn("journalctl --user -u steamos-utility-center-phone",
                       broken[0].detail)
 
     def test_a_silent_kdeconnect_and_an_unpaired_one_read_differently(self):
@@ -336,12 +336,12 @@ class CommandTest(unittest.TestCase):
         # Reinstalling after a system update must not reflash the ESP: the
         # firmware survives it, and a surprise flash is the last thing someone
         # fixing a dark bar needs.
-        command = ledpanel.reinstall_command("/home/deck/SteamOS-Led-Bar")
+        command = ledpanel.reinstall_command("/home/deck/SteamOS-Utility-Center")
         self.assertIn("--flash", command)
         self.assertEqual(command[command.index("--flash") + 1], "0")
 
     def test_repairing_rebuilds_the_module_unattended(self):
-        command = ledpanel.reinstall_command("/home/deck/SteamOS-Led-Bar")
+        command = ledpanel.reinstall_command("/home/deck/SteamOS-Utility-Center")
         self.assertIn("--rebuild-module", command)
         self.assertIn("--yes", command)
 
@@ -445,7 +445,7 @@ class DesktopEntryTest(unittest.TestCase):
     """The menu entry is written by install.sh from a template."""
 
     def _template(self):
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel.desktop")
+        path = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel.desktop")
         with open(path) as handle:
             return handle.read()
 
@@ -463,7 +463,7 @@ class DesktopEntryTest(unittest.TestCase):
         # This pair is what ties the running window to the menu entry. Get it
         # wrong and the desktop names the window after the interpreter that
         # happens to run it - "python3" in the task bar, with a stock icon.
-        panel = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        panel = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
         with open(panel) as handle:
             tree = ast.parse(handle.read())
         declared = next(node.value.value for node in tree.body
@@ -508,7 +508,7 @@ class NotificationColourTest(unittest.TestCase):
         self.colours = ledpanel.NOTIFICATION_COLOURS
 
     def test_every_offered_colour_is_one_the_service_accepts(self):
-        from steamos_led import notify
+        from steamos_utility_center import notify
         for label, value in self.colours:
             self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
             notify.parse_color(value)           # raises if it is not one
@@ -554,7 +554,7 @@ class LoadColourMenuTest(unittest.TestCase):
         self.colours = ledpanel.load_colours()
 
     def test_every_offered_colour_is_one_the_service_accepts(self):
-        from steamos_led import notify
+        from steamos_utility_center import notify
         for label, value in self.colours:
             self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
             notify.parse_color(value)           # raises if it is not one
@@ -615,7 +615,7 @@ class FlashPaletteTest(unittest.TestCase):
         self.palette = ledpanel.palette()
 
     def test_every_entry_is_a_colour_the_service_accepts(self):
-        from steamos_led import notify
+        from steamos_utility_center import notify
         for label, value in self.palette:
             self.assertRegex(value, r"^#[0-9a-fA-F]{6}$", label)
             notify.parse_color(value)           # raises if it is not one
@@ -756,7 +756,7 @@ class DialogTest(unittest.TestCase):
     """
 
     def setUp(self):
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        path = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
         with open(path) as handle:
             self.source = handle.read()
 
@@ -779,7 +779,7 @@ class ShapeTestButtonTest(unittest.TestCase):
     """The Test tab asks the service for one flash in a given shape."""
 
     def test_the_command_names_the_shape_and_the_colour(self):
-        from steamos_led import notify
+        from steamos_utility_center import notify
         command = ledpanel.shape_test_command(notify.STYLE_COMET)
         self.assertEqual(command[-1],
                          "comet:%s" % ledpanel.SHAPE_TEST_COLOUR)
@@ -787,7 +787,7 @@ class ShapeTestButtonTest(unittest.TestCase):
 
     def test_the_service_understands_what_the_button_sends(self):
         # The two sides of one string, which is the sort of thing that drifts.
-        from steamos_led import notify
+        from steamos_utility_center import notify
         for style in notify.STYLES:
             argument = ledpanel.shape_test_command(style)[-1]
             shape, colour = notify.split_shape(argument)
@@ -797,7 +797,7 @@ class ShapeTestButtonTest(unittest.TestCase):
     def test_the_test_colour_is_nobody_else_s(self):
         # The row is for comparing shapes; a colour that also means something
         # would have you comparing two things at once.
-        from steamos_led import notify
+        from steamos_utility_center import notify
         self.assertNotIn(notify.parse_color(ledpanel.SHAPE_TEST_COLOUR),
                          set(notify.KINDS.values()))
 
@@ -870,8 +870,8 @@ class SettingsProfileTest(unittest.TestCase):
     def test_profiles_live_beside_the_clone(self):
         # Not under /etc: no privileges, and it is where you already go for
         # this project.
-        directory = ledpanel.profiles_dir("/home/deck/SteamOS-Led-Bar")
-        self.assertTrue(directory.startswith("/home/deck/SteamOS-Led-Bar"))
+        directory = ledpanel.profiles_dir("/home/deck/SteamOS-Utility-Center")
+        self.assertTrue(directory.startswith("/home/deck/SteamOS-Utility-Center"))
         self.assertNotIn("/etc", directory)
 
     def test_they_are_not_committed_by_accident(self):
@@ -884,7 +884,7 @@ class StyleMenuTest(unittest.TestCase):
     """The flash shapes in the panel come from the service, not from a list."""
 
     def setUp(self):
-        from steamos_led import notify
+        from steamos_utility_center import notify
         self.notify = notify
         self.choices = ledpanel.style_choices(notify.STYLES)
         self.per_kind = ledpanel.style_choices(notify.STYLES,
@@ -1026,7 +1026,7 @@ class PanelSettingsTest(unittest.TestCase):
     def _panel(self):
         # Read out of the panel rather than imported: importing pulls in
         # tkinter, which a build machine has no reason to have.
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        path = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
         with open(path) as handle:
             return ast.parse(handle.read())
 
@@ -1561,7 +1561,7 @@ class PanelStyleTest(unittest.TestCase):
     """
 
     def setUp(self):
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        path = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
         with open(path) as handle:
             self.tree = ast.parse(handle.read())
 
@@ -1839,7 +1839,7 @@ class OwnDropDownTest(unittest.TestCase):
     """
 
     def setUp(self):
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        path = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
         with open(path) as handle:
             self.tree = ast.parse(handle.read())
 
@@ -1870,7 +1870,7 @@ class TouchTargetTest(unittest.TestCase):
     """
 
     def setUp(self):
-        path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
+        path = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
         with open(path) as handle:
             tree = ast.parse(handle.read())
         self.sizes = {node.targets[0].id: node.value.value

@@ -17,7 +17,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import render, shim  # noqa: E402
+from steamos_utility_center import render, shim  # noqa: E402
 
 SOURCE = os.path.join(HERE, "..", "leds-valve-shim", "leds-valve-shim.c")
 SCALAR_SIZES = {"u8": 1, "u16": 2, "u32": 4, "u64": 8}

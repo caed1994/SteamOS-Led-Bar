@@ -17,7 +17,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "server"))
 
-from steamos_led import config, link, render, service, shim  # noqa: E402
+from steamos_utility_center import config, link, render, service, shim  # noqa: E402
 
 
 class TestCrc(unittest.TestCase):
@@ -461,7 +461,7 @@ class TestConfig(unittest.TestCase):
     def test_the_default_notification_colours_are_the_built_in_ones(self):
         # The config file states them so they can be changed; if the two ever
         # disagree, a fresh install changes colour for no stated reason.
-        from steamos_led import notify
+        from steamos_utility_center import notify
         for kind, prefix in config.CONFIGURABLE_KINDS:
             key = prefix + "_COLOR"
             self.assertEqual(notify.parse_color(config.DEFAULTS[key]),
@@ -470,7 +470,7 @@ class TestConfig(unittest.TestCase):
     def test_every_notification_starts_out_following_the_general_shape(self):
         # Otherwise NOTIFY_STYLE would stop being the one setting for "all of
         # them look like this", which is what most people want it to be.
-        from steamos_led import notify
+        from steamos_utility_center import notify
         for _kind, prefix in config.CONFIGURABLE_KINDS:
             key = prefix + "_STYLE"
             self.assertEqual(config.DEFAULTS[key], notify.STYLE_INHERIT, key)
@@ -478,11 +478,11 @@ class TestConfig(unittest.TestCase):
     def test_following_the_general_shape_is_not_itself_a_shape(self):
         # "default" is stored in the same field as a shape name, so a shape
         # called that would be unreachable - and nobody would know why.
-        from steamos_led import notify
+        from steamos_utility_center import notify
         self.assertNotIn(notify.STYLE_INHERIT, notify.STYLES)
 
     def test_a_shape_of_its_own_is_accepted(self):
-        from steamos_led import notify
+        from steamos_utility_center import notify
         loaded = config.load(path=None,
                              overrides={"ACHIEVEMENT_STYLE": notify.STYLE_PULSE})
         self.assertEqual(loaded["ACHIEVEMENT_STYLE"], notify.STYLE_PULSE)
@@ -506,7 +506,7 @@ class TestFirmwareConsistency(unittest.TestCase):
         return rates
 
     def test_firmware_rates_can_be_set_on_linux(self):
-        from steamos_led.serialport import BAUD_CONSTANTS
+        from steamos_utility_center.serialport import BAUD_CONSTANTS
         for rate in self._firmware_rates():
             self.assertIn(rate, BAUD_CONSTANTS,
                           "firmware builds %d baud, which termios cannot set"
@@ -620,7 +620,7 @@ class RefusedConfigurationTest(unittest.TestCase):
 
     def test_systemd_is_told_not_to_retry_that(self):
         here = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(here, "..", "server", "steamos-led-serial.service")
+        path = os.path.join(here, "..", "server", "steamos-utility-center.service")
         with open(path) as handle:
             unit = handle.read()
         self.assertIn("RestartPreventExitStatus=%d"
@@ -646,7 +646,7 @@ class ConfigRewritingTest(unittest.TestCase):
     """
 
     SAMPLE = (
-        "# Configuration for steamos-led-serial.\n"
+        "# Configuration for steamos-utility-center.\n"
         "\n"
         "# Number of LEDs on the physical strip.\n"
         "LED_COUNT=17\n"
@@ -738,7 +738,7 @@ class ConfigRewritingTest(unittest.TestCase):
 
     def test_the_real_shipped_config_survives_a_round_trip(self):
         here = os.path.dirname(os.path.abspath(__file__))
-        shipped = os.path.join(here, "..", "server", "steamos-led-serial.conf")
+        shipped = os.path.join(here, "..", "server", "steamos-utility-center.conf")
         with open(shipped) as handle:
             text = handle.read()
         result = config.update_text(text, {"LED_COUNT": 60, "GAMMA": 2.2})
@@ -890,7 +890,7 @@ class StandbyQuietTest(unittest.TestCase):
         silence is also what a real machine does: Steam writes when a setting
         changes, not sixty times a second.
         """
-        from steamos_led import shim as shim_module
+        from steamos_utility_center import shim as shim_module
 
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, ignore_errors=True)

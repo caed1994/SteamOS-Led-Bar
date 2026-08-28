@@ -1,10 +1,10 @@
 # Stable name for the ESP that drives the LED bar, plus group access so the
 # service does not have to guess which ttyUSB it ended up on.
 #
-# Install: sudo cp 99-steamos-led-serial.rules /etc/udev/rules.d/
+# Install: sudo cp 99-steamos-utility-center.rules /etc/udev/rules.d/
 #          sudo udevadm control --reload && sudo udevadm trigger
 #
-# Afterwards set SERIAL_PORT=/dev/steamos-led-esp in /etc/steamos-led-serial.conf.
+# Afterwards set SERIAL_PORT=/dev/steamos-led-esp in /etc/steamos-utility-center.conf.
 #
 # If you own more than one board with the same USB-serial chip, add
 # ATTRS{serial}=="<your board's serial>" to the matching rule so the symlink

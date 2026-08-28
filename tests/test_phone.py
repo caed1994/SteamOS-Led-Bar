@@ -23,8 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import config as config_module      # noqa: E402
-from steamos_led import notify, phone                # noqa: E402
+from steamos_utility_center import config as config_module      # noqa: E402
+from steamos_utility_center import notify, phone                # noqa: E402
 from shellvalues import shell_value                  # noqa: E402
 
 KDECONNECT_LINES = [
@@ -595,7 +595,7 @@ class BridgeTest(unittest.TestCase):
             raise OSError("no such file")
 
         bridge = phone.Bridge(self.rules, send=refuse)
-        with self.assertLogs("steamos_led.phone", "WARNING") as caught:
+        with self.assertLogs("steamos_utility_center.phone", "WARNING") as caught:
             bridge.run(POSTED_LINES)
         self.assertEqual(bridge.seen, 3)
         self.assertEqual(bridge.flashed, 0)
@@ -946,7 +946,7 @@ class ObstacleTest(unittest.TestCase):
         self.assertEqual(len(said), 1)
         self.assertIn("NOTIFY_PHONE", said[0])
         # And what to do about it, not only what is wrong.
-        self.assertIn("systemctl --user restart steamos-led-phone", said[0])
+        self.assertIn("systemctl --user restart steamos-utility-center-phone", said[0])
 
     def test_the_master_switch_is_mentioned_before_the_one_under_it(self):
         # Turning NOTIFY_PHONE on while NOTIFY is off changes nothing, so
@@ -958,7 +958,7 @@ class ObstacleTest(unittest.TestCase):
     def test_a_service_that_is_not_listening_is_worth_saying_too(self):
         said = phone.obstacles(True, True, False)
         self.assertEqual(len(said), 1)
-        self.assertIn("steamos-led-serial", said[0])
+        self.assertIn("steamos-utility-center", said[0])
 
     def test_every_complaint_names_something_to_run_or_press(self):
         for said in phone.obstacles(False, False, False):
@@ -1006,10 +1006,10 @@ class ConfigurationTest(unittest.TestCase):
         """
         self.assertIn("PHONE_SOURCE", config_module.RETIRED)
         self.assertNotIn("PHONE_SOURCE", config_module.DEFAULTS)
-        path = os.path.join(self.stale, "steamos-led-serial.conf")
+        path = os.path.join(self.stale, "steamos-utility-center.conf")
         with open(path, "w") as handle:
             handle.write("NOTIFY_PHONE=1\nPHONE_SOURCE=auto\n")
-        with self.assertLogs("steamos_led.config", "WARNING"):
+        with self.assertLogs("steamos_utility_center.config", "WARNING"):
             settings = config_module.load(path)
         self.assertTrue(settings["NOTIFY_PHONE"], "the rest of it still read")
         # And the panel takes the line out the next time it saves, or every
@@ -1032,7 +1032,7 @@ class ConfigurationTest(unittest.TestCase):
     def test_the_shipped_file_names_every_phone_setting(self):
         # A setting nobody can find is a setting nobody uses, and this file is
         # where people look before they find the panel.
-        path = os.path.join(HERE, "..", "server", "steamos-led-serial.conf")
+        path = os.path.join(HERE, "..", "server", "steamos-utility-center.conf")
         with open(path) as handle:
             text = handle.read()
         for key in ("NOTIFY_PHONE", "PHONE_COLOR", "PHONE_STYLE",
@@ -1048,7 +1048,7 @@ class EndToEndTest(unittest.TestCase):
     """A line off the bus, through the pipe, to a lit strip."""
 
     def _overlay(self, **overrides):
-        from steamos_led import service
+        from steamos_utility_center import service
         settings = dict(config_module.DEFAULTS)
         settings.update(overrides)
         return notify.NotificationOverlay(
@@ -1108,19 +1108,19 @@ class UnitFileTest(unittest.TestCase):
     """The user unit, and the exit codes it promises not to restart over."""
 
     def setUp(self):
-        path = os.path.join(HERE, "..", "server", "steamos-led-phone.service")
+        path = os.path.join(HERE, "..", "server", "steamos-utility-center-phone.service")
         with open(path) as handle:
             self.text = handle.read()
 
     def test_it_runs_the_mode_it_says_it_does(self):
         self.assertIn("--watch-phone", self.text)
-        self.assertIn("@INSTALL_DIR@/steamos-led-serial", self.text)
+        self.assertIn("@INSTALL_DIR@/steamos-utility-center", self.text)
 
     def test_the_answers_it_gives_are_not_treated_as_failures(self):
         # "NOTIFY_PHONE is off" and "there is no gdbus here" are both settled
         # facts; restarting every ten seconds would fill the journal with
         # them and never change either.
-        from steamos_led import service
+        from steamos_utility_center import service
         for code in (service.NOTHING_TO_WATCH_EXIT,
                      service.MONITOR_MISSING_EXIT):
             self.assertRegex(self.text,
@@ -1156,7 +1156,7 @@ class InstallerTest(unittest.TestCase):
     def test_the_phone_bridge_is_one_of_them(self):
         # Installed but not started by anything until NOTIFY_PHONE goes on,
         # which is what the unit's own exit code 3 is for.
-        self.assertIn("steamos-led-phone.service",
+        self.assertIn("steamos-utility-center-phone.service",
                       shell_value("WATCHER_UNITS"))
 
     def test_the_installer_and_the_uninstaller_walk_the_same_list(self):

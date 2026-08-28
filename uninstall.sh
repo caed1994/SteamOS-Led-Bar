@@ -2,27 +2,21 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Removes the SteamOS LED bar USB-serial bridge.
+# Removes the SteamOS Utility Center.
 #   sudo ./uninstall.sh [--purge] [--remove-module]
-# --purge          also deletes /etc/steamos-led-serial.conf
+# --purge          also deletes /etc/steamos-utility-center.conf
 # --remove-module  also unloads and removes the leds-valve-shim kernel module
 
 set -euo pipefail
 
-INSTALL_DIR="/var/lib/steamos-led-serial"
-CONFIG_PATH="/etc/steamos-led-serial.conf"
-UNIT_PATH="/etc/systemd/system/steamos-led-serial.service"
-POWER_UNIT_PATH="/etc/systemd/system/steamos-led-power.service"
-POWER_CONFIG_PATH="/etc/steamos-led-power.conf"
-UDEV_PATH="/etc/udev/rules.d/99-steamos-led-serial.rules"
-SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/steamos-led-serial"
-
 MODULE_NAME="leds-valve-shim"
 RELEASE="$(uname -r)"
 MODULE_PATH="/usr/lib/modules/$RELEASE/updates/${MODULE_NAME}.ko"
-MODULES_LOAD="/etc/modules-load.d/steamos-led-bar.conf"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Every path this removes, named once and shared with install.sh: the two used
+# to hold their own copies, and an uninstaller looking for a name the
+# installer had stopped writing leaves a service nothing can take away.
 # shellcheck source=scripts/user-unit.sh
 source "$SOURCE_DIR/scripts/user-unit.sh"
 
@@ -121,10 +115,12 @@ remove_platformio_path() {
     # their own .bashrc owned by root. Written back through the same inode,
     # so its ownership and mode are whatever they already were.
     if runuser -u "$WATCHER_USER" -- bash -c '
-            profile="$1"; scratch="$profile.steamos-led.$$"
-            grep -vxF "$2" "$profile" | grep -vxF "$3" > "$scratch" || true
+            profile="$1"; scratch="$profile.steamos-utility-center.$$"
+            grep -vxF "$2" "$profile" | grep -vxF "$3" | grep -vxF "$4" \
+                > "$scratch" || true
             cat "$scratch" > "$profile" && rm -f "$scratch"
-        ' _ "$profile" "$PLATFORMIO_PATH_NOTE" "$PLATFORMIO_PATH_LINE"; then
+        ' _ "$profile" "$PLATFORMIO_PATH_NOTE" "$PLATFORMIO_PATH_LINE" \
+          "$OLD_PLATFORMIO_PATH_NOTE"; then
         echo "Took the PlatformIO PATH line back out of $profile."
         PLATFORMIO_NOTE=1
     else
@@ -138,30 +134,37 @@ remove_menu_entry
 remove_platformio_path
 
 # Stopping the service blanks the strip before the process exits.
-systemctl disable --now steamos-led-serial.service 2>/dev/null || true
+systemctl disable --now "$NAME.service" 2>/dev/null || true
 rm -f "$UNIT_PATH"
 
 # The CPU settings. Disabling stops it being reapplied at the next boot; what
 # is set right now is left as it is, because putting the governor back would
 # mean knowing what it was before this was ever installed, and nothing here
 # recorded that. It is a setting, not a change to be undone.
-systemctl disable steamos-led-power.service 2>/dev/null || true
+systemctl disable "$NAME-power.service" 2>/dev/null || true
 rm -f "$POWER_UNIT_PATH"
+
+# And anything left from before the rename. Somebody uninstalling may never
+# have run the new installer at all - they clone, pull, and run this - so the
+# names it is asked to remove are the old ones. Walking the same list the
+# migration walks is what keeps this from being the one script that does not
+# know about them.
+remove_old_install "$PURGE"
 systemctl daemon-reload
 
 rm -f "$UDEV_PATH"
 rm -f "$SLEEP_HOOK_PATH"
 udevadm control --reload >/dev/null 2>&1 || true
 
-# Only if it is still ours. Somebody who put their own steamos-led-serial
+# Only if it is still ours. Somebody who put their own steamos-utility-center
 # there is entitled to keep it, and a link pointing somewhere else is not
 # something this script installed.
 if [[ -L "$COMMAND_LINK" \
-      && "$(readlink "$COMMAND_LINK")" == "$INSTALL_DIR/steamos-led-serial" ]]; then
+      && "$(readlink "$COMMAND_LINK")" == "$INSTALL_DIR/$NAME" ]]; then
     rm -f "$COMMAND_LINK"
 fi
 if [[ -L "$POWER_COMMAND_LINK" \
-      && "$(readlink "$POWER_COMMAND_LINK")" == "$INSTALL_DIR/steamos-led-power" ]]; then
+      && "$(readlink "$POWER_COMMAND_LINK")" == "$INSTALL_DIR/$NAME-power" ]]; then
     rm -f "$POWER_COMMAND_LINK"
 fi
 

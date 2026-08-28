@@ -19,7 +19,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import elf, steamworks  # noqa: E402
+from steamos_utility_center import elf, steamworks  # noqa: E402
 
 
 def _some_libraries(limit=3):

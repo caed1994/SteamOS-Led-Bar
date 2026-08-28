@@ -35,7 +35,7 @@ ACTION="${1:-}"
 SOURCE="${2:-}"
 WANTED_USER="${3:-}"
 
-RULE="/etc/sudoers.d/zz-steamos-led-cec-install"
+RULE="/etc/sudoers.d/zz-steamos-utility-center-cec-install"
 
 usage() {
     echo "usage: install-cec.sh install|remove <source-dir> [user]" >&2
@@ -120,7 +120,7 @@ trap drop_the_rule EXIT INT TERM
 # flag this script does not pass.
 staged="$(mktemp)"
 {
-    echo "# Written by the SteamOS LED bar panel while installing the CEC"
+    echo "# Written by the SteamOS Utility Center while installing the CEC"
     echo "# toolkit, and removed again when it finishes. If you are reading"
     echo "# this in a running system, an install was killed part way through"
     echo "# and this file is safe to delete."

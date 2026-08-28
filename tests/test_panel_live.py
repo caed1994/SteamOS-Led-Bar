@@ -25,8 +25,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 import appsettings                                          # noqa: E402
 import kdetheme                                             # noqa: E402
 import syssettings                                          # noqa: E402
-from steamos_led import cec                                 # noqa: E402
-from steamos_led import lact                                # noqa: E402
+from steamos_utility_center import cec                                 # noqa: E402
+from steamos_utility_center import lact                                # noqa: E402
 from test_lact import (FakeDaemon, DEVICES, STATS, CLOCKS,  # noqa: E402
                        CONFIG, RDNA3_FAN)
 
@@ -41,9 +41,9 @@ def _panel_module():
     """Import the panel, which has no .py on the end of it."""
     import importlib.machinery
     import importlib.util
-    path = os.path.join(HERE, "..", "gui", "steamos-led-panel")
-    loader = importlib.machinery.SourceFileLoader("steamos_led_panel", path)
-    spec = importlib.util.spec_from_loader("steamos_led_panel", loader)
+    path = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
+    loader = importlib.machinery.SourceFileLoader("steamos_utility_center_panel", path)
+    spec = importlib.util.spec_from_loader("steamos_utility_center_panel", loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
@@ -1312,7 +1312,7 @@ class LiveWindowTest(unittest.TestCase):
                         for child in self.panel.statusbar.winfo_children()
                         if isinstance(child, ttk.Label))
         self.assertNotIn(self.panel_module.VERSION, said, said)
-        self.assertNotIn("SteamOS LED bar", said, said)
+        self.assertNotIn("SteamOS Utility Center", said, said)
 
     def test_but_the_version_is_still_somewhere_to_be_found(self):
         # Removing the label must not be removing the number: it is the first

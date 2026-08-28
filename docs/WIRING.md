@@ -47,7 +47,7 @@ Two ways to go:
    **not** connect that supply's 5 V rail to the ESP's 5 V pin while the ESP is
    powered over USB.
 2. **Run it off the USB rail** and cap the brightness:
-   `MAX_BRIGHTNESS=80` in `/etc/steamos-led-serial.conf` (or
+   `MAX_BRIGHTNESS=80` in `/etc/steamos-utility-center.conf` (or
    `-D MAX_BRIGHTNESS=80` in the firmware, which also caps directly driven
    tests).
 

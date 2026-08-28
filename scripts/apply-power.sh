@@ -12,10 +12,10 @@
 
 set -euo pipefail
 
-CONFIG_PATH="/etc/steamos-led-power.conf"
-SERVICE="steamos-led-power.service"
-INSTALL_DIR="/var/lib/steamos-led-serial"
-APPLIER="$INSTALL_DIR/steamos-led-power"
+CONFIG_PATH="/etc/steamos-utility-center-power.conf"
+SERVICE="steamos-utility-center-power.service"
+INSTALL_DIR="/var/lib/steamos-utility-center"
+APPLIER="$INSTALL_DIR/steamos-utility-center-power"
 
 STAGED="${1:-}"
 [[ -n "$STAGED" ]] || { echo "usage: apply-power.sh <staged-file>" >&2; exit 2; }

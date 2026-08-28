@@ -29,7 +29,7 @@ firmware is pinned to its top preference and the EPP file stops accepting
 anything else. That is the kernel's rule, not ours - see epp_applies.
 
 Nothing in here writes anything. Applying needs root and lives in
-steamos-led-power, which this module is the reading half of.
+steamos-utility-center-power, which this module is the reading half of.
 """
 
 from __future__ import annotations

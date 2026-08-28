@@ -16,7 +16,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import render, shim, temperature  # noqa: E402
+from steamos_utility_center import render, shim, temperature  # noqa: E402
 
 
 class FakeHwmon:

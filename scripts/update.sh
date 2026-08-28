@@ -38,7 +38,7 @@ cd "$SOURCE_DIR"
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "$SOURCE_DIR is not a git clone, so there is nothing to update from." >&2
     echo "This happens when the code was downloaded as a zip. To get updates:" >&2
-    echo "  git clone https://github.com/caed1994/SteamOS-Led-Bar" >&2
+    echo "  git clone https://github.com/caed1994/SteamOS-Utility-Center" >&2
     exit 1
 fi
 

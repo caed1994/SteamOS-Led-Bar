@@ -53,7 +53,38 @@ class ReadWriteTest(HomeTest):
         # It is somebody's home directory, and a bare NAME=value file there
         # with no name on it is a file nobody can place.
         appsettings.write(dict(appsettings.DEFAULTS), self.home)
-        self.assertIn("control panel", self._text())
+        self.assertIn("SteamOS Utility Center", self._text())
+
+    def test_settings_from_before_the_rename_are_still_read(self):
+        """The panel's preferences moved with the project's name.
+
+        The installer moves the file, but the panel is the thing somebody
+        opens - and they may open it without ever running the installer
+        again. Without this their theme, and anything else in there, would
+        come back as the default with no sign that a file had been passed
+        over.
+        """
+        os.makedirs(os.path.join(self.home, appsettings.CONFIG_DIR))
+        with open(os.path.join(self.home, appsettings.CONFIG_DIR,
+                               appsettings.OLD_CONFIG_FILE), "w") as handle:
+            handle.write("%s=%s\n" % (appsettings.THEME,
+                                      appsettings.THEME_LIGHT))
+        self.assertEqual(appsettings.read(self.home)[appsettings.THEME],
+                         appsettings.THEME_LIGHT)
+
+    def test_the_current_name_wins_over_the_old_one(self):
+        # Both present is a machine that has been migrated and then opened an
+        # older panel, or one that migrated by hand. The current file is the
+        # one being written, so it is the one that stands.
+        os.makedirs(os.path.join(self.home, appsettings.CONFIG_DIR))
+        with open(os.path.join(self.home, appsettings.CONFIG_DIR,
+                               appsettings.OLD_CONFIG_FILE), "w") as handle:
+            handle.write("%s=%s\n" % (appsettings.THEME,
+                                      appsettings.THEME_LIGHT))
+        appsettings.write({appsettings.THEME: appsettings.THEME_DARK},
+                          self.home)
+        self.assertEqual(appsettings.read(self.home)[appsettings.THEME],
+                         appsettings.THEME_DARK)
 
     def test_it_is_written_in_one_step(self):
         appsettings.write(dict(appsettings.DEFAULTS), self.home)

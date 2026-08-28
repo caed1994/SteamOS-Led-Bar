@@ -3,11 +3,11 @@
 
 """Settings the panel manages that are not the LED service's.
 
-The rest of this window edits one file, `/etc/steamos-led-serial.conf`, and
+The rest of this window edits one file, `/etc/steamos-utility-center.conf`, and
 every row on every page is a key in it. These are not: they are the machine's
 own settings, they live in the user's home, and no service of ours reads them.
 
-Kept apart from `steamos_led.config` on purpose, rather than added to it. That
+Kept apart from `steamos_utility_center.config` on purpose, rather than added to it. That
 file is the service's, it is validated by the service, and the service is
 restarted when it changes - a keyboard layout in it would be a setting the
 service would refuse to start over and a restart nobody needed.

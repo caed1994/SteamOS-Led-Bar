@@ -17,7 +17,7 @@
 set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVICE="steamos-led-serial.service"
+SERVICE="steamos-utility-center.service"
 INI="$SOURCE_DIR/firmware/led-client/platformio.ini"
 
 ENVIRONMENT="${1:-}"

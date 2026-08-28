@@ -1,19 +1,19 @@
 [Desktop Entry]
 Type=Application
-Name=SteamOS LED bar
+Name=SteamOS Utility Center
 GenericName=LED strip control panel
 Comment=Settings, tests and repair for the LED bar bridge
 # @SOURCE_DIR@ is replaced by install.sh with the path of the clone, because
 # repairing runs install.sh from there - the panel has to stay next to it.
-Exec=@SOURCE_DIR@/gui/steamos-led-panel
+Exec=@SOURCE_DIR@/gui/steamos-utility-center-panel
 Path=@SOURCE_DIR@
-# @ICON@ becomes gui/steamos-led-panel.png in the clone, or a theme icon name
+# @ICON@ becomes gui/steamos-utility-center-panel.png in the clone, or a theme icon name
 # if that file is not there.
 Icon=@ICON@
 Terminal=false
 # Ties the running window to this entry, so the task bar shows its name and
 # icon instead of naming it after the interpreter. Must match the className
 # the panel passes to tkinter.Tk().
-StartupWMClass=steamos-led-panel
+StartupWMClass=steamos-utility-center-panel
 Categories=Settings;HardwareSettings;
 Keywords=LED;strip;Steam;

@@ -20,7 +20,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import cec                                  # noqa: E402
+from steamos_utility_center import cec                                  # noqa: E402
 
 
 def status(**changes):

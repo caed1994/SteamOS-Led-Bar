@@ -14,30 +14,30 @@ import platform
 import re
 import subprocess
 
-from steamos_led import cec as cec_module
-from steamos_led import config as config_module
-from steamos_led import lact as lact_module
-from steamos_led import phone
-from steamos_led import power as power_module
-from steamos_led import temperature
+from steamos_utility_center import cec as cec_module
+from steamos_utility_center import config as config_module
+from steamos_utility_center import lact as lact_module
+from steamos_utility_center import phone
+from steamos_utility_center import power as power_module
+from steamos_utility_center import temperature
 
-INSTALL_DIR = "/var/lib/steamos-led-serial"
-BINARY = os.path.join(INSTALL_DIR, "steamos-led-serial")
-CONFIG_PATH = "/etc/steamos-led-serial.conf"
-UNIT_PATH = "/etc/systemd/system/steamos-led-serial.service"
-UDEV_PATH = "/etc/udev/rules.d/99-steamos-led-serial.rules"
+INSTALL_DIR = "/var/lib/steamos-utility-center"
+BINARY = os.path.join(INSTALL_DIR, "steamos-utility-center")
+CONFIG_PATH = "/etc/steamos-utility-center.conf"
+UNIT_PATH = "/etc/systemd/system/steamos-utility-center.service"
+UDEV_PATH = "/etc/udev/rules.d/99-steamos-utility-center.rules"
 
 # Not something that should be installed - something that should not be left
 # behind. scripts/install-cec.sh lends the desktop user a sudo rule for the
 # length of a CEC install and removes it in a trap; the one way out that trap
 # cannot cover is the signal it cannot see. Nothing else in the window would
 # ever mention it, so the checklist is where it belongs.
-CEC_INSTALL_RULE = "/etc/sudoers.d/zz-steamos-led-cec-install"
+CEC_INSTALL_RULE = "/etc/sudoers.d/zz-steamos-utility-center-cec-install"
 SHIM_DEVICE = "/dev/valve-leds-shim"
 MODULE_NAME = "leds-valve-shim"
-SERVICE = "steamos-led-serial.service"
-WATCHER = "steamos-led-achievements.service"
-PHONE_BRIDGE = "steamos-led-phone.service"
+SERVICE = "steamos-utility-center.service"
+WATCHER = "steamos-utility-center-achievements.service"
+PHONE_BRIDGE = "steamos-utility-center-phone.service"
 
 # How long to let KDE Connect answer before calling it silent. Shorter than
 # the service's own wait, because the panel asks this on the thread that draws
@@ -48,7 +48,7 @@ PHONE_ASK_SECONDS = 2.0
 
 # The panel's own icon, next to the panel. A theme icon name is the fallback
 # because a missing icon file leaves a menu entry with no picture at all.
-ICON_NAME = "steamos-led-panel.png"
+ICON_NAME = "steamos-utility-center-panel.png"
 FALLBACK_ICON = "preferences-desktop-display"
 
 
@@ -189,7 +189,7 @@ def run_checks(probe=None, config=None):
         "systemctl status %s says why" % SERVICE, repairable=True,
         live=True))
 
-    fifo = (config or {}).get("NOTIFY_FIFO") or "/run/steamos-led-serial/notify"
+    fifo = (config or {}).get("NOTIFY_FIFO") or "/run/steamos-utility-center/notify"
     notify_on = (config or {}).get("NOTIFY", True)
     if notify_on:
         checks.append(Check(
@@ -527,9 +527,9 @@ def profile_path(directory, name):
 def profile_text(values):
     """A profile file, ready to write."""
     lines = [
-        "# A settings profile for the SteamOS LED bar control panel.",
+        "# A settings profile for the SteamOS Utility Center.",
         "# Load it from the panel with \"Load profile\", or copy the lines",
-        "# you want into /etc/steamos-led-serial.conf by hand.",
+        "# you want into /etc/steamos-utility-center.conf by hand.",
         "",
     ]
     for key in sorted(values):
@@ -1033,7 +1033,7 @@ def sensor_choices(sensors, chosen=None, current="auto"):
     return _uniquify(choices)
 
 
-POWER_CONFIG_PATH = "/etc/steamos-led-power.conf"
+POWER_CONFIG_PATH = "/etc/steamos-utility-center-power.conf"
 
 
 def read_power_config(path=None):
@@ -1127,7 +1127,7 @@ def _where(path):
 # -- HDMI CEC ----------------------------------------------------------------
 #
 # The CEC work itself is the vendored SteamOS CEC Toolkit and the reading of
-# it is server/steamos_led/cec.py. What belongs here is the same thing the
+# it is server/steamos_utility_center/cec.py. What belongs here is the same thing the
 # rest of this file holds: the commands the window runs, in one place, so a
 # window that is hard to drive under a test is not also the only record of
 # what it would have executed.

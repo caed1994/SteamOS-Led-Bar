@@ -20,10 +20,10 @@ REPO = os.path.abspath(os.path.join(HERE, ".."))
 LICENCE = "GPL-3.0-or-later"
 
 # What counts as ours to license. Suffixes plus the executables whose language
-# is not in their name - a script called steamos-led-serial is source too.
+# is not in their name - a script called steamos-utility-center is source too.
 SUFFIXES = (".py", ".sh", ".cpp", ".h")
-SCRIPTS = ("server/steamos-led-serial", "gui/steamos-led-panel",
-           "systemd-sleep/steamos-led-serial")
+SCRIPTS = ("server/steamos-utility-center", "gui/steamos-utility-center-panel",
+           "systemd-sleep/steamos-utility-center")
 
 # Somebody else's code, under somebody else's licence, which this project does
 # not get to relabel. The kernel shim carries its own SPDX line saying GPL-2.0+;

@@ -1,6 +1,6 @@
 [Unit]
-Description=CPU governor and EPP for the SteamOS LED bar toolbox
-Documentation=https://github.com/caed1994/SteamOS-Led-Bar
+Description=CPU governor and EPP for the SteamOS Utility Center
+Documentation=https://github.com/caed1994/SteamOS-Utility-Center
 # sysfs has to be there, and cpufreq is set up long before this point.
 After=sysinit.target
 
@@ -10,7 +10,7 @@ Type=oneshot
 # so there is no process to keep. RemainAfterExit is what makes "is-active"
 # answer yes afterwards, which is what the control panel's check reads.
 RemainAfterExit=yes
-ExecStart=@INSTALL_DIR@/steamos-led-power --apply
+ExecStart=@INSTALL_DIR@/steamos-utility-center-power --apply
 
 # It writes /sys/devices/system/cpu, so ProtectKernelTunables cannot be on -
 # that is exactly the tree it mounts read-only. Everything else that does not

@@ -47,9 +47,20 @@ DEFAULTS = {
 }
 
 CONFIG_DIR = ".config"
-CONFIG_FILE = "steamos-led-panel.conf"
+CONFIG_FILE = "steamos-utility-center-panel.conf"
 
-HEADER = ("# Settings for the SteamOS LED bar control panel itself.\n"
+# What this file was called when the project was the SteamOS LED bar. Read
+# when the current name is not there, so somebody's theme survives the rename
+# whether or not they ever run the installer again - the installer moves it
+# too, but the panel is the thing they open, and it can do this itself
+# without needing root.
+#
+# Read, not written: the next write lands under the current name, and the old
+# file is left alone. Deleting somebody's file to tidy up is not this window's
+# business, and it costs one stat on a start where the new one is missing.
+OLD_CONFIG_FILE = "steamos-led-panel.conf"
+
+HEADER = ("# Settings for the SteamOS Utility Center itself.\n"
           "# Only this window reads them; nothing here changes the machine.\n")
 
 
@@ -63,6 +74,15 @@ def path(home=None):
                         CONFIG_FILE)
 
 
+def _lines(where):
+    """The file's lines, or None when there is no file to read."""
+    try:
+        with open(where, encoding="utf-8", errors="replace") as handle:
+            return handle.read().splitlines()
+    except OSError:
+        return None
+
+
 def read(home=None):
     """The preferences, defaults for anything missing or unreadable.
 
@@ -72,10 +92,13 @@ def read(home=None):
     the default.
     """
     values = dict(DEFAULTS)
-    try:
-        with open(path(home), encoding="utf-8", errors="replace") as handle:
-            lines = handle.read().splitlines()
-    except OSError:
+    lines = _lines(path(home))
+    if lines is None:
+        # Nothing under the current name. It may be a first start, or it may
+        # be somebody who had this before the rename - see OLD_CONFIG_FILE.
+        lines = _lines(os.path.join(home or os.path.expanduser("~"),
+                                    CONFIG_DIR, OLD_CONFIG_FILE))
+    if lines is None:
         return values
     for line in lines:
         line = line.strip()

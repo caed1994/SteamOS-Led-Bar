@@ -4,13 +4,13 @@
 
 """Put the CPU governor and the EPP where the config file says.
 
-Run at boot by steamos-led-power.service, and again by the control panel
+Run at boot by steamos-utility-center-power.service, and again by the control panel
 whenever the setting changes. Both go through here rather than writing sysfs
 themselves, so there is one place that knows the order the two have to be
 written in and what a refusal means.
 
-    steamos-led-power --apply     write them, report what happened
-    steamos-led-power --report    say what the machine offers and holds
+    steamos-utility-center-power --apply     write them, report what happened
+    steamos-utility-center-power --report    say what the machine offers and holds
 
 Doing nothing is a valid outcome and the default one: with neither setting in
 the file this exits 0 having touched nothing, which is what an installation
@@ -25,9 +25,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from steamos_led import power                              # noqa: E402
+from steamos_utility_center import power                              # noqa: E402
 
-CONFIG_PATH = "/etc/steamos-led-power.conf"
+CONFIG_PATH = "/etc/steamos-utility-center-power.conf"
 
 
 def load(path):

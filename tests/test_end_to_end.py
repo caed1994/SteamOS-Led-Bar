@@ -20,9 +20,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import link, notify, shim  # noqa: E402
+from steamos_utility_center import link, notify, shim  # noqa: E402
 
-ENTRY_POINT = os.path.join(HERE, "..", "server", "steamos-led-serial")
+ENTRY_POINT = os.path.join(HERE, "..", "server", "steamos-utility-center")
 RUN_SECONDS = 2.5
 # The notification case needs room for the flash to finish inside the window.
 NOTIFY_RUN_SECONDS = 5.0

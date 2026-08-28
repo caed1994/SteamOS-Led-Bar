@@ -22,9 +22,9 @@ from . import steamworks
 from . import temperature
 from .link import EspLink
 
-LOG = logging.getLogger("steamos-led")
+LOG = logging.getLogger("steamos-utility-center")
 
-PROGRAM = "steamos-led-serial"
+PROGRAM = "steamos-utility-center"
 DEVICE_RETRY_DELAY = 5.0
 
 # A configuration the service will not accept. Restarting cannot rewrite a
@@ -667,7 +667,7 @@ def run_desktop(config):
               "whenever that changes, so an empty list means it has not run "
               "since this was installed. Restart it, then switch to Game Mode "
               "and back:")
-        print("    sudo systemctl restart steamos-led-serial")
+        print("    sudo systemctl restart steamos-utility-center")
     else:
         print("What it saw before now:")
         for line in lines:
@@ -954,7 +954,7 @@ def run_steam_check(config):
         stats.close()
 
     print()
-    print("Realtime detection works here: steamos-led-serial --watch-achievements")
+    print("Realtime detection works here: steamos-utility-center --watch-achievements")
     print("To skip the search next time, put this in the config:")
     print("  STEAM_ROUTE=%s" % route)
     return 0

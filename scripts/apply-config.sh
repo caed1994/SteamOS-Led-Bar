@@ -12,8 +12,8 @@
 
 set -euo pipefail
 
-CONFIG_PATH="/etc/steamos-led-serial.conf"
-SERVICE="steamos-led-serial.service"
+CONFIG_PATH="/etc/steamos-utility-center.conf"
+SERVICE="steamos-utility-center.service"
 
 STAGED="${1:-}"
 [[ -n "$STAGED" ]] || { echo "usage: apply-config.sh <staged-file>" >&2; exit 2; }
@@ -21,13 +21,13 @@ STAGED="${1:-}"
 
 # Refuse anything the service itself would refuse, before it replaces a
 # working file - a rejected config would leave the service dead on restart.
-INSTALL_DIR="/var/lib/steamos-led-serial"
-if [[ -x "$INSTALL_DIR/steamos-led-serial" ]]; then
+INSTALL_DIR="/var/lib/steamos-utility-center"
+if [[ -x "$INSTALL_DIR/steamos-utility-center" ]]; then
     # Ask the service itself whether it would accept the file. Anything else
     # would be a second copy of the validation rules, and getting that subtly
     # wrong means overwriting a working config with one the service refuses -
     # leaving it dead on restart.
-    if ! rejection="$("$INSTALL_DIR/steamos-led-serial" --config "$STAGED" \
+    if ! rejection="$("$INSTALL_DIR/steamos-utility-center" --config "$STAGED" \
                       --check-config 2>&1 1>/dev/null)"; then
         echo "the new configuration was rejected, keeping the old one:" >&2
         echo "$rejection" >&2

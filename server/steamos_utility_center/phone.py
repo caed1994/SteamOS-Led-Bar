@@ -757,11 +757,11 @@ def obstacles(notify_on, phone_on, fifo_ready):
         complaints.append(
             "NOTIFY_PHONE is off, so the bar will not do this for real yet. "
             "Switch on 'Flash on phone notifications' in the panel, press "
-            "Apply, then: systemctl --user restart steamos-led-phone")
+            "Apply, then: systemctl --user restart steamos-utility-center-phone")
     if not fifo_ready:
         complaints.append(
             "the service is not listening - no notification pipe. Check it "
-            "with: systemctl status steamos-led-serial")
+            "with: systemctl status steamos-utility-center")
     return complaints
 
 

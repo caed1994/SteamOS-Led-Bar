@@ -11,7 +11,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import notify  # noqa: E402
+from steamos_utility_center import notify  # noqa: E402
 
 
 class ColourParsingTest(unittest.TestCase):
@@ -545,7 +545,7 @@ class ConfiguredOverlayTest(unittest.TestCase):
     """What the service hands the overlay, straight from a configuration."""
 
     def _config(self, **overrides):
-        from steamos_led import config as config_module
+        from steamos_utility_center import config as config_module
         settings = dict(config_module.DEFAULTS)
         settings.update(overrides)
         return settings
@@ -553,18 +553,18 @@ class ConfiguredOverlayTest(unittest.TestCase):
     def test_a_shape_left_at_the_default_is_not_passed_on(self):
         # "default" is the absence of a choice, so it must not arrive at the
         # overlay as a shape name - there is none by that name to draw.
-        from steamos_led import service
+        from steamos_utility_center import service
         self.assertEqual(service.notification_styles(self._config()), {})
 
     def test_a_shape_of_its_own_is_passed_on(self):
-        from steamos_led import service
+        from steamos_utility_center import service
         styles = service.notification_styles(
             self._config(MESSAGE_STYLE=notify.STYLE_PULSE))
         self.assertEqual(styles, {"message": notify.STYLE_PULSE})
 
     def test_the_colours_come_from_the_same_table(self):
-        from steamos_led import config as config_module
-        from steamos_led import service
+        from steamos_utility_center import config as config_module
+        from steamos_utility_center import service
         colors = service.notification_colors(self._config())
         self.assertEqual(sorted(colors),
                          sorted(kind for kind, _prefix
@@ -573,7 +573,7 @@ class ConfiguredOverlayTest(unittest.TestCase):
     def test_every_configurable_kind_is_one_the_overlay_knows(self):
         # A prefix with no matching trigger word would be a setting that
         # changes nothing at all, and nothing would say so.
-        from steamos_led import config as config_module
+        from steamos_utility_center import config as config_module
         for kind, _prefix in config_module.CONFIGURABLE_KINDS:
             self.assertIn(kind, notify.KINDS)
 
@@ -581,7 +581,7 @@ class ConfiguredOverlayTest(unittest.TestCase):
         # And the other way round: a trigger word that is in neither table is
         # one nobody decided about, which is how warning started out - it had
         # no options because it had been forgotten, not because it was fixed.
-        from steamos_led import config as config_module
+        from steamos_utility_center import config as config_module
         configurable = {kind for kind, _prefix
                         in config_module.CONFIGURABLE_KINDS}
         self.assertEqual(configurable | set(notify.FIXED_KINDS),

@@ -10,7 +10,7 @@
 #   ./flash-esp.sh nodemcuv2 /dev/ttyUSB0
 #
 # Do not run this from SteamOS Game Mode while the service owns the port:
-#   sudo systemctl stop steamos-led-serial
+#   sudo systemctl stop steamos-utility-center
 
 set -euo pipefail
 
@@ -71,9 +71,9 @@ EOF
 
 ensure_esptool_deps
 
-if systemctl is-active --quiet steamos-led-serial.service 2>/dev/null; then
-    echo "Stopping steamos-led-serial so the serial port is free..."
-    sudo systemctl stop steamos-led-serial.service
+if systemctl is-active --quiet steamos-utility-center.service 2>/dev/null; then
+    echo "Stopping steamos-utility-center so the serial port is free..."
+    sudo systemctl stop steamos-utility-center.service
     RESTART_SERVICE=1
 fi
 
@@ -84,8 +84,8 @@ echo "Building and flashing environment '$ENVIRONMENT'..."
 pio "${ARGS[@]}"
 
 if [[ "${RESTART_SERVICE:-0}" == "1" ]]; then
-    echo "Restarting steamos-led-serial..."
-    sudo systemctl start steamos-led-serial.service
+    echo "Restarting steamos-utility-center..."
+    sudo systemctl start steamos-utility-center.service
 fi
 
 # Read the rate out of the firmware config instead of duplicating it here.
@@ -97,15 +97,15 @@ cat <<EOF
 
 Flashed environment '$ENVIRONMENT' (serial link: $EXPECTED_BAUD baud).
 
-Make sure /etc/steamos-led-serial.conf matches:
+Make sure /etc/steamos-utility-center.conf matches:
 
     BAUD=$EXPECTED_BAUD
 
-then: sudo systemctl restart steamos-led-serial
+then: sudo systemctl restart steamos-utility-center
 EOF
 
-if [[ -f /etc/steamos-led-serial.conf ]]; then
-    CONFIGURED_BAUD="$(sed -n 's/^BAUD=\([0-9]\+\).*/\1/p' /etc/steamos-led-serial.conf | tail -1)"
+if [[ -f /etc/steamos-utility-center.conf ]]; then
+    CONFIGURED_BAUD="$(sed -n 's/^BAUD=\([0-9]\+\).*/\1/p' /etc/steamos-utility-center.conf | tail -1)"
     if [[ -n "$CONFIGURED_BAUD" && "$CONFIGURED_BAUD" != "$EXPECTED_BAUD" ]]; then
         printf '\n\033[1;33mwarning:\033[0m config says BAUD=%s but the firmware runs at %s.\n' \
             "$CONFIGURED_BAUD" "$EXPECTED_BAUD"

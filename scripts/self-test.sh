@@ -11,12 +11,12 @@
 
 set -euo pipefail
 
-INSTALL_DIR="/var/lib/steamos-led-serial"
-SERVICE="steamos-led-serial.service"
+INSTALL_DIR="/var/lib/steamos-utility-center"
+SERVICE="steamos-utility-center.service"
 SECONDS_TO_RUN="${1:-12}"
 
-[[ -x "$INSTALL_DIR/steamos-led-serial" ]] \
-    || { echo "not installed: $INSTALL_DIR/steamos-led-serial" >&2; exit 2; }
+[[ -x "$INSTALL_DIR/steamos-utility-center" ]] \
+    || { echo "not installed: $INSTALL_DIR/steamos-utility-center" >&2; exit 2; }
 
 RESTART=0
 if systemctl is-active --quiet "$SERVICE"; then
@@ -29,4 +29,4 @@ restore() {
 }
 trap restore EXIT
 
-"$INSTALL_DIR/steamos-led-serial" --self-test "$SECONDS_TO_RUN"
+"$INSTALL_DIR/steamos-utility-center" --self-test "$SECONDS_TO_RUN"

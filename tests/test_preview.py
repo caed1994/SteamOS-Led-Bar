@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
 import ledpanel  # noqa: E402
 import preview  # noqa: E402
-from steamos_led import config as config_module, notify, render, shim  # noqa: E402
+from steamos_utility_center import config as config_module, notify, render, shim  # noqa: E402
 
 
 class CatalogueTest(unittest.TestCase):

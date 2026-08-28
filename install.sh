@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Installer for the SteamOS LED bar USB-serial bridge.
+# Installer for the SteamOS Utility Center.
 #
 #   sudo ./install.sh                 interactive
 #   sudo ./install.sh --leds 60 --port /dev/steamos-led-esp --yes
@@ -12,19 +12,15 @@
 
 set -euo pipefail
 
-INSTALL_DIR="/var/lib/steamos-led-serial"
-CONFIG_PATH="/etc/steamos-led-serial.conf"
-UNIT_PATH="/etc/systemd/system/steamos-led-serial.service"
-POWER_UNIT_PATH="/etc/systemd/system/steamos-led-power.service"
-POWER_CONFIG_PATH="/etc/steamos-led-power.conf"
-UDEV_PATH="/etc/udev/rules.d/99-steamos-led-serial.rules"
-SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/steamos-led-serial"
+# Named by the kernel module, which is vendored from another project and is
+# not ours to rename - see scripts/user-unit.sh.
 SHIM_DEVICE="/dev/valve-leds-shim"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Where the achievement watcher's user unit lives, and how to reach the user's
-# systemd. Shared with uninstall.sh so the two cannot disagree.
+# Every path this installs to, where the achievement watcher's user unit
+# lives, and how to reach the user's systemd. Shared with uninstall.sh so the
+# two cannot disagree - they used to hold their own copies of the paths.
 # shellcheck source=scripts/user-unit.sh
 source "$SOURCE_DIR/scripts/user-unit.sh"
 
@@ -89,7 +85,7 @@ done
 
 [[ $EUID -eq 0 ]] || die "run as root: sudo ./install.sh"
 command -v python3 >/dev/null || die "python3 not found"
-[[ -f "$SOURCE_DIR/server/steamos-led-serial" ]] \
+[[ -f "$SOURCE_DIR/server/steamos-utility-center" ]] \
     || die "run this script from inside the cloned repository"
 
 # --- the read-only rootfs ---------------------------------------------------
@@ -121,7 +117,7 @@ fi
 
 if [[ -z "$SERIAL_PORT" ]]; then
     say "Detected USB serial devices:"
-    if ! python3 "$SOURCE_DIR/server/steamos-led-serial" --list-ports 2>/dev/null; then
+    if ! python3 "$SOURCE_DIR/server/steamos-utility-center" --list-ports 2>/dev/null; then
         echo "   (none - plug the ESP in, or set the port later in $CONFIG_PATH)"
     fi
     SERIAL_PORT="$(ask 'Serial port ("auto" picks the first ESP adapter)' auto)"
@@ -163,13 +159,19 @@ FLASH_ENV="$(resolve_firmware_choice "$FLASH_ENV")"
 
 # --- install ---------------------------------------------------------------
 
+# Before a single new file is written. The old install has to be stopped and
+# out of the way first: its service holds the serial port the new one is about
+# to want, and its settings have to be carried across before the step below
+# would write fresh defaults over the top of nothing. See migrate_old_install.
+migrate_old_install
+
 say "Installing service to $INSTALL_DIR"
 install -d -m 0755 "$INSTALL_DIR"
-rm -rf "${INSTALL_DIR:?}/steamos_led"
-cp -r "$SOURCE_DIR/server/steamos_led" "$INSTALL_DIR/"
-install -m 0755 "$SOURCE_DIR/server/steamos-led-serial" "$INSTALL_DIR/steamos-led-serial"
-install -m 0755 "$SOURCE_DIR/server/steamos-led-power" "$INSTALL_DIR/steamos-led-power"
-find "$INSTALL_DIR/steamos_led" -type f -exec chmod 0644 {} +
+rm -rf "${INSTALL_DIR:?}/steamos_utility_center"
+cp -r "$SOURCE_DIR/server/steamos_utility_center" "$INSTALL_DIR/"
+install -m 0755 "$SOURCE_DIR/server/steamos-utility-center" "$INSTALL_DIR/steamos-utility-center"
+install -m 0755 "$SOURCE_DIR/server/steamos-utility-center-power" "$INSTALL_DIR/steamos-utility-center-power"
+find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
 
 # A name to type. Everything lives in /var/lib so it survives a SteamOS
 # update, and nothing there is on anybody's PATH - so every command in the
@@ -181,17 +183,17 @@ find "$INSTALL_DIR/steamos_led" -type f -exec chmod 0644 {} +
 # fatal either way: the full path works whether this exists or not.
 # COMMAND_LINK is in scripts/user-unit.sh, so the uninstaller removes the same
 # one this creates.
-COMMAND_STATUS="$INSTALL_DIR/steamos-led-serial"
+COMMAND_STATUS="$INSTALL_DIR/steamos-utility-center"
 
 if install -d -m 0755 "$(dirname "$COMMAND_LINK")" 2>/dev/null \
-   && ln -sfn "$INSTALL_DIR/steamos-led-serial" "$COMMAND_LINK" 2>/dev/null; then
+   && ln -sfn "$INSTALL_DIR/steamos-utility-center" "$COMMAND_LINK" 2>/dev/null; then
     say "Linking $COMMAND_LINK"
-    COMMAND_STATUS="steamos-led-serial"
+    COMMAND_STATUS="steamos-utility-center"
 else
     warn "could not write $COMMAND_LINK - run it by its full path instead"
 fi
 
-ln -sfn "$INSTALL_DIR/steamos-led-power" "$POWER_COMMAND_LINK" 2>/dev/null \
+ln -sfn "$INSTALL_DIR/steamos-utility-center-power" "$POWER_COMMAND_LINK" 2>/dev/null \
     || warn "could not write $POWER_COMMAND_LINK - run it by its full path"
 
 if [[ -f "$CONFIG_PATH" ]]; then
@@ -199,7 +201,7 @@ if [[ -f "$CONFIG_PATH" ]]; then
     warn "check that LED_COUNT/SERIAL_PORT/BAUD there still match your setup"
 else
     say "Writing $CONFIG_PATH"
-    install -m 0644 "$SOURCE_DIR/server/steamos-led-serial.conf" "$CONFIG_PATH"
+    install -m 0644 "$SOURCE_DIR/server/steamos-utility-center.conf" "$CONFIG_PATH"
     sed -i \
         -e "s|^LED_COUNT=.*|LED_COUNT=$LED_COUNT|" \
         -e "s|^SERIAL_PORT=.*|SERIAL_PORT=$SERIAL_PORT|" \
@@ -208,7 +210,7 @@ else
 fi
 
 say "Installing udev rule to $UDEV_PATH"
-install -m 0644 "$SOURCE_DIR/udev/99-steamos-led-serial.rules" "$UDEV_PATH"
+install -m 0644 "$SOURCE_DIR/udev/99-steamos-utility-center.rules" "$UDEV_PATH"
 udevadm control --reload >/dev/null 2>&1 || warn "could not reload udev rules"
 udevadm trigger --subsystem-match=tty >/dev/null 2>&1 || true
 
@@ -217,7 +219,7 @@ say "Installing the suspend hook to $SLEEP_HOOK_PATH"
 # simply goes dark during a suspend, as it did before - so a system without
 # /usr/lib/systemd/system-sleep is a missing feature, not a failed install.
 if [ -d "$(dirname "$SLEEP_HOOK_PATH")" ]; then
-    install -m 0755 "$SOURCE_DIR/systemd-sleep/steamos-led-serial" \
+    install -m 0755 "$SOURCE_DIR/systemd-sleep/steamos-utility-center" \
         "$SLEEP_HOOK_PATH"
 else
     warn "no $(dirname "$SLEEP_HOOK_PATH") - the strip will go dark in standby"
@@ -225,7 +227,7 @@ fi
 
 say "Installing systemd unit to $UNIT_PATH"
 sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
-    "$SOURCE_DIR/server/steamos-led-serial.service" > "$UNIT_PATH"
+    "$SOURCE_DIR/server/steamos-utility-center.service" > "$UNIT_PATH"
 chmod 0644 "$UNIT_PATH"
 
 # The CPU settings. Its unit is installed but deliberately not enabled: with
@@ -235,14 +237,14 @@ chmod 0644 "$UNIT_PATH"
 # scripts/apply-power.sh.
 say "Installing systemd unit to $POWER_UNIT_PATH"
 sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
-    "$SOURCE_DIR/server/steamos-led-power.service" > "$POWER_UNIT_PATH"
+    "$SOURCE_DIR/server/steamos-utility-center-power.service" > "$POWER_UNIT_PATH"
 chmod 0644 "$POWER_UNIT_PATH"
 
 if [[ -f "$POWER_CONFIG_PATH" ]]; then
     say "Keeping existing $POWER_CONFIG_PATH"
 else
     say "Writing $POWER_CONFIG_PATH"
-    install -m 0644 "$SOURCE_DIR/server/steamos-led-power.conf" \
+    install -m 0644 "$SOURCE_DIR/server/steamos-utility-center-power.conf" \
         "$POWER_CONFIG_PATH"
 fi
 
@@ -700,7 +702,7 @@ flash_firmware() {
 
     # The service holds the serial port exclusively. It is started further
     # down, so stopping any older copy here leaves the port free.
-    systemctl stop steamos-led-serial.service >/dev/null 2>&1 || true
+    systemctl stop steamos-utility-center.service >/dev/null 2>&1 || true
 
     local ini="$SOURCE_DIR/firmware/led-client/platformio.ini"
     if ! grep -q "^\[env:$FLASH_ENV\]" "$ini"; then
@@ -758,7 +760,7 @@ install_panel_icon() {
     # a name also survives the clone being moved, which an absolute path
     # would not. Falls back to the path, and then to a stock icon, because
     # an entry with no picture at all looks broken.
-    local source_icon="$SOURCE_DIR/gui/steamos-led-panel.png"
+    local source_icon="$SOURCE_DIR/gui/steamos-utility-center-panel.png"
     if [[ ! -f "$source_icon" ]]; then
         printf 'preferences-desktop-display'
         return 0
@@ -769,18 +771,20 @@ install_panel_icon() {
     [[ "$width" =~ ^[0-9]+$ ]] || width=512
     local icon_dir="$WATCHER_HOME/.local/share/icons/hicolor/${width}x${width}/apps"
 
+    # PANEL_ICON is in scripts/user-unit.sh, so the name written here and the
+    # one the uninstaller globs for cannot drift apart.
     if runuser -u "$WATCHER_USER" -- mkdir -p "$icon_dir" \
-       && cp "$source_icon" "$icon_dir/steamos-led-panel.png"; then
-        chown "$WATCHER_USER:$WATCHER_USER" "$icon_dir/steamos-led-panel.png"
-        chmod 0644 "$icon_dir/steamos-led-panel.png"
-        printf 'steamos-led-panel'
+       && cp "$source_icon" "$icon_dir/$PANEL_ICON.png"; then
+        chown "$WATCHER_USER:$WATCHER_USER" "$icon_dir/$PANEL_ICON.png"
+        chmod 0644 "$icon_dir/$PANEL_ICON.png"
+        printf '%s' "$PANEL_ICON"
     else
         printf '%s' "$source_icon"
     fi
 }
 
 install_control_panel() {
-    local source="$SOURCE_DIR/gui/steamos-led-panel.desktop"
+    local source="$SOURCE_DIR/gui/steamos-utility-center-panel.desktop"
     [[ -f "$source" ]] || { PANEL_STATUS="not in the repository"; return 1; }
 
     if ! watcher_user_dirs; then
@@ -804,7 +808,7 @@ install_control_panel() {
 
     if runuser -u "$WATCHER_USER" -- python3 -c 'import tkinter' >/dev/null 2>&1
     then
-        PANEL_STATUS="in the application menu as \"SteamOS LED bar\""
+        PANEL_STATUS="in the application menu as \"SteamOS Utility Center\""
     else
         PANEL_STATUS="installed, but python3-tk is missing - see the README"
         warn "the control panel needs tkinter, which is not installed."
@@ -818,14 +822,14 @@ install_control_panel || true
 
 # --- start it --------------------------------------------------------------
 
-say "Enabling steamos-led-serial.service"
+say "Enabling steamos-utility-center.service"
 systemctl daemon-reload
-systemctl enable steamos-led-serial.service
+systemctl enable steamos-utility-center.service
 # Deliberately not "enable --now": that starts a stopped service but leaves a
 # running one alone, so installing over a running copy would keep serving the
 # old code from the old unit - files updated, behaviour not. Restarting always
 # lands on what was just installed.
-systemctl restart steamos-led-serial.service
+systemctl restart steamos-utility-center.service
 
 # systemctl restart returns once the process has been launched, so a service
 # that dies on its own configuration is genuinely "active" for the moment in
@@ -833,9 +837,9 @@ systemctl restart steamos-led-serial.service
 # one glance can land anywhere. Look again once it has had time to fail, and
 # count the restarts.
 sleep 4
-restarts="$(systemctl show -p NRestarts --value steamos-led-serial.service \
+restarts="$(systemctl show -p NRestarts --value steamos-utility-center.service \
             2>/dev/null || true)"
-if systemctl is-active --quiet steamos-led-serial.service \
+if systemctl is-active --quiet steamos-utility-center.service \
    && [[ "${restarts:-0}" == "0" ]]; then
     say "Service is running."
 else
@@ -848,7 +852,7 @@ else
     # journal: a bad line in the configuration says so plainly, and that is
     # exactly the message worth seeing at the end of an install.
     warn "The last thing it said:"
-    journalctl -u steamos-led-serial.service -n 5 --no-pager -o cat 2>/dev/null \
+    journalctl -u steamos-utility-center.service -n 5 --no-pager -o cat 2>/dev/null \
         | sed 's/^/    /' >&2 || true
 fi
 
@@ -865,7 +869,7 @@ notify_setting() {  # notify_setting <KEY> <default>
 }
 
 if [[ "$(notify_setting NOTIFY 1)" =~ ^(1|true|yes|on)$ ]]; then
-    NOTIFY_FIFO="$(notify_setting NOTIFY_FIFO /run/steamos-led-serial/notify)"
+    NOTIFY_FIFO="$(notify_setting NOTIFY_FIFO /run/steamos-utility-center/notify)"
     for _ in 1 2 3 4 5 6; do
         [[ -p "$NOTIFY_FIFO" ]] && break
         sleep 0.5
@@ -875,7 +879,7 @@ if [[ "$(notify_setting NOTIFY 1)" =~ ^(1|true|yes|on)$ ]]; then
     else
         warn "the service is running, but $NOTIFY_FIFO was not created -"
         warn "no flash of any kind will work."
-        warn "The reason is in: journalctl -u steamos-led-serial -n 40"
+        warn "The reason is in: journalctl -u steamos-utility-center -n 40"
     fi
 fi
 
@@ -894,23 +898,23 @@ Done.
   Firmware: $FIRMWARE_STATUS
   Command:  $COMMAND_STATUS
   Config:   $CONFIG_PATH
-  Logs:     journalctl -u steamos-led-serial -f
-  Restart:  sudo systemctl restart steamos-led-serial
+  Logs:     journalctl -u steamos-utility-center -f
+  Restart:  sudo systemctl restart steamos-utility-center
 
 Desktop-session services: $WATCHER_STATUS
   Achievements, messages and friends
   Check:    $COMMAND_STATUS --steam-check   (with a game running)
-  Log:      journalctl --user -u steamos-led-achievements -f
+  Log:      journalctl --user -u steamos-utility-center-achievements -f
 
   Phone notifications over KDE Connect - off until you switch it on in the
   panel, under Notifications
   Try it:   $COMMAND_STATUS --watch-phone --print   (as yourself, not with sudo)
-  Log:      journalctl --user -u steamos-led-phone -f
+  Log:      journalctl --user -u steamos-utility-center-phone -f
 
 Test the strip without Steam (stop the service first so the port is free):
 
-  sudo systemctl stop steamos-led-serial
+  sudo systemctl stop steamos-utility-center
   sudo $COMMAND_STATUS --self-test
-  sudo systemctl start steamos-led-serial
+  sudo systemctl start steamos-utility-center
 
 EOF

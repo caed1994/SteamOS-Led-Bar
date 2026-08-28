@@ -21,8 +21,8 @@ already running.
 
 from __future__ import annotations
 
-from steamos_led import config as config_module
-from steamos_led import notify, render, shim
+from steamos_utility_center import config as config_module
+from steamos_utility_center import notify, render, shim
 
 # One flash, then a beat of dark before it starts again, so a shape is seen to
 # end rather than looping into itself.

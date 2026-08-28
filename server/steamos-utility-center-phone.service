@@ -3,7 +3,7 @@
 # notifications live on the session bus, and only the session can read it. The
 # LED service stays sandboxed as root and only receives trigger words through
 # its FIFO.
-# Log: journalctl --user -u steamos-led-phone -f
+# Log: journalctl --user -u steamos-utility-center-phone -f
 Description=Flash the LED bar on the phone notifications KDE Connect forwards
 # Ordering only, deliberately NOT PartOf=: that would stop this whenever the
 # desktop session goes away - which is what switching to Game Mode does, and
@@ -12,7 +12,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=@INSTALL_DIR@/steamos-led-serial --watch-phone
+ExecStart=@INSTALL_DIR@/steamos-utility-center --watch-phone
 # The bus goes away with the session and comes back with the next one, and
 # gdbus ends when it does. Restarting is how this reconnects.
 Restart=always

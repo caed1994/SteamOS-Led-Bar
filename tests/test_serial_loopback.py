@@ -17,8 +17,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "server"))
 
-from steamos_led import link, render, shim  # noqa: E402
-from steamos_led.serialport import SerialError, SerialPort  # noqa: E402
+from steamos_utility_center import link, render, shim  # noqa: E402
+from steamos_utility_center.serialport import SerialError, SerialPort  # noqa: E402
 
 BAUD = 115200
 
@@ -144,7 +144,7 @@ class SerialLoopbackTest(unittest.TestCase):
     def test_every_shipped_firmware_rate_is_settable_on_linux(self):
         # 250000 baud, an obvious choice for WS2812 work, has no termios
         # constant - a firmware built for it could never be talked to.
-        from steamos_led.serialport import BAUD_CONSTANTS
+        from steamos_utility_center.serialport import BAUD_CONSTANTS
         for rate in link.FALLBACK_BAUD_RATES:
             self.assertIn(rate, BAUD_CONSTANTS,
                           "firmware rate %d cannot be set on Linux" % rate)

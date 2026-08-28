@@ -27,7 +27,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "..", "scripts", "install-cec.sh")
-RULE = "/etc/sudoers.d/zz-steamos-led-cec-install"
+RULE = "/etc/sudoers.d/zz-steamos-utility-center-cec-install"
 
 # Somebody who is not root and is not the user running the tests, to install
 # for. Read from the machine rather than named, so this does not depend on a

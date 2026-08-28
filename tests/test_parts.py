@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "server"))
 sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
 import ledpanel                                             # noqa: E402
-from steamos_led import cec                                 # noqa: E402
+from steamos_utility_center import cec                                 # noqa: E402
 from test_gui import healthy                                # noqa: E402
 
 

@@ -262,7 +262,7 @@ esac
 
 
 UNINSTALLER = os.path.join(HERE, "..", "uninstall.sh")
-SLEEP_HOOK = os.path.join(HERE, "..", "systemd-sleep", "steamos-led-serial")
+SLEEP_HOOK = os.path.join(HERE, "..", "systemd-sleep", "steamos-utility-center")
 
 
 class RootfsTest(unittest.TestCase):
@@ -362,16 +362,16 @@ class UninstallHomeTest(unittest.TestCase):
 
         applications = os.path.join(home, ".local", "share", "applications")
         os.makedirs(applications)
-        entry = os.path.join(applications, "steamos-led-panel.desktop")
+        entry = os.path.join(applications, "steamos-utility-center.desktop")
         with open(entry, "w") as handle:
-            handle.write("[Desktop Entry]\nName=SteamOS LED bar\n")
+            handle.write("[Desktop Entry]\nName=SteamOS Utility Center\n")
 
         icons = []
         for size in sizes:
             where = os.path.join(home, ".local", "share", "icons", "hicolor",
                                  "%dx%d" % (size, size), "apps")
             os.makedirs(where)
-            icons.append(os.path.join(where, "steamos-led-panel.png"))
+            icons.append(os.path.join(where, "steamos-utility-center.png"))
             with open(icons[-1], "wb") as handle:
                 handle.write(b"\x89PNG\r\n")
 
@@ -446,18 +446,28 @@ class UninstallHomeTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "")
 
     def test_the_path_line_goes_and_nothing_else_does(self):
-        line = 'export PATH="$HOME/.platformio/penv/bin:$PATH"'
-        note = "# PlatformIO, added by the SteamOS LED bar installer."
-        room, home, _entry, _icons, profile = self._home(
-            bashrc=self.OWN_BASHRC + "\n" + note + "\n" + line + "\n")
-        done = self._call("remove_platformio_path", room, home)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        with open(profile) as handle:
-            left = handle.read()
-        self.assertNotIn(".platformio", left)
-        self.assertNotIn("SteamOS LED bar installer", left)
-        for kept in self.OWN_BASHRC.strip().splitlines():
-            self.assertIn(kept, left, "it ate something of theirs")
+        """Under either comment - the one written now, and the one before it.
+
+        These two lines are deleted from somebody's .bashrc by exact match,
+        which is what makes it safe to touch a file that is theirs. It also
+        means the wording is an interface: the rename changed the comment, and
+        without keeping the old spelling every .bashrc an older install wrote
+        would carry a line naming an installer that no longer exists, with
+        nothing left that would take it back out.
+        """
+        line = shell_value("PLATFORMIO_PATH_LINE")
+        for note in (shell_value("PLATFORMIO_PATH_NOTE"),
+                     shell_value("OLD_PLATFORMIO_PATH_NOTE")):
+            room, home, _entry, _icons, profile = self._home(
+                bashrc=self.OWN_BASHRC + "\n" + note + "\n" + line + "\n")
+            done = self._call("remove_platformio_path", room, home)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            with open(profile) as handle:
+                left = handle.read()
+            self.assertNotIn(".platformio", left, note)
+            self.assertNotIn("added by the SteamOS", left, note)
+            for kept in self.OWN_BASHRC.strip().splitlines():
+                self.assertIn(kept, left, "it ate something of theirs")
 
     def test_a_profile_it_never_touched_is_left_alone(self):
         room, home, _entry, _icons, profile = self._home(bashrc=self.OWN_BASHRC)
@@ -564,7 +574,7 @@ class SleepHookTest(unittest.TestCase):
 
     def test_a_file_that_says_nothing_leaves_the_default_standing(self):
         hook = open(SLEEP_HOOK).read()
-        self.assertIn('DEFAULT_FIFO="/run/steamos-led-serial/notify"', hook)
+        self.assertIn('DEFAULT_FIFO="/run/steamos-utility-center/notify"', hook)
         _room, _pipe, config = self._setup("LED_COUNT=17\n")
         # Nothing at the default path on a build machine, so it is the quiet
         # exit below rather than a write - which is the point.
@@ -616,7 +626,7 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_the_command_the_readme_names_is_one_you_can_type(self):
-        """The README says "steamos-led-serial --x" fourteen times.
+        """The README says "steamos-utility-center --x" fourteen times.
 
         Everything installs into /var/lib, which is on nobody's PATH, so for a
         long time every one of those was a command you could read and not run:
@@ -642,7 +652,7 @@ class InstallerShapeTest(unittest.TestCase):
         # of other people's tools would need extending every time one is
         # mentioned, which is a test that eventually gets edited rather than
         # read.
-        typed = set(re.findall(r"^\s*(?:sudo )?(steamos-led-[a-z-]+)\b",
+        typed = set(re.findall(r"^\s*(?:sudo )?(steamos-utility-center[a-z-]*)\b",
                                readme, re.M))
         self.assertIn(name, typed, "the README names no such command")
         # Every command this project puts on the PATH, by constant. A second
@@ -651,7 +661,7 @@ class InstallerShapeTest(unittest.TestCase):
         # caught the second time round rather than the first.
         linked = {os.path.basename(shell_value(each))
                   for each in ("COMMAND_LINK", "POWER_COMMAND_LINK")}
-        self.assertEqual(typed - linked - {"steamos-led-serial.conf"}, set(),
+        self.assertEqual(typed - linked - {"steamos-utility-center.conf"}, set(),
                          "the README names a command nothing installs")
 
     def test_the_user_units_are_installed_before_anything_that_can_fail(self):
@@ -659,7 +669,7 @@ class InstallerShapeTest(unittest.TestCase):
 
         They used to be installed at the very end, after pacman, the kernel
         module and the firmware flash. Under set -e any of those ends the run,
-        and then the units are simply not there: "Unit steamos-led-phone.
+        and then the units are simply not there: "Unit steamos-utility-center-phone.
         service not found", on a machine where everything else had worked.
         They depend on none of it, so they go on disk first.
         """
@@ -676,7 +686,7 @@ class InstallerShapeTest(unittest.TestCase):
         # The achievement watcher wants the service running and the bridge
         # wants its pipe, so starting early would only make both retry.
         started = self.text.index("\nstart_user_units || true")
-        self.assertLess(self.text.index("systemctl restart steamos-led-serial"),
+        self.assertLess(self.text.index("systemctl restart steamos-utility-center"),
                         started)
         self.assertLess(self.text.index("\ninstall_user_units || true"), started)
 
@@ -859,12 +869,12 @@ class InstallerShapeTest(unittest.TestCase):
         """
         with open(UNINSTALLER) as handle:
             uninstaller = handle.read()
-        self.assertIn("server/steamos-led-power", self.text)
-        self.assertIn("steamos-led-power.service", self.text)
+        self.assertIn("server/steamos-utility-center-power", self.text)
+        self.assertIn("steamos-utility-center-power.service", self.text)
         # Removed with the rest of INSTALL_DIR, which the uninstaller wipes
         # whole - so what has to be named there is the unit outside it.
         self.assertIn("POWER_UNIT_PATH", uninstaller)
-        self.assertIn("systemctl disable steamos-led-power.service",
+        self.assertIn('systemctl disable "$NAME-power.service"',
                       uninstaller)
 
     def test_the_cpu_unit_is_installed_but_not_enabled(self):
@@ -875,7 +885,7 @@ class InstallerShapeTest(unittest.TestCase):
         wonder about. scripts/apply-power.sh enables it the first time a
         setting is applied.
         """
-        self.assertNotIn("systemctl enable steamos-led-power", self.text)
+        self.assertNotIn("systemctl enable steamos-utility-center-power", self.text)
         with open(os.path.join(HERE, "..", "scripts",
                                "apply-power.sh")) as handle:
             self.assertIn('systemctl enable "$SERVICE"', handle.read())
@@ -907,6 +917,392 @@ class InstallerShapeTest(unittest.TestCase):
         # -Syu would pull a newer kernel than the one now running, and the
         # headers would then match nothing.
         self.assertNotIn("pacman -Syu", self.text)
+
+
+class PanelIconTest(unittest.TestCase):
+    """The name the installer files the icon under, and the one the
+    uninstaller globs for.
+
+    Found during the rename: the installer wrote steamos-utility-center-panel.png
+    and the glob looked for steamos-utility-center.png, so the icon would have
+    been installed and never removed. Both now read PANEL_ICON out of
+    scripts/user-unit.sh, and this is what says they still do - a pair of
+    names that have to match by hand is a pair that drifts.
+    """
+
+    def test_the_installer_files_it_where_the_uninstaller_looks(self):
+        icon = shell_value("PANEL_ICON")
+        glob = shell_value("PANEL_ICON_GLOB")
+        self.assertTrue(glob.endswith("/%s.png" % icon), glob)
+        with open(INSTALLER) as handle:
+            installer = handle.read()
+        self.assertIn('"$icon_dir/$PANEL_ICON.png"', installer,
+                      "the installer names the icon itself again")
+
+    def test_the_migration_moves_the_panels_settings_where_it_reads_them(self):
+        """Two files, two languages, one name - and nothing enforced it.
+
+        The migration moves ~/.config/steamos-led-panel.conf to a name it
+        spells in shell; the panel reads a name it spells in Python. They were
+        briefly different, and the whole of the symptom would have been
+        somebody's theme back to dark after an update, with the file sitting
+        one name away.
+        """
+        sys.path.insert(0, os.path.join(HERE, "..", "gui"))
+        import appsettings
+        self.assertEqual(shell_value("PANEL_CONFIG"), appsettings.CONFIG_FILE)
+        with open(USER_UNIT) as handle:
+            shared = handle.read()
+        # And the file it moves is the one the panel falls back to reading.
+        self.assertIn(appsettings.OLD_CONFIG_FILE, shared)
+
+    def test_the_entry_and_the_icon_are_both_shipped(self):
+        # The template the installer substitutes, and the picture it copies.
+        # Renamed together with everything else, and a missing one is a menu
+        # entry with a stock icon or none at all.
+        here = os.path.join(HERE, "..", "gui")
+        for name in ("steamos-utility-center-panel.desktop",
+                     "steamos-utility-center-panel.png",
+                     "steamos-utility-center-panel"):
+            self.assertTrue(os.path.exists(os.path.join(here, name)), name)
+
+
+class MigrationTest(unittest.TestCase):
+    """The install that is already on the machine under its old name.
+
+    The project was renamed from "SteamOS LED bar" to the SteamOS Utility
+    Centre, and with it every unit, config and command it installs. Renaming
+    them in the tree is the easy half; the half that breaks somebody's machine
+    is that nothing about installing under new names removes what is already
+    there under the old ones. An update without this leaves the old
+    steamos-led-serial.service enabled and running beside the new unit - two
+    processes on one serial port - and leaves the settings in the old config
+    file, which nothing reads any more, so every one of them silently goes
+    back to its default.
+
+    Run against a directory built here rather than against /etc, which is what
+    ROOT in scripts/user-unit.sh is for.
+    """
+
+    OLD_CONFIG = ("LED_COUNT=17\nSERIAL_PORT=/dev/steamos-led-esp\n"
+                  "NOTIFY_FIFO=/run/steamos-led-serial/notify\n")
+
+    def _root(self, old=True, home=True):
+        """A machine with an old install on it, or a clean one."""
+        room = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, room, True)
+        root = os.path.join(room, "root")
+        where = os.path.join(room, "home")
+
+        for directory in ("etc/systemd/system", "etc/udev/rules.d",
+                          "etc/modules-load.d", "usr/local/bin",
+                          "usr/lib/systemd/system-sleep", "var/lib"):
+            os.makedirs(os.path.join(root, directory))
+        for directory in (".config/systemd/user/default.target.wants",
+                          ".local/share/applications",
+                          ".local/share/icons/hicolor/512x512/apps"):
+            os.makedirs(os.path.join(where, directory))
+
+        if old:
+            self._put(root, "etc/steamos-led-serial.conf", self.OLD_CONFIG)
+            self._put(root, "etc/steamos-led-power.conf", "CPU_GOVERNOR=powersave\n")
+            self._put(root, "etc/systemd/system/steamos-led-serial.service", "[Unit]\n")
+            self._put(root, "etc/systemd/system/steamos-led-power.service", "[Unit]\n")
+            self._put(root, "etc/udev/rules.d/99-steamos-led-serial.rules", "#\n")
+            self._put(root, "usr/lib/systemd/system-sleep/steamos-led-serial", "#\n")
+            self._put(root, "usr/local/bin/steamos-led-serial", "#\n")
+            self._put(root, "usr/local/bin/steamos-led-power", "#\n")
+            self._put(root, "etc/modules-load.d/steamos-led-bar.conf", "leds-valve-shim\n")
+            os.makedirs(os.path.join(root, "var/lib/steamos-led-serial/steamos_utility_center"))
+            self._put(root, "var/lib/steamos-led-serial/steamos-led-serial", "#\n")
+            if home:
+                for unit in ("steamos-led-achievements.service",
+                             "steamos-led-phone.service"):
+                    self._put(where, ".config/systemd/user/" + unit, "[Unit]\n")
+                    self._put(where, ".config/systemd/user/default.target.wants/"
+                              + unit, "[Unit]\n")
+                self._put(where, ".local/share/applications/"
+                          "steamos-led-panel.desktop", "[Desktop Entry]\n")
+                self._put(where, ".local/share/icons/hicolor/512x512/apps/"
+                          "steamos-led-panel.png", "PNG\n")
+                self._put(where, ".config/steamos-led-panel.conf", "THEME=light\n")
+        return room, root, where
+
+    def _put(self, base, relative, text):
+        path = os.path.join(base, relative)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as handle:
+            handle.write(text)
+        return path
+
+    def _run(self, call, root, home, room):
+        """Source user-unit.sh against that root and make the call."""
+        stubs = os.path.join(room, "stubs")
+        os.makedirs(stubs, exist_ok=True)
+        log = os.path.join(room, "calls")
+        # Every command the migration reaches for that would touch the real
+        # machine. Recorded rather than swallowed: whether the old service was
+        # stopped before its file went is half of what this has to check, and
+        # a stub that only returned success could not say.
+        for name in ("systemctl", "udevadm", "loginctl",
+                     "update-desktop-database", "kbuildsycoca6", "chown"):
+            self._stub(stubs, name,
+                       'echo "%s $*" >> "%s"\nexit 0\n' % (name, log))
+        self._stub(stubs, "id", 'case "$1" in\n'
+                                '  -nu) [[ "$2" == "1000" ]] && echo deck ;;\n'
+                                '  -u)  echo 1000 ;;\n'
+                                'esac\n')
+        self._stub(stubs, "getent",
+                   'echo "deck:x:1000:1000::%s:/bin/bash"\n' % home)
+        self._stub(stubs, "runuser",
+                   'while [[ $# -gt 0 ]]; do\n'
+                   '  case "$1" in\n'
+                   '    -u) shift 2 ;;\n'
+                   '    --) shift; break ;;\n'
+                   '    *) break ;;\n'
+                   '  esac\n'
+                   'done\n'
+                   'exec "$@"\n')
+
+        done = subprocess.run(
+            ["bash", "-c", 'set -euo pipefail\nsource "%s"\n%s\n'
+             % (USER_UNIT, call)],
+            capture_output=True, text=True,
+            env={"PATH": stubs + ":" + os.environ.get("PATH", ""),
+                 "ROOT": root, "PKEXEC_UID": "1000", "HOME": home,
+                 # No live session, so user_systemctl returns early rather
+                 # than reaching for a bus that is not there.
+                 "XDG_RUNTIME_DIR": "/nonexistent"})
+        said = ""
+        if os.path.exists(log):
+            with open(log) as handle:
+                said = handle.read()
+        return done, said
+
+    def _stub(self, directory, name, body):
+        path = os.path.join(directory, name)
+        with open(path, "w") as handle:
+            handle.write("#!/usr/bin/env bash\n" + body)
+        os.chmod(path, 0o755)
+
+    def _migrate(self, **kwargs):
+        room, root, home = self._root(**kwargs)
+        done, calls = self._run("migrate_old_install", root, home, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return root, home, done, calls
+
+    def test_the_old_service_is_stopped_before_its_file_is_taken_away(self):
+        """The one ordering that matters on a running machine.
+
+        A unit file that is merely deleted leaves the service running - it is
+        already loaded - and it goes on holding the serial port. The new one
+        then starts, finds the port busy, and reports a bar that is not
+        plugged in. Removing the file also leaves the enable symlink behind,
+        so systemd keeps trying to start something that is gone.
+        """
+        root, _home, _done, calls = self._migrate()
+        self.assertIn("systemctl stop steamos-led-serial.service", calls)
+        self.assertIn("systemctl disable steamos-led-serial.service", calls)
+        self.assertIn("systemctl stop steamos-led-power.service", calls)
+        for unit in ("steamos-led-serial.service", "steamos-led-power.service"):
+            self.assertFalse(
+                os.path.exists(os.path.join(root, "etc/systemd/system", unit)),
+                unit)
+        stopped = calls.index("systemctl stop steamos-led-serial.service")
+        reloaded = calls.index("systemctl daemon-reload")
+        self.assertLess(stopped, reloaded, calls)
+
+    def test_the_settings_are_carried_across_rather_than_lost(self):
+        """The quiet half, and the one nobody would notice until later.
+
+        Without this the new install writes a fresh config full of defaults,
+        the old file sits unread beside it, and every setting somebody ever
+        changed is back where it started - LED count, serial port, effects,
+        the lot. Nothing fails; the strip just does something else.
+        """
+        root, _home, _done, _calls = self._migrate()
+        new = os.path.join(root, "etc/steamos-utility-center.conf")
+        self.assertTrue(os.path.exists(new), "the settings were not carried")
+        with open(new) as handle:
+            said = handle.read()
+        self.assertIn("LED_COUNT=17", said)
+        # The board it is plugged into, which is not renamed - see the note
+        # in user-unit.sh. A migration that rewrote this would unplug the bar.
+        self.assertIn("SERIAL_PORT=/dev/steamos-led-esp", said)
+        self.assertFalse(
+            os.path.exists(os.path.join(root, "etc/steamos-led-serial.conf")))
+        power = os.path.join(root, "etc/steamos-utility-center-power.conf")
+        self.assertTrue(os.path.exists(power))
+
+    def test_the_notification_pipe_is_pointed_at_the_new_directory(self):
+        """NOTIFY_FIFO is a live setting naming a directory the unit creates.
+
+        RuntimeDirectory= in the unit is what makes /run/<name> exist, so
+        renaming the unit renames that directory. A config carried over
+        verbatim would point the pipe at /run/steamos-led-serial, which
+        nothing creates any more - and notifications would simply stop
+        arriving, with nothing in any log to say why.
+        """
+        root, _home, _done, _calls = self._migrate()
+        with open(os.path.join(root, "etc/steamos-utility-center.conf")) as f:
+            said = f.read()
+        self.assertIn("NOTIFY_FIFO=/run/steamos-utility-center/notify", said)
+        self.assertNotIn("/run/steamos-led-serial", said)
+
+    def test_a_pipe_somebody_moved_themselves_is_left_where_they_put_it(self):
+        # Only the old default is rewritten. Anything else was somebody's
+        # decision, and repairing a setting is not the same as overruling one.
+        room, root, home = self._root()
+        self._put(root, "etc/steamos-led-serial.conf",
+                  "NOTIFY_FIFO=/tmp/mine\n")
+        done, _calls = self._run("migrate_old_install", root, home, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        with open(os.path.join(root, "etc/steamos-utility-center.conf")) as f:
+            self.assertIn("NOTIFY_FIFO=/tmp/mine", f.read())
+
+    def test_everything_else_of_the_old_install_goes(self):
+        root, _home, _done, _calls = self._migrate()
+        for left in ("etc/udev/rules.d/99-steamos-led-serial.rules",
+                     "usr/lib/systemd/system-sleep/steamos-led-serial",
+                     "usr/local/bin/steamos-led-serial",
+                     "usr/local/bin/steamos-led-power",
+                     "var/lib/steamos-led-serial"):
+            self.assertFalse(os.path.exists(os.path.join(root, left)), left)
+
+    def test_the_file_that_loads_the_kernel_module_is_left_alone(self):
+        """/etc/modules-load.d/steamos-led-bar.conf is not ours to take.
+
+        It carries an old-looking name and is written by the vendored
+        leds-valve-shim installer, under that name, today - see
+        leds-valve-shim/PROVENANCE.md, which is why that script is kept
+        unmodified. Sweeping it up with the rest of the steamos-led-* names
+        would stop the module loading at the next boot, which is the strip
+        going dark a reboot after an update, with nothing to connect the two.
+        """
+        root, _home, _done, _calls = self._migrate()
+        self.assertTrue(
+            os.path.exists(os.path.join(
+                root, "etc/modules-load.d/steamos-led-bar.conf")),
+            "the module would no longer load at boot")
+
+    def test_the_user_half_goes_too(self):
+        """The units, the menu entry and the icon in somebody's home.
+
+        Not under any root path, so none of the removals above reach them. A
+        stale menu entry is the visible one: a second Utility Centre in the
+        launcher that starts a program which is no longer there.
+        """
+        _root, home, _done, _calls = self._migrate()
+        for left in (".config/systemd/user/steamos-led-achievements.service",
+                     ".config/systemd/user/default.target.wants/"
+                     "steamos-led-phone.service",
+                     ".local/share/applications/steamos-led-panel.desktop",
+                     ".local/share/icons/hicolor/512x512/apps/"
+                     "steamos-led-panel.png"):
+            self.assertFalse(os.path.exists(os.path.join(home, left)), left)
+
+    def test_the_panels_own_settings_come_across_as_well(self):
+        _root, home, _done, _calls = self._migrate()
+        moved = os.path.join(home, ".config/steamos-utility-center-panel.conf")
+        self.assertTrue(os.path.exists(moved))
+        with open(moved) as handle:
+            self.assertIn("THEME=light", handle.read())
+
+    def test_a_machine_that_never_had_the_old_one_is_not_touched(self):
+        """The common case by far, and it has to be silent.
+
+        Every machine installing this from now on takes this path, and a
+        migration that announced itself on a machine with nothing to migrate
+        would be a line in every install saying something happened that did
+        not.
+        """
+        room, root, home = self._root(old=False)
+        before = sorted(os.walk(root))
+        done, calls = self._run("migrate_old_install", root, home, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "", done.stdout)
+        self.assertEqual(calls, "", calls)
+        self.assertEqual(sorted(os.walk(root)), before)
+
+    def test_running_it_twice_is_the_same_as_running_it_once(self):
+        """An install that fails halfway is one somebody runs again.
+
+        The second run meets a machine that is already half migrated, and it
+        must not undo the first - in particular it must not move the config
+        it already moved, or overwrite the new one with a stale copy.
+        """
+        room, root, home = self._root()
+        first, _calls = self._run("migrate_old_install", root, home, room)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        after = sorted(os.walk(root))
+        second, _calls = self._run("migrate_old_install", root, home, room)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(sorted(os.walk(root)), after)
+        with open(os.path.join(root, "etc/steamos-utility-center.conf")) as f:
+            self.assertIn("LED_COUNT=17", f.read())
+
+    def test_a_new_config_beside_an_old_one_wins(self):
+        """Both present is a machine somebody has already migrated by hand.
+
+        The new file is the one being read, so it is the one that stands. The
+        old one is left where it is rather than deleted: it is still somebody's
+        settings, and this is not the script that gets to throw them away.
+        """
+        room, root, home = self._root()
+        self._put(root, "etc/steamos-utility-center.conf", "LED_COUNT=99\n")
+        done, _calls = self._run("migrate_old_install", root, home, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        with open(os.path.join(root, "etc/steamos-utility-center.conf")) as f:
+            self.assertIn("LED_COUNT=99", f.read())
+        self.assertTrue(
+            os.path.exists(os.path.join(root, "etc/steamos-led-serial.conf")),
+            "somebody's old settings were thrown away")
+
+    def test_the_uninstaller_keeps_nothing_and_purges_on_request(self):
+        """Its half of the same list: remove, do not carry across.
+
+        Somebody uninstalling may never have run the new installer - they
+        pull, they uninstall, and every name on the machine is an old one. So
+        the uninstaller walks this list too, or it is the one script that does
+        not know the old names exist.
+        """
+        room, root, home = self._root()
+        done, calls = self._run("remove_old_install 0", root, home, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("systemctl disable --now steamos-led-serial.service",
+                      calls)
+        self.assertFalse(os.path.exists(
+            os.path.join(root, "var/lib/steamos-led-serial")))
+        # Without --purge the settings stay, exactly as they do for the
+        # current names.
+        self.assertTrue(os.path.exists(
+            os.path.join(root, "etc/steamos-led-serial.conf")))
+
+        room, root, home = self._root()
+        done, _calls = self._run("remove_old_install 1", root, home, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(os.path.exists(
+            os.path.join(root, "etc/steamos-led-serial.conf")))
+
+    def test_the_installer_migrates_before_it_writes_anything(self):
+        """Order again, this time in the installer rather than in a function.
+
+        Called after the first file is written, the migration would delete the
+        install directory it had just filled, and move a config over the fresh
+        one. Checked by reading the script, because running it installs.
+        """
+        with open(INSTALLER) as handle:
+            text = handle.read()
+        # The call, on a line of its own - not the name, which also appears in
+        # the comment above it explaining why the call is there. Matching the
+        # name found the comment, which sits earlier in the file than the
+        # first install step whether the call is there at all or not: deleting
+        # the call outright still passed.
+        called = re.search(r"^migrate_old_install$", text, re.M)
+        self.assertIsNotNone(called, "the installer never migrates")
+        self.assertLess(called.start(),
+                        text.index('install -d -m 0755 "$INSTALL_DIR"'),
+                        "the migration runs after the install has begun")
 
 
 if __name__ == "__main__":

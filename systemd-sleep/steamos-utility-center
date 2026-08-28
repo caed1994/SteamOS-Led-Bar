@@ -15,8 +15,8 @@
 # serial port, because the service holds that port exclusively. The pipe is
 # world-writable and already read in the service's main loop.
 
-CONFIG="${STEAMOS_LED_CONFIG:-/etc/steamos-led-serial.conf}"
-DEFAULT_FIFO="/run/steamos-led-serial/notify"
+CONFIG="${STEAMOS_LED_CONFIG:-/etc/steamos-utility-center.conf}"
+DEFAULT_FIFO="/run/steamos-utility-center/notify"
 
 # Where the service is actually listening.
 #

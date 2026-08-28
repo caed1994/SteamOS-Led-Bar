@@ -74,8 +74,8 @@ before.
 `STATS` is sent every 5 seconds and shows up in the journal at debug level:
 
 ```
-sudo systemctl stop steamos-led-serial
-sudo /var/lib/steamos-led-serial/steamos-led-serial -v
+sudo systemctl stop steamos-utility-center
+sudo /var/lib/steamos-utility-center/steamos-utility-center -v
 ```
 
 Rising `crc_errors` or `resyncs` means the link is losing bytes — lower `BAUD`

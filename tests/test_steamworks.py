@@ -17,8 +17,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import config as config_module  # noqa: E402
-from steamos_led import elf, service, steamworks  # noqa: E402
+from steamos_utility_center import config as config_module  # noqa: E402
+from steamos_utility_center import elf, service, steamworks  # noqa: E402
 
 
 class FakeStats:
@@ -1160,7 +1160,7 @@ class NothingToWatchForTest(unittest.TestCase):
         # "nothing to do" has to be a different code - or the unit respawns
         # every RestartSec forever, saying so in the journal each time.
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                            "server", "steamos-led-achievements.service")
+                            "server", "steamos-utility-center-achievements.service")
         with open(path) as handle:
             unit = handle.read()
         self.assertIn("RestartPreventExitStatus=%d"

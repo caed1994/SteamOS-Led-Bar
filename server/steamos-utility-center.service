@@ -1,14 +1,14 @@
 [Unit]
-Description=SteamOS LED bar bridge to an ESP over USB serial
-Documentation=https://github.com/caed1994/SteamOS-Led-Bar
+Description=SteamOS Utility Center: LED bar bridge to an ESP over USB serial
+Documentation=https://github.com/caed1994/SteamOS-Utility-Center
 After=multi-user.target
 
 [Service]
 Type=simple
 # Holds the notification FIFO; systemd creates and cleans it up.
-RuntimeDirectory=steamos-led-serial
+RuntimeDirectory=steamos-utility-center
 RuntimeDirectoryMode=0755
-ExecStart=@INSTALL_DIR@/steamos-led-serial
+ExecStart=@INSTALL_DIR@/steamos-utility-center
 Restart=always
 RestartSec=3
 # Exit 2 is a configuration the service will not accept, and no amount of

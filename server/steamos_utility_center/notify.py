@@ -20,7 +20,7 @@ from .render import breath_envelope
 
 LOG = logging.getLogger(__name__)
 
-DEFAULT_FIFO = "/run/steamos-led-serial/notify"
+DEFAULT_FIFO = "/run/steamos-utility-center/notify"
 
 # Named triggers. Anything else is parsed as a colour, so a caller can flash an
 # arbitrary one with e.g. `--notify '#00ff88'`.

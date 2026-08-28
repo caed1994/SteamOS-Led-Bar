@@ -2,7 +2,7 @@
 # A *user* unit: Steamworks talks to the logged-in user's Steam client, so this
 # has to live in that session. The LED service stays sandboxed as root and only
 # receives trigger words through its FIFO.
-# Log: journalctl --user -u steamos-led-achievements -f
+# Log: journalctl --user -u steamos-utility-center-achievements -f
 Description=Flash the LED bar when a Steam achievement unlocks
 # Ordering only, deliberately NOT PartOf=: that would stop the watcher whenever
 # the desktop session goes away - which is what switching to Game Mode does,
@@ -11,7 +11,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=@INSTALL_DIR@/steamos-led-serial --watch-achievements
+ExecStart=@INSTALL_DIR@/steamos-utility-center --watch-achievements
 # Not just crash recovery - it is how the watcher works. A process that has
 # initialised Steamworks stays registered as an instance of that game, and
 # Steam will not report the game stopped while that lasts (SteamAPI_Shutdown

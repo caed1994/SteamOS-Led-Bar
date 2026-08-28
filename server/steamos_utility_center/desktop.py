@@ -26,7 +26,7 @@ The one genuinely hard part is knowing which mode the machine is in. The
 service is a *system* service: it has no session of its own to ask, and the
 one you are logged into is not readable from here - so the question is put
 to the process table instead, and answered by gamescope, the compositor Game
-Mode runs under. `steamos-led-serial --desktop` reports what it found, on
+Mode runs under. `steamos-utility-center --desktop` reports what it found, on
 the machine where it matters.
 """
 
@@ -359,7 +359,7 @@ GAME_MODE_MARK = "Game Mode"
 IN_GAME_MODE = GAME_MODE_MARK + " is running (%s) - the bar is Steam's"
 ON_THE_DESKTOP = "no " + GAME_MODE_MARK + " session - the bar is the desktop's"
 
-JOURNAL_UNIT = "steamos-led-serial.service"
+JOURNAL_UNIT = "steamos-utility-center.service"
 JOURNAL_SINCE = "-2 days"
 # Enough to show the last few switches without pasting a day of boots.
 JOURNAL_LINES = 6

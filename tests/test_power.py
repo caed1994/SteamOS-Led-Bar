@@ -21,14 +21,14 @@ sys.path.insert(0, os.path.join(HERE, "..", "server"))
 sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
 import ledpanel                                             # noqa: E402
-from steamos_led import power                               # noqa: E402
+from steamos_utility_center import power                               # noqa: E402
 
 
 def _applier():
     """The installed script, imported by path - it has no .py on the end."""
-    path = os.path.join(HERE, "..", "server", "steamos-led-power")
-    loader = importlib.machinery.SourceFileLoader("steamos_led_power", path)
-    spec = importlib.util.spec_from_loader("steamos_led_power", loader)
+    path = os.path.join(HERE, "..", "server", "steamos-utility-center-power")
+    loader = importlib.machinery.SourceFileLoader("steamos_utility_center_power", path)
+    spec = importlib.util.spec_from_loader("steamos_utility_center_power", loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
@@ -430,7 +430,7 @@ class ConfigFileTest(FakeCpu):
 
     def test_the_shipped_file_sets_nothing(self):
         """An installation nobody has configured leaves the CPU alone."""
-        shipped = os.path.join(HERE, "..", "server", "steamos-led-power.conf")
+        shipped = os.path.join(HERE, "..", "server", "steamos-utility-center-power.conf")
         self.assertEqual(ledpanel.read_power_config(shipped),
                          dict(power.DEFAULTS))
 

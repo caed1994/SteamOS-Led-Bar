@@ -7,7 +7,7 @@ Two halves, and only one of them can be checked here. What a scene looks like
 is arithmetic and is settled below to the pixel. Whether *this* machine's Game
 Mode session is one the process table gives away is a question about somebody's
 Steam Machine, and no test can answer it - which is what
-`steamos-led-serial --desktop` is for.
+`steamos-utility-center --desktop` is for.
 """
 
 import os
@@ -20,8 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_led import config as config_module      # noqa: E402
-from steamos_led import desktop, render, service, shim   # noqa: E402
+from steamos_utility_center import config as config_module      # noqa: E402
+from steamos_utility_center import desktop, render, service, shim   # noqa: E402
 
 
 def _proc(root, entries):
@@ -773,13 +773,13 @@ class OwnershipTest(unittest.TestCase):
         # the bar ignoring Steam", which look identical from in front of it.
         watch = self._watch(["", "gamescope"], interval=1.0)
         watch.game_mode(1000.0)
-        with self.assertLogs("steamos_led.desktop", "INFO") as caught:
+        with self.assertLogs("steamos_utility_center.desktop", "INFO") as caught:
             watch.game_mode(1002.0)
         self.assertIn("Game Mode", caught.output[0])
 
     def test_it_does_not_say_it_again_every_time_it_looks(self):
         watch = self._watch("gamescope", interval=0.0)
-        with self.assertLogs("steamos_led.desktop", "INFO") as caught:
+        with self.assertLogs("steamos_utility_center.desktop", "INFO") as caught:
             for tick in range(5):
                 watch.game_mode(1000.0 + tick)
         self.assertEqual(len(caught.output), 1)
@@ -792,7 +792,7 @@ class OwnershipTest(unittest.TestCase):
         on a change would leave a service started on the desktop saying
         nothing at all, which reads exactly like a check that never ran.
         """
-        with self.assertLogs("steamos_led.desktop", "INFO") as caught:
+        with self.assertLogs("steamos_utility_center.desktop", "INFO") as caught:
             self._watch("").game_mode(1000.0)
         self.assertEqual(len(caught.output), 1)
         self.assertIn(desktop.GAME_MODE_MARK, caught.output[0])
@@ -802,14 +802,14 @@ class JournalTest(unittest.TestCase):
     """Reading back what the service saw while nobody could watch."""
 
     SAMPLE = "\n".join((
-        "2026-08-21T18:02:11+0200 fractal steamos-led-serial[901]: INFO "
-        "steamos-led: reading LED state from /dev/valve-leds-shim",
-        "2026-08-21T18:02:11+0200 fractal steamos-led-serial[901]: INFO "
-        "steamos-led: " + desktop.ON_THE_DESKTOP,
-        "2026-08-21T19:41:03+0200 fractal steamos-led-serial[901]: INFO "
-        "steamos-led: " + desktop.IN_GAME_MODE % "gamescope",
-        "2026-08-21T21:05:55+0200 fractal steamos-led-serial[901]: INFO "
-        "steamos-led: " + desktop.ON_THE_DESKTOP,
+        "2026-08-21T18:02:11+0200 fractal steamos-utility-center[901]: INFO "
+        "steamos-utility-center: reading LED state from /dev/valve-leds-shim",
+        "2026-08-21T18:02:11+0200 fractal steamos-utility-center[901]: INFO "
+        "steamos-utility-center: " + desktop.ON_THE_DESKTOP,
+        "2026-08-21T19:41:03+0200 fractal steamos-utility-center[901]: INFO "
+        "steamos-utility-center: " + desktop.IN_GAME_MODE % "gamescope",
+        "2026-08-21T21:05:55+0200 fractal steamos-utility-center[901]: INFO "
+        "steamos-utility-center: " + desktop.ON_THE_DESKTOP,
     ))
 
     def test_the_lines_it_wants_are_the_ones_it_wrote(self):
@@ -1321,7 +1321,7 @@ class ConfigurationTest(unittest.TestCase):
             config_module.validate(self._config(DESKTOP_SPEED=value))
 
     def test_the_shipped_file_names_every_desktop_setting(self):
-        path = os.path.join(HERE, "..", "server", "steamos-led-serial.conf")
+        path = os.path.join(HERE, "..", "server", "steamos-utility-center.conf")
         with open(path) as handle:
             text = handle.read()
         for key in ("DESKTOP_SCENE", "DESKTOP_COLOR", "DESKTOP_BRIGHTNESS",

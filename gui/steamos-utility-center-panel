@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Control panel for the SteamOS LED bar bridge.
+"""Control panel for the SteamOS Utility Center.
 
 Settings, tests and repair in one window. Installation stays with install.sh;
 this is for everything after it, the part you do more than once.
@@ -48,14 +48,14 @@ import ledpanel                                             # noqa: E402
 import appsettings                                          # noqa: E402
 import preview as preview_module                            # noqa: E402
 import syssettings                                          # noqa: E402
-from steamos_led import cec                                 # noqa: E402
-from steamos_led import config as config_module             # noqa: E402
-from steamos_led import lact                                # noqa: E402
-from steamos_led import notify                              # noqa: E402
-from steamos_led import power                               # noqa: E402
-from steamos_led import render                              # noqa: E402
-from steamos_led import shim                                # noqa: E402
-from steamos_led import __version__ as VERSION              # noqa: E402
+from steamos_utility_center import cec                                 # noqa: E402
+from steamos_utility_center import config as config_module             # noqa: E402
+from steamos_utility_center import lact                                # noqa: E402
+from steamos_utility_center import notify                              # noqa: E402
+from steamos_utility_center import power                               # noqa: E402
+from steamos_utility_center import render                              # noqa: E402
+from steamos_utility_center import shim                                # noqa: E402
+from steamos_utility_center import __version__ as VERSION              # noqa: E402
 
 
 # Which settings to show, in order: key, label, kind, and for numeric ones the
@@ -387,7 +387,7 @@ ABOUT_LINES = (
      "hands out what Steam writes to the LEDs, this service draws it, and the "
      "board lights it. Plus the effects and notifications Steam has no menu "
      "for."),
-    ("Project", "github.com/caed1994/SteamOS-Led-Bar"),
+    ("Project", "github.com/caed1994/SteamOS-Utility-Center"),
     ("Licence",
      "GPL-3.0-or-later. The firmware, the kernel shim, the service and this "
      "panel are all in the one repository. Two directories are somebody "
@@ -505,7 +505,7 @@ DEPENDS_ON = {
 
 # What the window calls itself to the desktop. Tk derives WM_CLASS from this,
 # and the .desktop file names the same string in StartupWMClass.
-WM_CLASS = "steamos-led-panel"
+WM_CLASS = "steamos-utility-center-panel"
 
 # PhotoImage objects live only while something references them, and a widget
 # element does not count - so they are parked here for the window's life.
@@ -2286,7 +2286,7 @@ class FanCurve:
 class Panel:
     def __init__(self, root):
         self.root = root
-        root.title("SteamOS LED bar")
+        root.title("SteamOS Utility Center")
         # Wide enough that the sidebar, the inner list and a full-width
         # setting row all fit without the window having to be dragged bigger
         # before anything can be read - which is what the old 820 meant once
@@ -2720,7 +2720,7 @@ class Panel:
         card.pack(fill="x")
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
-        ttk.Label(inner, text="SteamOS LED bar", style="Heading.TLabel").pack(anchor="w")
+        ttk.Label(inner, text="SteamOS Utility Center", style="Heading.TLabel").pack(anchor="w")
         ttk.Label(inner, text="Version %s" % VERSION,
                   style="Muted.TLabel").pack(
                       anchor="w", pady=(2, GROUP_GAP // 2))
@@ -4044,7 +4044,7 @@ class Panel:
             # everything, which is the shape this project deliberately does
             # not have. See scripts/apply-power.sh.
             staged = tempfile.NamedTemporaryFile(
-                "w", suffix=".conf", prefix="steamos-led-power-", delete=False)
+                "w", suffix=".conf", prefix="steamos-utility-center-power-", delete=False)
             with staged:
                 staged.write(ledpanel.power_config_text(cpu))
             os.chmod(staged.name, 0o644)
@@ -4073,7 +4073,7 @@ class Panel:
             # No config yet: start from the one shipped in the repository so
             # its comments come along.
             shipped = os.path.join(SOURCE_DIR, "server",
-                                   "steamos-led-serial.conf")
+                                   "steamos-utility-center.conf")
             try:
                 with open(shipped) as handle:
                     text = handle.read()
@@ -4082,7 +4082,7 @@ class Panel:
                 return
 
         staged = tempfile.NamedTemporaryFile(
-            "w", suffix=".conf", prefix="steamos-led-", delete=False)
+            "w", suffix=".conf", prefix="steamos-utility-center-", delete=False)
         with staged:
             staged.write(config_module.update_text(text, values))
         os.chmod(staged.name, 0o644)
@@ -4880,7 +4880,7 @@ class Panel:
         Nothing here queues behind Apply. The toolkit's installer leaves a
         sudoers rule granting exactly the helpers its own switches use, so
         every switch on this page is an ordinary command that runs as you
-        click - see server/steamos_led/cec.py. Apply exists on the settings
+        click - see server/steamos_utility_center/cec.py. Apply exists on the settings
         pages because writing /etc needs a password and a service restart;
         here the machine does not ask, and inventing the ceremony anyway would
         be this window being formal about nothing.

@@ -48,6 +48,6 @@ back the effects is up to the consumer — here, the service in `server/`.
 
 When pulling in a newer upstream version, copy the four files unmodified again,
 update the checksums and the commit above, and check
-`server/steamos_led/shim.py` against `struct valve_leds_snapshot` — the layout
+`server/steamos_utility_center/shim.py` against `struct valve_leds_snapshot` — the layout
 and field meanings there depend on it directly. `tests/test_shim_abi.py`
 verifies that agreement automatically.
