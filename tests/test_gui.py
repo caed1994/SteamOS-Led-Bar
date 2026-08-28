@@ -1135,8 +1135,7 @@ class PanelSettingsTest(unittest.TestCase):
                           "app"])
         self.assertEqual([entry[1] for entry in sections],
                          ["LED Strip", "EPP & Governor", "HDMI CEC Mods",
-                          "Keyboard Layout", "Status & Repair",
-                          "App Settings"])
+                          "Keyboard Layout", "Status", "App Settings"])
         self.assertEqual(ast.literal_eval(assigned["ABOUT"])[0], "about")
         # Every one of them says what it is for. A sidebar of five titles with
         # a blank line under one of them is a sidebar that failed to draw.

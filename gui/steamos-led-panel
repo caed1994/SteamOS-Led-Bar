@@ -366,10 +366,10 @@ SECTIONS = (
     # than the lighting half of it. Two of its three blocks were already about
     # more than the bar before there was a second thing in this window, and
     # every section added from here brings checks of its own to the same list.
-    ("status", "Status & Repair", "Installation and updates", "wrench"),
+    ("status", "Status", "How every part is doing", "wrench"),
     # Last of the run, and the only one that is about this window rather than
     # about the machine. Above About, which is not a thing you configure.
-    ("app", "App Settings", "How this window looks", "sliders"),
+    ("app", "App Settings", "Appearance and updates", "sliders"),
 )
 
 # Sits at the foot of the sidebar rather than in the list: it is not a thing
@@ -657,6 +657,10 @@ SIDE_MARGIN = 4 * material.SPACE
 # How wide the switch column on the CEC page is, so a feature's sentence lines
 # up under its own label rather than under the switch.
 CEC_INDENT = 9 * material.SPACE
+
+# The same for a status block: its sentence sits under the part's name rather
+# than under the light beside it.
+PART_INDENT = 6 * material.SPACE
 GROUP_GAP = 6 * material.SPACE
 ROW_GAP = 2 * material.SPACE
 INDENT_STEP = 5 * material.SPACE
@@ -1126,6 +1130,9 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("Page.Muted.TLabel", background=page)
     style.configure("Page.Heading.TLabel", background=page)
     style.configure("Page.Good.TLabel", background=page)
+    # A group heading standing on the page rather than on a card - the preview
+    # page's two columns of effects are the ones that do.
+    style.configure("Page.Section.TLabel", background=page)
     style.configure("Page.Bad.TLabel", background=page)
     style.configure("Card.TFrame", background=surface)
     # The same tone, and no corners. For a frame that stands *on* a card
@@ -2138,9 +2145,11 @@ class Panel:
                 continue
             if key in SECTION_SETTINGS:
                 table, note = SECTION_SETTINGS[key]
+                build = (self._build_app if key == "app"
+                         else self._build_settings)
                 page = self._page(self.sections,
-                                  lambda where, t=table, n=note:
-                                  self._build_settings(where, t, n))
+                                  lambda where, b=build, t=table, n=note:
+                                  b(where, t, n))
             elif key == "cec":
                 page = self._page(self.sections, self._build_cec)
             elif key in SOON:
@@ -2465,6 +2474,7 @@ class Panel:
         greyed buttons already say, and it said it by animating four pixels
         sixty times a second for the length of an install.
         """
+        self._busy = busy
         for button in self._busy_buttons:
             button.state(["disabled"] if busy else ["!disabled"])
         if not busy:
@@ -2581,11 +2591,17 @@ class Panel:
 
         Collected by walking rather than listed: a button added later would be
         left pressable, and the failure - two pkexec prompts stacked on each
-        other - is not one anybody would connect back to a list here. The one
-        that only folds something away stays live: it starts nothing, so
-        greying it would be the window taking away a control for no reason.
+        other - is not one anybody would connect back to a list here. The ones
+        that only fold something away stay live: they start nothing, so
+        greying them would be the window taking away a control for no reason.
+
+        Run again whenever the status page redraws, because that page builds
+        its buttons fresh each time - a repair button that was not walked is
+        one that stays pressable while a command runs, which is the failure
+        this exists to prevent. The busy state is put back afterwards for the
+        same reason: re-registering during a command must not wake everything.
         """
-        folds = {str(self.details)}
+        folds = set(getattr(self, "_fold_buttons", ()))
         self._busy_buttons = []
 
         def walk(widget):
@@ -2595,6 +2611,9 @@ class Panel:
                 walk(child)
 
         walk(self.root)
+        if getattr(self, "_busy", False):
+            for button in self._busy_buttons:
+                button.state(["disabled"])
 
     def _set_window_icon(self):
         """The same icon the menu entry uses, in the titlebar and task bar.
@@ -2668,18 +2687,55 @@ class Panel:
 
     # -- the pieces a page is built from ----------------------------------
 
-    def _section(self, parent, title=None, first=False, before=None):
-        """A named group of controls, with no box drawn round it.
+    def _ground(self, parent):
+        """The style a plain frame needs to stand on this parent seamlessly.
+
+        Every frame in this window is either a surface of its own - a card -
+        or a piece of whatever it is packed into, and the second kind has to
+        be told which. A helper rather than a style at each call site, because
+        the generic builders below are used on cards *and* on pages, and one
+        that guessed wrong drew a band of the wrong shade the width of its
+        content. Three of those were found at once by a test; this is the
+        thing that stops there being a fourth.
+        """
+        try:
+            named = str(parent.cget("style"))
+        except tk.TclError:                                  # pragma: no cover
+            return ""
+        # A card's children want the card's own colour, which is what a plain
+        # ttk.Frame already is - so only the two grounds that are not that
+        # need passing on.
+        return named if named in ("Page.TFrame", "OnCard.TFrame") else ""
+
+    def _section(self, parent, title=None, first=False, before=None,
+                 card=False):
+        """A named group of controls.
 
         Material tells groups apart by a heading and the space around them
         rather than by a line, which is what keeps a page of thirty settings
         from reading as thirty compartments.
 
+        `card` raises it onto a surface of its own, which is what every other
+        page in this window does with its groups. Without it a group is a
+        piece of whatever it is packed into, and takes that ground.
+
         The heading goes *inside* the frame this returns rather than beside it,
         so a group is one widget: something packed before it lands above the
         heading and not between the heading and what it names.
         """
-        holder = ttk.Frame(parent)
+        where = parent
+        if card:
+            box = ttk.Frame(parent, style="Card.TFrame")
+            box.pack(fill="x", padx=SIDE_MARGIN,
+                     pady=(ROW_GAP if first else GROUP_GAP, 0),
+                     **({"before": before} if before is not None else {}))
+            holder = ttk.Frame(box, style="OnCard.TFrame")
+            holder.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+            if title:
+                ttk.Label(holder, text=title, style="Section.TLabel").pack(
+                    anchor="w", pady=(0, ROW_GAP))
+            return holder
+        holder = ttk.Frame(where, style=self._ground(where))
         holder.pack(fill="x", padx=SIDE_MARGIN,
                     pady=(ROW_GAP if first else GROUP_GAP, 0),
                     **({"before": before} if before is not None else {}))
@@ -3162,6 +3218,17 @@ class Panel:
                           style="Page.Muted.TLabel" if page
                           else "Muted.TLabel", wraplength=560, **kwargs)
         self._wrapped.append(label)
+        # A note inside a card has the card's padding less room than one on
+        # the page, and _rewrap hands the same width to every label - so
+        # without this the ones in cards were laid out wider than the card and
+        # cut off at its edge. Taken from where it is going rather than passed
+        # by each caller: a note is written where it belongs and nobody should
+        # have to remember arithmetic about its surroundings.
+        try:
+            if str(parent.cget("style")) == "OnCard.TFrame":
+                self._wrap_insets[str(label)] = 2 * GROUP_GAP
+        except tk.TclError:                                  # pragma: no cover
+            pass
         return label
 
     def _rewrap(self, event):
@@ -3867,7 +3934,7 @@ class Panel:
         self.preview_blurb = ttk.Label(outer, style="Page.Muted.TLabel")
         self.preview_blurb.pack(anchor="center", pady=(0, 8))
 
-        picker = ttk.Frame(outer)
+        picker = ttk.Frame(outer, style=self._ground(outer))
         picker.pack(fill="x", padx=SIDE_MARGIN)
         picker.columnconfigure(0, weight=1)
         picker.columnconfigure(1, weight=1)
@@ -3883,10 +3950,10 @@ class Panel:
         groups = (("Our effects", "slot"),
                   ("Notification shapes", "shape"))
         for column, (title, wanted) in enumerate(groups):
-            box = ttk.Frame(picker)
+            box = ttk.Frame(picker, style=self._ground(picker))
             box.grid(row=0, column=column, sticky="nsew",
                      padx=(0, GROUP_GAP) if column == 0 else (GROUP_GAP, 0))
-            ttk.Label(box, text=title, style="Section.TLabel").pack(
+            ttk.Label(box, text=title, style="Page.Section.TLabel").pack(
                 anchor="w", pady=(0, 4))
             for label, kind, name, _blurb in preview_module.entries():
                 if kind != wanted:
@@ -3909,7 +3976,7 @@ class Panel:
         # somewhere. Halved between the stage and here, so the room the strip
         # stands in grows with the window without swallowing the lot - all of
         # it left the strip adrift in the middle of a very large dark box.
-        ttk.Frame(outer).pack(fill="both", expand=True)
+        ttk.Frame(outer, style="Page.TFrame").pack(fill="both", expand=True)
 
         self._preview = preview_module.Preview()
         self._preview_job = None
@@ -4071,7 +4138,7 @@ class Panel:
         smallest, and a row packed left simply loses the last of them - so they
         are gridded and the columns are counted, not packed and hoped for.
         """
-        row = ttk.Frame(parent)
+        row = ttk.Frame(parent, style=self._ground(parent))
         row.pack(fill="x")
         for column in range(self.BUTTONS_ACROSS):
             row.columnconfigure(column, weight=1, uniform="buttons")
@@ -4083,9 +4150,9 @@ class Panel:
         return row
 
     def _build_tests(self, parent):
-        outer = ttk.Frame(parent)
+        outer = ttk.Frame(parent, style="Page.TFrame")
 
-        flashes = self._section(outer, "Flash the bar", first=True)
+        flashes = self._section(outer, "Flash the bar", first=True, card=True)
         self._note(flashes,
                    "Needs no privileges - the trigger pipe is open to anyone."
                    ).pack(anchor="w", pady=(0, ROW_GAP))
@@ -4105,7 +4172,7 @@ class Panel:
         # is only the thing you are choosing between. Nothing is saved: this
         # asks the service for one flash in that shape, which is what makes it
         # useful for choosing at all.
-        shapes = self._section(outer, "Try a flash shape")
+        shapes = self._section(outer, "Try a flash shape", card=True)
         self._note(shapes,
                    "Shown in Steam blue and not saved anywhere - pick one "
                    "here, then set it on the Notifications tab."
@@ -4115,7 +4182,7 @@ class Panel:
                 ledpanel.shape_test_command(s)))
             for label, shape in STYLE_CHOICES])
 
-        strip = self._section(outer, "Strip and Steam")
+        strip = self._section(outer, "Strip and Steam", card=True)
         self._note(strip,
                    "Steam check and the message probe need a game running."
                    ).pack(anchor="w", pady=(0, ROW_GAP))
@@ -4513,104 +4580,141 @@ class Panel:
     # -- status and repair ------------------------------------------------
 
     def _build_status(self, parent):
-        """Two things you might do here: check the installation, or update it.
+        """How every part of the toolbox is doing, one block each.
 
-        The checklist used to be nine lines of "yes" whenever nothing was
-        wrong, which is nearly always. It folds away instead, and unfolds
-        itself the moment something is not in order.
+        This was the LED checklist and nothing else, on a page headed "this
+        installation" - while the toolbox had grown to install four things.
+        The other three reported on their own settings pages, in their own
+        shapes, and nowhere together: a machine whose CEC adapter had gone
+        read "everything is in order" here.
 
-        Flashing the ESP used to be the third block and is on the Test page
-        now. This section is about the installation, which is every part of
-        the toolbox; the board on the end of the USB cable is the one thing
-        here that was only ever about the strip - and "the self test failed,
-        reflash it" is a sentence that should not span two sections.
+        Each block is the same: a light, a sentence, the detail behind it, and
+        the one button that repairs *that* thing. The repairs stay here rather
+        than moving to the pages they belong to, because this is where you
+        find out something is broken and walking to another section for the
+        fix is the walk this page exists to save.
         """
-        outer = ttk.Frame(parent)
-
-        holder = self._section(outer, "This installation", first=True)
-        buttons = ttk.Frame(holder)
-        buttons.pack(fill="x")
-        # The one thing on this tab that changes the machine is filled; the two
-        # that only look at it are not. A row of buttons that all shout is a
-        # row that says nothing about which one you want.
-        self.details = ttk.Button(buttons, text="Details \u25be",
-                                  style="Text.TButton",
-                                  command=self.toggle_details)
-        self.details.pack(side="left", padx=(0, ROW_GAP))
-        ttk.Button(buttons, text="Check again", style="Outlined.TButton",
-                   command=self.refresh_status).pack(side="left",
-                                                     padx=(0, ROW_GAP))
-        ttk.Button(buttons, text="Rebuild and reinstall",
-                   style="Filled.TButton",
-                   command=self.reinstall).pack(side="left")
-        self._note(holder, "Keeps your settings, never touches the ESP."
-                   ).pack(anchor="w", pady=(ROW_GAP, 0))
-
-        # Packed straight into the page, not into a slot of its own. Measured:
-        # Tk does not reset a frame's requested size when its *last* child is
-        # unpacked, so a list living alone in a slot left that slot - and the
-        # window - at the height it had needed. Among siblings it shrinks
-        # properly, and "before" is what keeps its place in the order.
-        self.checklist = ttk.Frame(outer)
-        self._details_open = False
-
-        self.update_box = self._build_update(outer)
+        outer = ttk.Frame(parent, style="Page.TFrame")
+        # Which blocks are unfolded, by part key. Kept out here because
+        # refreshing rebuilds them and a fold that closed itself every time
+        # the page was re-read would be a fold nobody could use.
+        self._open_parts = set()
+        # The fold buttons currently on the page, by widget name. Rebuilt with
+        # the blocks - see _register_buttons, which excludes them.
+        self._fold_buttons = set()
+        # And which have already unfolded themselves for being broken. Once
+        # each: without this, a block you deliberately folded away would open
+        # again on the next read, which is every few seconds while something
+        # is running.
+        self._shown_parts = set()
+        self.parts_box = ttk.Frame(outer, style="Page.TFrame")
+        self.parts_box.pack(fill="x")
+        row = ttk.Frame(outer, style="Page.TFrame")
+        row.pack(anchor="w", padx=SIDE_MARGIN, pady=(GROUP_GAP, GROUP_GAP))
+        ttk.Button(row, text="Check again", style="Page.Outlined.TButton",
+                   command=self.refresh_status).pack(side="left")
         return outer
 
-    def toggle_details(self):
-        self._show_details(not self._details_open)
+    def _read_parts(self):
+        """Ask every part how it is. One place, so the page and the headline
+        cannot disagree about it.
+        """
+        checks = ledpanel.run_checks(config=self.config)
+        self._checks = checks           # kept for the foot of the window
+        return [
+            ledpanel.led_part(checks),
+            ledpanel.power_part(self.power, power.available()),
+            ledpanel.cec_part(self._cec, cec.installed()),
+            ledpanel.layout_part(self.system.get(syssettings.LAYOUT, ""),
+                                 dict((value, label) for label, value
+                                      in syssettings.layouts())),
+            ledpanel.panel_part(VERSION, getattr(self, "_update_state", None),
+                                self.update_state.cget("text")
+                                if hasattr(self, "update_state") else ""),
+        ]
 
-    def _show_details(self, show):
-        self._details_open = show
-        # The height and the content change in one go, and in the order that
-        # never asks for more room than the window has: grow first, then fill
-        # it; empty it first, then shrink. Measured the other way round, a
-        # fold drew three states, one of them with the output pane hanging off
-        # the bottom edge - which is the jerk this is here to avoid.
-        width = self.root.winfo_width()
-        height = self.root.winfo_height() + self._details_change(show)
-        if show:
-            self.root.geometry("%dx%d" % (width, height))
-            self.checklist.pack(fill="x", padx=SIDE_MARGIN,
-                                pady=(0, DETAILS_GAP),
-                                before=self.update_box)
-        else:
-            self.checklist.pack_forget()
-            # Let the page settle into its shorter self before the window
-            # follows: without this the two reflows overlap and one of them
-            # is drawn with the checklist below the bottom edge.
-            self.root.update_idletasks()
-            self.root.geometry("%dx%d" % (width, height))
-        self.details.configure(text="Details \u25b4" if show
-                               else "Details \u25be")
-        # Arithmetic gets it right to the pixel or it does not; this settles
-        # the difference afterwards, and shows nothing when there is none.
+    def _build_part(self, part):
+        """One block: a light, a sentence, a fold, and its own repair."""
+        card = ttk.Frame(self.parts_box, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        inner.columnconfigure(1, weight=1)
+
+        colour = (self.roles["on_surface_variant"] if part.ok is None
+                  else self.roles["positive"] if part.ok
+                  else self.roles["error"])
+        dot = tk.Canvas(inner, width=STATUS_DOT * 2, height=STATUS_DOT * 2,
+                        highlightthickness=0, borderwidth=0,
+                        background=self.roles["surface_container_lowest"])
+        dot.create_oval(1, 1, STATUS_DOT * 2 - 1, STATUS_DOT * 2 - 1,
+                        width=0, fill=colour)
+        dot.grid(row=0, column=0, sticky="w", padx=(0, ROW_GAP))
+        ttk.Label(inner, text=part.name, style="Section.TLabel").grid(
+            row=0, column=1, sticky="w")
+
+        buttons = ttk.Frame(inner, style="OnCard.TFrame")
+        buttons.grid(row=0, column=2, sticky="e")
+        if part.detail:
+            fold = ttk.Button(buttons, style="Text.TButton",
+                              command=lambda k=part.key: self._fold_part(k))
+            fold.configure(text="Details \u25b4" if part.key in self._open_parts
+                           else "Details \u25be")
+            fold.pack(side="left", padx=(0, ROW_GAP))
+            self._fold_buttons.add(str(fold))
+        if part.repair:
+            ttk.Button(buttons, text=ledpanel.REPAIR_LABELS[part.repair],
+                       style="Tonal.TButton",
+                       command=lambda r=part.repair: self._repair(r)).pack(
+                           side="left")
+
+        said = ttk.Label(inner, text=part.verdict, justify="left",
+                         style="TLabel" if part.ok is not False
+                         else "Bad.TLabel", wraplength=CARD_WRAP - PART_INDENT)
+        said.grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 0))
+        self._wrapped.append(said)
+        self._wrap_insets[str(said)] = PART_INDENT
+
+        if part.detail and part.key in self._open_parts:
+            self._build_part_detail(inner, part)
+
+    def _build_part_detail(self, inner, part):
+        """What is behind a block, which is a list of Checks or of lines."""
+        holder = ttk.Frame(inner, style="OnCard.TFrame")
+        holder.grid(row=2, column=1, columnspan=2, sticky="ew",
+                    pady=(ROW_GAP, 0))
+        holder.columnconfigure(2, weight=1)
+        for row, item in enumerate(part.detail):
+            if isinstance(item, str):
+                # A plain line, from a part that has no checks of its own.
+                ttk.Label(holder, text=item, style="Muted.TLabel").grid(
+                    row=row, column=0, columnspan=3, sticky="w", pady=2)
+                continue
+            ttk.Label(holder, text="\u2713" if item.ok else "\u2717", width=3,
+                      style="Good.TLabel" if item.ok else "Bad.TLabel").grid(
+                          row=row, column=0, sticky="nw", pady=2)
+            ttk.Label(holder, text=item.name,
+                      style="TLabel" if item.ok else "Bad.TLabel").grid(
+                          row=row, column=1, sticky="w", pady=2,
+                          padx=(0, GROUP_GAP))
+            if not item.ok:
+                ttk.Label(holder, text=item.detail, wraplength=460,
+                          justify="left", style="Muted.TLabel").grid(
+                              row=row, column=2, sticky="w", pady=2)
+
+    def _fold_part(self, key):
+        self._open_parts.symmetric_difference_update({key})
+        self.refresh_status()
         self._fit_window()
 
-    def _details_change(self, show):
-        """How much taller or shorter the window has to be for the checklist.
-
-        Worked out rather than tried: asking Tk means packing the list, doing
-        a layout pass and reading the answer, and that pass is drawn - which
-        is the squeezed intermediate this is here to avoid. A notebook asks
-        for the tallest of its panes plus its own trim, so what the window
-        gains is what this pane would gain, less the slack the tallest pane
-        already provides. If the arithmetic is ever off, _fit_window puts it
-        right afterwards; it is only the smoothness that depends on this.
+    def _repair(self, name):
+        """Run the repair a block offers. Named rather than bound, so the
+        model can say which repair a part has without knowing this window.
         """
-        # Against the notebook the checklist actually lives in, which is the
-        # outer one now: asked of the strip's pages the answer would be the
-        # slack in a stack this page is not in, and the window would jump by
-        # whatever that happened to be.
-        book = self.sections
-        gain = self.checklist.winfo_reqheight() + DETAILS_GAP
-        tabs = [self.root.nametowidget(name) for name in book.tabs()]
-        heights = [tab.winfo_reqheight() for tab in tabs]
-        others = max(height for tab, height in zip(tabs, heights)
-                     if tab is not self.status_tab)
-        wanted = self.status_tab.winfo_reqheight() + (gain if show else -gain)
-        trim = book.winfo_reqheight() - max(heights)
-        return max(others, wanted) + trim - book.winfo_reqheight()
+        if name == "reinstall":
+            self.reinstall()
+        elif name == "install-cec":
+            self._install_cec()
 
     def _fit_window(self):
         """Give the window the height its content needs, and no more.
@@ -4650,9 +4754,9 @@ class Panel:
 
     def _build_firmware(self, parent):
         """The last thing that still needed a terminal after installing."""
-        frame = self._section(parent, "ESP firmware")
+        frame = self._section(parent, "ESP firmware", card=True)
 
-        row = ttk.Frame(frame)
+        row = ttk.Frame(frame, style=self._ground(frame))
         row.pack(fill="x")
         self.firmware = tk.StringVar()
         # Grows with the window: at a fixed width the longest build name was
@@ -4680,20 +4784,49 @@ class Panel:
             ledpanel.flash_firmware_command(SOURCE_DIR, environment),
             lambda _code: self.refresh_status())
 
+    def _build_app(self, where, table, note):
+        """App Settings, which is now everything about this program itself.
+
+        Its own look, and its own updating. Updating used to be on the status
+        page, which put "fetch a branch and install it" beside a checklist of
+        what is broken - two different questions, and the second is not a
+        setting at all. Here it sits with the other thing that is about the
+        panel rather than about the machine.
+        """
+        outer = self._build_settings(where, table, note)
+        self.update_box = self._build_update(outer)
+        return outer
+
     def _build_update(self, parent):
-        """Fetch a branch and install it: the two halves of "get the new one"."""
-        frame = self._section(parent, "Update")
+        """Fetch a branch and install it: the two halves of "get the new one".
+
+        On a card, like every other group of settings on this page. It used to
+        be a bare frame, which was right where it lived: the old status page
+        was itself card-coloured, so a plain frame on it matched. Moved onto a
+        page, that frame became a band of the wrong shade the width of the
+        content - which is a thing this window has now done in two ways, so
+        the live tests check both.
+        """
+        holder = ttk.Frame(parent, style="Page.TFrame")
+        holder.pack(fill="x")
 
         if not ledpanel.is_git_clone(SOURCE_DIR):
             self._note(
-                frame,
+                holder,
                 "%s is not a git clone, so there is nothing to update from - "
                 "this is what downloading a zip leaves you with. Clone it "
-                "with git to get updates here." % SOURCE_DIR,
-            ).pack(anchor="w")
-            return frame
+                "with git to get updates here." % SOURCE_DIR, page=True,
+            ).pack(anchor="w", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
+            return holder
 
-        row = ttk.Frame(frame)
+        card = ttk.Frame(holder, style="Card.TFrame")
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
+        frame = ttk.Frame(card)
+        frame.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        ttk.Label(frame, text="Update", style="Section.TLabel").pack(
+            anchor="w", pady=(0, ROW_GAP))
+
+        row = ttk.Frame(frame, style=self._ground(frame))
         row.pack(fill="x")
         ttk.Label(row, text="Branch").pack(side="left", padx=(0, ROW_GAP))
         self.branch = tk.StringVar()
@@ -4716,16 +4849,19 @@ class Panel:
         # the answer ever appeared.
         self.update_state = ttk.Label(frame)
         self.update_state.pack(anchor="w", pady=(ROW_GAP, 0))
-        self._note(frame,
+        # Under the card rather than in it, the way every other explanation on
+        # this page stands under the group it explains.
+        self._note(holder,
                    "Fetches into the clone and installs it. Local changes or "
-                   "commits of your own stop it, with a message.").pack(
-                       anchor="w", pady=(ROW_GAP, 0))
+                   "commits of your own stop it, with a message.",
+                   page=True).pack(anchor="w", padx=SIDE_MARGIN,
+                                   pady=(ROW_GAP, GROUP_GAP))
         self._say_update(ledpanel.UPDATE_UNKNOWN, "")
         # A different branch is a different question, and the old answer is
         # not one about it.
         self.branch.trace_add("write", lambda *_a: self._say_update(
             ledpanel.UPDATE_UNKNOWN, ""))
-        return frame
+        return holder
 
     def _say_update(self, state, sentence):
         """Show what the last check found, and gate the install button on it."""
@@ -4838,34 +4974,70 @@ class Panel:
                      "Start it again from the application menu." % exc)
 
     def refresh_status(self):
-        for child in self.checklist.winfo_children():
+        """Read every part again and draw the page from what they said."""
+        for child in self.parts_box.winfo_children():
             child.destroy()
-        checks = ledpanel.run_checks(config=self.config)
-        broken = ledpanel.broken(checks)
-        # One place says how it is, under the title, where every tab can see
-        # it - the same sentence at the top of this tab as well was saying it
-        # twice to someone already looking at it.
+        self._forget_dead_labels()
+        self._fold_buttons = set()
+        parts = self._read_parts()
+        for part in parts:
+            self._build_part(part)
+        # The blocks' buttons are new widgets every time, so the list of what
+        # to grey while a command runs has to be taken again.
+        self._register_buttons()
+        # One place says how it is, under the title, where every section can
+        # see it. Counted across every part rather than over the LED
+        # checklist alone, which is what it used to be - so the LED bar's own
+        # problem count was printed over the HDMI CEC page, and a machine
+        # whose adapter had gone read "everything is in order".
+        broken = [part for part in parts if part.ok is False]
         self.headline.configure(
-            text=ledpanel.repair_summary(checks),
+            text=ledpanel.parts_summary(parts),
             style="Page.Bad.TLabel" if broken else "Page.Good.TLabel")
-        # And the foot of the window, which asks the narrower question - see
-        # ledpanel.bar_is_live.
-        self._say_link(ledpanel.bar_is_live(checks))
-        if broken:
-            self._show_details(True)
-        for row, check in enumerate(checks):
-            ttk.Label(self.checklist, text="\u2713" if check.ok else "\u2717",
-                      width=3, style="Good.TLabel" if check.ok
-                      else "Bad.TLabel").grid(row=row, column=0, sticky="nw",
-                                              pady=2)
-            ttk.Label(self.checklist, text=check.name,
-                      style="TLabel" if check.ok else "Bad.TLabel").grid(
-                          row=row, column=1, sticky="w", pady=2,
-                          padx=(0, GROUP_GAP))
-            if not check.ok:
-                ttk.Label(self.checklist, text=check.detail, wraplength=460,
-                          justify="left", style="Muted.TLabel").grid(
-                              row=row, column=2, sticky="w", pady=2)
+        # And the foot of the window, which asks a narrower question still -
+        # see ledpanel.bar_is_live.
+        self._say_link(ledpanel.bar_is_live(self._checks))
+        # A part that is broken unfolds itself, once. Left folded, the page
+        # would say something is wrong and hide what.
+        for part in broken:
+            if part.detail and part.key not in self._shown_parts:
+                self._shown_parts.add(part.key)
+                self._open_parts.add(part.key)
+                self.root.after_idle(self.refresh_status)
+        self._rewrap_parts()
+
+    def _forget_dead_labels(self):
+        """Drop wrapped labels whose widgets have gone.
+
+        This page destroys and rebuilds its blocks on every read, and every
+        block's sentence had been added to the list of things to re-wrap on a
+        resize. Left in it, the next resize configures a widget that no longer
+        exists - which Tk reports as an invalid command name - and the list
+        grows for as long as the window is open.
+        """
+        alive = []
+        for label in self._wrapped:
+            try:
+                if label.winfo_exists():
+                    alive.append(label)
+                    continue
+            except tk.TclError:                              # pragma: no cover
+                pass
+            self._wrap_insets.pop(str(label), None)
+        self._wrapped = alive
+
+    def _rewrap_parts(self):
+        """Give the blocks' sentences the width the page has.
+
+        They are built after the last resize, so nothing has told them how
+        wide the page is - and _rewrap only fires when the width changes,
+        which it has not.
+        """
+        for label in self._wrapped:
+            if self._wrap_width:
+                label.configure(wraplength=max(
+                    160, self._wrap_width - self._wrap_insets.get(str(label),
+                                                                  0)))
 
     def reinstall(self):
         if not os.path.exists(os.path.join(SOURCE_DIR, "install.sh")):

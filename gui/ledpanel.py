@@ -283,6 +283,171 @@ def repair_summary(checks):
     return "%d problem(s) found." % len(problems)
 
 
+# -- the state of every part -----------------------------------------------
+#
+# This toolbox installs four things now - the LED service, a CPU power unit, a
+# whole HDMI CEC toolkit and a line in somebody's environment.d - and until
+# this layer existed it reported on exactly one of them while calling that
+# page "this installation". The others said their piece on their own settings
+# pages, in their own shapes, and nowhere together.
+#
+# So every part is described the same way here and read from one place: the
+# status page draws these, the headline counts them, and neither knows how any
+# particular part is checked.
+
+
+class Part:
+    """One installable thing, and how it is doing.
+
+    `ok` has three values on purpose. True and False are what you expect;
+    None is "not installed", which is not a fault - a machine that never
+    wanted HDMI CEC is not a machine with a problem, and counting it as one
+    would put a permanent red number over every page.
+    """
+
+    def __init__(self, key, name, ok, verdict, detail=(), repair=""):
+        self.key = key
+        self.name = name
+        self.ok = ok
+        # One line, for the block's own heading. What is wrong rather than
+        # that something is: "no adapter" beats "not working".
+        self.verdict = verdict
+        # The Checks or lines behind it, shown when the block is unfolded.
+        self.detail = list(detail)
+        # Which repair belongs to this part, if any. Named rather than a
+        # callable so this module stays free of the window - see the panel's
+        # PART_REPAIRS for what each name does.
+        self.repair = repair
+
+    @property
+    def installed(self):
+        return self.ok is not None
+
+    def __repr__(self):                                     # pragma: no cover
+        return "<Part %s %s>" % (self.key, self.ok)
+
+
+# What each part's repair button says, keyed by Part.repair. Here rather than
+# in the window so a part that gains a repair cannot gain a button with no
+# label, and so the tests can check every name resolves.
+REPAIR_LABELS = {
+    "reinstall": "Rebuild and reinstall",
+    "install-cec": "Reinstall HDMI CEC",
+}
+
+
+def led_part(checks):
+    """The LED service, from the checklist that was this page's only content."""
+    problems = broken(checks)
+    if not problems:
+        verdict = "Installed and running."
+    elif any(check.name.startswith("Kernel module") for check in problems):
+        # The one a SteamOS update reliably causes, and the one with an
+        # answer, so it is worth saying instead of the count.
+        verdict = ("The kernel module is missing for the running kernel - a "
+                   "SteamOS update brings a new one, and reinstalling builds "
+                   "it again.")
+    else:
+        verdict = "%d of %d checks failed." % (len(problems), len(checks))
+    return Part("led", "LED bar", not problems, verdict, checks,
+                repair="reinstall")
+
+
+def power_part(current, available):
+    """The CPU governor, if this machine is being told what to do at all.
+
+    Not installed rather than broken when nothing is set: leaving the CPU as
+    SteamOS had it is this project's default and the ordinary state, so a
+    machine that never touched it has nothing to report.
+    """
+    governor = (current or {}).get("CPU_GOVERNOR", "")
+    if not governor:
+        return Part("power", "CPU power", None, "Left as SteamOS set it.")
+    running = (available or {}).get("current", {}).get("CPU_GOVERNOR", "")
+    detail = ["Wanted: %s" % governor, "Running: %s" % (running or "unknown")]
+    epp = (current or {}).get("CPU_EPP", "")
+    if epp:
+        detail.append("Energy preference: %s" % epp)
+    if running and running != governor:
+        return Part("power", "CPU power", False,
+                    "Set to %s, but the CPU is running %s."
+                    % (governor, running), detail)
+    return Part("power", "CPU power", True, "Running %s." % governor, detail)
+
+
+def cec_part(status, installed):
+    """HDMI CEC: is the toolkit there, and can it reach the television."""
+    if not installed:
+        return Part("cec", "HDMI CEC", None, "Not installed.")
+    if status is None:
+        return Part("cec", "HDMI CEC", False,
+                    "Installed, but it will not say how it is.",
+                    repair="install-cec")
+    device = cec_module.device(status)
+    on = [name for name, _k, _l, _s in cec_module.FEATURES
+          if cec_module.feature_on(status, name)]
+    detail = ["Adapter: %s" % (device.get("device") or "none configured"),
+              "Features on: %s" % (", ".join(on) if on else "none")]
+    if not cec_module.usable(status):
+        return Part("cec", "HDMI CEC", False,
+                    "%s cannot be reached, so nothing can be sent."
+                    % (device.get("device") or "The adapter"),
+                    detail, repair="install-cec")
+    return Part("cec", "HDMI CEC", True,
+                "Ready on %s, %d feature(s) on."
+                % (device.get("device"), len(on)), detail)
+
+
+def layout_part(layout, labels=None):
+    """The keyboard layout, which is a setting rather than an installation.
+
+    Never False. There is nothing here that can be broken - a line is in a
+    file or it is not - so it reports set or unset and never counts against
+    the window's summary.
+    """
+    if not layout:
+        return Part("keyboard", "Keyboard layout", None,
+                    "Left to the system.")
+    named = (labels or {}).get(layout, layout)
+    return Part("keyboard", "Keyboard layout", True, named,
+                ["Applies to Game Mode at the next login."])
+
+
+def panel_part(version, update_state=None, update_said=""):
+    """The program itself. Always installed - you are looking at it."""
+    # Named at call time rather than imported above it: this block sits
+    # before the update constants in the file, and moving it below them would
+    # put the parts a long way from the checks they are built out of.
+    if update_state == UPDATE_AVAILABLE:
+        return Part("panel", "This panel", True,
+                    "Version %s. %s" % (version, update_said or
+                                        "An update is available."))
+    return Part("panel", "This panel", True, "Version %s." % version)
+
+
+def parts_summary(parts):
+    """One sentence for the top of the window, over every part.
+
+    Counted across all of them rather than over the LED checklist alone,
+    which is what it used to say - so a machine whose CEC adapter had gone
+    read "Everything is in order" while the CEC page said otherwise, and the
+    LED bar's own count was printed over pages that have nothing to do with
+    it.
+
+    Parts that are not installed are not counted. A machine that never wanted
+    HDMI CEC is not a machine with a problem.
+    """
+    problems = [part for part in parts if part.ok is False]
+    if not problems:
+        return "Everything is in order."
+    if len(problems) == 1:
+        # One thing wrong is worth naming; the sentence is then the same one
+        # its own block shows, which is where you are about to look.
+        return "%s: %s" % (problems[0].name, problems[0].verdict)
+    return "%d problems: %s." % (len(problems),
+                                 ", ".join(part.name for part in problems))
+
+
 # -- settings profiles -----------------------------------------------------
 #
 # A profile is the same KEY=value file as the configuration, which is what

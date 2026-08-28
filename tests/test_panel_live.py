@@ -1273,9 +1273,12 @@ class LiveWindowTest(unittest.TestCase):
         self.root.update()
         for button in self.panel._busy_buttons:
             self.assertIn("disabled", button.state(), button.cget("text"))
-        # The one that only folds something away stays live: it starts
-        # nothing, so greying it would take away a control for no reason.
-        self.assertNotIn("disabled", self.panel.details.state())
+        # The ones that only fold something away stay live: they start
+        # nothing, so greying them would take away a control for no reason.
+        self.assertTrue(self.panel._fold_buttons, "no fold buttons to check")
+        for name in self.panel._fold_buttons:
+            self.assertNotIn("disabled",
+                             self.root.nametowidget(name).state())
         self.panel._set_busy(False, 0)
 
     def test_the_easter_egg_is_not_on_the_construction_path(self):
@@ -1429,32 +1432,59 @@ class LiveWindowTest(unittest.TestCase):
                         tests)
         self.assertNotIn("Rebuild and reinstall", tests)
 
-    def test_the_checklist_still_folds_where_the_page_now_lives(self):
-        """It opens, it closes, and the window stays on the screen.
+    def test_each_status_block_folds_on_its_own(self):
+        """One fold per part now, where there used to be one for the page.
 
-        Not the window's height: _details_change works out how much taller to
-        make it, but that is about the *smoothness* of the fold - _fit_window
-        settles the size afterwards either way, and on a screen this short the
-        window is already at the cap where neither can grow it. What has to
-        hold is that the list appears and goes away, on a page that has just
-        moved out of one notebook and into another.
+        The page was the LED checklist and a single Details button. It is one
+        block per part of the toolbox, so a fold that opened all of them would
+        be the old page again with more in it.
+        """
+        # Arranged rather than assumed: on a machine with nothing configured
+        # only the LED bar has any detail, and a test that needs two blocks
+        # would then be testing whatever this machine happens to be.
+        self.panel.power = {"CPU_GOVERNOR": "powersave"}
+        self.panel.system = {syssettings.LAYOUT: "de"}
+        self.panel._open_section("status")
+        self.panel.refresh_status()
+        for _ in range(4):
+            self.root.update()
+        keys = [part.key for part in self.panel._read_parts() if part.detail]
+        self.assertGreater(len(keys), 1, "only one part has any detail")
+
+        was = set(self.panel._open_parts)
+        self.panel._fold_part(keys[-1])
+        for _ in range(4):
+            self.root.update()
+        # Exactly that one changed, and nothing else moved with it.
+        self.assertEqual(self.panel._open_parts ^ was, {keys[-1]})
+        self.assertLessEqual(self.root.winfo_height(),
+                             self.root.winfo_screenheight())
+
+    def test_a_broken_part_unfolds_itself_once_and_stays_where_it_is_put(self):
+        """Opening itself is right; opening again after you shut it is not.
+
+        The page is re-read every time a command finishes, which while an
+        install runs is every few seconds - so a block that reopened on each
+        read would be one nobody could fold away.
         """
         self.panel._open_section("status")
-        # Closed first, and deliberately: refresh_status unfolds the list on a
-        # machine with something wrong with it, which this one has - so the
-        # window opens with it already down and "open it" would be a no-op.
-        for show in (False, True, False):
-            self.panel._show_details(show)
-            for _ in range(4):
-                self.root.update()
-            self.assertEqual(bool(self.panel.checklist.winfo_ismapped()),
-                             show)
-            self.assertLessEqual(self.root.winfo_height(),
-                                 self.root.winfo_screenheight())
-        # And the arithmetic is asked of the notebook the page is in. Against
-        # the strip's, which is what it used to read, this is a number about a
-        # stack the checklist is not in.
-        self.assertIsInstance(self.panel._details_change(True), int)
+        for _ in range(6):
+            self.root.update()
+        broken = [part for part in self.panel._read_parts()
+                  if part.ok is False and part.detail]
+        if not broken:                                       # pragma: no cover
+            self.skipTest("nothing on this machine is broken to unfold")
+        key = broken[0].key
+        self.assertIn(key, self.panel._open_parts, "it stayed folded")
+        self.panel._fold_part(key)
+        for _ in range(4):
+            self.root.update()
+        self.assertNotIn(key, self.panel._open_parts)
+        self.panel.refresh_status()
+        for _ in range(4):
+            self.root.update()
+        self.assertNotIn(key, self.panel._open_parts,
+                         "it opened itself again after being folded away")
 
     def test_the_wheel_scrolls_the_section_in_front_of_you(self):
         """Not the strip's page, which is what one notebook meant.
@@ -1666,6 +1696,54 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(sorted(wrong.values()), [],
                          "\n" + "\n".join(sorted(wrong.values())))
         self.assertGreater(checked, 20, "hardly any label was checked")
+
+    def test_no_frame_is_a_band_of_a_colour_its_parent_is_not(self):
+        """The same rule as the labels, one layer up - and the gap it left.
+
+        The Update group was a bare ttk.Frame, which is card-coloured. On the
+        old status page that was right, because the page itself was a card. It
+        moved onto App Settings, kept the colour, and became a band of the
+        wrong shade the width of the content - and the label test above passed
+        the whole time, because every label in that band correctly matched the
+        band.
+
+        A card is the one frame allowed to differ from what it stands on: that
+        contrast is what a card *is*. Everything else has to match.
+        """
+        style = ttk.Style(self.root)
+        surfaces = {"Card.TFrame"}
+
+        def ground(widget):
+            try:
+                named = str(widget.cget("style"))
+            except tk.TclError:                              # pragma: no cover
+                return ""
+            return str(style.lookup(named or widget.winfo_class(),
+                                    "background")).lower()
+
+        wrong = {}
+        for section, _t, _s, _i in self.panel_module.SECTIONS + (
+                self.panel_module.ABOUT,):
+            self.panel._open_section(section)
+            self.root.update()
+            for widget in self._every_widget():
+                if not isinstance(widget, ttk.Frame):
+                    continue
+                if str(widget.cget("style")) in surfaces:
+                    continue                    # a card, and meant to differ
+                mine = ground(widget)
+                parent = widget.nametowidget(widget.winfo_parent())
+                if isinstance(parent, (tk.Canvas, tk.Toplevel, tk.Tk)):
+                    continue                    # not a themed ground to match
+                theirs = ground(parent)
+                if not mine or not theirs or mine == theirs:
+                    continue
+                wrong[str(widget)] = ("%s: %s on %s, stands on %s"
+                                      % (section, widget.cget("style")
+                                         or widget.winfo_class(),
+                                         mine, theirs))
+        self.assertEqual(sorted(wrong.values()), [],
+                         "\n" + "\n".join(sorted(wrong.values())))
 
     def test_no_card_stands_on_another_card(self):
         """Reported: dark notches inside the corners of the placeholder cards.
