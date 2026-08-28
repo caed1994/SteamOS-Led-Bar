@@ -14,6 +14,7 @@ produces, trimmed to the keys this panel reads.
 import json
 import os
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -338,6 +339,78 @@ class ShownSettingsTest(unittest.TestCase):
     def test_a_status_with_no_config_is_an_empty_one(self):
         self.assertEqual(cec.config({}), {})
         self.assertEqual(cec.config({"config": "not a dictionary"}), {})
+
+
+class PanelCommandTest(unittest.TestCase):
+    """What the window would run, checked without a window."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "gui"))
+        import ledpanel
+        self.ledpanel = ledpanel
+
+    def test_installing_goes_through_our_own_script_not_theirs(self):
+        """Not `pkexec vendor/.../install.sh`.
+
+        That installer refuses to run as root, which is what pkexec makes it -
+        so aimed straight at it the prompt would be spent to be told no.
+        """
+        command = self.ledpanel.install_cec_command("/repo")
+        self.assertEqual(command[0], "pkexec")
+        self.assertTrue(command[1].endswith("scripts/install-cec.sh"))
+        self.assertEqual(command[2], "install")
+        self.assertIn("vendor", command[3])
+
+    def test_removing_is_the_same_script_with_the_other_word(self):
+        command = self.ledpanel.install_cec_command("/repo", remove=True)
+        self.assertEqual(command[2], "remove")
+
+    def test_a_machine_without_the_toolkit_has_no_status_rather_than_a_blank(self):
+        """None and {} are different pages.
+
+        None is "not installed", which is a page offering to install. An empty
+        status is "installed and reporting nothing", which is a page of
+        switches all showing off. Returning the second for the first would
+        offer to configure a toolkit that is not there.
+        """
+        with tempfile.TemporaryDirectory() as home:
+            self.assertIsNone(self.ledpanel.cec_status(home))
+
+    def test_it_asks_the_toolkit_when_there_is_one(self):
+        with tempfile.TemporaryDirectory() as home:
+            where = cec.command_path(home)
+            os.makedirs(os.path.dirname(where))
+            with open(where, "w") as handle:
+                handle.write("#!/bin/sh\n")
+            os.chmod(where, 0o755)
+            asked = []
+
+            def run(command):
+                asked.append(command)
+                return json.dumps(status())
+
+            found = self.ledpanel.cec_status(home, run=run)
+        self.assertEqual(asked, [cec.status_command(home)])
+        self.assertEqual(found["version"], "v0.1.26")
+
+    def test_a_toolkit_that_will_not_answer_is_not_installed_as_far_as_the_page_goes(self):
+        # It is asked on every visit to the page and on a timer. A toolkit
+        # mid-restart answering nothing must not put a line in the log and a
+        # warning in the status bar each time.
+        with tempfile.TemporaryDirectory() as home:
+            where = cec.command_path(home)
+            os.makedirs(os.path.dirname(where))
+            with open(where, "w") as handle:
+                handle.write("#!/bin/sh\n")
+            os.chmod(where, 0o755)
+            self.assertIsNone(self.ledpanel.cec_status(home,
+                                                       run=lambda _c: None))
+
+    def test_asking_a_program_that_is_not_there_is_not_a_crash(self):
+        # The real runner, against a path that does not exist. This is the
+        # timer's path, and an exception on it would come out of a callback.
+        self.assertIsNone(self.ledpanel._run_quietly(["/nonexistent/toolkitctl",
+                                                      "status"]))
 
 
 if __name__ == "__main__":                                  # pragma: no cover

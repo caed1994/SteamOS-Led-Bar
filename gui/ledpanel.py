@@ -14,6 +14,7 @@ import platform
 import re
 import subprocess
 
+from steamos_led import cec as cec_module
 from steamos_led import config as config_module
 from steamos_led import phone
 from steamos_led import power as power_module
@@ -905,3 +906,56 @@ def _where(path):
     """A sensor's place in /sys, short: "hwmon1/temp2"."""
     directory, name = os.path.split(path)
     return "%s/%s" % (os.path.basename(directory), name.replace("_input", ""))
+
+
+# -- HDMI CEC ----------------------------------------------------------------
+#
+# The CEC work itself is the vendored SteamOS CEC Toolkit and the reading of
+# it is server/steamos_led/cec.py. What belongs here is the same thing the
+# rest of this file holds: the commands the window runs, in one place, so a
+# window that is hard to drive under a test is not also the only record of
+# what it would have executed.
+
+
+def install_cec_command(source_dir, remove=False):
+    """Install or remove the CEC toolkit, in one prompt.
+
+    Through a script of ours rather than straight at the toolkit's installer,
+    because that installer refuses to run as root and wants sudo about forty
+    times - see scripts/install-cec.sh for what stands between the two.
+    """
+    return ["pkexec", os.path.join(source_dir, "scripts", "install-cec.sh"),
+            "remove" if remove else "install",
+            cec_module.source_dir(source_dir)]
+
+
+def cec_status(home=None, run=None):
+    """Ask the installed toolkit about itself. None when it is not installed.
+
+    None rather than an empty status, and the difference is the whole of what
+    the page does next: not installed is a page offering to install, and
+    installed-but-broken is a page saying what is wrong. An empty dictionary
+    would look like the second while meaning the first.
+    """
+    if not cec_module.installed(home):
+        return None
+    runner = run or _run_quietly
+    done = runner(cec_module.status_command(home))
+    if done is None:
+        return None
+    return cec_module.read_status(done)
+
+
+def _run_quietly(command):
+    """Run something short and hand back its output, or None if it would not.
+
+    Used for the status read, which happens on every visit to the page and on
+    a timer - so it is the one command here that must not put a line in the
+    log or a warning in the status bar each time the toolkit is mid-restart.
+    """
+    try:
+        done = subprocess.run(command, capture_output=True, text=True,
+                              timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
