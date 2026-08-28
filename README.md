@@ -523,7 +523,7 @@ editing the file by hand:
 systemctl --user restart steamos-led-phone
 ```
 
-*Status & Repair* then shows two more rows: the bridge running, and KDE Connect
+*Status* then shows two more rows under the LED bar: the bridge running, and KDE Connect
 naming your phone. Both have to be there for anything to flash.
 
 To watch it work, as yourself and not with `sudo`:
@@ -554,7 +554,7 @@ To try the bar on its own, without involving the phone:
 **Game Mode works too**, with one thing to set up. KDE Connect's daemon dies
 with the desktop session, so the bridge starts it again itself &mdash; but your
 systemd has to keep running when no session is open, or the bridge is not there
-either. `install.sh` turns that on and *Status & Repair* checks it:
+either. `install.sh` turns that on and *Status* checks it:
 
 ```bash
 sudo loginctl enable-linger $USER
@@ -586,8 +586,8 @@ enough settings to need it, has its own list of pages inside.
 | **EPP & Governor** | the CPU governor and the energy preference &mdash; see [CPU power](#cpu-power) |
 | **HDMI CEC Mods** | talking to the television over HDMI &mdash; see [HDMI CEC](#hdmi-cec) |
 | **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
-| **Status & Repair** | what is installed and running, one button that puts it back, and [updating](#updating-and-removing) |
-| **App Settings** | how this window looks &mdash; see [Light and dark](#light-and-dark) |
+| **Status** | how every part of the toolbox is doing, each with the button that repairs it |
+| **App Settings** | this program itself: its [look](#light-and-dark) and its [updates](#updating-and-removing) |
 | **About** | version, licence and credits, at the foot of the list |
 
 | LED Strip page | What is on it |
@@ -614,6 +614,24 @@ which is the better place to watch it:
 ./gui/steamos-led-panel          # its commands' output lands in this terminal
 ./install.sh                     # the same steps, with all of their output
 ```
+
+### Status
+
+One block per part of the toolbox &mdash; the LED bar, CPU power, HDMI CEC,
+the keyboard layout and the panel itself &mdash; each with a light, a sentence
+saying how it is, a fold for the detail behind it, and the one button that
+repairs *that* part. The repairs stay here rather than moving to the pages
+they belong to: this is where you find out something is broken, and walking to
+another section for the fix is the walk this page saves.
+
+The light has three states, and the third is the point. Grey is **not
+installed**, which is not a fault: a machine that never wanted HDMI CEC is not
+a machine with a problem, and it is not counted as one in the sentence at the
+top of the window.
+
+A part that is broken unfolds itself once, so the page never says something is
+wrong and hides what. Fold it away and it stays away &mdash; the page is
+re-read every time a command finishes.
 
 ### Light and dark
 
@@ -853,7 +871,7 @@ Follow the log with `journalctl -u steamos-led-serial -f`.
 
 ## Updating and removing
 
-From the control panel: *Status & Repair* > *Update*, pick a branch, **Check for
+From the control panel: *App Settings* > *Update*, pick a branch, **Check for
 updates**, then **Update and install**. Local edits or commits of your own stop
 it with a message naming them, rather than being resolved behind your back.
 
