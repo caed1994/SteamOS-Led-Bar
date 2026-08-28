@@ -1664,53 +1664,6 @@ class Dialog:
         self.window.destroy()
 
 
-# -- easter egg ---------------------------------------------------------------
-#
-# A birthday cake, shown once when the window opens. Temporary and meant to be
-# thrown away: everything it needs is this block and the two lines in main()
-# that call it, so removing it is deleting those and nothing else. Nothing in
-# the panel refers to it, and Panel does not know it exists - which is also
-# why it is put up from main() rather than from Panel.__init__: a modal dialog
-# on the construction path would wait forever in every test that builds a
-# window, and would come back on every theme change, since rebuild() runs the
-# constructor again.
-
-# Solid rather than outlined, which is a decision the font made: at Tk's line
-# spacing an open box of rules reads as a crate, and the filled rows are what
-# make it a cake.
-BIRTHDAY_CAKE = r"""
-         ,   ,   ,   ,   ,
-         |   |   |   |   |
-    _____|___|___|___|___|___
-    (~~~~~~~~~~~~~~~~~~~~~~~)
-    |#######################|
-    |:::::::::::::::::::::::|
-    |#######################|
-    '-----------------------'
-"""
-
-BIRTHDAY_TITLE = "Happy Birthday"
-BIRTHDAY_LINE = "Have a good one."
-
-
-class BirthdayDialog(Dialog):
-    """The cake, in a window that already knows how to be a dialog."""
-
-    def __init__(self, parent):
-        Dialog.__init__(self, parent, BIRTHDAY_TITLE, "")
-
-    def build(self, body):
-        # A fixed-width font, which is the whole point: drawn in the window's
-        # proportional one the candles do not stand over the cake.
-        ttk.Label(body, text=BIRTHDAY_CAKE.strip("\n"), font=("TkFixedFont",),
-                  justify="left").pack(anchor="center")
-        ttk.Label(body, text=BIRTHDAY_LINE, justify="left").pack(
-            anchor="center", pady=(GROUP_GAP, 0))
-
-
-# -- end of easter egg --------------------------------------------------------
-
-
 class CountdownDialog(Dialog):
     """Keep these settings, or let them be put back.
 
@@ -5720,10 +5673,6 @@ def main():
     except tk.TclError:                                     # pragma: no cover
         pass
     Panel(root)
-    # Two lines of easter egg - see BirthdayDialog. Put up after an update so
-    # the window it centres itself on has been laid out and has a size.
-    root.update()
-    BirthdayDialog(root)
     root.mainloop()
     return 0
 
