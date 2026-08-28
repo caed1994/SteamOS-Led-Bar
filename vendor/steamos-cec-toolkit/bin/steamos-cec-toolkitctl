@@ -1,0 +1,1078 @@
+#!/usr/bin/env python3
+"""Control/status helper for SteamOS CEC Toolkit and Decky UI."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shlex
+import subprocess
+from pathlib import Path
+from typing import Any
+
+
+SYSTEM_CONFIG_FILE = Path(os.environ.get("STEAMOS_CEC_CONFIG", "/etc/steamos-cec-toolkit.conf"))
+USER_CONFIG_FILE = Path.home() / ".config/steamos-cec-toolkit/config.conf"
+DISCOVERY_CACHE_FILE = Path.home() / ".config/steamos-cec-toolkit/cec-devices.json"
+CONFIG_FILE = USER_CONFIG_FILE if USER_CONFIG_FILE.exists() else SYSTEM_CONFIG_FILE
+ROOT_HELPER = Path("/var/lib/steamos-cec-toolkit/steamos-cec-volume-raw")
+DEBUG_HELPER = Path("/var/lib/steamos-cec-toolkit/steamos-cec-debug-monitor")
+POWER_STANDBY_HELPER = Path("/var/lib/steamos-cec-toolkit/steamos-cec-power-standby-control")
+USB_WAKE_HELPER = Path("/var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-control")
+CEC_PERMISSIONS_HELPER = Path("/var/lib/steamos-cec-toolkit/steamos-cec-permissions-apply")
+RESUME_WAKE_HELPER = Path("/var/lib/steamos-cec-toolkit/steamos-cec-resume-wake")
+RESUME_WAKE_UNIT = Path("/etc/systemd/system/steamos-cec-resume-wake.service")
+SUDOERS_FILE = Path("/etc/sudoers.d/zz-steamos-cec-toolkit-volume")
+INSTALLED_VERSION_FILE = Path.home() / ".local/share/steamos-cec-toolkit/VERSION"
+SOURCE_VERSION_FILE = Path(__file__).resolve().parent.parent / "VERSION"
+EXTERNAL_VOLUME_SCRIPT = Path.home() / ".local/bin/steamos-cec-external-volume"
+VOLUME_SCRIPT = Path.home() / ".local/bin/steamos-cec-volume"
+BOOT_WAKE_SCRIPT = Path.home() / ".local/bin/steamos-cec-boot-wake"
+STEAM_BUTTON_SCRIPT = Path.home() / ".local/bin/steamos-cec-steam-button"
+TV_STANDBY_SCRIPT = Path.home() / ".local/bin/steamos-cec-tv-standby-suspend"
+INPUT_AWAY_SUSPEND_SCRIPT = Path.home() / ".local/bin/steamos-cec-input-away-suspend"
+GAMESCOPE_RECOVERY_SCRIPT = Path.home() / ".local/bin/steamos-cec-gamescope-recovery"
+WIREPLUMBER_CONFIG = (
+    Path.home()
+    / ".config/wireplumber/wireplumber.conf.d/99-steamos-cec-external-volume.conf"
+)
+WIREPLUMBER_CONFIG_ALIASES = (
+    Path.home() / ".config/wireplumber/wireplumber.conf.d/99-cec-external-volume.conf",
+)
+CEC_SERVICE_OVERRIDE = (
+    Path.home()
+    / ".config/systemd/user/cec-audio-control.service.d/override.conf"
+)
+CEC_SERVICE_OVERRIDE_CONTENT = """[Service]
+ExecStart=
+ExecStart=%h/.local/bin/steamos-cec-external-volume
+"""
+WIREPLUMBER_CONFIG_TEMPLATE = """# SteamOS CEC Toolkit: enable PipeWire ExternalVolume for HDMI CEC.
+
+context.properties = {
+  support.varlink = true
+}
+
+monitor.alsa.rules = [
+  {
+    matches = [
+      {
+        device.name = "@HDMI_ALSA_CARD_NAME@"
+      }
+    ]
+    actions = {
+      update-props = {
+        device.description = "HDMI / DisplayPort"
+        api.acp.disable-pro-audio = true
+        device.routes.default-sink-volume = 1.0
+        api.alsa.external-volume-control = "unix:/run/user/1000/cec-audio-control/org.pipewire.ExternalVolume"
+        steamos.supports-hdmi-cec = true
+      }
+    }
+  },
+  {
+    matches = [
+      {
+        node.name = "~alsa_output.pci-.*hdmi.*"
+      }
+    ]
+    actions = {
+      update-props = {
+        session.suspend-timeout-seconds = 3600
+      }
+    }
+  }
+]
+
+wireplumber.settings {
+  monitor.alsa.enable-external-volume-control = true
+}
+"""
+
+USER_SERVICES = {
+    "boot-wake": "steamos-cec-boot-wake.service",
+    "steam-button": "steamos-cec-steam-button.service",
+    "tv-standby": "steamos-cec-tv-standby-suspend.service",
+    "input-away-suspend": "steamos-cec-input-away-suspend.service",
+    "gamescope-recovery": "steamos-cec-gamescope-recovery.service",
+}
+
+SYSTEM_SERVICES = {
+    "power-standby": "steamos-cec-before-sleep.service",
+    "usb-wake": "steamos-cec-usb-wake.service",
+}
+
+GAMEPAD_NAME_HINTS = (
+    "8bitdo",
+    "controller",
+    "dualsense",
+    "dualshock",
+    "gamepad",
+    "guitar",
+    "joystick",
+    "nintendo",
+    "playstation",
+    "santroller",
+    "shield",
+    "x-box",
+    "xbox",
+)
+NON_GAMEPAD_NAME_HINTS = (
+    "consumer control",
+    "keyboard",
+    "mouse",
+    "power button",
+    "sleep button",
+    "steamos-manager",
+    "system control",
+    "touchpad",
+)
+
+
+def run(command: list[str], timeout: int = 8) -> dict[str, Any]:
+    try:
+        process = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return {
+            "returncode": process.returncode,
+            "stdout": process.stdout.strip(),
+            "ok": process.returncode == 0,
+        }
+    except Exception as error:
+        return {"returncode": -1, "stdout": str(error), "ok": False}
+
+
+def systemctl_user(*args: str) -> dict[str, Any]:
+    return run(["systemctl", "--user", *args])
+
+
+def read_config() -> dict[str, str]:
+    values: dict[str, str] = {}
+    for path in (SYSTEM_CONFIG_FILE, USER_CONFIG_FILE):
+        values.update(read_config_file(path))
+    return values
+
+
+def read_config_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        with path.open(encoding="utf-8") as file:
+            for raw_line in file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return values
+
+
+def write_user_config(updates: dict[str, str]) -> None:
+    allowed = {
+        "CEC_DEVICE",
+        "CEC_PHYSICAL_ADDRESS",
+        "CEC_VOLUME_INITIATOR",
+        "CEC_AUDIO_LOGICAL_ADDRESS",
+        "CEC_SIMPLINK_ACK",
+        "CEC_SIMPLINK_PAYLOAD",
+        "CEC_SIMPLINK_VENDOR_ID",
+        "CEC_SLEEP_TV_ACTION",
+        "HDMI_ALSA_CARD_NAME",
+        "HDMI_ALSA_CARD_NICK",
+        "EXTERNAL_VOLUME_ROUTE",
+        "CONTROLLER_WAKE_GENERIC_INPUT",
+        "CONTROLLER_WAKE_STEAM_HID",
+        "INPUT_INACTIVE_SUSPEND_DELAY_SECONDS",
+        "INPUT_AWAY_SUSPEND_DELAY_SECONDS",
+    }
+    current = read_config()
+    for key, value in updates.items():
+        if key not in allowed:
+            raise ValueError(f"Unsupported config key: {key}")
+        if value and not re.fullmatch(r"[A-Za-z0-9_./: ,+()[\]-]+", value):
+            raise ValueError(f"Unsupported value for {key}")
+        current[key] = value
+
+    USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# SteamOS CEC Toolkit user configuration.\n"]
+    for key in sorted(allowed):
+        if key in current:
+            lines.append(f"{key}={shlex.quote(current[key])}\n")
+    USER_CONFIG_FILE.write_text("".join(lines), encoding="utf-8")
+
+
+def service_state(unit: str) -> dict[str, Any]:
+    active = systemctl_user("is-active", unit)
+    enabled = systemctl_user("is-enabled", unit)
+    return {
+        "unit": unit,
+        "active": active["stdout"],
+        "enabled": enabled["stdout"],
+        "is_active": active["returncode"] == 0,
+        "is_enabled": enabled["returncode"] == 0,
+    }
+
+
+def system_service_state(unit: str) -> dict[str, Any]:
+    active = run(["systemctl", "is-active", unit])
+    enabled = run(["systemctl", "is-enabled", unit])
+    return {
+        "unit": unit,
+        "active": active["stdout"],
+        "enabled": enabled["stdout"],
+        "is_active": active["returncode"] == 0,
+        "is_enabled": enabled["returncode"] == 0,
+    }
+
+
+def cec_label(logical: str, device_type: str, osd_name: str) -> str:
+    parts = [logical]
+    if device_type:
+        parts.append(device_type)
+    if osd_name:
+        parts.append(osd_name)
+    return " - ".join(parts)
+
+
+def valid_physical_address(value: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F]", value)) and value.lower() != "f.f.f.f"
+
+
+def discover_cec() -> dict[str, Any]:
+    config = read_config()
+    cec_device = config.get("CEC_DEVICE", "/dev/cec0")
+    available = sorted(str(path) for path in Path("/dev").glob("cec*"))
+    cec_path = Path(cec_device)
+    if not cec_path.exists():
+        if len(available) == 1:
+            cec_device = available[0]
+            cec_path = Path(cec_device)
+        else:
+            detail = (
+                f"No CEC adapter found at {cec_device}."
+                if not available
+                else f"Configured CEC adapter {cec_device} was not found."
+            )
+            return {
+                "ok": False,
+                "cec_device": cec_device,
+                "available_cec_devices": available,
+                "devices": [],
+                "suggested": {
+                    "CEC_DEVICE": available[0] if len(available) == 1 else cec_device,
+                    "CEC_PHYSICAL_ADDRESS": "",
+                    "CEC_VOLUME_INITIATOR": "",
+                    "CEC_AUDIO_LOGICAL_ADDRESS": "0",
+                },
+                "error": (
+                    f"{detail} "
+                    "Check that your HDMI-CEC adapter is connected and exposed as /dev/cec*. "
+                    f"Available CEC devices: {', '.join(available) if available else 'none'}."
+                ),
+                "raw": "",
+            }
+    multiple_note = ""
+    if len(available) > 1:
+        multiple_note = (
+            f"Multiple CEC adapters found: {', '.join(available)}. "
+            f"Using configured CEC_DEVICE={cec_device}."
+        )
+    elif len(available) == 1 and available[0] != config.get("CEC_DEVICE", "/dev/cec0"):
+        multiple_note = f"Using detected CEC_DEVICE={cec_device}."
+    result = run(["cec-ctl", "-d", cec_device, "--show-topology"], timeout=12)
+    devices: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    adapter_physical_address = ""
+
+    for line in result["stdout"].splitlines():
+        if current is None and "Physical Address" in line:
+            value = line.split(":", 1)[-1].strip()
+            if valid_physical_address(value):
+                adapter_physical_address = value
+            continue
+        match = re.search(r"System Information for device (\d+) \(([^)]+)\)", line)
+        if match:
+            if current:
+                current["label"] = cec_label(
+                    current["logical_address"],
+                    current.get("device_type", ""),
+                    current.get("osd_name", ""),
+                )
+                devices.append(current)
+            current = {
+                "logical_address": match.group(1),
+                "device_type": match.group(2),
+                "osd_name": "",
+                "physical_address": "",
+                "vendor": "",
+                "power_status": "",
+            }
+            continue
+        if current is None:
+            continue
+        if "Physical Address" in line:
+            current["physical_address"] = line.split(":", 1)[-1].strip()
+        elif "Vendor ID" in line:
+            current["vendor"] = line.split(":", 1)[-1].strip()
+        elif "OSD Name" in line:
+            current["osd_name"] = line.split(":", 1)[-1].strip().strip("'")
+        elif "Power Status" in line:
+            current["power_status"] = line.split(":", 1)[-1].strip()
+
+    if current:
+        current["label"] = cec_label(
+            current["logical_address"],
+            current.get("device_type", ""),
+            current.get("osd_name", ""),
+        )
+        devices.append(current)
+
+    tv = next((device for device in devices if device.get("device_type") == "TV"), None)
+    audio = next(
+        (device for device in devices if device.get("device_type") == "Audio System"),
+        None,
+    )
+    tv_is_lg = bool(tv) and tv.get("vendor", "").lower().lstrip().startswith("0x00e091")
+    payload = {
+        "ok": result["ok"],
+        "cec_device": cec_device,
+        "available_cec_devices": available,
+        "devices": devices,
+        "suggested": {
+            "CEC_DEVICE": cec_device,
+            "CEC_PHYSICAL_ADDRESS": adapter_physical_address,
+            "CEC_VOLUME_INITIATOR": "",
+            "CEC_AUDIO_LOGICAL_ADDRESS": audio["logical_address"] if audio else "0",
+            "CEC_SIMPLINK_ACK": "1" if tv_is_lg else "0",
+        },
+        "note": multiple_note,
+        "error": "" if result["ok"] else result["stdout"],
+        "raw": result["stdout"],
+    }
+    if result["ok"]:
+        if adapter_physical_address:
+            try:
+                write_user_config({
+                    "CEC_DEVICE": cec_device,
+                    "CEC_PHYSICAL_ADDRESS": adapter_physical_address,
+                })
+            except ValueError:
+                pass
+        DISCOVERY_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DISCOVERY_CACHE_FILE.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    return payload
+
+
+def cached_discovery() -> dict[str, Any] | None:
+    try:
+        payload = json.loads(DISCOVERY_CACHE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def object_props(item: dict[str, Any]) -> dict[str, Any]:
+    info = item.get("info", {})
+    props = info.get("props", {})
+    return props if isinstance(props, dict) else {}
+
+
+def audio_label(name: str, nick: str, description: str) -> str:
+    parts = [part for part in (nick, description, name) if part]
+    seen: list[str] = []
+    for part in parts:
+        if part not in seen:
+            seen.append(part)
+    return " / ".join(seen[:2]) if seen else "HDMI audio"
+
+
+def discover_audio() -> dict[str, Any]:
+    config = read_config()
+    result = run(["pw-dump"], timeout=12)
+    fallback = {
+        "HDMI_ALSA_CARD_NAME": config.get("HDMI_ALSA_CARD_NAME", "alsa_card.pci-0000_03_00.1"),
+        "HDMI_ALSA_CARD_NICK": config.get("HDMI_ALSA_CARD_NICK", "HDA ATI HDMI"),
+        "EXTERNAL_VOLUME_ROUTE": config.get("EXTERNAL_VOLUME_ROUTE", "hdmi-output-0"),
+    }
+    if not result["ok"]:
+        return {
+            "ok": False,
+            "cards": [],
+            "routes": [],
+            "suggested": fallback,
+            "error": result["stdout"] or "pw-dump failed",
+        }
+
+    try:
+        objects = json.loads(result["stdout"])
+    except json.JSONDecodeError as error:
+        return {
+            "ok": False,
+            "cards": [],
+            "routes": [],
+            "suggested": fallback,
+            "error": f"Could not parse pw-dump JSON: {error}",
+        }
+
+    cards: list[dict[str, str]] = []
+    routes: list[str] = []
+    route_pattern = re.compile(r"hdmi-output-\d+")
+    for item in objects if isinstance(objects, list) else []:
+        props = object_props(item)
+        values = [str(value) for value in props.values() if isinstance(value, (str, int, float))]
+        text = " ".join(values).lower()
+        name = str(props.get("device.name", ""))
+        nick = str(props.get("device.nick", ""))
+        description = str(props.get("device.description", ""))
+        media_class = str(props.get("media.class", ""))
+
+        for value in values:
+            for route in route_pattern.findall(value):
+                if route not in routes:
+                    routes.append(route)
+
+        is_alsa_card = name.startswith("alsa_card.")
+        is_audio_device = media_class in {"Audio/Device", ""} and is_alsa_card
+        looks_hdmi = any(
+            term in text
+            for term in ("hdmi", "displayport", "display port", "hda ati", "hda nvidia", "hda intel")
+        )
+        if is_audio_device and looks_hdmi:
+            cards.append(
+                {
+                    "name": name,
+                    "nick": nick,
+                    "description": description,
+                    "label": audio_label(name, nick, description),
+                }
+            )
+
+    if not routes:
+        routes = [fallback["EXTERNAL_VOLUME_ROUTE"]]
+
+    configured_name = config.get("HDMI_ALSA_CARD_NAME", "")
+    suggested_card = next((card for card in cards if card["name"] == configured_name), None)
+    if suggested_card is None and cards:
+        suggested_card = cards[0]
+
+    suggested = {
+        "HDMI_ALSA_CARD_NAME": (suggested_card or {}).get("name", fallback["HDMI_ALSA_CARD_NAME"]),
+        "HDMI_ALSA_CARD_NICK": (suggested_card or {}).get("nick", fallback["HDMI_ALSA_CARD_NICK"]),
+        "EXTERNAL_VOLUME_ROUTE": routes[0],
+    }
+    note = ""
+    if len(cards) > 1:
+        note = "Multiple HDMI/DisplayPort audio cards found. Use the one connected to the TV/AVR chain."
+    elif not cards:
+        note = "No HDMI/DisplayPort ALSA card was detected from PipeWire."
+
+    if cards:
+        try:
+            write_user_config(suggested)
+        except ValueError:
+            pass
+
+    return {
+        "ok": bool(cards),
+        "cards": cards,
+        "routes": routes,
+        "suggested": suggested,
+        "note": note,
+        "error": "" if cards else note,
+    }
+
+
+def input_devices() -> list[dict[str, Any]]:
+    devices: list[dict[str, Any]] = []
+    current: dict[str, str] = {}
+
+    def flush() -> None:
+        if not current:
+            return
+        name = current.get("name", "")
+        phys = current.get("phys", "")
+        sysfs = current.get("sysfs", "")
+        bus = current.get("bus", "")
+        vendor = current.get("vendor", "")
+        product = current.get("product", "")
+        handlers = current.get("handlers", "").split()
+        for handler in handlers:
+            if handler.startswith("event"):
+                path = f"/dev/input/{handler}"
+                devices.append(
+                    {
+                        "path": path,
+                        "name": name,
+                        "phys": phys,
+                        "sysfs": sysfs,
+                        "bus": bus,
+                        "vendor": vendor,
+                        "product": product,
+                        "display_name": controller_display_name(name, vendor, product, bus),
+                        "handlers": handlers,
+                        "readable": os.access(path, os.R_OK),
+                        "gamepad": is_gamepad_name(name, handlers, vendor, product),
+                    }
+                )
+
+    try:
+        with Path("/proc/bus/input/devices").open(encoding="utf-8") as file:
+            for raw_line in file:
+                line = raw_line.rstrip("\n")
+                if not line:
+                    flush()
+                    current = {}
+                    continue
+                if line.startswith("N: Name="):
+                    current["name"] = line.split("=", 1)[1].strip().strip('"')
+                elif line.startswith("I:"):
+                    for field in line.split():
+                        if field.startswith("Bus="):
+                            current["bus"] = field.split("=", 1)[1].lower()
+                        elif field.startswith("Vendor="):
+                            current["vendor"] = field.split("=", 1)[1].lower()
+                        elif field.startswith("Product="):
+                            current["product"] = field.split("=", 1)[1].lower()
+                elif line.startswith("P: Phys="):
+                    current["phys"] = line.split("=", 1)[1].strip()
+                elif line.startswith("S: Sysfs="):
+                    current["sysfs"] = line.split("=", 1)[1].strip()
+                elif line.startswith("H: Handlers="):
+                    current["handlers"] = line.split("=", 1)[1].strip()
+            flush()
+    except OSError as error:
+        return [{"error": str(error)}]
+    return devices
+
+
+def controller_display_name(name: str, vendor: str, product: str, bus: str) -> str:
+    clean_name = clean_controller_name(name)
+    known = {
+        ("054c", "0ce6"): "DualSense / PS5 Controller",
+        ("054c", "09cc"): "DualShock 4 / PS4 Controller",
+        ("054c", "05c4"): "DualShock 4 / PS4 Controller",
+        ("054c", "0ba0"): "DualShock 4 USB Wireless Adapter",
+        ("2002", "9000"): "8BitDo NES30 Pro",
+    }
+    if (vendor, product) in known:
+        return known[(vendor, product)]
+    if vendor == "054c" and clean_name == "Wireless Controller":
+        return "PlayStation Controller"
+    if vendor == "28de" and product == "1304":
+        return "Steam Controller"
+    if bus == "0005" and clean_name:
+        return f"{clean_name} (Bluetooth)"
+    return clean_name or "Unknown controller"
+
+
+def clean_controller_name(name: str) -> str:
+    clean_name = " ".join(name.split())
+    parts = clean_name.split()
+    if len(parts) % 2 == 0:
+        half = len(parts) // 2
+        if parts[:half] == parts[half:]:
+            return " ".join(parts[:half])
+    return clean_name
+
+
+def is_gamepad_name(
+    name: str,
+    handlers: list[str],
+    vendor: str = "",
+    product: str = "",
+) -> bool:
+    lower_name = name.lower()
+    if any(hint in lower_name for hint in NON_GAMEPAD_NAME_HINTS):
+        return False
+    if "motion sensor" in lower_name or "motion sensors" in lower_name:
+        return False
+    if vendor == "28de" and product == "11ff":
+        return False
+    if any(handler.startswith("js") for handler in handlers):
+        return True
+    return any(hint in lower_name for hint in GAMEPAD_NAME_HINTS)
+
+
+def discover_input() -> dict[str, Any]:
+    devices = input_devices()
+    gamepads = [device for device in devices if device.get("gamepad")]
+    return {
+        "ok": True,
+        "supported_codes": ["BTN_MODE", "KEY_HOMEPAGE", "KEY_HOME"],
+        "devices": gamepads,
+        "hid_fallback_devices": steam_hid_fallback_devices(),
+        "all_input_devices": len(devices),
+    }
+
+
+def steam_hid_fallback_devices() -> list[dict[str, str]]:
+    config = read_config()
+    expected_hid_id = config.get("STEAM_BUTTON_HID_ID", "0003:000028DE:00001304").lower()
+    excluded_phys = config.get("STEAM_BUTTON_EXCLUDED_PHYS", "input6").lower()
+    devices: dict[str, dict[str, str]] = {}
+
+    for path in sorted(Path("/sys/class/hidraw").glob("hidraw*/device/uevent")):
+        properties: dict[str, str] = {}
+        try:
+            for raw_line in path.read_text(encoding="utf-8").splitlines():
+                key, separator, value = raw_line.partition("=")
+                if separator:
+                    properties[key] = value
+        except OSError:
+            continue
+
+        hid_id = properties.get("HID_ID", "").lower()
+        hid_phys = properties.get("HID_PHYS", "").lower()
+        if expected_hid_id not in hid_id or excluded_phys in hid_phys:
+            continue
+
+        name = properties.get("HID_NAME", "Steam Controller")
+        key = f"{hid_id}:{name}"
+        devices[key] = {
+            "name": name,
+            "display_name": "Steam Controller",
+            "path": f"/dev/{path.parent.parent.name}",
+            "method": "Steam Controller HID fallback",
+        }
+
+    return list(devices.values())
+
+
+def external_volume_state() -> dict[str, Any]:
+    service = service_state("cec-audio-control.service")
+    socket = service_state("cec-audio-control.socket")
+    config_exists = WIREPLUMBER_CONFIG.exists() or any(
+        path.exists() for path in WIREPLUMBER_CONFIG_ALIASES
+    )
+    capabilities = run(
+        [
+            "varlinkctl",
+            "call",
+            "unix:/run/user/1000/cec-audio-control/org.pipewire.ExternalVolume",
+            "org.pipewire.ExternalVolume.GetCapabilities",
+            '{"device":""}',
+        ]
+    )
+    return {
+        "config_exists": config_exists,
+        "override_exists": CEC_SERVICE_OVERRIDE.exists(),
+        "enabled": config_exists and CEC_SERVICE_OVERRIDE.exists(),
+        "service": service,
+        "socket": socket,
+        "capabilities_ok": capabilities["ok"]
+        and '"writeVolumeRelative":true' in capabilities["stdout"].replace(" ", ""),
+        "capabilities": capabilities["stdout"],
+    }
+
+
+def cec_device_state(config: dict[str, str]) -> dict[str, Any]:
+    device = Path(config.get("CEC_DEVICE", "/dev/cec0"))
+    return {
+        "device": str(device),
+        "exists": device.exists(),
+        "readable": os.access(device, os.R_OK),
+        "writable": os.access(device, os.W_OK),
+        "permissions_helper_exists": CEC_PERMISSIONS_HELPER.exists(),
+    }
+
+
+def toolkit_version() -> str:
+    for path in (INSTALLED_VERSION_FILE, SOURCE_VERSION_FILE):
+        try:
+            version = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if version:
+            return version
+    return "unknown"
+
+
+def status() -> dict[str, Any]:
+    config = read_config()
+    return {
+        "ok": True,
+        "version": toolkit_version(),
+        "config_file": str(USER_CONFIG_FILE if USER_CONFIG_FILE.exists() else SYSTEM_CONFIG_FILE),
+        "system_config_file": str(SYSTEM_CONFIG_FILE),
+        "user_config_file": str(USER_CONFIG_FILE),
+        "config_exists": SYSTEM_CONFIG_FILE.exists() or USER_CONFIG_FILE.exists(),
+        "user_config_exists": USER_CONFIG_FILE.exists(),
+        "config": config,
+        "discovery": cached_discovery(),
+        "root_helper_exists": ROOT_HELPER.exists(),
+        "debug_helper_exists": DEBUG_HELPER.exists(),
+        "power_standby_helper_exists": POWER_STANDBY_HELPER.exists(),
+        "usb_wake_helper_exists": USB_WAKE_HELPER.exists(),
+        "cec_permissions_helper_exists": CEC_PERMISSIONS_HELPER.exists(),
+        "resume_wake_helper_exists": RESUME_WAKE_HELPER.exists(),
+        "resume_wake_unit_exists": RESUME_WAKE_UNIT.exists(),
+        "sudoers_exists": SUDOERS_FILE.exists(),
+        "cec_device": cec_device_state(config),
+        "external_volume_script_exists": EXTERNAL_VOLUME_SCRIPT.exists(),
+        "volume_script_exists": VOLUME_SCRIPT.exists(),
+        "boot_wake_script_exists": BOOT_WAKE_SCRIPT.exists(),
+        "steam_button_script_exists": STEAM_BUTTON_SCRIPT.exists(),
+        "tv_standby_script_exists": TV_STANDBY_SCRIPT.exists(),
+        "input_away_suspend_script_exists": INPUT_AWAY_SUSPEND_SCRIPT.exists(),
+        "gamescope_recovery_script_exists": GAMESCOPE_RECOVERY_SCRIPT.exists(),
+        "external_volume": external_volume_state(),
+        "controller_wake": {
+            "script_exists": STEAM_BUTTON_SCRIPT.exists(),
+            "generic_input_enabled": config.get("CONTROLLER_WAKE_GENERIC_INPUT", "1")
+            not in {"0", "false", "False", "no"},
+            "steam_hid_enabled": config.get("CONTROLLER_WAKE_STEAM_HID", "1")
+            not in {"0", "false", "False", "no"},
+            "gamepad_devices": discover_input()["devices"],
+            "hid_fallback_devices": steam_hid_fallback_devices(),
+        },
+        "services": {name: service_state(unit) for name, unit in USER_SERVICES.items()},
+        "system_services": {
+            name: system_service_state(unit) for name, unit in SYSTEM_SERVICES.items()
+        },
+    }
+
+
+def set_service(name: str, enabled: bool) -> dict[str, Any]:
+    if name not in USER_SERVICES:
+        return {"ok": False, "error": f"Unknown service: {name}"}
+    unit = USER_SERVICES[name]
+    if name == "boot-wake":
+        # boot-wake is a oneshot for the next Game Mode/session start. Starting
+        # it from a Decky toggle blocks until the CEC retry loop completes.
+        result = systemctl_user("enable" if enabled else "disable", unit)
+    else:
+        action = "enable" if enabled else "disable"
+        result = systemctl_user(action, "--now", unit)
+    payload = status()
+    payload["action"] = result
+    if not result["ok"]:
+        payload["ok"] = False
+        payload["error"] = result["stdout"] or f"Could not {'enable' if enabled else 'disable'} {unit}"
+    return payload
+
+
+def set_system_service(name: str, enabled: bool) -> dict[str, Any]:
+    helpers = {
+        "power-standby": POWER_STANDBY_HELPER,
+        "usb-wake": USB_WAKE_HELPER,
+    }
+    if name not in helpers:
+        return {"ok": False, "error": f"Unknown system service: {name}"}
+    helper = helpers[name]
+    if not helper.exists():
+        return {
+            "ok": False,
+            "error": f"{name} helper is missing; run the installer/update script first.",
+        }
+    result = run(
+        [
+            "sudo",
+            "-n",
+            str(helper),
+            "on" if enabled else "off",
+        ],
+        timeout=15,
+    )
+    payload = status()
+    payload["action"] = result
+    if not result["ok"]:
+        payload["ok"] = False
+        payload["error"] = result["stdout"] or "System service toggle failed"
+    return payload
+
+
+def set_config(updates: dict[str, str]) -> dict[str, Any]:
+    try:
+        write_user_config(updates)
+    except ValueError as error:
+        return {"ok": False, "error": str(error)}
+    if (
+        "INPUT_INACTIVE_SUSPEND_DELAY_SECONDS" in updates
+        or "INPUT_AWAY_SUSPEND_DELAY_SECONDS" in updates
+    ):
+        systemctl_user("try-restart", USER_SERVICES["input-away-suspend"])
+    payload = status()
+    payload["action"] = {"ok": True, "returncode": 0, "stdout": str(USER_CONFIG_FILE)}
+    return payload
+
+
+def physical_address_payload(config: dict[str, str]) -> str:
+    physical = config.get("CEC_PHYSICAL_ADDRESS", "")
+    if not physical:
+        return ""
+    try:
+        parts = [int(part, 16) for part in physical.split(".")]
+    except ValueError:
+        return ""
+    if len(parts) != 4 or any(part < 0 or part > 15 for part in parts):
+        return ""
+    return f"0x{(parts[0] << 4) | parts[1]:02x}:0x{(parts[2] << 4) | parts[3]:02x}"
+
+
+def current_playback_logical_address(config: dict[str, str]) -> str:
+    cec_device = config.get("CEC_DEVICE", "/dev/cec0")
+    fallback = config.get("CEC_PLAYBACK_LOGICAL_ADDRESS", "4")
+    for args, timeout in ((["-l"], 5), (["-L"], 5), (["-S"], 12)):
+        result = run(["cec-ctl", "-d", cec_device, *args], timeout=timeout)
+        if not result["ok"]:
+            continue
+        plain_match = re.search(r"^\s*(\d+)\s*$", result["stdout"], re.MULTILINE)
+        if plain_match:
+            return plain_match.group(1)
+        match = re.search(r"Logical Address\s*:\s*(\d+)\s*\(", result["stdout"])
+        if match:
+            return match.group(1)
+    return fallback
+
+
+def raw_wake(config: dict[str, str]) -> list[dict[str, Any]]:
+    cec_device = config.get("CEC_DEVICE", "/dev/cec0")
+    playback = current_playback_logical_address(config)
+    tv = config.get("TV_LOGICAL_ADDRESS", "0")
+    commands = [
+        ["cec-ctl", "-d", cec_device, "-s", "--raw-msg", "-f", playback, "-t", tv, "--custom-command", "cmd=0x04"],
+        ["cec-ctl", "-d", cec_device, "-s", "--raw-msg", "-f", playback, "-t", tv, "--custom-command", "cmd=0x0d"],
+    ]
+    active_source_payload = physical_address_payload(config)
+    if active_source_payload:
+        commands.append([
+            "cec-ctl",
+            "-d",
+            cec_device,
+            "-s",
+            "--raw-msg",
+            "-f",
+            playback,
+            "-t",
+            "15",
+            "--custom-command",
+            f"cmd=0x82,payload={active_source_payload}",
+        ])
+    results: list[dict[str, Any]] = []
+    for command in commands:
+        results.append(run(command, timeout=8))
+    return results
+
+
+def repair_cec_permissions() -> dict[str, Any]:
+    if not CEC_PERMISSIONS_HELPER.exists():
+        payload = status()
+        payload["ok"] = False
+        payload["error"] = "CEC permissions helper is missing; rerun the installer."
+        return payload
+
+    result = run(["sudo", "-n", str(CEC_PERMISSIONS_HELPER)], timeout=15)
+    systemctl_user("restart", "cecd.service")
+    payload = status()
+    payload["action"] = result
+    if not result["ok"]:
+        payload["ok"] = False
+        payload["error"] = result["stdout"] or "CEC permission repair failed; rerun the installer from SSH/Desktop."
+    return payload
+
+
+def test_volume(action: str) -> dict[str, Any]:
+    if action not in {"up", "down", "mute"}:
+        return {"ok": False, "error": f"Unknown volume action: {action}"}
+    result = run([str(VOLUME_SCRIPT), action], timeout=12)
+    payload = status()
+    payload["action"] = result
+    return payload
+
+
+def wake_tv() -> dict[str, Any]:
+    config = read_config()
+    raw_results = raw_wake(config)
+    result = run(
+        [
+            "busctl",
+            "--user",
+            "call",
+            "com.steampowered.CecDaemon1",
+            "/com/steampowered/CecDaemon1/Daemon",
+            "com.steampowered.CecDaemon1.Daemon1",
+            "Wake",
+        ]
+    )
+    payload = status()
+    payload["action"] = {
+        "ok": result["ok"] or any(raw_result["ok"] for raw_result in raw_results),
+        "returncode": result["returncode"],
+        "stdout": "\n".join(
+            [raw_result["stdout"] for raw_result in raw_results if raw_result["stdout"]]
+            + ([result["stdout"]] if result["stdout"] else [])
+        ),
+    }
+    return payload
+
+
+def standby_tv() -> dict[str, Any]:
+    result = run(
+        [
+            "busctl",
+            "--user",
+            "call",
+            "com.steampowered.CecDaemon1",
+            "/com/steampowered/CecDaemon1/Devices/Cec0",
+            "com.steampowered.CecDaemon1.CecDevice1",
+            "Standby",
+            "y",
+            "0",
+        ]
+    )
+    payload = status()
+    payload["action"] = result
+    return payload
+
+
+def restart_external_volume() -> dict[str, Any]:
+    systemctl_user("stop", "cec-audio-control.service")
+    systemctl_user("start", "cec-audio-control.socket")
+    systemctl_user("restart", "wireplumber.service")
+    return status()
+
+
+def debug_cec(seconds: int) -> dict[str, Any]:
+    if seconds < 1 or seconds > 5:
+        return {"ok": False, "error": "Debug capture must be between 1 and 5 seconds"}
+    result = run(["sudo", "-n", str(DEBUG_HELPER), str(seconds)], timeout=seconds + 6)
+    payload = status()
+    payload["debug"] = result
+    if not DEBUG_HELPER.exists():
+        payload["ok"] = False
+        payload["error"] = "Debug helper is missing; rerun install.sh to enable CEC debug capture."
+    elif result["returncode"] != 0:
+        payload["ok"] = False
+        payload["error"] = result["stdout"] or "CEC debug capture failed"
+    return payload
+
+
+def write_external_volume_files() -> None:
+    config = read_config()
+    hdmi_alsa_card_name = config.get("HDMI_ALSA_CARD_NAME", "alsa_card.pci-0000_03_00.1")
+    hdmi_alsa_card_nick = config.get("HDMI_ALSA_CARD_NICK", "HDA ATI HDMI")
+
+    wireplumber_config = (
+        WIREPLUMBER_CONFIG_TEMPLATE
+        .replace("@HDMI_ALSA_CARD_NAME@", hdmi_alsa_card_name)
+    )
+    WIREPLUMBER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    WIREPLUMBER_CONFIG.write_text(wireplumber_config, encoding="utf-8")
+
+    CEC_SERVICE_OVERRIDE.parent.mkdir(parents=True, exist_ok=True)
+    CEC_SERVICE_OVERRIDE.write_text(CEC_SERVICE_OVERRIDE_CONTENT, encoding="utf-8")
+
+
+def remove_external_volume_files() -> None:
+    for path in (WIREPLUMBER_CONFIG, *WIREPLUMBER_CONFIG_ALIASES, CEC_SERVICE_OVERRIDE):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def set_external_volume(enabled: bool) -> dict[str, Any]:
+    if enabled:
+        discover_audio()
+        write_external_volume_files()
+        systemctl_user("daemon-reload")
+        systemctl_user("stop", "cec-audio-control.service")
+        systemctl_user("start", "cec-audio-control.socket")
+        systemctl_user("restart", "pipewire.service")
+        systemctl_user("restart", "pipewire-pulse.service")
+        systemctl_user("restart", "wireplumber.service")
+        systemctl_user("start", "cec-audio-control.socket")
+    else:
+        remove_external_volume_files()
+        systemctl_user("daemon-reload")
+        systemctl_user("stop", "cec-audio-control.service")
+        systemctl_user("stop", "cec-audio-control.socket")
+        systemctl_user("restart", "wireplumber.service")
+        systemctl_user("restart", "pipewire.service")
+        systemctl_user("restart", "pipewire-pulse.service")
+    return status()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("status")
+    sub.add_parser("discover-cec")
+    sub.add_parser("discover-audio")
+    sub.add_parser("discover-input")
+    set_config_parser = sub.add_parser("set-config")
+    set_config_parser.add_argument("updates")
+    set_service_parser = sub.add_parser("set-service")
+    set_service_parser.add_argument("name", choices=sorted(USER_SERVICES))
+    set_service_parser.add_argument("state", choices=["on", "off"])
+    set_system_service_parser = sub.add_parser("set-system-service")
+    set_system_service_parser.add_argument("name", choices=sorted(SYSTEM_SERVICES))
+    set_system_service_parser.add_argument("state", choices=["on", "off"])
+    external_volume_parser = sub.add_parser("set-external-volume")
+    external_volume_parser.add_argument("state", choices=["on", "off"])
+    volume_parser = sub.add_parser("volume")
+    volume_parser.add_argument("action", choices=["up", "down", "mute"])
+    debug_parser = sub.add_parser("debug-cec")
+    debug_parser.add_argument("seconds", nargs="?", default=3, type=int)
+    sub.add_parser("wake")
+    sub.add_parser("standby")
+    sub.add_parser("restart-external-volume")
+    sub.add_parser("repair-cec-permissions")
+    args = parser.parse_args()
+
+    if args.command == "status":
+        payload = status()
+    elif args.command == "discover-cec":
+        payload = discover_cec()
+    elif args.command == "discover-audio":
+        payload = discover_audio()
+    elif args.command == "discover-input":
+        payload = discover_input()
+    elif args.command == "set-config":
+        try:
+            updates = json.loads(args.updates)
+            if not isinstance(updates, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in updates.items()
+            ):
+                raise ValueError("updates must be a string map")
+        except Exception as error:
+            payload = {"ok": False, "error": f"Invalid config payload: {error}"}
+        else:
+            payload = set_config(updates)
+    elif args.command == "set-service":
+        payload = set_service(args.name, args.state == "on")
+    elif args.command == "set-system-service":
+        payload = set_system_service(args.name, args.state == "on")
+    elif args.command == "set-external-volume":
+        payload = set_external_volume(args.state == "on")
+    elif args.command == "volume":
+        payload = test_volume(args.action)
+    elif args.command == "debug-cec":
+        payload = debug_cec(args.seconds)
+    elif args.command == "wake":
+        payload = wake_tv()
+    elif args.command == "standby":
+        payload = standby_tv()
+    elif args.command == "restart-external-volume":
+        payload = restart_external_volume()
+    elif args.command == "repair-cec-permissions":
+        payload = repair_cec_permissions()
+    else:
+        payload = {"ok": False, "error": "Unknown command"}
+
+    print(json.dumps(payload, separators=(",", ":")))
+    return 0 if payload.get("ok") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

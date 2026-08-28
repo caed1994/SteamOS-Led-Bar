@@ -1,0 +1,314 @@
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+"""Talking to the television over HDMI, through the CEC toolkit.
+
+None of the CEC work is ours. It is the SteamOS CEC Toolkit, vendored under
+vendor/steamos-cec-toolkit - see vendor/README.md for where it came from and
+why it lives in the repository rather than being fetched.
+
+This module is the seam between that toolkit and this panel, and it is thin on
+purpose. The toolkit already ships `steamos-cec-toolkitctl`, which reports
+everything about itself as one JSON document and turns each feature on and off
+one at a time. So there is nothing here that reads a device, runs systemctl or
+edits a config file: this builds the commands and reads the answers, and the
+toolkit stays the only thing that knows how CEC works.
+
+Two consequences worth knowing before reading further.
+
+**Installing needs root; using it does not.** The toolkit's installer writes a
+sudoers file granting the desktop user NOPASSWD on exactly the helpers its own
+toggles need. After that one elevated install, every switch on the page is an
+ordinary command run as the user - no password, no polkit, no Apply button.
+That is why the CEC page saves as you click where the LED pages queue up
+behind Apply: the machine does not ask, so making the user ask would be this
+panel inventing a ceremony the system does not need.
+
+**Every answer comes from the machine.** The feature list here is a list of
+names and wording; whether a feature is on, installable, or possible at all is
+read from `toolkitctl status` at the moment it is asked. A page built from
+this cannot claim a state the toolkit does not report.
+
+Nothing in here runs anything. The commands are built and handed back for the
+panel's Runner to run, which is what keeps this testable on a machine with no
+television, no CEC adapter and no toolkit installed - which is every machine
+this was written on.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+
+# Where the toolkit's installer puts its control program. A user path, not a
+# system one: the toolkit installs per user, because half of what it manages
+# are user systemd units and a WirePlumber config in somebody's home.
+COMMAND = ".local/bin/steamos-cec-toolkitctl"
+
+# The vendored tree, relative to the repository root. The installer is run
+# from inside it and reads its own siblings, so it cannot be copied out on its
+# own - see scripts/install-cec.sh.
+SOURCE = os.path.join("vendor", "steamos-cec-toolkit")
+
+# How a feature is turned on, which is not the same for all of them. The three
+# kinds differ in what they touch, and the toolkit gives each its own
+# subcommand rather than one that guesses.
+USER_SERVICE = "user"           # a systemd user unit, enabled as the user
+SYSTEM_SERVICE = "system"       # a root unit, through a NOPASSWD helper
+EXTERNAL_VOLUME = "volume"      # WirePlumber config plus a service override
+
+# The eight things this page can switch, in the order they are shown.
+#
+# Ordered by what somebody sets up first rather than by what the toolkit calls
+# them: the two that make the television follow the machine, then the two that
+# make the machine follow the television, then volume, then the three that are
+# repairs for particular hardware. The last three are last because they are
+# the ones nobody should turn on until something is wrong.
+#
+# The name is the toolkit's own - it is passed straight to set-service - so
+# these are not ours to rename.
+FEATURES = (
+    ("steam-button", USER_SERVICE,
+     "Steam button wakes the television",
+     "A press of Home or Guide on the controller powers the TV and receiver "
+     "on and switches the input back to this machine."),
+    ("boot-wake", USER_SERVICE,
+     "Wake the television at start",
+     "The same wake and input switch when Game Mode starts after a cold "
+     "boot, instead of waiting for a button."),
+    ("power-standby", SYSTEM_SERVICE,
+     "Turn the television off with the machine",
+     "Sends HDMI-CEC standby before this machine sleeps or shuts down. Some "
+     "televisions cold-boot from that - CEC_SLEEP_TV_ACTION in the config "
+     "file sends Inactive Source instead for those."),
+    ("tv-standby", USER_SERVICE,
+     "Sleep when the television does",
+     "Suspends this machine when the television broadcasts standby, so "
+     "turning off the TV turns off the machine."),
+    ("input-away-suspend", USER_SERVICE,
+     "Sleep when the television switches away",
+     "Suspends this machine once the TV has been on another input for a "
+     "while. The delay is INPUT_INACTIVE_SUSPEND_DELAY_SECONDS."),
+    ("external-volume", EXTERNAL_VOLUME,
+     "Volume buttons control the television",
+     "Game Mode shows + and - instead of a slider, and they change the "
+     "volume on the receiver or soundbar over CEC. Needs a reboot before "
+     "Game Mode picks up the new controls."),
+    ("usb-wake", SYSTEM_SERVICE,
+     "Let a controller wake the machine",
+     "Allows matching Bluetooth radios and controller receivers to wake this "
+     "machine from suspend, so the Steam button can reach it at all. Whether "
+     "it works depends on the hardware, not on this switch."),
+    ("gamescope-recovery", USER_SERVICE,
+     "Recover Gamescope after a wake",
+     "Restarts Gamescope when the display comes back in a bad state after "
+     "CEC switched the input. A repair for a specific fault - leave it off "
+     "unless you have that fault."),
+)
+
+# The same, keyed, for everything that has a name and wants the rest.
+BY_NAME = {name: (kind, label, said) for name, kind, label, said in FEATURES}
+
+# What has to be on the machine before any of this can work, and what to say
+# when it is not. The toolkit checks these too and fails clearly; they are
+# here so the panel can say so *before* somebody installs and wonders why
+# nothing happens.
+#
+# dbus_next is not in this list even though three services import it: it is a
+# python module rather than a program, so it is looked for differently - see
+# missing().
+NEEDS = (
+    ("cec-ctl", "v4l-utils, which is what actually speaks CEC"),
+    ("varlinkctl", "part of systemd, used to reach PipeWire's volume control"),
+    ("systemctl", "systemd itself"),
+)
+
+# The config values worth putting on a page. The file has about forty; these
+# are the ones whose wrong value stops CEC working at all, and the rest are
+# tuning for particular televisions and controllers that belongs in the file
+# with its comments around it.
+SHOWN = (
+    ("CEC_DEVICE", "CEC adapter",
+     "The adapter's device node, usually /dev/cec0."),
+    ("CEC_AUDIO_LOGICAL_ADDRESS", "Which device has the volume",
+     "5 is an amplifier or soundbar. Use 0 when the television itself makes "
+     "the sound."),
+    ("HDMI_ALSA_CARD_NAME", "HDMI sound card",
+     "The PipeWire card the television is on. Discover Audio fills this in."),
+)
+
+
+class CecError(Exception):
+    """The toolkit could not be asked, or did not answer in JSON."""
+
+
+def command_path(home=None):
+    """Where the toolkit's control program is, installed or not."""
+    return os.path.join(home or os.path.expanduser("~"), COMMAND)
+
+
+def installed(home=None):
+    """Whether the toolkit has been installed for this user.
+
+    The control program, not the config file: /etc/steamos-cec-toolkit.conf
+    survives an uninstall on an atomic-update system, so a page that keyed off
+    the config would offer to configure a toolkit that is no longer there.
+    """
+    return os.access(command_path(home), os.X_OK)
+
+
+def source_dir(repo):
+    return os.path.join(repo, SOURCE)
+
+
+def status_command(home=None):
+    return [command_path(home), "status"]
+
+
+def read_status(text):
+    """Turn what `toolkitctl status` printed into a dictionary.
+
+    Kept apart from running it so that everything downstream can be tested
+    against a recorded answer. The toolkit prints one JSON document and
+    nothing else, so anything unparseable means it did not get to run - a
+    missing python, a half-finished install - and that is worth the exception
+    rather than an empty status that reads as "nothing is on".
+    """
+    try:
+        found = json.loads(text)
+    except ValueError as exc:
+        raise CecError("the CEC toolkit did not answer in JSON: %s" % exc)
+    if not isinstance(found, dict):
+        raise CecError("the CEC toolkit answered with %s, not a status"
+                       % type(found).__name__)
+    return found
+
+
+def feature_on(status, name):
+    """Whether one feature is switched on, according to a status document.
+
+    Enabled rather than active, and the difference matters. boot-wake is a
+    oneshot that runs when Game Mode starts and then exits, so it is almost
+    never active and asking that would show it as off while it is working
+    perfectly. Enabled is the question the switch is asking.
+    """
+    kind = BY_NAME[name][0]
+    if kind == EXTERNAL_VOLUME:
+        return bool(status.get("external_volume", {}).get("enabled"))
+    where = "services" if kind == USER_SERVICE else "system_services"
+    return bool(status.get(where, {}).get(name, {}).get("is_enabled"))
+
+
+def toggle_command(name, on, home=None):
+    """The command that turns one feature on or off."""
+    kind = BY_NAME[name][0]
+    state = "on" if on else "off"
+    if kind == EXTERNAL_VOLUME:
+        return [command_path(home), "set-external-volume", state]
+    verb = "set-service" if kind == USER_SERVICE else "set-system-service"
+    return [command_path(home), verb, name, state]
+
+
+# What the page's buttons do, as (key, label, argv tail). Actions rather than
+# settings: each one happens once, now, and changes nothing that outlives it -
+# which is what makes them the way to find out whether any of this works
+# before turning a feature on and rebooting into it.
+ACTIONS = (
+    ("wake", "Wake the television", ["wake"]),
+    ("standby", "Send standby", ["standby"]),
+    ("volume-up", "Volume up", ["volume", "up"]),
+    ("volume-down", "Volume down", ["volume", "down"]),
+)
+
+# The three discoveries, which write what they find into the config. Separate
+# from ACTIONS because these do leave something behind.
+DISCOVERIES = (
+    ("discover-cec", "Discover CEC devices",
+     "Asks the bus what is on it and fills in the adapter and the addresses."),
+    ("discover-audio", "Discover audio output",
+     "Finds the HDMI sound card PipeWire is using for the television."),
+    ("discover-input", "Discover controllers",
+     "Lists the gamepads whose Home button can be watched for."),
+)
+
+
+def action_command(key, home=None):
+    for name, _label, tail in ACTIONS:
+        if name == key:
+            return [command_path(home)] + tail
+    for name, _label, _said in DISCOVERIES:
+        if name == key:
+            return [command_path(home), name]
+    raise KeyError(key)
+
+
+def config(status):
+    """The toolkit's configuration, as it reported it. Empty when it did not."""
+    found = status.get("config")
+    return dict(found) if isinstance(found, dict) else {}
+
+
+def set_config_command(values, home=None):
+    """The command that writes settings into the toolkit's own config file.
+
+    The toolkit takes them as one JSON argument and writes a *user* config
+    that shadows /etc - which is why this needs no root either, and why a
+    setting made here survives the toolkit being reinstalled over the top.
+    """
+    return [command_path(home), "set-config", json.dumps(values, sort_keys=True)]
+
+
+def device(status):
+    """What the status says about the adapter itself.
+
+    Its own answer rather than one derived from the feature states: every
+    feature can be enabled and none of them can work if the adapter is not
+    there or is not writable, and that is the first thing to say on a page
+    where nothing is happening.
+    """
+    found = status.get("cec_device")
+    if not isinstance(found, dict):
+        return {"device": "", "exists": False, "readable": False,
+                "writable": False}
+    return found
+
+
+def usable(status):
+    """Whether CEC could work right now: an adapter that is there and writable.
+
+    Readable *and* writable, because CEC is a conversation. An adapter that
+    can be read but not written is the shape a permissions problem takes after
+    a suspend or a SteamOS update, and the toolkit installs a helper and a
+    udev rule to repair exactly that - so this being false is a repairable
+    state and worth telling apart from having no adapter at all.
+    """
+    found = device(status)
+    return bool(found.get("exists") and found.get("readable")
+                and found.get("writable"))
+
+
+def missing(module_check=None, which=None):
+    """The programs and modules CEC needs that this machine does not have.
+
+    Returned as (name, why) pairs, in the order of NEEDS with the python
+    module last. Both lookups are injectable so the answer can be tested on a
+    machine that has none of them, which is the machine this runs on.
+    """
+    which = which or shutil.which
+    absent = [(name, why) for name, why in NEEDS if not which(name)]
+    # Three of the services import it, and its absence is the one requirement
+    # the toolkit's installer warns about rather than refuses over - so it is
+    # a thing you can install into and only find out about from a log.
+    if not (module_check or _has_dbus_next)():
+        absent.append(("python dbus_next",
+                       "needed by the services that watch the CEC bus"))
+    return tuple(absent)
+
+
+def _has_dbus_next():
+    try:
+        import dbus_next                                     # noqa: F401
+    except ImportError:
+        return False
+    return True

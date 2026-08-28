@@ -1,0 +1,33 @@
+# Where this tree came from, and how to bring it forward.
+#
+# Read as a shell file: tests and scripts source it rather than parsing the
+# prose around it, so the three values below are the record.
+
+UPSTREAM_URL=https://github.com/Twsts/steamos-cec-toolkit
+UPSTREAM_TAG=v0.1.26
+UPSTREAM_COMMIT=cc48b949dfea349d517fa8a9fd385ce19d4e2d5e
+
+# What was left behind, and why:
+#
+#   decky/   the Game Mode plugin. This panel is the UI here, and the toolkit
+#            is managed through steamos-cec-toolkitctl either way - the plugin
+#            is one of two front ends for the same helper, not a dependency of
+#            it. Nothing in the vendored tree refers to it.
+#   assets/  8.6 MB of screenshots of that plugin.
+#
+# Everything else is here as it was upstream at that commit.
+#
+# Re-syncing:
+#
+#   git clone https://github.com/Twsts/steamos-cec-toolkit /tmp/cec
+#   git -C /tmp/cec diff v0.1.26 <newer tag> -- bin systemd config udev \
+#       wireplumber docs install.sh uninstall.sh VERSION
+#
+# That diff is what upstream changed since this tree was taken, so it applies
+# onto our copy and shows our own changes as the conflicts. Bump the three
+# values above in the same commit that takes the diff, or the next person has
+# nothing to diff against.
+#
+# Licence: MIT, upstream's, in LICENSE beside this file. That is compatible
+# with this project's GPL-3.0-or-later, and this subtree keeps its own notice
+# rather than being relicensed - the copyright is not ours to move.

@@ -1,0 +1,110 @@
+# SteamOS CEC Toolkit configuration.
+#
+# Copy to /etc/steamos-cec-toolkit.conf or pass values as environment
+# variables when running install.sh.
+
+# CEC adapter exposed by the UGREEN DP-to-HDMI adapter or another CEC adapter.
+CEC_DEVICE=/dev/cec0
+CEC_PHYSICAL_ADDRESS=
+
+# SteamOS desktop user. Official Steam Deck/SteamOS images normally use deck.
+STEAMOS_CEC_USER=deck
+
+# Leave CEC_VOLUME_INITIATOR empty to let the kernel supply the adapter's own
+# logical address and validate the frame before sending it. This is correct
+# for almost everyone. Set it to 0 (TV) only for receivers that refuse volume
+# commands unless they appear to come from the TV; this forces --raw-msg,
+# which bypasses kernel validation and error reporting, so a bad frame can be
+# "sent" without any indication that nothing happened.
+CEC_VOLUME_INITIATOR=
+
+# Audio System (AVR/soundbar) is normally 5. If no Audio System is present on
+# the bus and the TV renders audio itself, use 0 (TV).
+CEC_AUDIO_LOGICAL_ADDRESS=5
+CEC_VOLUME_PRESS_SECONDS=0.25
+
+# LG TVs ignore CEC volume keys until they receive a SIMPLINK vendor-command
+# handshake, and only honor it from an adapter that has announced a vendor
+# ID. Set CEC_SIMPLINK_ACK=1 if the TV's vendor ID is 0x00e091 (LG) or volume
+# otherwise does nothing despite a well-formed frame. When enabled, the
+# script claims CEC_SIMPLINK_VENDOR_ID for the adapter itself if nothing has
+# claimed one yet (SteamOS's cecd usually does this on its own, but not
+# always immediately after boot). CEC_SIMPLINK_PAYLOAD rarely needs changing.
+CEC_SIMPLINK_ACK=0
+CEC_SIMPLINK_PAYLOAD=0x02:0x05
+CEC_SIMPLINK_VENDOR_ID=0x00e091
+
+# PipeWire/WirePlumber card match. Find with:
+#   wpctl status
+#   pw-cli ls Device
+HDMI_ALSA_CARD_NAME=alsa_card.pci-0000_03_00.1
+HDMI_ALSA_CARD_NICK="HDA ATI HDMI"
+EXTERNAL_VOLUME_DEVICE=HDMI
+EXTERNAL_VOLUME_ROUTE=hdmi-output-0
+
+# Controller Home/Guide button source activation.
+# Generic input support listens only to gamepad-like /dev/input/event devices
+# and only reacts to known system button codes: BTN_MODE, KEY_HOMEPAGE, KEY_HOME.
+# Steam HID support keeps the original Steam Controller fallback below.
+CONTROLLER_WAKE_GENERIC_INPUT=1
+CONTROLLER_WAKE_STEAM_HID=1
+CONTROLLER_WAKE_RESUME_DELAY_SECONDS=2
+STEAM_BUTTON_HID_ID=0003:000028DE:00001304
+STEAM_BUTTON_EXCLUDED_PHYS=input6
+STEAM_BUTTON_REPORT_ID=0x45
+STEAM_BUTTON_BYTE=4
+STEAM_BUTTON_MASK=0x01
+STEAM_BUTTON_ALT_REPORT_ID=0x44
+STEAM_BUTTON_ALT_BYTE=1
+STEAM_BUTTON_ALT_VALUES="0x03,0x04"
+STEAM_BUTTON_ALT_DEBOUNCE_SECONDS=20
+
+# Optional boot/session-start source activation.
+# The boot wake service waits briefly for SteamOS/cecd to settle, then sends
+# standard CEC wake/input activation if this source is not already active.
+BOOT_WAKE_DELAY_SECONDS=8
+BOOT_WAKE_ATTEMPTS=4
+BOOT_WAKE_RETRY_SECONDS=5
+CEC_RESUME_WAKE_DELAY_SECONDS=3
+CEC_RESUME_WAKE_ATTEMPTS=3
+CEC_RESUME_WAKE_RETRY_SECONDS=4
+CEC_RESUME_RESTART_CECD=1
+CEC_RESUME_CECD_SETTLE_SECONDS=3
+CEC_LOGICAL_ADDRESS_WAIT_SECONDS=12
+
+# Optional USB wake from suspend support.
+# This enables /sys/.../power/wakeup only for USB devices whose manufacturer or
+# product names match controller/Bluetooth-related terms and do not match
+# obvious hub/keyboard/mouse/audio exclusions.
+USB_WAKE_MATCH="bluetooth|steam controller|xbox|playstation|dualsense|dualshock|8bitdo|nintendo|shield|santroller"
+USB_WAKE_EXCLUDE="hub|host controller|keyboard|mouse|touchpad|aura|audio"
+USB_WAKE_USB_IDS="8087:0032"
+USB_WAKE_BLUETOOTH_CLASS=1
+
+# Optional TV standby suspend service.
+TV_LOGICAL_ADDRESS=0
+CEC_PLAYBACK_LOGICAL_ADDRESS=4
+CEC_STANDBY_OPCODE=0x36
+
+# CEC action sent before SteamOS sleeps or shuts down when the system
+# power-standby service is enabled:
+#   standby         Send normal HDMI-CEC Standby. This turns off most TVs/AVRs.
+#   inactive-source Send Inactive Source instead. Useful for TVs that cold-boot
+#                   after CEC Standby, such as some Philips Android/Titan OS TVs.
+CEC_SLEEP_TV_ACTION=standby
+
+# Optional input inactive suspend service.
+# Suspends SteamOS after this CEC source is no longer active for the delay.
+INPUT_INACTIVE_SUSPEND_DELAY_SECONDS=60
+
+# Optional Gamescope recovery service after CEC source activation.
+GAMESCOPE_CONNECTOR_STATUS=/sys/class/drm/card0-DP-1/status
+GAMESCOPE_RECOVER_AFTER_RESUME=1
+GAMESCOPE_RECOVERY_DELAY_SECONDS=3
+GAMESCOPE_RESUME_RECOVERY_DELAY_SECONDS=3
+GAMESCOPE_RECOVERY_COOLDOWN_SECONDS=30
+GAMESCOPE_CONNECTOR_POLL_SECONDS=1
+GAMESCOPE_RECOVER_ON_TV_POWER_ON=1
+GAMESCOPE_RECOVER_ON_CEC_ACTIVATION=1
+GAMESCOPE_TV_POWER_POLL_SECONDS=3
+GAMESCOPE_TV_POWER_TIMEOUT_SECONDS=2

@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Wake TV/AVR and activate the SteamOS HDMI-CEC source once at session start."""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import subprocess
+import time
+
+
+CEC_BUS = "com.steampowered.CecDaemon1"
+CEC_DAEMON_PATH = "/com/steampowered/CecDaemon1/Daemon"
+CEC_DAEMON_INTERFACE = "com.steampowered.CecDaemon1.Daemon1"
+CEC_DEVICE_PATH = "/com/steampowered/CecDaemon1/Devices/Cec0"
+CEC_DEVICE_INTERFACE = "com.steampowered.CecDaemon1.CecDevice1"
+DEFAULT_CONFIG = "/etc/steamos-cec-toolkit.conf"
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+LOG = logging.getLogger("steamos-cec-boot-wake")
+
+
+def read_config(path: str = DEFAULT_CONFIG) -> dict[str, str]:
+    config: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as file:
+            for raw_line in file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                config[key.strip()] = value.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return config
+
+
+SYSTEM_CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
+STEAMOS_CEC_USER = SYSTEM_CONFIG.get("STEAMOS_CEC_USER", "deck")
+USER_CONFIG = f"/home/{STEAMOS_CEC_USER}/.config/steamos-cec-toolkit/config.conf"
+CONFIG = {**SYSTEM_CONFIG, **read_config(USER_CONFIG)}
+CEC_DEVICE = CONFIG.get("CEC_DEVICE", "/dev/cec0")
+TV_LOGICAL_ADDRESS = CONFIG.get("TV_LOGICAL_ADDRESS", "0")
+CEC_PLAYBACK_LOGICAL_ADDRESS = CONFIG.get("CEC_PLAYBACK_LOGICAL_ADDRESS", "4")
+CEC_PHYSICAL_ADDRESS = CONFIG.get("CEC_PHYSICAL_ADDRESS", "")
+CEC_LOGICAL_ADDRESS_WAIT_SECONDS = float(CONFIG.get("CEC_LOGICAL_ADDRESS_WAIT_SECONDS", "12"))
+
+
+def run_busctl(args: list[str], timeout: int = 8) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["busctl", "--user", *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def raw_cec(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["cec-ctl", "-d", CEC_DEVICE, "-s", "--raw-msg", *command],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=8,
+        check=False,
+    )
+
+
+def cec_device_ready() -> bool:
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        if os.path.exists(CEC_DEVICE) and os.access(CEC_DEVICE, os.R_OK | os.W_OK):
+            return True
+        time.sleep(0.5)
+    return os.path.exists(CEC_DEVICE) and os.access(CEC_DEVICE, os.R_OK | os.W_OK)
+
+
+def valid_source_logical_address(value: str) -> bool:
+    try:
+        logical = int(value, 10)
+    except ValueError:
+        return False
+    return 0 <= logical <= 14
+
+
+def configured_playback_logical_address() -> str:
+    if valid_source_logical_address(CEC_PLAYBACK_LOGICAL_ADDRESS):
+        return CEC_PLAYBACK_LOGICAL_ADDRESS
+    return "4"
+
+
+def read_current_playback_logical_address() -> str | None:
+    for args, timeout in ((["-l"], 5), (["-L"], 5), (["-S"], 12)):
+        try:
+            result = subprocess.run(
+                ["cec-ctl", "-d", CEC_DEVICE, *args],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=timeout,
+                check=False,
+            )
+        except Exception:
+            continue
+        if result.returncode != 0:
+            continue
+        plain_match = re.search(r"^\s*(\d+)\s*$", result.stdout, re.MULTILINE)
+        if plain_match and valid_source_logical_address(plain_match.group(1)):
+            return plain_match.group(1)
+        match = re.search(r"Logical Address\s*:\s*(\d+)\s*\(", result.stdout)
+        if match and valid_source_logical_address(match.group(1)):
+            return match.group(1)
+    return None
+
+
+def current_playback_logical_address() -> str:
+    deadline = time.monotonic() + CEC_LOGICAL_ADDRESS_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        logical = read_current_playback_logical_address()
+        if logical is not None:
+            return logical
+        time.sleep(0.5)
+
+    fallback = configured_playback_logical_address()
+    LOG.warning("CEC logical address is not allocated yet; using configured fallback %s", fallback)
+    return fallback
+
+
+def physical_address() -> str:
+    return CEC_PHYSICAL_ADDRESS
+
+
+def physical_address_payload() -> str | None:
+    physical = physical_address()
+    if not physical:
+        return None
+    try:
+        parts = [int(part, 16) for part in physical.split(".")]
+    except ValueError:
+        return None
+    if len(parts) != 4 or any(part < 0 or part > 15 for part in parts):
+        return None
+    return f"0x{(parts[0] << 4) | parts[1]:02x}:0x{(parts[2] << 4) | parts[3]:02x}"
+
+
+def raw_wake() -> None:
+    if not cec_device_ready():
+        LOG.warning("CEC device %s is missing or not writable after waiting; cannot send raw wake", CEC_DEVICE)
+        return
+
+    playback_logical_address = current_playback_logical_address()
+    if playback_logical_address != CEC_PLAYBACK_LOGICAL_ADDRESS:
+        LOG.info(
+            "Using current CEC logical address %s instead of configured %s",
+            playback_logical_address,
+            CEC_PLAYBACK_LOGICAL_ADDRESS,
+        )
+    commands = [
+        ["-f", playback_logical_address, "-t", TV_LOGICAL_ADDRESS, "--custom-command", "cmd=0x04"],
+        ["-f", playback_logical_address, "-t", TV_LOGICAL_ADDRESS, "--custom-command", "cmd=0x0d"],
+    ]
+    active_source_payload = physical_address_payload()
+    if active_source_payload:
+        commands.append([
+            "-f",
+            playback_logical_address,
+            "-t",
+            "15",
+            "--custom-command",
+            f"cmd=0x82,payload={active_source_payload}",
+        ])
+    else:
+        LOG.warning("CEC_PHYSICAL_ADDRESS is not configured; skipping ACTIVE_SOURCE")
+
+    for command in commands:
+        result = raw_cec(command)
+        if result.returncode != 0:
+            LOG.warning("Raw CEC wake command failed: %s", result.stdout.strip())
+        time.sleep(0.25)
+
+
+def source_is_active() -> bool:
+    result = run_busctl(
+        [
+            "get-property",
+            CEC_BUS,
+            CEC_DEVICE_PATH,
+            CEC_DEVICE_INTERFACE,
+            "Active",
+        ],
+        timeout=5,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "b true"
+
+
+def wake_source() -> subprocess.CompletedProcess[str]:
+    return run_busctl(
+        [
+            "call",
+            CEC_BUS,
+            CEC_DAEMON_PATH,
+            CEC_DAEMON_INTERFACE,
+            "Wake",
+        ],
+        timeout=10,
+    )
+
+
+def main() -> int:
+    delay = float(CONFIG.get("BOOT_WAKE_DELAY_SECONDS", "8"))
+    attempts = int(CONFIG.get("BOOT_WAKE_ATTEMPTS", "4"))
+    retry_seconds = float(CONFIG.get("BOOT_WAKE_RETRY_SECONDS", "5"))
+
+    if delay > 0:
+        time.sleep(delay)
+
+    for attempt in range(1, attempts + 1):
+        if source_is_active():
+            LOG.info("SteamOS HDMI-CEC source reports active before attempt %d; sending wake/input anyway", attempt)
+        raw_wake()
+        result = wake_source()
+        if result.returncode != 0:
+            LOG.warning("Boot wake attempt %d failed: %s", attempt, result.stdout.strip())
+        else:
+            LOG.info("Sent boot wake/input activation attempt %d", attempt)
+
+        if attempt < attempts:
+            time.sleep(retry_seconds)
+
+    LOG.info("Finished boot wake/input activation attempts")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

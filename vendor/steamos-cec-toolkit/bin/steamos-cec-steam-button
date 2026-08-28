@@ -1,0 +1,736 @@
+#!/usr/bin/env python3
+"""Use controller Home/Guide buttons to wake TV/AVR and activate this source."""
+
+from __future__ import annotations
+
+import glob
+import asyncio
+import logging
+import os
+import re
+import selectors
+import struct
+import subprocess
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from dbus_next import BusType
+    from dbus_next.aio import MessageBus
+except ImportError:
+    BusType = None
+    MessageBus = None
+
+
+CEC_BUS = "com.steampowered.CecDaemon1"
+CEC_PATH = "/com/steampowered/CecDaemon1/Daemon"
+CEC_INTERFACE = "com.steampowered.CecDaemon1.Daemon1"
+CEC_DEVICE_PATH = "/com/steampowered/CecDaemon1/Devices/Cec0"
+CEC_DEVICE_INTERFACE = "com.steampowered.CecDaemon1.CecDevice1"
+LOGIN1_BUS_NAME = "org.freedesktop.login1"
+LOGIN1_PATH = "/org/freedesktop/login1"
+LOGIN1_INTERFACE = "org.freedesktop.login1.Manager"
+DEFAULT_CONFIG = "/etc/steamos-cec-toolkit.conf"
+
+BUTTON_DEBOUNCE_SECONDS = 2
+RESUME_ACTIVATION_COOLDOWN_SECONDS = 45
+SUSPEND_GAP_SECONDS = 10
+HID_RESUME_WINDOW_SECONDS = 60
+REPORT_RESUME_SECONDS = 3
+STARTUP_BASELINE_SECONDS = 2
+SHORT_PRESS_MAX_SECONDS = 1.5
+SHORT_PRESS_CONFIRM_SECONDS = 1.0
+SHORT_PRESS_CONFIRM_REPORTS = 20
+CEC_DEVICE_WAIT_SECONDS = 8.0
+CEC_DEVICE_WAIT_STEP_SECONDS = 0.5
+CEC_LOGICAL_ADDRESS_WAIT_SECONDS = 12.0
+CEC_WAKE_RETRY_DELAYS = (0, 2, 3, 5, 8)
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+CEC_ACTIVATION_MARKER = RUNTIME_DIR / "steamos-cec-activation-requested"
+
+INPUT_EVENT = struct.Struct("llHHI")
+EV_KEY = 0x01
+KEY_RELEASED = 0
+KEY_PRESSED = 1
+
+GAMEPAD_HOME_CODES = {
+    102: "KEY_HOME",
+    172: "KEY_HOMEPAGE",
+    316: "BTN_MODE",
+}
+
+GAMEPAD_NAME_HINTS = (
+    "8bitdo",
+    "controller",
+    "dualsense",
+    "dualshock",
+    "gamepad",
+    "guitar",
+    "joystick",
+    "nintendo",
+    "playstation",
+    "santroller",
+    "shield",
+    "x-box",
+    "xbox",
+)
+
+NON_GAMEPAD_NAME_HINTS = (
+    "consumer control",
+    "keyboard",
+    "mouse",
+    "power button",
+    "sleep button",
+    "steamos-manager",
+    "system control",
+    "touchpad",
+)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+LOG = logging.getLogger("steamos-cec-controller-wake")
+
+
+@dataclass(frozen=True)
+class InputDevice:
+    event: str
+    name: str
+    phys: str
+    sysfs: str
+    bus: str
+    vendor: str
+    product: str
+    handlers: tuple[str, ...]
+
+
+def read_config(path: str = DEFAULT_CONFIG) -> dict[str, str]:
+    config: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as file:
+            for raw_line in file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                config[key.strip()] = value.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return config
+
+
+CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
+STEAMOS_CEC_USER = CONFIG.get("STEAMOS_CEC_USER", "deck")
+USER_CONFIG = f"/home/{STEAMOS_CEC_USER}/.config/steamos-cec-toolkit/config.conf"
+CONFIG.update(read_config(USER_CONFIG))
+HID_ID = CONFIG.get("STEAM_BUTTON_HID_ID", "0003:000028DE:00001304")
+EXCLUDED_PHYS = CONFIG.get("STEAM_BUTTON_EXCLUDED_PHYS", "input6")
+REPORT_ID = int(CONFIG.get("STEAM_BUTTON_REPORT_ID", "0x45"), 0)
+BUTTON_BYTE = int(CONFIG.get("STEAM_BUTTON_BYTE", "4"), 0)
+BUTTON_MASK = int(CONFIG.get("STEAM_BUTTON_MASK", "0x01"), 0)
+ALT_REPORT_ID = int(CONFIG.get("STEAM_BUTTON_ALT_REPORT_ID", "0x44"), 0)
+ALT_BUTTON_BYTE = int(CONFIG.get("STEAM_BUTTON_ALT_BYTE", "1"), 0)
+ALT_BUTTON_VALUES = {
+    int(value.strip(), 0)
+    for value in CONFIG.get("STEAM_BUTTON_ALT_VALUES", "0x03,0x04").split(",")
+    if value.strip()
+}
+ALT_BUTTON_DEBOUNCE_SECONDS = float(CONFIG.get("STEAM_BUTTON_ALT_DEBOUNCE_SECONDS", "20"))
+ENABLE_GENERIC_INPUT = CONFIG.get("CONTROLLER_WAKE_GENERIC_INPUT", "1") not in {"0", "false", "False", "no"}
+ENABLE_STEAM_HID = CONFIG.get("CONTROLLER_WAKE_STEAM_HID", "1") not in {"0", "false", "False", "no"}
+CEC_DEVICE = CONFIG.get("CEC_DEVICE", "/dev/cec0")
+TV_LOGICAL_ADDRESS = CONFIG.get("TV_LOGICAL_ADDRESS", "0")
+CEC_PLAYBACK_LOGICAL_ADDRESS = CONFIG.get("CEC_PLAYBACK_LOGICAL_ADDRESS", "4")
+CEC_PHYSICAL_ADDRESS = CONFIG.get("CEC_PHYSICAL_ADDRESS", "")
+RESUME_CEC_DELAY_SECONDS = float(CONFIG.get("CONTROLLER_WAKE_RESUME_DELAY_SECONDS", "2"))
+
+ACTIVATION_LOCK = threading.Lock()
+
+
+def hid_properties(path: str) -> dict[str, str]:
+    properties: dict[str, str] = {}
+    device_name = os.path.basename(path)
+    try:
+        with open(
+            f"/sys/class/hidraw/{device_name}/device/uevent",
+            encoding="utf-8",
+        ) as uevent:
+            for line in uevent:
+                key, separator, value = line.strip().partition("=")
+                if separator:
+                    properties[key] = value
+    except OSError:
+        pass
+    return properties
+
+
+def is_controller(path: str) -> bool:
+    properties = hid_properties(path)
+    hid_id = properties.get("HID_ID", "").lower()
+    hid_phys = properties.get("HID_PHYS", "").lower()
+    return HID_ID.lower() in hid_id and EXCLUDED_PHYS.lower() not in hid_phys
+
+
+def input_devices() -> dict[str, InputDevice]:
+    devices: dict[str, InputDevice] = {}
+    current: dict[str, object] = {}
+
+    def flush() -> None:
+        if not current:
+            return
+        name = str(current.get("name", ""))
+        phys = str(current.get("phys", ""))
+        sysfs = str(current.get("sysfs", ""))
+        bus = str(current.get("bus", ""))
+        vendor = str(current.get("vendor", ""))
+        product = str(current.get("product", ""))
+        handlers = tuple(str(current.get("handlers", "")).split())
+        for handler in handlers:
+            if handler.startswith("event"):
+                devices[f"/dev/input/{handler}"] = InputDevice(
+                    event=handler,
+                    name=name,
+                    phys=phys,
+                    sysfs=sysfs,
+                    bus=bus,
+                    vendor=vendor,
+                    product=product,
+                    handlers=handlers,
+                )
+
+    try:
+        with open("/proc/bus/input/devices", encoding="utf-8") as file:
+            for raw_line in file:
+                line = raw_line.rstrip("\n")
+                if not line:
+                    flush()
+                    current = {}
+                    continue
+                if line.startswith("N: Name="):
+                    current["name"] = line.split("=", 1)[1].strip().strip('"')
+                elif line.startswith("I:"):
+                    for field in line.split():
+                        if field.startswith("Bus="):
+                            current["bus"] = field.split("=", 1)[1].lower()
+                        elif field.startswith("Vendor="):
+                            current["vendor"] = field.split("=", 1)[1].lower()
+                        elif field.startswith("Product="):
+                            current["product"] = field.split("=", 1)[1].lower()
+                elif line.startswith("P: Phys="):
+                    current["phys"] = line.split("=", 1)[1].strip()
+                elif line.startswith("S: Sysfs="):
+                    current["sysfs"] = line.split("=", 1)[1].strip()
+                elif line.startswith("H: Handlers="):
+                    current["handlers"] = line.split("=", 1)[1].strip()
+            flush()
+    except OSError as error:
+        LOG.warning("Cannot read /proc/bus/input/devices: %s", error)
+    return devices
+
+
+def is_gamepad_input_device(device: InputDevice) -> bool:
+    name = device.name.lower()
+    handlers = set(device.handlers)
+    if any(hint in name for hint in NON_GAMEPAD_NAME_HINTS):
+        return False
+    if "motion sensor" in name or "motion sensors" in name:
+        return False
+    if device.vendor == "28de" and device.product == "11ff":
+        return False
+    if any(handler.startswith("js") for handler in handlers):
+        return True
+    return any(hint in name for hint in GAMEPAD_NAME_HINTS)
+
+
+def cec_wake() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "busctl",
+            "--user",
+            "call",
+            CEC_BUS,
+            CEC_PATH,
+            CEC_INTERFACE,
+            "Wake",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=10,
+        check=False,
+    )
+
+
+def raw_cec(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["cec-ctl", "-d", CEC_DEVICE, "-s", "--raw-msg", *command],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=8,
+        check=False,
+    )
+
+
+def wait_for_cec_device() -> bool:
+    deadline = time.monotonic() + CEC_DEVICE_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        if os.path.exists(CEC_DEVICE) and os.access(CEC_DEVICE, os.R_OK | os.W_OK):
+            return True
+        time.sleep(CEC_DEVICE_WAIT_STEP_SECONDS)
+    return os.path.exists(CEC_DEVICE) and os.access(CEC_DEVICE, os.R_OK | os.W_OK)
+
+
+def valid_source_logical_address(value: str) -> bool:
+    try:
+        logical = int(value, 10)
+    except ValueError:
+        return False
+    return 0 <= logical <= 14
+
+
+def configured_playback_logical_address() -> str:
+    if valid_source_logical_address(CEC_PLAYBACK_LOGICAL_ADDRESS):
+        return CEC_PLAYBACK_LOGICAL_ADDRESS
+    return "4"
+
+
+def read_current_playback_logical_address() -> str | None:
+    for args, timeout in ((["-l"], 5), (["-L"], 5), (["-S"], 12)):
+        try:
+            result = subprocess.run(
+                ["cec-ctl", "-d", CEC_DEVICE, *args],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=timeout,
+                check=False,
+            )
+        except Exception:
+            continue
+        if result.returncode != 0:
+            continue
+        plain_match = re.search(r"^\s*(\d+)\s*$", result.stdout, re.MULTILINE)
+        if plain_match and valid_source_logical_address(plain_match.group(1)):
+            return plain_match.group(1)
+        match = re.search(r"Logical Address\s*:\s*(\d+)\s*\(", result.stdout)
+        if match and valid_source_logical_address(match.group(1)):
+            return match.group(1)
+    return None
+
+
+def current_playback_logical_address() -> str:
+    deadline = time.monotonic() + CEC_LOGICAL_ADDRESS_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        logical = read_current_playback_logical_address()
+        if logical is not None:
+            return logical
+        time.sleep(CEC_DEVICE_WAIT_STEP_SECONDS)
+
+    fallback = configured_playback_logical_address()
+    LOG.warning("CEC logical address is not allocated yet; using configured fallback %s", fallback)
+    return fallback
+
+
+def physical_address() -> str:
+    return CEC_PHYSICAL_ADDRESS
+
+
+def physical_address_payload() -> str | None:
+    physical = physical_address()
+    if not physical:
+        return None
+    try:
+        parts = [int(part, 16) for part in physical.split(".")]
+    except ValueError:
+        return None
+    if len(parts) != 4 or any(part < 0 or part > 15 for part in parts):
+        return None
+    return f"0x{(parts[0] << 4) | parts[1]:02x}:0x{(parts[2] << 4) | parts[3]:02x}"
+
+
+def raw_active_source() -> None:
+    if not wait_for_cec_device():
+        LOG.warning("CEC device %s is missing or not writable after waiting; cannot send ACTIVE_SOURCE", CEC_DEVICE)
+        return
+
+    active_source_payload = physical_address_payload()
+    if not active_source_payload:
+        LOG.warning("CEC_PHYSICAL_ADDRESS is not configured; skipping ACTIVE_SOURCE")
+        return
+
+    result = raw_cec([
+        "-f",
+        current_playback_logical_address(),
+        "-t",
+        "15",
+        "--custom-command",
+        f"cmd=0x82,payload={active_source_payload}",
+    ])
+    if result.returncode != 0:
+        LOG.warning("ACTIVE_SOURCE failed: %s", result.stdout.strip())
+
+
+def raw_wake() -> None:
+    if not wait_for_cec_device():
+        LOG.warning("CEC device %s is missing or not writable after waiting; cannot send raw wake", CEC_DEVICE)
+        return
+
+    playback_logical_address = current_playback_logical_address()
+    if playback_logical_address != CEC_PLAYBACK_LOGICAL_ADDRESS:
+        LOG.info(
+            "Using current CEC logical address %s instead of configured %s",
+            playback_logical_address,
+            CEC_PLAYBACK_LOGICAL_ADDRESS,
+        )
+    commands = [
+        [
+            "-f",
+            playback_logical_address,
+            "-t",
+            TV_LOGICAL_ADDRESS,
+            "--custom-command",
+            "cmd=0x04",
+        ],
+        [
+            "-f",
+            playback_logical_address,
+            "-t",
+            TV_LOGICAL_ADDRESS,
+            "--custom-command",
+            "cmd=0x0d",
+        ],
+    ]
+    for command in commands:
+        result = raw_cec(command)
+        if result.returncode != 0:
+            LOG.warning("Raw CEC wake command failed: %s", result.stdout.strip())
+        time.sleep(0.25)
+    raw_active_source()
+
+
+def source_is_active() -> bool:
+    result = subprocess.run(
+        [
+            "busctl",
+            "--user",
+            "get-property",
+            CEC_BUS,
+            CEC_DEVICE_PATH,
+            CEC_DEVICE_INTERFACE,
+            "Active",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=5,
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "b true"
+
+
+def mark_cec_activation_requested(reason: str) -> None:
+    try:
+        CEC_ACTIVATION_MARKER.write_text(f"{time.monotonic()} {reason}\n", encoding="utf-8")
+    except OSError as error:
+        LOG.warning("Cannot write CEC activation marker: %s", error)
+
+
+def activate_source(reason: str) -> None:
+    with ACTIVATION_LOCK:
+        was_active = source_is_active()
+        if was_active:
+            LOG.info("CEC source reports active; still sending raw wake/input activation (%s)", reason)
+
+        for attempt, delay in enumerate(CEC_WAKE_RETRY_DELAYS, start=1):
+            if delay:
+                time.sleep(delay)
+            raw_wake()
+            result = cec_wake()
+            if result.returncode != 0:
+                LOG.warning(
+                    "CEC activation attempt %d failed: %s",
+                    attempt,
+                    result.stdout.strip(),
+                )
+                continue
+            time.sleep(1.0)
+            raw_active_source()
+            time.sleep(0.5)
+            if source_is_active():
+                if not was_active:
+                    mark_cec_activation_requested(reason)
+                LOG.info("Woke display chain and activated HDMI source (%s, attempt %d)", reason, attempt)
+                return
+            LOG.info("CEC wake attempt %d did not activate this source", attempt)
+
+        for delay in (2, 5, 8):
+            time.sleep(delay)
+            raw_active_source()
+
+        LOG.warning("Display wake/source activation did not complete after CEC retries")
+
+
+async def monitor_login1_resume() -> None:
+    if BusType is None or MessageBus is None:
+        LOG.warning("dbus_next is missing; system resume CEC activation is disabled")
+        return
+
+    try:
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        introspection = await bus.introspect(LOGIN1_BUS_NAME, LOGIN1_PATH)
+        proxy = bus.get_proxy_object(LOGIN1_BUS_NAME, LOGIN1_PATH, introspection)
+        manager = proxy.get_interface(LOGIN1_INTERFACE)
+    except Exception as error:
+        LOG.warning("Cannot monitor system resume: %s", error)
+        return
+
+    async def activate_after_resume_delay() -> None:
+        await asyncio.sleep(RESUME_CEC_DELAY_SECONDS)
+        await asyncio.to_thread(activate_source, "system resumed")
+
+    def prepare_for_sleep(sleeping):
+        LOG.info("PrepareForSleep sleeping=%s", sleeping)
+        if sleeping:
+            return
+        asyncio.get_running_loop().create_task(activate_after_resume_delay())
+
+    manager.on_prepare_for_sleep(prepare_for_sleep)
+    LOG.info("Monitoring system resume for CEC wake/input activation")
+    await asyncio.get_running_loop().create_future()
+
+
+def start_resume_monitor() -> None:
+    thread = threading.Thread(
+        target=lambda: asyncio.run(monitor_login1_resume()),
+        name="login1-resume-monitor",
+        daemon=True,
+    )
+    thread.start()
+
+
+def refresh_devices(
+    selector: selectors.BaseSelector,
+    open_devices: dict[str, int],
+    device_kinds: dict[str, str],
+    failed_devices: dict[str, float],
+) -> None:
+    current: dict[str, str] = {}
+    if ENABLE_STEAM_HID:
+        current.update(
+            {
+                path: "steam-hid"
+                for path in glob.glob("/dev/hidraw*")
+                if is_controller(path)
+            }
+        )
+
+    if ENABLE_GENERIC_INPUT:
+        for path, device in input_devices().items():
+            if is_gamepad_input_device(device):
+                current[path] = "gamepad-input"
+
+    for path in set(open_devices) - set(current):
+        fd = open_devices.pop(path)
+        device_kinds.pop(path, None)
+        try:
+            selector.unregister(fd)
+        except KeyError:
+            pass
+        os.close(fd)
+
+    for path in sorted(set(current) - set(open_devices)):
+        now = time.monotonic()
+        if now - failed_devices.get(path, 0.0) < 60:
+            continue
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            selector.register(fd, selectors.EVENT_READ, path)
+            open_devices[path] = fd
+            device_kinds[path] = current[path]
+            failed_devices.pop(path, None)
+            LOG.info("Monitoring %s controller source at %s", current[path], path)
+        except OSError as error:
+            failed_devices[path] = now
+            LOG.warning("Cannot monitor %s: %s", path, error)
+
+
+def iter_input_events(data: bytes) -> list[tuple[int, int, int]]:
+    events: list[tuple[int, int, int]] = []
+    for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
+        _, _, event_type, code, value = INPUT_EVENT.unpack_from(data, offset)
+        events.append((event_type, code, value))
+    return events
+
+
+def update_system_resume_window(
+    previous_wall: float,
+    previous_monotonic: float,
+    resume_window_until: float,
+) -> tuple[float, float, float]:
+    wall_now = time.time()
+    monotonic_now = time.monotonic()
+    suspended_for = (wall_now - previous_wall) - (monotonic_now - previous_monotonic)
+    if suspended_for >= SUSPEND_GAP_SECONDS:
+        resume_window_until = monotonic_now + HID_RESUME_WINDOW_SECONDS
+        LOG.info(
+            "Detected system resume after %.1fs suspend; allowing Steam HID resume wake for %.0fs",
+            suspended_for,
+            HID_RESUME_WINDOW_SECONDS,
+        )
+    return wall_now, monotonic_now, resume_window_until
+
+
+def main() -> None:
+    start_resume_monitor()
+
+    selector = selectors.DefaultSelector()
+    open_devices: dict[str, int] = {}
+    device_kinds: dict[str, str] = {}
+    failed_devices: dict[str, float] = {}
+    startup_deadline = time.monotonic() + STARTUP_BASELINE_SECONDS
+    last_wall = time.time()
+    last_monotonic = time.monotonic()
+    hid_resume_window_until = 0.0
+
+    button_down: dict[str, bool] = {}
+    button_pressed_at: dict[str, float] = {}
+    pending_short_press: dict[str, tuple[float, int]] = {}
+    last_activation = 0.0
+    last_resume_activation = 0.0
+    last_alt_activation: dict[str, float] = {}
+    last_report_seen: dict[str, float] = {}
+    report_seen_once: set[str] = set()
+
+    while True:
+        now = time.monotonic()
+        for path, (released_at, reports_after_release) in list(pending_short_press.items()):
+            if (
+                now - released_at >= SHORT_PRESS_CONFIRM_SECONDS
+                and (
+                    reports_after_release >= SHORT_PRESS_CONFIRM_REPORTS
+                    or now - last_report_seen.get(path, released_at) >= SHORT_PRESS_CONFIRM_SECONDS
+                )
+                and now - last_activation >= BUTTON_DEBOUNCE_SECONDS
+            ):
+                last_activation = now
+                last_resume_activation = now
+                pending_short_press.pop(path, None)
+                activate_source("short Steam-button press")
+
+        previous_resume_window_until = hid_resume_window_until
+        last_wall, last_monotonic, hid_resume_window_until = update_system_resume_window(
+            last_wall,
+            last_monotonic,
+            hid_resume_window_until,
+        )
+        if (
+            hid_resume_window_until > previous_resume_window_until
+            and time.monotonic() - last_resume_activation >= RESUME_ACTIVATION_COOLDOWN_SECONDS
+        ):
+            last_activation = time.monotonic()
+            last_resume_activation = last_activation
+            activate_source("system resumed")
+        refresh_devices(selector, open_devices, device_kinds, failed_devices)
+
+        for key, _ in selector.select(timeout=5):
+            last_wall, last_monotonic, hid_resume_window_until = update_system_resume_window(
+                last_wall,
+                last_monotonic,
+                hid_resume_window_until,
+            )
+            path = key.data
+            try:
+                data = os.read(key.fileobj, 4096)
+            except (BlockingIOError, OSError):
+                continue
+
+            now = time.monotonic()
+            previous_report = last_report_seen.get(path)
+            first_report = path not in report_seen_once
+            resumed = (
+                previous_report is not None
+                and now - previous_report >= REPORT_RESUME_SECONDS
+            )
+            last_report_seen[path] = now
+
+            pending = pending_short_press.get(path)
+            if pending:
+                released_at, reports_after_release = pending
+                reports_after_release += 1
+                pending_short_press[path] = (released_at, reports_after_release)
+                if (
+                    now - released_at >= SHORT_PRESS_CONFIRM_SECONDS
+                    and reports_after_release >= SHORT_PRESS_CONFIRM_REPORTS
+                    and now - last_activation >= BUTTON_DEBOUNCE_SECONDS
+                ):
+                    last_activation = now
+                    pending_short_press.pop(path, None)
+                    activate_source("short Steam-button press")
+
+            steam_hid_awake = device_kinds.get(path) == "steam-hid" and (
+                (resumed and now >= startup_deadline)
+                or (first_report and now >= startup_deadline)
+            )
+            connected = steam_hid_awake or (
+                device_kinds.get(path) == "steam-hid"
+                and resumed
+                and now <= hid_resume_window_until
+            )
+            if (
+                connected
+                and now - last_resume_activation >= RESUME_ACTIVATION_COOLDOWN_SECONDS
+            ):
+                last_activation = now
+                last_resume_activation = now
+                activate_source("controller connected or resumed")
+
+            report_seen_once.add(path)
+
+            if device_kinds.get(path) == "gamepad-input":
+                for event_type, code, value in iter_input_events(data):
+                    if event_type != EV_KEY or value != KEY_PRESSED:
+                        continue
+                    if code not in GAMEPAD_HOME_CODES:
+                        continue
+                    if now - last_activation < BUTTON_DEBOUNCE_SECONDS:
+                        continue
+                    last_activation = now
+                    last_resume_activation = now
+                    activate_source(f"{GAMEPAD_HOME_CODES[code]} controller button")
+                continue
+
+            if (
+                len(data) > ALT_BUTTON_BYTE
+                and data[0] == ALT_REPORT_ID
+                and data[ALT_BUTTON_BYTE] in ALT_BUTTON_VALUES
+            ):
+                if (
+                    now - last_activation >= BUTTON_DEBOUNCE_SECONDS
+                    and now - last_alt_activation.get(path, 0.0) >= ALT_BUTTON_DEBOUNCE_SECONDS
+                ):
+                    last_activation = now
+                    last_resume_activation = now
+                    last_alt_activation[path] = now
+                    activate_source("Steam Controller system button")
+                continue
+
+            if len(data) <= BUTTON_BYTE or data[0] != REPORT_ID:
+                continue
+
+            is_down = bool(data[BUTTON_BYTE] & BUTTON_MASK)
+            was_down = button_down.get(path, False)
+
+            if is_down and not was_down:
+                button_pressed_at[path] = now
+                pending_short_press.pop(path, None)
+            elif not is_down and was_down:
+                pressed_at = button_pressed_at.pop(path, now)
+                if now - pressed_at <= SHORT_PRESS_MAX_SECONDS:
+                    pending_short_press[path] = (now, 0)
+
+            button_down[path] = is_down
+
+
+if __name__ == "__main__":
+    main()
