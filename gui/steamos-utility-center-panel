@@ -4782,7 +4782,8 @@ class Panel:
             variable = self._gpu_vars.get(knob["key"])
             if variable is not None:
                 config = lact.with_knob(config, knob["key"],
-                                        round(variable.get()))
+                                        round(variable.get()),
+                                        knob.get("scale", 1))
         # The firmware's own settings, which are a third place in the document
         # and are collected whether or not LACT is driving the fan.
         config = lact.with_firmware(config, {

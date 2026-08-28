@@ -85,12 +85,48 @@ CONFIRM_SECONDS = 5
 # LACT. These four are the ones people actually reach for.
 POWER_CAP = "power_cap"
 
+# Where the clocks sit in the config document. A newer daemon keeps them at
+# the top beside the power cap; an older one gathered them into a block of
+# their own. Both are read, and which one is written is decided by the
+# document itself rather than here - see with_knob.
+CLOCKS_BLOCK = "clocks_configuration"
+
+# The GPU clock offset is not one number in the document but a table of them,
+# one per power state. LACT's own window offers a single offset and writes it
+# into state 0, and this follows it.
+GPU_CLOCK_OFFSET = "gpu_clock_offset"
+GPU_CLOCK_OFFSETS = "gpu_clock_offsets"
+OFFSET_STATE = "0"
+
+# (key, label, unit, where its range comes from, where its slider starts)
+#
+# The last field is which end of what the card reports *now* an untouched
+# slider sits at: "max" and "min" take that end of the reported range, "now"
+# the single value reported for it. Starting a maximum at the top of what the
+# card would *accept* instead reads an untouched card as one clocked higher
+# than it runs - which is how the VRAM slider came to say 1500 on a card
+# whose memory runs at 1259.
+#
+# sclk and sclk_offset are alternatives rather than a pair: an RDNA card
+# reports no absolute core-clock range and takes an offset instead, an older
+# one the other way about, and each card is offered whichever it reports.
 KNOBS = (
-    (POWER_CAP, "Power limit", "W", "power"),
-    ("max_core_clock", "Maximum GPU clock", "MHz", "sclk"),
-    ("max_memory_clock", "Maximum VRAM clock", "MHz", "mclk"),
-    ("voltage_offset", "Voltage offset", "mV", "vddc_offset"),
+    (POWER_CAP, "Power limit", "W", "power", "max"),
+    ("max_core_clock", "Maximum GPU clock", "MHz", "sclk", "max"),
+    (GPU_CLOCK_OFFSET, "GPU clock offset", "MHz", "sclk_offset", "now"),
+    ("voltage_offset", "Voltage offset", "mV", "voltage_offset", "now"),
+    ("max_memory_clock", "Maximum VRAM clock", "MHz", "mclk", "max"),
+    ("min_memory_clock", "Minimum VRAM clock", "MHz", "mclk", "min"),
 )
+
+# The table kinds whose memory clock is shown at twice what it is stored at.
+# LACT's window does this because the memory is DDR and the table holds the
+# controller's own clock: a card reporting 1259 is shown as 2518, and 2400
+# typed into that window is stored as 1200. Doubled here too, so that two
+# windows open beside each other do not disagree about the same card by a
+# factor of two - and undone in with_knob, so what is written is what LACT
+# would have written.
+MEMORY_DOUBLED = ("rdna",)
 
 # How the fan is driven. LACT's own two, named the same.
 FAN_STATIC = "static"
@@ -400,6 +436,80 @@ def _number(value):
         return None
 
 
+def memory_scale(clocks):
+    """2 where the memory clock is shown at twice what it is stored at.
+
+    Keyed off the table's own `kind`, which is the daemon's word for the
+    shape it is reporting rather than a guess at what the card is.
+    """
+    for kind in _find(clocks, "kind"):
+        if isinstance(kind, str) and kind in MEMORY_DOUBLED:
+            return 2
+    return 1
+
+
+def reported(found):
+    """What the card says each knob is set to now, as {name: value}.
+
+    Kept apart from ranges(), because they answer different questions: one is
+    what the card would accept, this is where it actually sits, and a slider
+    nobody has written to belongs at the second. A card can report a ceiling
+    well above what it runs - 1500 against 1259 on RDNA - and starting the
+    slider at the ceiling says the card is clocked somewhere it is not.
+
+    Searched for in the same way and for the same reason as the ranges: the
+    table is a tagged union whose shape is the daemon's business.
+    """
+    out = {}
+    for key, name in (("current_sclk_range", "sclk"),
+                      ("current_mclk_range", "mclk")):
+        for where in _find(found, key):
+            span = _span(where)
+            if span and name not in out:
+                out[name] = span
+    # The offsets, which are plain numbers in that same table - and share
+    # their names with the {min, max} entries in od_range, so the ones that
+    # are not numbers here are those.
+    for name in ("sclk_offset", "voltage_offset"):
+        for value in _find(found, name):
+            number = _number(value)
+            if number is not None and name not in out:
+                out[name] = number
+    return out
+
+
+def knob_value(config, key):
+    """What one knob is set to in a config document, wherever it lives.
+
+    Both shapes are read rather than one: the document is the daemon's own
+    answer, and whether it keeps the clocks at the top or in a block of their
+    own is the daemon's to decide, not something to insist on from here.
+    """
+    config = config or {}
+    if key == GPU_CLOCK_OFFSET:
+        return _offset_value(config.get(GPU_CLOCK_OFFSETS))
+    if key in config:
+        return config.get(key)
+    return (config.get(CLOCKS_BLOCK) or {}).get(key)
+
+
+def _offset_value(offsets):
+    """The one GPU clock offset out of the table of them.
+
+    State 0 is the one LACT's window writes and the one this offers. A card
+    carrying offsets only for other states is still read from, so the slider
+    shows a number somebody set rather than nothing at all.
+    """
+    number = _number(offsets)
+    if number is not None:
+        return number               # a daemon that keeps just the one
+    if not isinstance(offsets, dict) or not offsets:
+        return None
+    if OFFSET_STATE in offsets:
+        return _number(offsets[OFFSET_STATE])
+    return _number(next(iter(offsets.values())))
+
+
 def offered(config, clocks, found_stats):
     """Which knobs this card actually has, with their range and value.
 
@@ -410,8 +520,11 @@ def offered(config, clocks, found_stats):
     """
     spans = ranges(clocks)
     power = power_range(found_stats)
+    now = reported(clocks)
+    doubled = memory_scale(clocks)
     out = []
-    for key, label, unit, source in KNOBS:
+    for key, label, unit, source, end in KNOBS:
+        scale = 1
         if source == "power":
             if power["min"] is None or power["max"] is None:
                 continue
@@ -420,33 +533,57 @@ def offered(config, clocks, found_stats):
             # What the card is set to right now, which for the power cap is a
             # thing the card reports whether or not LACT has written it.
             fallback = power["current"] or power["default"] or span[1]
-        elif source == "vddc_offset":
-            # An offset, not an absolute: its range is not the card's voltage
-            # range and LACT does not report one, so this is the window either
-            # side that every card this applies to accepts.
-            if "vddc" not in spans:
-                continue
-            span = (-250, 250)
-            value = (config.get("clocks_configuration") or {}).get(key)
-            fallback = 0                # no offset is the untouched state
         else:
-            if source not in spans:
-                continue
-            span = spans[source]
-            value = (config.get("clocks_configuration") or {}).get(key)
-            # A maximum nobody has set is the card's own maximum. Starting
-            # such a slider at the *bottom* of its range would draw an
-            # untouched card as one clamped to its lowest clock, which is a
-            # lie about the machine and the kind somebody acts on.
-            fallback = span[1]
+            span = spans.get(source)
+            if span is None:
+                # A card that reports an absolute voltage range and no window
+                # for the offset - older AMD. This is the window either side
+                # of nothing that every card it applies to accepts.
+                if source != "voltage_offset" or "vddc" not in spans:
+                    continue
+                span = (-250, 250)
+            if source == "mclk":
+                scale = doubled
+            value = knob_value(config, key)
+            fallback = _start(now, source, end, span)
+        if scale != 1:
+            span = (span[0] * scale, span[1] * scale)
+            fallback = fallback * scale
+            if value is not None:
+                value = float(value) * scale
         out.append({"key": key, "label": label, "unit": unit,
                     "min": span[0], "max": span[1],
+                    # What this slider is shown and set in against what the
+                    # document holds - see MEMORY_DOUBLED. Carried with the
+                    # knob so the one function that writes can undo it.
+                    "scale": scale,
                     "value": None if value is None else float(value),
                     # Where the slider starts when nothing is set. Kept apart
                     # from `value` so "set to this" and "not set, and this is
                     # what that means" stay different questions.
                     "start": float(value if value is not None else fallback)})
     return out
+
+
+def _start(now, source, end, span):
+    """Where a slider with nothing written to it sits.
+
+    What the card reports for that knob now, and the end of its accepted
+    range only when it reports nothing: the range is what the card would
+    take, which on a card whose ceiling sits above what it runs is a
+    different number, and drawing it would say the card is clocked somewhere
+    it is not.
+    """
+    found = now.get(source)
+    if isinstance(found, tuple):
+        return found[1] if end == "max" else found[0]
+    if found is not None:
+        return found
+    if end == "max":
+        return span[1]
+    if end == "min":
+        return span[0]
+    return 0
 
 
 # -- the fan ----------------------------------------------------------------
@@ -564,22 +701,51 @@ def with_fan(config, enabled=None, mode=None, static_speed=None, curve=None):
     return made
 
 
-def with_knob(config, key, value):
+def with_knob(config, key, value, scale=1):
     """A copy of the config with one knob changed, in the place it lives.
 
-    The power cap is a field of its own; everything else sits in
-    clocks_configuration. Two places, so this is the one function that knows
-    which - a page that guessed would write a clock into a key nothing reads
-    and report success.
+    Three places, so this is the one function that knows which - a page that
+    guessed would write a clock into a key nothing reads, and the daemon
+    would take the document and report success. The power cap is a field of
+    its own; the GPU clock offset is a table of them, one per power state;
+    everything else is a plain field, at the top of the document unless this
+    document keeps a clocks_configuration block, which is where an older
+    daemon gathered them. Decided by the document rather than by a version
+    number, because the document is the daemon's own answer.
+
+    `scale` is what the slider was shown in against what the document holds,
+    and it is undone here: a memory clock offered as 2400 is stored as 1200,
+    which is what LACT's own window stores for the same slider.
     """
     made = dict(config or {})
     if key == POWER_CAP:
         made[key] = None if value is None else float(value)
         return made
-    clocks = dict(made.get("clocks_configuration") or {})
+    if value is not None and scale != 1:
+        value = value / float(scale)
+    if key == GPU_CLOCK_OFFSET:
+        offsets = dict(made.get(GPU_CLOCK_OFFSETS) or {})
+        if value is None:
+            offsets.pop(OFFSET_STATE, None)
+        else:
+            offsets[OFFSET_STATE] = int(round(value))
+        if offsets:
+            made[GPU_CLOCK_OFFSETS] = offsets
+        else:
+            # Rather than an empty table, which is a card told to hold no
+            # offsets rather than one nobody has given any.
+            made.pop(GPU_CLOCK_OFFSETS, None)
+        return made
+    if CLOCKS_BLOCK in made:
+        clocks = dict(made.get(CLOCKS_BLOCK) or {})
+        if value is None:
+            clocks.pop(key, None)
+        else:
+            clocks[key] = int(round(value))
+        made[CLOCKS_BLOCK] = clocks
+        return made
     if value is None:
-        clocks.pop(key, None)
+        made.pop(key, None)
     else:
-        clocks[key] = int(value)
-    made["clocks_configuration"] = clocks
+        made[key] = int(round(value))
     return made

@@ -137,6 +137,47 @@ CONFIG = {"fan_control_enabled": False,
           "clocks_configuration": {}}
 
 
+# The same three documents off a newer card - an RX 9070 XT, recorded from
+# its own daemon. Kept beside the older one rather than replacing it: the two
+# shapes are both live, one on the Steam Deck's own iGPU and one on a card
+# somebody put in a Steam Machine, and every rule here has to hold for both.
+NEW_DEVICES = [{"id": "1002:7550-148C:2435-0000:03:00.0",
+                "name": "AMD Radeon RX 9070 XT"}]
+
+NEW_STATS = {"power": {"average": 6.0, "cap_current": 373.0, "cap_max": 374.0,
+                       "cap_min": 212.0, "cap_default": 304.0}}
+
+NEW_CLOCKS = {
+    "max_mclk": 1259,
+    "table": {"type": "amd", "value": {"kind": "rdna", "data": {
+        "current_sclk_range": {"min": None, "max": None},
+        "sclk_offset": 0,
+        "current_mclk_range": {"min": 97, "max": 1259},
+        "vddc_curve": [],
+        "voltage_offset": -20,
+        "od_range": {
+            "sclk": None,
+            "sclk_offset": {"min": -500, "max": 1000},
+            "mclk": {"min": 97, "max": 1500},
+            "curve_sclk_points": [],
+            "curve_voltage_points": [],
+            "voltage_offset": {"min": -200, "max": 0}}}}},
+}
+
+NEW_CONFIG = {
+    "fan_control_enabled": False,
+    "fan_control_settings": {"mode": "curve", "static_speed": 0.5,
+                             "temperature_key": "edge", "interval_ms": 500,
+                             "curve": {"40": 0.3, "80": 1.0}},
+    "pmfw_options": {"acoustic_limit": 3500, "acoustic_target": 1500,
+                     "minimum_pwm": 30, "target_temperature": 85,
+                     "zero_rpm": True},
+    "power_cap": 373.0,
+    "performance_level": "auto",
+    "voltage_offset": -20,
+}
+
+
 class DaemonTest(unittest.TestCase):
     """The client, against something on the other end of the socket."""
 
@@ -394,10 +435,19 @@ class PowerRangeTest(unittest.TestCase):
 class OfferedTest(unittest.TestCase):
     """Only the knobs this card actually has."""
 
-    def test_a_card_with_everything_offers_everything(self):
+    def test_a_card_is_offered_what_it_reports_and_not_the_whole_table(self):
+        """No card has every knob, and two of them are alternatives.
+
+        This one reports an absolute core-clock range and an absolute voltage
+        range, which is the older AMD shape - so it gets a maximum GPU clock
+        and the offset window either side of nothing, and no GPU clock
+        offset, which is the thing newer cards report *instead* of that
+        maximum.
+        """
         found = lact.offered(CONFIG, CLOCKS, STATS)
         self.assertEqual([knob["key"] for knob in found],
-                         [key for key, _l, _u, _s in lact.KNOBS])
+                         [lact.POWER_CAP, "max_core_clock", "voltage_offset",
+                          "max_memory_clock", "min_memory_clock"])
 
     def test_a_card_with_no_clocks_table_offers_only_the_power_limit(self):
         """Which is most integrated graphics, and the Steam Machine may be one.
@@ -697,6 +747,108 @@ class KnobWritingTest(unittest.TestCase):
         lact.with_knob(CONFIG, "max_core_clock", 1500)
         lact.with_fan(CONFIG, enabled=True)
         self.assertEqual(json.dumps(CONFIG, sort_keys=True), before)
+
+
+class NewerCardTest(unittest.TestCase):
+    """A card reporting the newer shape, recorded off a real one.
+
+    An RX 9070 XT as its daemon answered. Four things about it are not what
+    the older shape does, and this panel got all four wrong: there is no
+    absolute core-clock range at all, only an offset; the voltage offset has
+    a window of its own rather than the one every older card takes; the
+    clocks sit at the top of the config document instead of in a block; and
+    the memory clock is shown at twice what the table holds. Two sliders were
+    drawn where there should have been five, and the VRAM one read 1500 while
+    LACT read 2518 for the same card at the same moment.
+    """
+
+    CLOCKS = NEW_CLOCKS
+    STATS = NEW_STATS
+    CONFIG = NEW_CONFIG
+
+    def knobs(self, config=None):
+        return {knob["key"]: knob for knob in lact.offered(
+            self.CONFIG if config is None else config, self.CLOCKS,
+            self.STATS)}
+
+    def test_every_knob_this_card_reports_is_offered(self):
+        self.assertEqual(
+            sorted(self.knobs()),
+            sorted([lact.POWER_CAP, "gpu_clock_offset", "voltage_offset",
+                    "max_memory_clock", "min_memory_clock"]))
+
+    def test_no_maximum_core_clock_where_the_card_reports_no_range(self):
+        # od_range.sclk is null on this one: it takes an offset instead, and
+        # a slider for a range that is not there writes nowhere.
+        self.assertNotIn("max_core_clock", self.knobs())
+
+    def test_the_memory_clock_is_shown_the_way_the_other_window_shows_it(self):
+        """The numbers standing in LACT beside this card, for the same card.
+
+        Somebody with both windows open is looking at one machine, and a
+        panel that halves the number is a panel they have to translate.
+        """
+        found = self.knobs()
+        self.assertEqual(found["max_memory_clock"]["start"], 2518)
+        self.assertEqual(found["min_memory_clock"]["start"], 194)
+
+    def test_a_maximum_starts_where_the_card_runs_not_where_it_would_go(self):
+        """The one that was visible: 1500 against LACT's 2518.
+
+        od_range says this card would accept 1500; current_mclk_range says it
+        is set to 1259. Starting at the first drew an untouched card as one
+        clocked a fifth higher than it runs - and it is the ceiling, so the
+        slider sat at the far end looking like a maximum somebody had chosen.
+        """
+        found = self.knobs()["max_memory_clock"]
+        self.assertEqual(found["start"], 1259 * 2)
+        self.assertEqual(found["max"], 1500 * 2)
+
+    def test_the_voltage_window_is_the_one_this_card_gave(self):
+        # Not the +-250 the older shape gets: this card takes -200 to 0, and
+        # offering more is offering a voltage it will refuse.
+        found = self.knobs()["voltage_offset"]
+        self.assertEqual((found["min"], found["max"]), (-200, 0))
+        self.assertEqual(found["start"], -20)
+
+    def test_the_gpu_clock_offset_is_read_out_of_its_table(self):
+        # One number in the window, a table of them per power state in the
+        # document.
+        found = self.knobs(dict(self.CONFIG, gpu_clock_offsets={"0": 15}))
+        self.assertEqual(found["gpu_clock_offset"]["value"], 15)
+
+    def test_what_is_written_is_what_lact_writes(self):
+        """The three settings made in LACT's window, read back off the daemon.
+
+        This is the whole point of the exercise: the panel that writes
+        anything else is one whose sliders move, whose apply reports success,
+        and whose card does not change - clocks_configuration is not in this
+        document, and a key nothing reads is taken without complaint.
+        """
+        made = lact.with_knob(self.CONFIG, "gpu_clock_offset", 15)
+        made = lact.with_knob(made, "max_memory_clock", 2400, 2)
+        made = lact.with_knob(made, "min_memory_clock", 400, 2)
+        self.assertNotIn(lact.CLOCKS_BLOCK, made)
+        self.assertEqual(
+            {key: made[key] for key in
+             ("min_memory_clock", "max_memory_clock", "gpu_clock_offsets",
+              "voltage_offset", "power_cap")},
+            {"min_memory_clock": 200, "max_memory_clock": 1200,
+             "gpu_clock_offsets": {"0": 15}, "voltage_offset": -20,
+             "power_cap": 373.0})
+
+    def test_the_rest_of_the_document_survives_a_clock(self):
+        made = lact.with_knob(self.CONFIG, "max_memory_clock", 2400, 2)
+        self.assertEqual(made["pmfw_options"], self.CONFIG["pmfw_options"])
+        self.assertEqual(made["fan_control_settings"],
+                         self.CONFIG["fan_control_settings"])
+
+    def test_clearing_the_offset_takes_its_table_with_it(self):
+        # Rather than an empty table, which is a card told to hold no offsets
+        # rather than one nobody has given any.
+        made = lact.with_knob(dict(self.CONFIG, gpu_clock_offsets={"0": 15}),
+                              "gpu_clock_offset", None)
+        self.assertNotIn("gpu_clock_offsets", made)
 
 
 if __name__ == "__main__":                                  # pragma: no cover

@@ -28,6 +28,7 @@ import syssettings                                          # noqa: E402
 from steamos_utility_center import cec                                 # noqa: E402
 from steamos_utility_center import lact                                # noqa: E402
 from test_lact import (FakeDaemon, DEVICES, STATS, CLOCKS,  # noqa: E402
+                       NEW_DEVICES, NEW_STATS, NEW_CLOCKS, NEW_CONFIG,
                        CONFIG, RDNA3_FAN)
 
 try:
@@ -2614,8 +2615,14 @@ class GpuBlockTest(unittest.TestCase):
     # -- the knobs ---------------------------------------------------------
 
     def test_every_knob_the_card_reported_gets_a_slider(self):
-        for key, _label, _unit, _source in lact.KNOBS:
-            self.assertIn(key, self.panel._gpu_vars, key)
+        # What this card reported, not the whole table: two of the knobs are
+        # alternatives - a card reports an absolute core clock or an offset
+        # from one, never both - so KNOBS is what could be offered and this
+        # is what was.
+        reported = self.panel_module.ledpanel.gpu_knobs(self.panel._gpu)
+        self.assertTrue(reported, "the card in this fixture reported none")
+        for knob in reported:
+            self.assertIn(knob["key"], self.panel._gpu_vars, knob["key"])
 
     def test_a_card_with_no_clocks_table_gets_only_the_power_slider(self):
         """Which is most integrated graphics, and may be this machine.
@@ -2865,6 +2872,121 @@ class GpuBlockTest(unittest.TestCase):
         sent = [one for one in self.daemon.asked
                 if one["command"] == "set_profile"]
         self.assertEqual(sent[-1]["args"], {"name": "loud"})
+
+
+class NewerCardBlockTest(unittest.TestCase):
+    """The same block against the newer card, through the whole path.
+
+    A fake daemon answering with an RX 9070 XT's own documents, so what is
+    tested is the window: read what the card reports, draw sliders from it,
+    collect them and send them back. This card gets none of that right by
+    accident - it reports no absolute core clock, a voltage window of its
+    own, and a memory clock that is shown at twice what is written - and the
+    panel showed two sliders where LACT showed five, one of them by a factor
+    of two.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.daemon = FakeDaemon(answers={
+            "list_devices": NEW_DEVICES,
+            "device_stats": NEW_STATS,
+            "device_clocks_info": NEW_CLOCKS,
+            "get_gpu_config": NEW_CONFIG,
+            "list_profiles": {"profiles": [], "current_profile": ""},
+            "set_gpu_config": 5,
+            "confirm_pending_config": None,
+            "set_profile": None,
+        })
+        self.addCleanup(self.daemon.close)
+        for module in (lact, self.panel_module.lact,
+                       self.panel_module.ledpanel.lact_module):
+            was = module.SOCKET_PATH
+            module.SOCKET_PATH = self.daemon.path
+            self.addCleanup(
+                lambda m=module, w=was: setattr(m, "SOCKET_PATH", w))
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.panel._open_section("power")
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _keep(self):
+        """Answer the confirm dialog yes, as somebody at the machine would."""
+        was = self.panel_module.CountdownDialog
+        self.panel_module.CountdownDialog = (
+            lambda parent, seconds: type("A", (), {"answer": True})())
+        self.addCleanup(
+            lambda: setattr(self.panel_module, "CountdownDialog", was))
+
+    def test_the_window_draws_every_slider_this_card_reports(self):
+        drawn = set(self.panel._gpu_vars)
+        self.assertLessEqual(
+            {"power_cap", "gpu_clock_offset", "voltage_offset",
+             "max_memory_clock", "min_memory_clock"}, drawn)
+        # And not the one it reports no range for, which would write nowhere.
+        self.assertNotIn("max_core_clock", drawn)
+
+    def test_the_sliders_open_on_the_numbers_the_other_window_shows(self):
+        """Against LACT, reading the same card at the same moment.
+
+        Somebody with both windows open is looking at one machine. These are
+        the numbers LACT put beside this card: a panel that disagrees with it
+        by a factor of two is one they have to translate, and a panel that
+        starts at the ceiling says the card is clocked where it is not.
+        """
+        opened = dict((key, round(variable.get())) for key, variable
+                      in self.panel._gpu_vars.items()
+                      if key in ("power_cap", "gpu_clock_offset",
+                                 "voltage_offset", "max_memory_clock",
+                                 "min_memory_clock"))
+        self.assertEqual(opened, {"power_cap": 373, "gpu_clock_offset": 0,
+                                  "voltage_offset": -20,
+                                  "max_memory_clock": 2518,
+                                  "min_memory_clock": 194})
+
+    def test_applying_sends_what_lact_itself_would_have_written(self):
+        """The end of it: the document that reaches the daemon.
+
+        The same three settings, made here instead of in LACT's window. What
+        arrives has to be what LACT stores for them - halved memory clocks
+        and an offset in its table - or the sliders move, the apply reports
+        success, and the card goes on as it was.
+        """
+        self._keep()
+        self.panel._gpu_vars["gpu_clock_offset"].set(15)
+        self.panel._gpu_vars["max_memory_clock"].set(2400)
+        self.panel._gpu_vars["min_memory_clock"].set(400)
+        self.panel._apply_gpu()
+        sent = [one for one in self.daemon.asked
+                if one["command"] == "set_gpu_config"]
+        self.assertTrue(sent, "nothing was sent to the daemon")
+        config = sent[-1]["args"]["config"]
+        self.assertEqual(config["max_memory_clock"], 1200)
+        self.assertEqual(config["min_memory_clock"], 200)
+        self.assertEqual(config["gpu_clock_offsets"], {"0": 15})
+        # Not into the block an older daemon keeps, which this one has not
+        # got: it would take the document, report success, and change nothing.
+        self.assertNotIn("clocks_configuration", config)
+
+    def test_what_nobody_touched_is_sent_back_as_it_was(self):
+        # set_gpu_config replaces the document, so a setting left out is a
+        # setting turned off on somebody's card.
+        self._keep()
+        self.panel._apply_gpu()
+        config = [one for one in self.daemon.asked
+                  if one["command"] == "set_gpu_config"][-1]["args"]["config"]
+        self.assertEqual(config["power_cap"], 373.0)
+        self.assertEqual(config["voltage_offset"], -20)
+        self.assertEqual(config["pmfw_options"]["target_temperature"], 85)
 
 
 class CountdownTest(unittest.TestCase):
