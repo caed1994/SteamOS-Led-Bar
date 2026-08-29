@@ -582,6 +582,10 @@ install_shim_module() {
     say "Building and installing the leds-valve-shim kernel module"
     "$dir/install.sh" || return 1
     [[ -e "$SHIM_DEVICE" ]] || return 1
+    # The kernel this was just built for is the one running. Every other copy
+    # belongs to a kernel a SteamOS update has moved on from, and is a file
+    # nothing will ever load again - see remove_stale_shims.
+    remove_stale_shims "$release"
     return 0
 }
 

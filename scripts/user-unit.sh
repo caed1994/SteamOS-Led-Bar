@@ -50,6 +50,50 @@ SLEEP_HOOK_PATH="$ROOT/usr/lib/systemd/system-sleep/$NAME"
 # the real one behind, still loading the module at every boot.
 MODULES_LOAD="$ROOT/etc/modules-load.d/steamos-led-bar.conf"
 
+# --- the kernel shim, on every kernel that has one --------------------------
+#
+# The module is installed into the running kernel's own updates/ directory. A
+# SteamOS update brings a new kernel and leaves the old one's modules exactly
+# where they are - so the copy built for the kernel before last sits in its
+# own directory for ever: it does nothing, because that kernel is not the one
+# running, and it survived an uninstall that only ever looked at `uname -r`.
+#
+# Both roots are walked because /lib/modules is a symlink to /usr/lib/modules
+# on Arch and a directory of its own elsewhere; the same file found twice
+# under two names is dropped by comparing what it resolves to.
+SHIM_NAME="leds-valve-shim"
+
+shim_copies() {
+    local root path resolved seen=""
+    for root in "$ROOT/usr/lib/modules" "$ROOT/lib/modules"; do
+        [[ -d "$root" ]] || continue
+        for path in "$root"/*/updates/"$SHIM_NAME".ko; do
+            [[ -e "$path" ]] || continue
+            resolved="$(readlink -f "$path")"
+            [[ "$seen" == *"|$resolved|"* ]] && continue
+            seen="$seen|$resolved|"
+            printf '%s\n' "$path"
+        done
+    done
+}
+
+shim_release() {    # shim_release PATH - the kernel one copy was built for
+    local where="${1%/updates/*}"
+    printf '%s\n' "${where##*/}"
+}
+
+remove_stale_shims() {  # remove_stale_shims [release to keep]
+    local keep="${1:-}" path release
+    while read -r path; do
+        [[ -n "$path" ]] || continue
+        release="$(shim_release "$path")"
+        [[ -n "$keep" && "$release" == "$keep" ]] && continue
+        rm -f "$path"
+        depmod "$release" >/dev/null 2>&1 || true
+        say "  removed the shim built for $release"
+    done < <(shim_copies)
+}
+
 # The name you can type. Everything this project installs lives in /var/lib so
 # it survives a SteamOS update, and nothing there is on anybody's PATH - so
 # without this, every command in the README is one you can read and not run.

@@ -11,6 +11,7 @@ kernel - and that arithmetic is what is checked here. Everything that would
 touch the system is left to the machine it runs on.
 """
 
+import glob
 import os
 import re
 import subprocess
@@ -742,6 +743,32 @@ class InstallerShapeTest(unittest.TestCase):
             self.assertLess(unlock, self.text.index(path),
                             "%s runs before the rootfs is unlocked" % what)
 
+    def test_the_uninstaller_takes_the_cec_toolkit_with_it(self):
+        """Installed from vendor/ by a button on the page, so it is ours.
+
+        Its units, helpers, udev rule and sudoers file were all put on the
+        machine by this project and none of them were touched here before -
+        an uninstall left the whole toolkit running.
+        """
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        self.assertIn("remove_cec_toolkit", text)
+        self.assertIn("install-cec.sh", text)
+
+    def test_the_uninstaller_turns_lingering_back_off(self):
+        # The installer turns it on. Reported as "left in place", it stayed on
+        # every machine this was ever installed on.
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        self.assertIn("loginctl disable-linger", text)
+
+    def test_purging_takes_the_panel_s_own_settings_too(self):
+        # They live in the desktop user's home rather than in /etc, which is
+        # how they were missed.
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        self.assertIn('rm -f "$WATCHER_HOME/.config/$PANEL_CONFIG"', text)
+
     def test_the_uninstaller_unlocks_before_it_removes_anything(self):
         """Order, and this one was measured rather than imagined.
 
@@ -757,7 +784,7 @@ class InstallerShapeTest(unittest.TestCase):
             text = handle.read()
         unlock = text.index("\nunlock_rootfs || true")
         for path, what in (('rm -f "$SLEEP_HOOK_PATH"', "the suspend hook"),
-                           ('rm -f "$MODULE_PATH"', "the kernel module")):
+                           ("\n    remove_stale_shims", "the kernel module")):
             self.assertLess(unlock, text.index(path),
                             "%s is removed before the rootfs is unlocked"
                             % what)
@@ -965,6 +992,96 @@ class PanelIconTest(unittest.TestCase):
                      "steamos-utility-center-panel.png",
                      "steamos-utility-center-panel"):
             self.assertTrue(os.path.exists(os.path.join(here, name)), name)
+
+
+class StaleShimTest(unittest.TestCase):
+    """The shim copies a kernel update leaves behind.
+
+    The module is installed into the running kernel's own updates/ directory.
+    A SteamOS update brings a new kernel and leaves the old one's modules
+    exactly where they were, so the copy built for the kernel before last sits
+    there for ever: nothing loads it, and an uninstaller that only ever looked
+    at `uname -r` never saw it.
+    """
+
+    KERNELS = ("6.11.11-valve1-1-neptune-611",
+               "6.16.4-valve2-1-neptune-616")
+
+    def _root(self, kernels=None):
+        room = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, room, True)
+        root = os.path.join(room, "root")
+        for release in (self.KERNELS if kernels is None else kernels):
+            where = os.path.join(root, "usr/lib/modules", release, "updates")
+            os.makedirs(where)
+            with open(os.path.join(where, "leds-valve-shim.ko"), "w") as handle:
+                handle.write("ELF")
+        return room, root
+
+    def _run(self, call, root, room):
+        stubs = os.path.join(room, "stubs")
+        os.makedirs(stubs, exist_ok=True)
+        log = os.path.join(room, "calls")
+        with open(os.path.join(stubs, "depmod"), "w") as handle:
+            handle.write('#!/usr/bin/env bash\necho "depmod $*" >> "%s"\n' % log)
+        os.chmod(os.path.join(stubs, "depmod"), 0o755)
+        done = subprocess.run(
+            ["bash", "-c", 'set -euo pipefail\nsource "%s"\n%s\n'
+             % (USER_UNIT, call)],
+            capture_output=True, text=True,
+            env={"PATH": stubs + ":" + os.environ.get("PATH", ""),
+                 "ROOT": root})
+        said = ""
+        if os.path.exists(log):
+            with open(log) as handle:
+                said = handle.read()
+        return done, said
+
+    def _left(self, root):
+        return sorted(
+            path.split(os.sep)[-3]
+            for path in glob.glob(os.path.join(
+                root, "usr/lib/modules/*/updates/leds-valve-shim.ko")))
+
+    def test_every_copy_is_found(self):
+        room, root = self._root()
+        done, _said = self._run("shim_copies", root, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(len(done.stdout.split()), 2, done.stdout)
+
+    def test_the_running_kernel_keeps_its_own(self):
+        """The one case that must not go wrong.
+
+        Called after a build, with the kernel just built for - so the copy
+        that was made a moment ago has to survive and every other one has to
+        go.
+        """
+        room, root = self._root()
+        done, _said = self._run('remove_stale_shims "%s"' % self.KERNELS[1],
+                                root, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self._left(root), [self.KERNELS[1]])
+
+    def test_naming_no_kernel_takes_all_of_them(self):
+        # Which is the uninstaller: nothing is being kept.
+        room, root = self._root()
+        done, _said = self._run("remove_stale_shims", root, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self._left(root), [])
+
+    def test_each_kernel_it_touched_is_told(self):
+        # Without a depmod the kernel goes on listing a module that is not
+        # there, and modprobe says so at the next boot.
+        room, root = self._root()
+        _done, said = self._run("remove_stale_shims", root, room)
+        for release in self.KERNELS:
+            self.assertIn("depmod %s" % release, said)
+
+    def test_a_machine_with_none_is_not_an_error(self):
+        room, root = self._root(kernels=())
+        os.makedirs(os.path.join(root, "usr/lib/modules"), exist_ok=True)
+        done, _said = self._run("remove_stale_shims", root, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
 
 
 class MigrationTest(unittest.TestCase):

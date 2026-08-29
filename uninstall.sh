@@ -129,9 +129,31 @@ remove_platformio_path() {
     fi
 }
 
+# --- the HDMI CEC toolkit ---------------------------------------------------
+#
+# Installed from vendor/ by this panel's own page, so it is this script's to
+# take away again: its units, helpers, udev rule and sudoers file are all
+# things somebody got by pressing a button here, and none of them were touched
+# by this uninstaller before.
+#
+# Driven through the same script the page uses, because the toolkit's own
+# uninstaller refuses to run as root and has to be handed the desktop user.
+remove_cec_toolkit() {
+    watcher_user_dirs || return 0
+    local control="$WATCHER_HOME/.local/bin/steamos-cec-toolkitctl"
+    [[ -x "$control" ]] || return 0
+    echo "Removing the HDMI CEC toolkit."
+    if ! bash "$SOURCE_DIR/scripts/install-cec.sh" remove \
+            "$SOURCE_DIR/vendor/steamos-cec-toolkit" "$WATCHER_USER"; then
+        echo "  the toolkit's own uninstaller did not finish - what is left" >&2
+        echo "  can be removed with: $control uninstall" >&2
+    fi
+}
+
 PLATFORMIO_NOTE=0
 remove_menu_entry
 remove_platformio_path
+remove_cec_toolkit
 
 # Stopping the service blanks the strip before the process exits.
 systemctl disable --now "$NAME.service" 2>/dev/null || true
@@ -152,6 +174,15 @@ rm -f "$POWER_UNIT_PATH"
 remove_old_install "$PURGE"
 systemctl daemon-reload
 
+# Lingering, which the installer turns on so the desktop user's services
+# survive Game Mode. Turned off again here: it was this project that switched
+# it on, and reporting it as "left in place" left every machine that ever had
+# this installed with a switch nobody asked for and nobody would find.
+if [[ -n "${WATCHER_USER:-}" ]] && linger_is_on "$WATCHER_USER"; then
+    loginctl disable-linger "$WATCHER_USER" >/dev/null 2>&1 || true
+    echo "Turned lingering back off for $WATCHER_USER."
+fi
+
 rm -f "$UDEV_PATH"
 rm -f "$SLEEP_HOOK_PATH"
 udevadm control --reload >/dev/null 2>&1 || true
@@ -170,7 +201,13 @@ fi
 
 rm -rf "${INSTALL_DIR:?}"
 
-[[ $PURGE -eq 1 ]] && rm -f "$CONFIG_PATH" "$POWER_CONFIG_PATH"
+if [[ $PURGE -eq 1 ]]; then
+    rm -f "$CONFIG_PATH" "$POWER_CONFIG_PATH"
+    # The panel's own settings, which live in the desktop user's home rather
+    # than in /etc and were the one file this script never mentioned.
+    [[ -n "${WATCHER_HOME:-}" ]] \
+        && rm -f "$WATCHER_HOME/.config/$PANEL_CONFIG"
+fi
 echo "Removed."
 
 # --- kernel module ---------------------------------------------------------
@@ -184,9 +221,13 @@ if [[ $REMOVE_MODULE -eq 1 ]]; then
             || modprobe -r "$MODULE_NAME" 2>/dev/null || true
         echo "Module unloaded."
     fi
-    rm -f "$MODULE_PATH" "$MODULES_LOAD"
+    # Every kernel that has a copy, not only the one running: a SteamOS
+    # update leaves the previous kernel's modules in place, so the shim built
+    # for it would otherwise stay on the machine for ever.
+    remove_stale_shims
+    rm -f "$MODULES_LOAD"
     depmod "$RELEASE" || true
-    echo "Module removed from $MODULE_PATH."
+    echo "Module removed, from every kernel that had one."
 fi
 
 # --- what is still here, and why -------------------------------------------
@@ -200,7 +241,10 @@ echo "Left in place:"
 if [[ $PURGE -eq 0 ]]; then
     echo "  $CONFIG_PATH"
     echo "  $POWER_CONFIG_PATH"
-    echo "      your settings - --purge deletes it"
+    if [[ -n "${WATCHER_HOME:-}" ]]; then
+        echo "  $WATCHER_HOME/.config/$PANEL_CONFIG"
+    fi
+    echo "      your settings - --purge deletes them"
 fi
 if [[ $REMOVE_MODULE -eq 0 ]]; then
     echo "  the $MODULE_NAME kernel module"
@@ -212,13 +256,6 @@ else
 fi
 echo "  $SOURCE_DIR"
 echo "      the clone, which is yours - delete it if you like"
-if [[ -n "${WATCHER_USER:-}" ]] && linger_is_on "$WATCHER_USER"; then
-    # Turned on by the installer if it was not already on, and not turned off
-    # here: it is a per-user switch that anything else in that account may be
-    # relying on by now, and taking it away would stop those too.
-    echo "  lingering for $WATCHER_USER, so their services survive Game Mode"
-    echo "      sudo loginctl disable-linger $WATCHER_USER"
-fi
 if [[ -n "${WATCHER_HOME:-}" && -d "$WATCHER_HOME/.platformio" ]]; then
     echo "  $WATCHER_HOME/.platformio"
     echo "      PlatformIO, which builds the ESP firmware. It is not ours,"
