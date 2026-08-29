@@ -51,7 +51,7 @@ class FeatureTableTest(unittest.TestCase):
         for name, kind, label, said in cec.FEATURES:
             self.assertTrue(name and label and said, name)
             self.assertIn(kind, (cec.USER_SERVICE, cec.SYSTEM_SERVICE,
-                                 cec.EXTERNAL_VOLUME), name)
+                                 cec.EXTERNAL_VOLUME, cec.RESUME_WAKE), name)
             self.assertNotEqual(label, name, "%s is unlabelled" % name)
             # A sentence, not a restated label. Every one of these switches
             # does something to the television or to sleep, and a switch whose
@@ -70,15 +70,43 @@ class FeatureTableTest(unittest.TestCase):
         with open(source) as handle:
             text = handle.read()
         for name, kind, _label, _said in cec.FEATURES:
-            if kind == cec.EXTERNAL_VOLUME:
-                continue                # not a service; has its own subcommand
+            if kind in (cec.EXTERNAL_VOLUME, cec.RESUME_WAKE):
+                continue                # neither is in a service table
             self.assertIn('"%s":' % name, text,
                           "the toolkit has no service called %s" % name)
+
+    def test_the_resume_wake_unit_is_the_toolkit_s_own(self):
+        """The one switch that names a unit instead of a service.
+
+        toolkitctl has it in neither table, so the seam that would catch a
+        rename is the unit file itself - which is what this switch enables.
+        """
+        unit = os.path.join(HERE, "..", "vendor", "steamos-cec-toolkit",
+                            "systemd", "system", cec.RESUME_WAKE_UNIT)
+        self.assertTrue(os.path.exists(unit), unit)
+
+    def test_switching_it_goes_through_our_helper_not_the_toolkit(self):
+        # toolkitctl cannot switch it, and it is a root unit - so this is the
+        # one feature whose command is a pkexec of ours.
+        command = cec.toggle_command("resume-wake", True, source_dir="/clone")
+        self.assertEqual(command[0], "pkexec")
+        self.assertTrue(command[1].endswith("scripts/install-cec.sh"))
+        self.assertEqual(command[2:], ["resume-wake", "on"])
+
+    def test_what_systemd_says_decides_whether_it_is_on(self):
+        self.assertTrue(cec.resume_wake_enabled("enabled\n"))
+        self.assertFalse(cec.resume_wake_enabled("disabled\n"))
+        # A runner that hands back nothing for a bad exit is saying "off",
+        # which is also what a unit that is not there means here.
+        self.assertFalse(cec.resume_wake_enabled(None))
+        self.assertTrue(cec.feature_on({cec.RESUME_WAKE_REPORT: True},
+                                       "resume-wake"))
+        self.assertFalse(cec.feature_on({}, "resume-wake"))
 
     def test_both_service_kinds_and_the_volume_are_covered(self):
         kinds = {kind for _n, kind, _l, _s in cec.FEATURES}
         self.assertEqual(kinds, {cec.USER_SERVICE, cec.SYSTEM_SERVICE,
-                                 cec.EXTERNAL_VOLUME})
+                                 cec.EXTERNAL_VOLUME, cec.RESUME_WAKE})
 
     def test_no_feature_is_listed_twice(self):
         names = [name for name, _k, _l, _s in cec.FEATURES]
@@ -387,10 +415,16 @@ class PanelCommandTest(unittest.TestCase):
 
             def run(command):
                 asked.append(command)
+                if command == cec.resume_wake_command():
+                    return "enabled\n"
                 return json.dumps(status())
 
             found = self.ledpanel.cec_status(home, run=run)
-        self.assertEqual(asked, [cec.status_command(home)])
+        # Two: the toolkit's own status, and systemd for the one switch that
+        # status does not report on.
+        self.assertEqual(asked, [cec.status_command(home),
+                                 cec.resume_wake_command()])
+        self.assertTrue(found[cec.RESUME_WAKE_REPORT])
         self.assertEqual(found["version"], "v0.1.26")
 
     def test_a_toolkit_that_will_not_answer_is_not_installed_as_far_as_the_page_goes(self):

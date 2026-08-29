@@ -57,6 +57,42 @@ def run(*args, **kwargs):
 class ArgumentTest(unittest.TestCase):
     """What it refuses before it does anything at all."""
 
+    def test_resume_wake_wants_on_or_off(self):
+        # The second argument is a state here, not a directory, and anything
+        # else is a switch that would silently do nothing.
+        self.assertEqual(run("resume-wake").returncode, 2)
+        self.assertEqual(run("resume-wake", "/some/dir").returncode, 2)
+
+    @AS_ROOT
+    def test_resume_wake_says_so_when_the_unit_is_not_installed(self):
+        with tempfile.TemporaryDirectory() as root:
+            done = run("resume-wake", "on", env=dict(os.environ, ROOT=root))
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("install the CEC toolkit first", done.stderr)
+
+    @AS_ROOT
+    def test_resume_wake_enables_the_unit_and_nothing_else(self):
+        with tempfile.TemporaryDirectory() as room:
+            root = os.path.join(room, "root")
+            os.makedirs(os.path.join(root, "etc/systemd/system"))
+            with open(os.path.join(root, "etc/systemd/system",
+                                   "steamos-cec-resume-wake.service"),
+                      "w") as handle:
+                handle.write("[Unit]\n")
+            stubs = os.path.join(room, "stubs")
+            os.makedirs(stubs)
+            log = os.path.join(room, "calls")
+            with open(os.path.join(stubs, "systemctl"), "w") as handle:
+                handle.write('#!/usr/bin/env bash\necho "$*" >> "%s"\n' % log)
+            os.chmod(os.path.join(stubs, "systemctl"), 0o755)
+            done = run("resume-wake", "on",
+                       env=dict(os.environ, ROOT=root,
+                                PATH=stubs + ":" + os.environ["PATH"]))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            with open(log) as handle:
+                self.assertEqual(handle.read().split("\n")[0],
+                                 "enable steamos-cec-resume-wake.service")
+
     def test_it_parses(self):
         done = subprocess.run(["bash", "-n", SCRIPT], capture_output=True,
                               text=True)

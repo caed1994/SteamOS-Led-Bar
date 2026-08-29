@@ -1159,7 +1159,13 @@ def cec_status(home=None, run=None):
     done = runner(cec_module.status_command(home))
     if done is None:
         return None
-    return cec_module.read_status(done)
+    status = cec_module.read_status(done)
+    # The one switch the toolkit does not report on: its status says the
+    # resume-wake unit file is there, which it is from the moment the toolkit
+    # is installed, and never whether it is enabled. systemd is asked instead.
+    status[cec_module.RESUME_WAKE_REPORT] = cec_module.resume_wake_enabled(
+        runner(cec_module.resume_wake_command()))
+    return status
 
 
 def _run_quietly(command):

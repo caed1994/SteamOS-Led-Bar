@@ -57,6 +57,14 @@ SOURCE = os.path.join("vendor", "steamos-cec-toolkit")
 USER_SERVICE = "user"           # a systemd user unit, enabled as the user
 SYSTEM_SERVICE = "system"       # a root unit, through a NOPASSWD helper
 EXTERNAL_VOLUME = "volume"      # WirePlumber config plus a service override
+RESUME_WAKE = "resume"          # a root unit toolkitctl cannot switch
+
+# The unit behind that last one. The toolkit installs it and enables it only
+# alongside the Steam button - see its install.sh - and its control program
+# has it in neither service table, so nothing it offers can switch it and
+# nothing it reports says whether it is on. Both are done here instead.
+RESUME_WAKE_UNIT = "steamos-cec-resume-wake.service"
+RESUME_WAKE_REPORT = "resume_wake_enabled"
 
 # The eight things this page can switch, in the order they are shown.
 #
@@ -77,6 +85,11 @@ FEATURES = (
      "Wake the television at start",
      "The same wake and input switch when Game Mode starts after a cold "
      "boot, instead of waiting for a button."),
+    ("resume-wake", RESUME_WAKE,
+     "Wake the television on resume",
+     "The same wake and input switch when this machine comes back from "
+     "suspend. The toolkit enables this only alongside the Steam button and "
+     "cannot switch it afterwards, so this one goes through our own helper."),
     ("power-standby", SYSTEM_SERVICE,
      "Turn the television off with the machine",
      "Sends HDMI-CEC standby before this machine sleeps or shuts down. Some "
@@ -217,14 +230,49 @@ def feature_on(status, name):
     kind = BY_NAME[name][0]
     if kind == EXTERNAL_VOLUME:
         return bool(status.get("external_volume", {}).get("enabled"))
+    if kind == RESUME_WAKE:
+        # Not in the toolkit's status at all - put there by whoever read it,
+        # because systemd is the only one that knows. See resume_wake_command.
+        return bool(status.get(RESUME_WAKE_REPORT))
     where = "services" if kind == USER_SERVICE else "system_services"
     return bool(status.get(where, {}).get(name, {}).get("is_enabled"))
 
 
-def toggle_command(name, on, home=None):
-    """The command that turns one feature on or off."""
+def resume_wake_command():
+    """Ask systemd whether the resume-wake unit is enabled.
+
+    The toolkit's own status reports only that the unit file is on disk,
+    which it is from the moment the toolkit is installed - so a switch drawn
+    from that would be on from the start and would never be off.
+    """
+    return ["systemctl", "is-enabled", RESUME_WAKE_UNIT]
+
+
+def resume_wake_enabled(answer):
+    """What that command said. Anything but "enabled" is off.
+
+    `systemctl is-enabled` exits non-zero for a disabled unit, so a runner
+    that hands back nothing on a bad exit is answering "off" - which is the
+    same answer as a unit that is not there, and on this page those are the
+    same thing.
+    """
+    return bool(answer) and answer.strip().startswith("enabled")
+
+
+def toggle_command(name, on, home=None, source_dir=None):
+    """The command that turns one feature on or off.
+
+    `source_dir` is the clone, and only the resume-wake switch needs it: that
+    one is a root unit the toolkit's control program does not know, so it
+    goes through the same privileged helper of ours that installs the toolkit
+    rather than through toolkitctl.
+    """
     kind = BY_NAME[name][0]
     state = "on" if on else "off"
+    if kind == RESUME_WAKE:
+        return ["pkexec",
+                os.path.join(source_dir or "", "scripts", "install-cec.sh"),
+                "resume-wake", state]
     if kind == EXTERNAL_VOLUME:
         return [command_path(home), "set-external-volume", state]
     verb = "set-service" if kind == USER_SERVICE else "set-system-service"

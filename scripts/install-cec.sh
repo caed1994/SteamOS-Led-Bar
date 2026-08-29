@@ -39,15 +39,43 @@ RULE="/etc/sudoers.d/zz-steamos-utility-center-cec-install"
 
 usage() {
     echo "usage: install-cec.sh install|remove <source-dir> [user]" >&2
+    echo "       install-cec.sh resume-wake on|off" >&2
     exit 2
 }
 
-[[ "$ACTION" == "install" || "$ACTION" == "remove" ]] || usage
-[[ -n "$SOURCE" ]] || usage
+[[ "$ACTION" == "install" || "$ACTION" == "remove" \
+        || "$ACTION" == "resume-wake" ]] || usage
+if [[ "$ACTION" == "resume-wake" ]]; then
+    # The second argument is on|off rather than a directory: this action
+    # installs nothing and only switches a unit that is already there.
+    [[ "$SOURCE" == "on" || "$SOURCE" == "off" ]] || usage
+else
+    [[ -n "$SOURCE" ]] || usage
+fi
 
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "install-cec.sh has to run as root - the panel starts it with pkexec." >&2
     exit 1
+fi
+
+# The resume-wake unit, which the toolkit installs and then enables only
+# alongside the Steam button - and its control program has it in neither
+# service table, so nothing it offers can switch it afterwards. One
+# systemctl, and none of the rest of this script applies.
+RESUME_WAKE_UNIT="steamos-cec-resume-wake.service"
+# ROOT is empty on a machine and a directory in the tests, the same way
+# scripts/user-unit.sh uses it.
+if [[ "$ACTION" == "resume-wake" ]]; then
+    if [[ ! -f "${ROOT:-}/etc/systemd/system/$RESUME_WAKE_UNIT" ]]; then
+        echo "$RESUME_WAKE_UNIT is not there - install the CEC toolkit first." >&2
+        exit 1
+    fi
+    if [[ "$SOURCE" == "on" ]]; then
+        systemctl enable "$RESUME_WAKE_UNIT"
+    else
+        systemctl disable "$RESUME_WAKE_UNIT"
+    fi
+    exit 0
 fi
 
 INSTALLER="$SOURCE/$ACTION.sh"

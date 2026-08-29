@@ -5389,7 +5389,7 @@ class Panel:
         self._write("%s %s...\n" % ("Turning on" if wanted else "Turning off",
                                     cec.BY_NAME[name][1]))
         started = self.runner.start(
-            cec.toggle_command(name, wanted),
+            cec.toggle_command(name, wanted, source_dir=SOURCE_DIR),
             lambda _code, rest=left[1:]: self._run_cec_toggles(rest))
         if not started:
             # Refused because something else is running. Nothing was applied,
