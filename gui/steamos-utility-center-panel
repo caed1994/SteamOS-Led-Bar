@@ -814,14 +814,21 @@ def dress(style, roles, sizes):
         style.layout("TNotebook.Tab", [])
 
     def panels():
-        # The one raised surface in the window: a tone up from the page, no
-        # line round it. Used where the content is not a ttk widget and so
-        # cannot take a background of its own - the log and the preview stage.
-        style.element_create(
-            "Material.Panel", "image",
-            _slice(CARD_RADIUS, surface, page),
-            border=CARD_RADIUS, sticky="nsew")
-        style.layout("Card.TFrame", [("Material.Panel", {"sticky": "nsew"})])
+        """The one raised surface in the window: a tone up from the page.
+
+        Its colour is set with the rest of them in apply_theme, and its
+        corners are four small pictures pinned to it by Panel._card - not a
+        nine-slice image like everything else here. A nine-slice is stretched
+        to the widget's size on every redraw, and a card is the largest thing
+        in the window: one card a thousand pixels tall cost most of a single
+        wheel notch by itself, which is the stutter people reported. These
+        never change size, so nothing is scaled and the same page moved in
+        3.6 ms rather than 149.
+
+        Recorded as a ground all the same: those four pictures carry the
+        page's colour in them exactly as a nine-slice would, so a card still
+        has to stand on the page and the walking test still has to see it.
+        """
         grounds["Card.TFrame"] = page
 
     def buttons():
@@ -1227,11 +1234,10 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("Page.Bad.TLabel", background=page)
     style.configure("Card.TFrame", background=surface)
     # The same tone, and no corners. For a frame that stands *on* a card
-    # rather than being one: a Card.TFrame inside a Card.TFrame draws its own
-    # rounded rectangle, and that picture's corners are painted against the
-    # page - so a nested one puts four notches of the page's colour on top of
-    # the card underneath it. The layout is left alone here, which is what
-    # keeps it flat; see panels() in dress, where Card.TFrame gets its image.
+    # rather than being one: a card carries its own rounded corners, and those
+    # are painted against the page - so a nested one puts four notches of the
+    # page's colour on top of the card underneath it. This one is only the
+    # colour, which is what keeps it flat; see Panel._card for the corners.
     style.configure("OnCard.TFrame", background=surface)
     style.configure("TLabel", background=surface, foreground=on_surface)
     style.configure("Heading.TLabel", font=(family, size + TYPE_HEADLINE))
@@ -2326,6 +2332,10 @@ class Panel:
         # wrapped, it is cut off.
         self._wrap_insets = {}
         self._wrap_width = 0
+        # ...and the same, kept per notebook - see _page_width.
+        self._wrap_widths = {}
+        # The four pictures every card's corners are made of - see _card.
+        self._corners = None
         # The rows of buttons, and how many columns each is currently laid out
         # in - see _relay_buttons.
         self._button_rows = []
@@ -2388,7 +2398,7 @@ class Panel:
         # window that needs a box round it: it is a list of pages standing
         # beside the page it chose, and with both on the same ground the two
         # read as one column of things you can click.
-        rail_card = ttk.Frame(strip, style="Card.TFrame")
+        rail_card = self._card(strip)
         rail_card.pack(side="left", fill="y", padx=(0, GROUP_GAP),
                        pady=(0, GROUP_GAP))
         self.rail = ttk.Frame(rail_card, style="OnCard.TFrame")
@@ -2709,7 +2719,7 @@ class Panel:
         holder = ttk.Frame(where, style="Page.TFrame")
         holder.pack(fill="both", expand=True, padx=SIDE_MARGIN,
                     pady=SIDE_MARGIN)
-        card = ttk.Frame(holder, style="Card.TFrame")
+        card = self._card(holder)
         card.pack(fill="x")
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -2729,7 +2739,7 @@ class Panel:
         holder = ttk.Frame(where, style="Page.TFrame")
         holder.pack(fill="both", expand=True, padx=SIDE_MARGIN,
                     pady=SIDE_MARGIN)
-        card = ttk.Frame(holder, style="Card.TFrame")
+        card = self._card(holder)
         card.pack(fill="x")
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -3018,6 +3028,57 @@ class Panel:
         # need passing on.
         return named if named in ("Page.TFrame", "OnCard.TFrame") else ""
 
+    def _card(self, parent, **kw):
+        """A raised surface with rounded corners: what this window groups by.
+
+        The corners are four small pictures pinned to the frame with place(),
+        rather than one picture stretched behind the whole of it the way every
+        other rounded thing here is drawn. ttk can only fill a frame with an
+        image by scaling it, and it rescales on every redraw - so the cost is
+        the card's area, and a card is the largest thing in the window. The
+        CEC page's four cards, one of them a thousand pixels tall, cost about
+        150 ms of a single wheel notch between them: that is the stutter. These
+        four are drawn at the size they are shown at, and the same page moved
+        in 3.6 ms.
+
+        Made before the caller fills the card, so the content is stacked above
+        them: where a card's padding is narrower than the radius the content
+        covers the inner part of a corner square, which is card-coloured
+        anyway. The other way round it would cover the content.
+        """
+        card = ttk.Frame(parent, style="Card.TFrame", **kw)
+        for photo, where in self._card_corners():
+            tk.Label(card, image=photo, borderwidth=0, highlightthickness=0,
+                     background=self.roles["surface"]).place(**where)
+        return card
+
+    def _card_corners(self):
+        """The four corner pictures, made once and held for the window's life.
+
+        Held on the Panel rather than in _IMAGES because they carry the two
+        colours of the theme that is on now, and a theme change rebuilds the
+        window - so they go when it does.
+        """
+        if self._corners is not None:
+            return self._corners
+        radius = CARD_RADIUS
+        picture = roundrect.rows(radius * 2, radius * 2, radius,
+                                 self.roles["surface"], self.roles["_page"])
+        made = []
+        for top in (True, False):
+            for left in (True, False):
+                rows = picture[:radius] if top else picture[radius:]
+                photo = tk.PhotoImage(width=radius, height=radius)
+                photo.put(roundrect.as_put_string(
+                    [row[:radius] if left else row[radius:] for row in rows]))
+                made.append((photo, {
+                    "relx": 0.0 if left else 1.0,
+                    "rely": 0.0 if top else 1.0,
+                    "anchor": ("nw" if left else "ne") if top
+                              else ("sw" if left else "se")}))
+        self._corners = made
+        return made
+
     def _section(self, parent, title=None, first=False, before=None,
                  card=False):
         """A named group of controls.
@@ -3036,7 +3097,7 @@ class Panel:
         """
         where = parent
         if card:
-            box = ttk.Frame(parent, style="Card.TFrame")
+            box = self._card(parent)
             box.pack(fill="x", padx=SIDE_MARGIN,
                      pady=(ROW_GAP if first else GROUP_GAP, 0),
                      **({"before": before} if before is not None else {}))
@@ -3079,7 +3140,7 @@ class Panel:
             # but a page of thirty settings on one flat field is what made the
             # light theme read as a wall, and the cards are what the eye rests
             # against. The alignment is put back below instead, by hand.
-            card = ttk.Frame(outer, style="Card.TFrame")
+            card = self._card(outer)
             card.pack(fill="x", padx=SIDE_MARGIN,
                       pady=(ROW_GAP if index == 0 else GROUP_GAP, 0))
             grid = ttk.Frame(card)
@@ -3587,11 +3648,11 @@ class Panel:
         # otherwise change when the window is made shorter.
         width = max(320, min(event.width, CONTENT_MAX)
                     - 3 * SIDE_MARGIN - SCROLLBAR_ROOM)
-        if width == self._wrap_width:
+        if width == self._wrap_widths.get(str(event.widget)):
             return
+        self._wrap_widths[str(event.widget)] = width
         self._wrap_width = width
-        for label in self._wrapped:
-            label.configure(wraplength=max(160, width - self._inset_of(label)))
+        self._set_wrapping()
 
     def _relay_wrapping(self):
         """Set the wraplengths again once the page has been laid out.
@@ -3603,16 +3664,14 @@ class Panel:
         when its geometry is real; on a page that was already right it sets
         every label to what it already had.
         """
-        if not self._wrap_width:
+        if not self._wrap_widths:
             return
         # The geometry first: an idle callback can be queued ahead of the one
         # that lays the page out, and measuring then gives every widget the
         # nothing it starts at - which is the fallback, which is the constant
         # this exists to stop using.
         self.root.update_idletasks()
-        for label in self._wrapped:
-            label.configure(wraplength=max(
-                160, self._wrap_width - self._inset_of(label)))
+        self._set_wrapping()
         self._relay_buttons()
 
     def _relay_buttons(self):
@@ -3643,6 +3702,40 @@ class Panel:
             for index, button in enumerate(buttons):
                 button.grid(row=index // across, column=index % across,
                             sticky="ew", padx=(0, ROW_GAP), pady=(0, ROW_GAP))
+
+    def _set_wrapping(self):
+        """Lay every wrapped line out to the room its own page has."""
+        for label in self._wrapped:
+            room = self._page_width(label)
+            if room:
+                label.configure(wraplength=max(
+                    160, room - self._inset_of(label)))
+
+    def _page_width(self, label):
+        """How wide the page this label stands on is.
+
+        There are two notebooks and they are not the same width: the sections
+        run down the left, so the strip's tabs have the rail's width less than
+        a section that is a page of its own - 631 against 812, measured. One
+        number for both is one of them wrong, and which one it was depended on
+        whose Configure arrived last. Both orders happen, and the same window
+        laid the same page out both ways: with the narrow number winning, the
+        CEC page's explanations wrapped 180 px short of the card they are in
+        and the right third of it stood empty; with the wide one, the strip's
+        are laid out 180 px past the edge of theirs, and a label wider than
+        its slot is not wrapped but cut off.
+
+        Asked per label rather than remembered per page, because a label knows
+        where it is and nothing has to be told when it moves.
+        """
+        up = label
+        while up is not None:
+            # The inner notebook first: it is *inside* the outer one, so a
+            # label on a tab of the strip is under both and wants the nearer.
+            if up is self.notebook or up is self.sections:
+                return self._wrap_widths.get(str(up), self._wrap_width)
+            up = getattr(up, "master", None)
+        return self._wrap_width
 
     def _inset_of(self, label):
         """How much less room this label has than the page it stands on.
@@ -4321,7 +4414,7 @@ class Panel:
         # is shorter than the tallest one and the slack has to go somewhere,
         # and a dim room with a strip in the middle of it is a better use of
         # that room than blank window.
-        stage = ttk.Frame(outer, style="Card.TFrame", padding=10)
+        stage = self._card(outer, padding=10)
         stage.pack(fill="both", expand=True, padx=SIDE_MARGIN,
                    pady=(GROUP_GAP, ROW_GAP))
         self.preview_canvas = tk.Canvas(
@@ -4696,7 +4789,7 @@ class Panel:
         self._gpu_curve = None
         if self._gpu is None and not self._gpu_error:
             return                      # no LACT: no block at all
-        card = ttk.Frame(self.gpu_box, style="Card.TFrame")
+        card = self._card(self.gpu_box)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5028,7 +5121,7 @@ class Panel:
         worse way to find out that v4l-utils is not on the machine.
         """
         holder = ttk.Frame(parent, style="Page.TFrame")
-        card = ttk.Frame(holder, style="Card.TFrame")
+        card = self._card(holder)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5069,7 +5162,7 @@ class Panel:
 
         # The adapter first. Every switch below is worthless without it, and
         # when nothing is happening this is the line that says why.
-        card = ttk.Frame(holder, style="Card.TFrame")
+        card = self._card(holder)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5100,7 +5193,7 @@ class Panel:
         suspend" is a label somebody can only find out the meaning of by
         turning it on and losing their session.
         """
-        card = ttk.Frame(parent, style="Card.TFrame")
+        card = self._card(parent)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5156,7 +5249,7 @@ class Panel:
         reaches the television, before switching on a feature and rebooting
         into it to see.
         """
-        card = ttk.Frame(parent, style="Card.TFrame")
+        card = self._card(parent)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5174,7 +5267,7 @@ class Panel:
         with the paragraph of explanation each of them has - copied onto a
         page here they would be forty rows nobody can judge.
         """
-        card = ttk.Frame(parent, style="Card.TFrame")
+        card = self._card(parent)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, GROUP_GAP))
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5495,7 +5588,7 @@ class Panel:
 
     def _build_part(self, part):
         """One block: a light, a sentence, a fold, and its own repair."""
-        card = ttk.Frame(self.parts_box, style="Card.TFrame")
+        card = self._card(self.parts_box)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
         inner = ttk.Frame(card, style="OnCard.TFrame")
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5680,7 +5773,7 @@ class Panel:
             ).pack(anchor="w", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
             return holder
 
-        card = ttk.Frame(holder, style="Card.TFrame")
+        card = self._card(holder)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, 0))
         frame = ttk.Frame(card)
         frame.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
@@ -5894,10 +5987,7 @@ class Panel:
         wide the page is - and _rewrap only fires when the width changes,
         which it has not.
         """
-        for label in self._wrapped:
-            if self._wrap_width:
-                label.configure(wraplength=max(
-                    160, self._wrap_width - self._inset_of(label)))
+        self._set_wrapping()
 
     def reinstall(self):
         if not os.path.exists(os.path.join(SOURCE_DIR, "install.sh")):

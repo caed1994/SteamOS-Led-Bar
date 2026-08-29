@@ -1817,10 +1817,10 @@ class LiveWindowTest(unittest.TestCase):
     def test_no_card_stands_on_another_card(self):
         """Reported: dark notches inside the corners of the placeholder cards.
 
-        Card.TFrame is drawn with a nine-slice image, and that image carries
-        its own corners - painted against the *page*, because that is what a
-        card normally stands on. Put one inside another and those four corners
-        are four notches of the page's colour on top of the card underneath.
+        A card carries its own corners, and they are painted against the
+        *page*, because that is what a card normally stands on. Put one inside
+        another and those four corners are four notches of the page's colour
+        on top of the card underneath.
 
         Structural rather than by pixel, so it catches the next one as well:
         the fix is a flat OnCard.TFrame for anything that stands on a card,
@@ -3051,6 +3051,172 @@ class WrappingTest(unittest.TestCase):
     def test_nor_on_the_pages_that_were_already_right(self):
         for key in ("strip", "power", "keyboard"):
             self.assertEqual(self._too_wide(key), [], key)
+
+    def _notebook_of(self, label):
+        """The notebook whose page this label is on, of the two there are."""
+        up = label
+        while up is not None:
+            if up in (self.panel.notebook, self.panel.sections):
+                return up
+            up = getattr(up, "master", None)
+        return None
+
+    def _laid_out_to(self, label):
+        """The page width this label's wraplength was worked out from."""
+        return label.cget("wraplength") + self.panel._inset_of(label)
+
+    def test_each_page_is_laid_out_to_its_own_width(self):
+        """Two notebooks, one number, and whichever spoke last won.
+
+        The sections run down the left, so the strip's tabs have the rail's
+        width less than a section that is a page of its own - 180 px less on
+        the machine this was found on. Both fed the same wraplength, so every
+        page was laid out to the width of whichever notebook had resized most
+        recently, and the same window did it both ways. With the narrow number
+        winning, the CEC page's explanations wrapped 180 px short of the card
+        they are in and the right third of it stood empty; with the wide one,
+        the strip's are laid out 180 px past the edge of theirs - and a label
+        wider than its slot is not wrapped but cut off.
+
+        Checked as two halves, because only the second catches the order that
+        was shipped: nothing may be laid out wider than the page it is on, and
+        a page that has more room than the narrow one must be using it.
+        """
+        seen, roomy = 0, 0
+        for key in ("strip", "cec", "status", "strip", "cec"):
+            self.assertEqual(self._too_wide(key), [], key)
+            for label in self.panel._wrapped:
+                if not label.winfo_ismapped():
+                    continue
+                book = self._notebook_of(label)
+                if book is None or book.winfo_width() <= 1:
+                    continue
+                seen += 1
+                self.assertLessEqual(
+                    self._laid_out_to(label), book.winfo_width(),
+                    "on %s, %r is laid out to %d in a page of %d"
+                    % (key, str(label.cget("text"))[:40],
+                       self._laid_out_to(label), book.winfo_width()))
+                if book is self.panel.sections:
+                    inner = self.panel.notebook.winfo_width()
+                    if self._laid_out_to(label) > inner:
+                        roomy += 1
+        self.assertGreater(seen, 10, "hardly anything was checked")
+        self.assertGreater(
+            roomy, 0, "every page was laid out to the narrower notebook's "
+                      "width, so the sections are wrapping short")
+
+
+class CardTest(unittest.TestCase):
+    """A card is not one picture stretched behind it, and here is why.
+
+    ttk can only fill a frame with an image by scaling it, and it rescales on
+    every redraw - so the cost is the card's area, and a card is the largest
+    thing in this window. The CEC page's four cards, one of them 828x1071,
+    cost 149 ms of a single wheel notch between them: the page moved twice a
+    second on the machine this was reported from. The same page with the
+    corners drawn as four small pictures instead moved in 3.7 ms.
+
+    Checked structurally rather than by the clock, because a timing test on a
+    build machine says more about the build machine than about the window.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _cards(self):
+        found = []
+        def walk(widget):
+            for child in widget.winfo_children():
+                try:
+                    if str(child.cget("style")) == "Card.TFrame":
+                        found.append(child)
+                except tk.TclError:
+                    pass
+                walk(child)
+        walk(self.root)
+        return found
+
+    def test_a_card_is_laid_out_like_any_other_frame(self):
+        """No element of its own, so nothing to stretch.
+
+        The look comes from the background it is configured with and the four
+        corners pinned to it. Compared against a plain frame's layout rather
+        than spelled out here: what a default layout is called is Tk's
+        business, and the point is only that a card no longer has one of ours.
+        """
+        style = ttk.Style(self.root)
+        self.assertEqual(style.layout("Card.TFrame"), style.layout("TFrame"))
+        self.assertEqual(str(style.lookup("Card.TFrame", "background")),
+                         self.panel.roles["surface"])
+
+    def test_every_card_carries_its_four_corners(self):
+        """Four, and at the four corners - the padded one included.
+
+        One card is built with a padding of its own, and place() measures
+        against a ttk frame's outer size rather than its padded one. Asserted
+        because the two are a plausible thing for Tk to disagree about, and
+        the failure is four rounded squares floating ten pixels inside the
+        edges of the preview stage.
+        """
+        radius = self.panel_module.CARD_RADIUS
+        cards = self._cards()
+        self.assertGreater(len(cards), 3, "no cards were built at all")
+        for card in cards:
+            corners = [child for child in card.winfo_children()
+                       if isinstance(child, tk.Label)
+                       and child.winfo_manager() == "place"]
+            self.assertEqual(len(corners), 4,
+                             "%s has %d corners" % (card, len(corners)))
+            if not card.winfo_ismapped():
+                continue
+            wide, tall = card.winfo_width(), card.winfo_height()
+            self.assertEqual(
+                sorted((corner.winfo_x(), corner.winfo_y())
+                       for corner in corners),
+                sorted([(0, 0), (wide - radius, 0), (0, tall - radius),
+                        (wide - radius, tall - radius)]),
+                "%s: %dx%d" % (card, wide, tall))
+
+    def test_the_corners_are_the_size_they_are_drawn_at(self):
+        """Never scaled: that is the whole point of them.
+
+        A picture placed at its own size costs nothing to draw again. The
+        moment one is stretched to the widget it is in, the cost is the
+        widget's area and the stutter is back.
+        """
+        radius = self.panel_module.CARD_RADIUS
+        for photo, where in self.panel._card_corners():
+            self.assertEqual((photo.width(), photo.height()),
+                             (radius, radius))
+            self.assertNotIn("relwidth", where)
+            self.assertNotIn("relheight", where)
+
+    def test_a_corner_carries_the_page_s_colour_outside_the_shape(self):
+        """Which is what makes a card have to stand on the page.
+
+        The corners are the only part of a card that knows what it is sitting
+        on - so the ground recorded for Card.TFrame is about these four
+        pictures, and the walking test that reads it still means something.
+        """
+        photo, _where = self.panel._card_corners()[0]      # the top left one
+        page = self.panel.roles["_page"]
+        self.assertEqual(tuple(photo.get(0, 0)),
+                         tuple(int(page[i:i + 2], 16) for i in (1, 3, 5)))
+        self.assertEqual(self.panel.roles["_grounds"]["Card.TFrame"].lower(),
+                         page)
 
 
 class GroundTest(unittest.TestCase):
