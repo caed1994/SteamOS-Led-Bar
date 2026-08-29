@@ -164,6 +164,29 @@ NEW_CLOCKS = {
             "voltage_offset": {"min": -200, "max": 0}}}}},
 }
 
+# And a third, from an RX 6400 - RDNA2, and the reason the voltage offset had
+# to stop depending on a range. Its od_range is nothing but nulls: it publishes
+# no window for anything, while reporting the offset it is set to and taking a
+# new one. A knob gated on having a range is a knob this card never gets.
+BARE_CLOCKS = {
+    "table": {"type": "amd", "value": {"kind": "rdna", "data": {
+        "current_sclk_range": {"min": None, "max": None},
+        "sclk_offset": None,
+        "current_mclk_range": {"min": None, "max": None},
+        "vddc_curve": [],
+        "voltage_offset": -50,
+        "od_range": {
+            "sclk": None,
+            "sclk_offset": None,
+            "mclk": None,
+            "curve_sclk_points": [],
+            "curve_voltage_points": [],
+            "voltage_offset": None}}}},
+}
+
+BARE_CONFIG = {"fan_control_enabled": False, "performance_level": "auto",
+               "voltage_offset": -50}
+
 NEW_CONFIG = {
     "fan_control_enabled": False,
     "fan_control_settings": {"mode": "curve", "static_speed": 0.5,
@@ -849,6 +872,51 @@ class NewerCardTest(unittest.TestCase):
         made = lact.with_knob(dict(self.CONFIG, gpu_clock_offsets={"0": 15}),
                               "gpu_clock_offset", None)
         self.assertNotIn("gpu_clock_offsets", made)
+
+
+class CardWithNoRangesTest(unittest.TestCase):
+    """A card that publishes no window for anything.
+
+    RDNA2 answers with an od_range of nulls. It still reports the voltage
+    offset it is set to, LACT still has one written for it, and it still takes
+    a new one - so "no range" is not the same question as "no such knob", and
+    treating them the same hid the one setting this card actually has.
+    """
+
+    def knobs(self, config=None):
+        return {knob["key"]: knob for knob in lact.offered(
+            BARE_CONFIG if config is None else config, BARE_CLOCKS, {})}
+
+    def test_the_voltage_offset_is_offered_anyway(self):
+        self.assertIn("voltage_offset", self.knobs())
+
+    def test_it_opens_on_what_the_card_reports(self):
+        found = self.knobs()["voltage_offset"]
+        self.assertEqual(found["value"], -50)
+        self.assertEqual(found["start"], -50)
+
+    def test_it_gets_the_window_a_card_with_no_window_gets(self):
+        found = self.knobs()["voltage_offset"]
+        self.assertEqual((found["min"], found["max"]), (-250, 250))
+
+    def test_nothing_else_is_offered(self):
+        """Only the voltage offset. A clock with no range is a clock this
+        card does not take, and a slider for one would write nowhere.
+        """
+        self.assertEqual(sorted(self.knobs()), ["voltage_offset"])
+
+    def test_a_card_reporting_no_offset_at_all_gets_none(self):
+        # The other side of it: without a range and without a reported value
+        # there is nothing to say the card has one.
+        import copy
+        clocks = copy.deepcopy(BARE_CLOCKS)
+        clocks["table"]["value"]["data"]["voltage_offset"] = None
+        self.assertEqual(lact.offered({}, clocks, {}), [])
+
+    def test_what_is_written_goes_where_this_daemon_keeps_it(self):
+        made = lact.with_knob(BARE_CONFIG, "voltage_offset", -60)
+        self.assertEqual(made["voltage_offset"], -60)
+        self.assertNotIn(lact.CLOCKS_BLOCK, made)
 
 
 if __name__ == "__main__":                                  # pragma: no cover

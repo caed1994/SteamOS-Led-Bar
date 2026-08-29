@@ -536,10 +536,17 @@ def offered(config, clocks, found_stats):
         else:
             span = spans.get(source)
             if span is None:
-                # A card that reports an absolute voltage range and no window
-                # for the offset - older AMD. This is the window either side
-                # of nothing that every card it applies to accepts.
-                if source != "voltage_offset" or "vddc" not in spans:
+                # No window for this knob. For the voltage offset that is not
+                # the same as not having one: an RDNA2 card publishes an
+                # od_range of nothing but nulls and still reports the offset
+                # it is set to and takes a new one, and an older card reports
+                # an absolute voltage range instead of a window. Both are
+                # offered the window either side of nothing that they accept;
+                # everything else with no range is a knob the card does not
+                # have, and drawing it would write nowhere.
+                if source != "voltage_offset" or not (
+                        "vddc" in spans
+                        or now.get("voltage_offset") is not None):
                     continue
                 span = (-250, 250)
             if source == "mclk":
