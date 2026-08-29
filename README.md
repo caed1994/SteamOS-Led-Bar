@@ -949,9 +949,9 @@ needs reflashing when something in `firmware/` changed.
 > The service itself lives in `/var/lib/` and survives updates.
 
 ```bash
-sudo ./uninstall.sh                    # service gone, config and module stay
-sudo ./uninstall.sh --purge            # also delete the config
-sudo ./uninstall.sh --remove-module    # also remove the kernel module
+sudo ./uninstall.sh                    # everything it installed, gone
+sudo ./uninstall.sh --keep-conf        # keep the settings
+sudo ./uninstall.sh --keep-module      # keep the kernel module
 ```
 
 ## How it works

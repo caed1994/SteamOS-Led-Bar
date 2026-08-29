@@ -994,6 +994,62 @@ class PanelIconTest(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(here, name)), name)
 
 
+class UninstallDefaultsTest(unittest.TestCase):
+    """Uninstall means uninstall.
+
+    It used to keep the settings and the kernel module unless asked twice, so
+    the common case - somebody who wants this off their machine - was the one
+    that needed two flags nobody knew about, and the run ended with a list of
+    what it had decided to leave. The flags are still there; they are the ones
+    that keep now.
+
+    Run with --help after the flag under test: the arguments are read before
+    anything is done, so this exercises the parsing without uninstalling
+    anything.
+    """
+
+    def _help(self, *flags):
+        return subprocess.run(["bash", UNINSTALLER] + list(flags) + ["--help"],
+                              capture_output=True, text=True)
+
+    def test_the_usage_names_the_two_that_keep(self):
+        done = self._help()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("--keep-conf", done.stdout)
+        self.assertIn("--keep-module", done.stdout)
+
+    def test_both_keeping_flags_are_taken(self):
+        for flag in ("--keep-conf", "--keep-module"):
+            done = self._help(flag)
+            self.assertEqual(done.returncode, 0, "%s: %s" % (flag, done.stderr))
+
+    def test_the_old_flags_are_still_taken(self):
+        # They asked for what happens anyway now, and they are in the README
+        # of every clone made before this changed.
+        for flag in ("--purge", "--remove-module"):
+            done = self._help(flag)
+            self.assertEqual(done.returncode, 0, "%s: %s" % (flag, done.stderr))
+
+    def test_something_else_is_still_refused(self):
+        done = self._help("--delete-everything-twice")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("unknown option", done.stderr)
+
+    def test_removing_is_what_happens_without_a_flag(self):
+        """The inversion itself, read off the script.
+
+        Both switches are derived from the keeping flag, so the body goes on
+        asking what is being removed - and neither can be left at a default
+        that keeps something.
+        """
+        with open(UNINSTALLER) as handle:
+            text = handle.read()
+        self.assertIn("PURGE=$(( 1 - KEEP_CONF ))", text)
+        self.assertIn("REMOVE_MODULE=$(( 1 - KEEP_MODULE ))", text)
+        self.assertIn("KEEP_CONF=0", text)
+        self.assertIn("KEEP_MODULE=0", text)
+
+
 class StaleShimTest(unittest.TestCase):
     """The shim copies a kernel update leaves behind.
 

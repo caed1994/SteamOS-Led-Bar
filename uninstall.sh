@@ -2,10 +2,11 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Removes the SteamOS Utility Center.
-#   sudo ./uninstall.sh [--purge] [--remove-module]
-# --purge          also deletes /etc/steamos-utility-center.conf
-# --remove-module  also unloads and removes the leds-valve-shim kernel module
+# Removes the SteamOS Utility Center, and by default everything it installed.
+#   sudo ./uninstall.sh [--keep-conf] [--keep-module]
+# --keep-conf    leaves the settings: /etc/steamos-utility-center.conf, the
+#                power config, and the panel's own in the desktop user's home
+# --keep-module  leaves the leds-valve-shim kernel module loaded and installed
 
 set -euo pipefail
 
@@ -20,16 +21,30 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/user-unit.sh
 source "$SOURCE_DIR/scripts/user-unit.sh"
 
-PURGE=0
-REMOVE_MODULE=0
+# Somebody typing "uninstall" wants it gone. The two things worth a second
+# thought - the settings and the kernel module - are still one flag away, but
+# the flag is now the one that keeps them rather than the one that removes
+# them: a default that leaves half the machine behind is a default that has to
+# be undone by everybody who did not read this.
+KEEP_CONF=0
+KEEP_MODULE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --purge) PURGE=1; shift ;;
-        --remove-module) REMOVE_MODULE=1; shift ;;
-        -h|--help) sed -n '2,5p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --keep-conf) KEEP_CONF=1; shift ;;
+        --keep-module) KEEP_MODULE=1; shift ;;
+        # What these used to ask for is what happens anyway now. Taken rather
+        # than refused, because they are in the README of every clone made
+        # before this changed, and in the fingers of anyone who has run it.
+        --purge|--remove-module) shift ;;
+        -h|--help) sed -n '5,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+# The body below asks what is being removed rather than what is being kept,
+# which is the way round it reads best where the removing happens.
+PURGE=$(( 1 - KEEP_CONF ))
+REMOVE_MODULE=$(( 1 - KEEP_MODULE ))
 
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo ./uninstall.sh" >&2; exit 1; }
 
@@ -244,11 +259,11 @@ if [[ $PURGE -eq 0 ]]; then
     if [[ -n "${WATCHER_HOME:-}" ]]; then
         echo "  $WATCHER_HOME/.config/$PANEL_CONFIG"
     fi
-    echo "      your settings - --purge deletes them"
+    echo "      your settings, kept because of --keep-conf"
 fi
 if [[ $REMOVE_MODULE -eq 0 ]]; then
     echo "  the $MODULE_NAME kernel module"
-    echo "      --remove-module unloads and removes it"
+    echo "      kept because of --keep-module"
 else
     echo "  /usr/lib/depmod.d/10-updates.conf"
     echo "      it only sets the general search order for updates/, and other"
