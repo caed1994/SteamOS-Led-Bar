@@ -2236,17 +2236,67 @@ class CecPageTest(unittest.TestCase):
         on = {n for n, v in self.panel._cec_vars.items() if v.get()}
         self.assertEqual(on, {"steam-button", "external-volume"})
 
-    def test_clicking_one_runs_its_own_command(self):
+    def test_a_click_on_its_own_reaches_nothing(self):
+        """What the Apply button is for.
+
+        Every switch here starts or stops a unit, and half of them decide
+        whether the machine goes to sleep. Clicking one is a decision made,
+        not a decision applied - and a slip of the finger is undone by
+        clicking back rather than by waiting for a service to start and stop
+        again.
+        """
         self.panel._cec_vars["tv-standby"].set(True)
         self.panel._cec_toggled("tv-standby")
+        self.assertEqual(self.ran, [])
+
+    def test_applying_runs_the_switch_that_moved(self):
+        self.panel._cec_vars["tv-standby"].set(True)
+        self.panel._cec_toggled("tv-standby")
+        self.panel._apply_cec_features()
         command, _done = self.ran[-1]
         self.assertEqual(command[1:], ["set-service", "tv-standby", "on"])
 
     def test_a_system_service_goes_the_other_way_round(self):
         self.panel._cec_vars["usb-wake"].set(True)
         self.panel._cec_toggled("usb-wake")
+        self.panel._apply_cec_features()
         self.assertEqual(self.ran[-1][0][1:],
                          ["set-system-service", "usb-wake", "on"])
+
+    def test_a_switch_put_back_before_applying_is_no_change_at_all(self):
+        # Compared with the machine rather than counted from the clicks, so
+        # turning one on and off again applies nothing.
+        self.panel._cec_vars["tv-standby"].set(True)
+        self.panel._cec_toggled("tv-standby")
+        self.panel._cec_vars["tv-standby"].set(False)
+        self.panel._cec_toggled("tv-standby")
+        self.panel._apply_cec_features()
+        self.assertEqual(self.ran, [])
+
+    def test_apply_is_dead_until_a_switch_has_moved(self):
+        self.assertIn("disabled", self.panel.cec_apply.state())
+        self.panel._cec_vars["tv-standby"].set(True)
+        self.panel._cec_toggled("tv-standby")
+        self.assertNotIn("disabled", self.panel.cec_apply.state())
+
+    def test_two_switches_go_one_after_the_other(self):
+        """The runner holds one command, so they are chained.
+
+        Started together the second is refused, which would leave half a page
+        applied and nothing to say which half.
+        """
+        self.panel._cec_vars["tv-standby"].set(True)
+        self.panel._cec_toggled("tv-standby")
+        self.panel._cec_vars["usb-wake"].set(True)
+        self.panel._cec_toggled("usb-wake")
+        self.panel._apply_cec_features()
+        self.assertEqual(len(self.ran), 1, "both went at once")
+        first = self.ran[-1][0][2]
+        self._finish(code=0)
+        started = [one[0][2] for one in self.ran]
+        self.assertIn("tv-standby", started)
+        self.assertIn("usb-wake", started)
+        self.assertNotEqual(started[0], started[1], first)
 
     def test_settling_the_switches_does_not_set_them_all_going(self):
         """Writing a variable fires the same handler a click does.
@@ -2268,17 +2318,20 @@ class CecPageTest(unittest.TestCase):
         """
         self.panel._cec_vars["tv-standby"].set(True)
         self.panel._cec_toggled("tv-standby")
+        self.panel._apply_cec_features()
         # The command ran and the machine still says off, which is what a
         # refused toggle looks like from here.
         self._finish(code=1)
         self.assertFalse(self.panel._cec_vars["tv-standby"].get())
 
-    def test_a_switch_clicked_while_something_else_runs_is_put_back(self):
-        # The Runner takes one command at a time. The switch has already moved
-        # under the pointer and nothing is going to happen to justify it.
+    def test_applying_while_something_else_runs_puts_the_switches_back(self):
+        # The Runner takes one command at a time. Nothing was applied, so the
+        # switches go back to what the machine says rather than standing as
+        # this window's opinion.
         self.panel.runner.start = lambda command, done=None: False
         self.panel._cec_vars["boot-wake"].set(True)
         self.panel._cec_toggled("boot-wake")
+        self.panel._apply_cec_features()
         self.assertFalse(self.panel._cec_vars["boot-wake"].get())
 
     # -- the adapter -------------------------------------------------------
@@ -2401,7 +2454,8 @@ class CecPageTest(unittest.TestCase):
         """
         for start in (lambda: self.panel._cec_action("discover-cec"),
                       lambda: self.panel._save_cec_config(),
-                      lambda: self.panel._cec_toggled("boot-wake")):
+                      lambda: (self.panel._cec_vars["boot-wake"].set(True),
+                               self.panel._apply_cec_features())):
             self.ran = []
             start()
             self.assertIsNotNone(self.ran[-1][1],
@@ -2997,6 +3051,114 @@ class WrappingTest(unittest.TestCase):
     def test_nor_on_the_pages_that_were_already_right(self):
         for key in ("strip", "power", "keyboard"):
             self.assertEqual(self._too_wide(key), [], key)
+
+
+class GroundTest(unittest.TestCase):
+    """Nothing draws its own background in the wrong colour.
+
+    A ttk radio paints two things itself: a label with a -background, and an
+    indicator that is a picture with its ground baked into it. Both are
+    decided when the style is made, so one made for a card and packed onto a
+    page leaves a block of the card's colour behind every name - which is what
+    stood behind the effect names on the preview page.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _radios(self, widget, out=None):
+        out = [] if out is None else out
+        for child in widget.winfo_children():
+            if child.winfo_class() == "TRadiobutton":
+                out.append(child)
+            self._radios(child, out)
+        return out
+
+    def test_every_radio_stands_on_the_ground_it_is_packed_onto(self):
+        style = ttk.Style(self.root)
+        self.panel._open_section("strip")
+        self.root.update()
+        found = [radio for radio in self._radios(self.panel.notebook)
+                 if str(radio.cget("style")) != "Rail.TRadiobutton"]
+        self.assertTrue(found, "no radios to check")
+        for radio in found:
+            self.assertEqual(
+                style.lookup(str(radio.cget("style")), "background"),
+                style.lookup(str(radio.master.cget("style")) or "TFrame",
+                             "background"),
+                "%r sits on %r" % (radio.cget("text"),
+                                   radio.master.cget("style")))
+
+
+class ButtonRowTest(unittest.TestCase):
+    """No button squeezed narrower than the name on it.
+
+    The rows are equal stretched columns, so four of them hold four names of
+    the same width whatever they say - and a name wider than its quarter is
+    cut off rather than wrapped. How wide a name draws is the desktop's font,
+    which is why this builds the window at a size this machine does not use:
+    at its own, four fit and the case cannot be seen.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        import kdetheme
+        was = kdetheme.read
+        kdetheme.read = lambda *a, **k: dict(was(*a, **k),
+                                             font=("DejaVu Sans", 14))
+        self.addCleanup(lambda: setattr(kdetheme, "read", was))
+        was_installed = cec.installed
+        cec.installed = lambda home=None: True
+        self.addCleanup(lambda: setattr(cec, "installed", was_installed))
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: {
+                "cec_device": {"device": "/dev/cec0", "exists": True,
+                               "readable": True, "writable": True},
+                "services": {}, "system_services": {},
+                "external_volume": {"enabled": False}, "config": {}})
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+        self.root.geometry("1300x900")
+        for _ in range(4):
+            self.root.update_idletasks()
+            self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def test_no_button_is_narrower_than_its_own_name(self):
+        squeezed = []
+        for key in ("strip", "power", "cec", "status"):
+            self.panel._open_section(key)
+            for _ in range(4):
+                self.root.update_idletasks()
+                self.root.update()
+            for row, buttons in self.panel._button_rows:
+                if not row.winfo_ismapped():
+                    continue
+                squeezed += [(key, button.cget("text"))
+                             for button in buttons
+                             if button.winfo_width() < button.winfo_reqwidth() - 1]
+        self.assertEqual(squeezed, [])
 
 
 class SidebarWidthTest(unittest.TestCase):

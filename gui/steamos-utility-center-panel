@@ -945,22 +945,37 @@ def dress(style, roles, sizes):
                 roundrect.draw_disc(rows, middle, middle, size / 4.0, dot)
             return _photo(rows)
 
-        style.element_create(
-            "Material.Radio", "image", picture(roles["on_surface_variant"]),
-            ("disabled", "selected",
-             picture(material.disabled(roles, roles["primary"]),
-                     material.disabled(roles, roles["primary"]))),
-            ("disabled", picture(material.disabled(roles,
-                                                   roles["on_surface"]))),
-            ("selected", picture(roles["primary"], roles["primary"])),
-            ("active", picture(roles["on_surface"], None,
-                               wash("surface", "on_surface",
-                                    material.STATE_HOVER))),
-            sticky="", padding=2)
-        style.layout("TRadiobutton", [
-            ("Radiobutton.padding", {"sticky": "nsew", "children": [
-                ("Material.Radio", {"side": "left", "sticky": ""}),
-                ("Radiobutton.label", {"side": "left", "sticky": "w"})]})])
+        def family(element, layout, ground, hovered):
+            """One radio, drawn against one ground.
+
+            Two of them, because a radio paints its own: the indicator is a
+            picture with its ground baked in and the label carries a
+            -background. Made for a card and packed onto a page, it leaves a
+            block of the card's colour behind every name - which is what stood
+            behind the effect names on the preview page.
+            """
+            style.element_create(
+                element, "image",
+                picture(roles["on_surface_variant"], ground=ground),
+                ("disabled", "selected",
+                 picture(material.disabled(roles, roles["primary"]),
+                         material.disabled(roles, roles["primary"]), ground)),
+                ("disabled", picture(material.disabled(roles,
+                                                       roles["on_surface"]),
+                                     None, ground)),
+                ("selected", picture(roles["primary"], roles["primary"],
+                                     ground)),
+                ("active", picture(roles["on_surface"], None, hovered)),
+                sticky="", padding=2)
+            style.layout(layout, [
+                ("Radiobutton.padding", {"sticky": "nsew", "children": [
+                    (element, {"side": "left", "sticky": ""}),
+                    ("Radiobutton.label", {"side": "left", "sticky": "w"})]})])
+
+        family("Material.Radio", "TRadiobutton", surface,
+               wash("surface", "on_surface", material.STATE_HOVER))
+        family("Material.Radio.Page", "Page.TRadiobutton", page,
+               wash("_page", "on_surface", material.STATE_HOVER))
 
     def sliders():
         # A pill-shaped groove and a round knob.
@@ -1286,6 +1301,12 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("TRadiobutton", background=surface, foreground=on_surface,
                     focuscolor=surface, padding=(0, 3))
     style.map("TRadiobutton", background=[("active", surface)])
+    # The same radio on the page's own ground - see the two families in
+    # dress(). Without it a list of them on a page draws a block of the card
+    # colour behind every name.
+    style.configure("Page.TRadiobutton", background=page,
+                    foreground=on_surface, focuscolor=page, padding=(0, 3))
+    style.map("Page.TRadiobutton", background=[("active", page)])
 
     # Nothing here dresses a ttk.Combobox, and that is deliberate: there is
     # not one left in the window. Every drop-down is a Field.TButton opening a
@@ -2305,6 +2326,10 @@ class Panel:
         # wrapped, it is cut off.
         self._wrap_insets = {}
         self._wrap_width = 0
+        # The rows of buttons, and how many columns each is currently laid out
+        # in - see _relay_buttons.
+        self._button_rows = []
+        self._button_across = {}
 
         # The header says which *section* is open, not what the program is
         # called - the title bar already does that, and repeating it inside
@@ -3588,6 +3613,36 @@ class Panel:
         for label in self._wrapped:
             label.configure(wraplength=max(
                 160, self._wrap_width - self._inset_of(label)))
+        self._relay_buttons()
+
+    def _relay_buttons(self):
+        """Lay each row of buttons out in as many columns as actually fit.
+
+        The columns are equal and stretched, so a row of four holds four
+        names of the same width whatever they say - and a name wider than its
+        quarter is cut off rather than wrapped. How wide a name is, is the
+        desktop's font; how much room there is, is the window. Both are known
+        here and neither was when the row was built.
+        """
+        for row, buttons in self._button_rows:
+            if not row.winfo_ismapped() or not buttons:
+                continue
+            widest = max(button.winfo_reqwidth() for button in buttons)
+            room = row.winfo_width()
+            if room <= 1 or widest <= 1:
+                continue
+            across = max(1, min(self.BUTTONS_ACROSS,
+                                (room + ROW_GAP) // (widest + ROW_GAP)))
+            if across == self._button_across.get(str(row)):
+                continue
+            self._button_across[str(row)] = across
+            for column in range(self.BUTTONS_ACROSS):
+                row.columnconfigure(column, weight=0, uniform="")
+            for column in range(across):
+                row.columnconfigure(column, weight=1, uniform="buttons")
+            for index, button in enumerate(buttons):
+                button.grid(row=index // across, column=index % across,
+                            sticky="ew", padx=(0, ROW_GAP), pady=(0, ROW_GAP))
 
     def _inset_of(self, label):
         """How much less room this label has than the page it stands on.
@@ -4313,8 +4368,16 @@ class Panel:
             for label, kind, name, _blurb in preview_module.entries():
                 if kind != wanted:
                     continue
-                ttk.Radiobutton(box, text=label, value=kind + ":" + name,
-                                variable=self.preview_choice).pack(anchor="w")
+                # The ground it is packed onto, for the same reason _ground
+                # exists: a radio paints its own background and its own
+                # indicator, both against a ground fixed when the style was
+                # made - see the two families in dress().
+                ttk.Radiobutton(
+                    box, text=label, value=kind + ":" + name,
+                    variable=self.preview_choice,
+                    style=("Page.TRadiobutton"
+                           if self._ground(box) == "Page.TFrame"
+                           else "TRadiobutton")).pack(anchor="w")
 
         # page=True: this one stands under the cards, not in one.
         self._note(
@@ -4486,22 +4549,35 @@ class Panel:
                 continue
         return values
 
-    def _buttons(self, parent, entries, style="Tonal.TButton"):
+    def _buttons(self, parent, entries, style="Tonal.TButton", lead=0):
         """A row of buttons that wraps rather than running off the window.
 
         Six shape buttons in a row are wider than the window is at its
         smallest, and a row packed left simply loses the last of them - so they
         are gridded and the columns are counted, not packed and hoped for.
+
+        Four to a row is where it starts; how many actually fit is measured
+        once the row has a width - see _relay_buttons. Stretched to equal
+        columns, a button whose name is longer than its share of the row is
+        not made narrower, it is cut off, and "Wake the television" became
+        "Wake the televisic".
+
+        `lead` is the room above the row, for the places where it follows a
+        column of settings rather than a paragraph.
         """
         row = ttk.Frame(parent, style=self._ground(parent))
-        row.pack(fill="x")
+        row.pack(fill="x", pady=(lead, 0))
         for column in range(self.BUTTONS_ACROSS):
             row.columnconfigure(column, weight=1, uniform="buttons")
+        made = []
         for index, (label, command) in enumerate(entries):
-            ttk.Button(row, text=label, style=style, command=command).grid(
-                row=index // self.BUTTONS_ACROSS,
-                column=index % self.BUTTONS_ACROSS, sticky="ew",
-                padx=(0, ROW_GAP), pady=(0, ROW_GAP))
+            button = ttk.Button(row, text=label, style=style, command=command)
+            button.grid(row=index // self.BUTTONS_ACROSS,
+                        column=index % self.BUTTONS_ACROSS, sticky="ew",
+                        padx=(0, ROW_GAP), pady=(0, ROW_GAP))
+            made.append(button)
+        self._button_rows.append((row, made))
+        self._button_across[str(row)] = self.BUTTONS_ACROSS
         return row
 
     def _build_tests(self, parent):
@@ -4641,7 +4717,8 @@ class Panel:
         self._build_gpu_knobs(inner)
         self._build_gpu_fan(inner)
         self._buttons(inner, [("Apply to the card", self._apply_gpu),
-                              ("Check again", self._reread_gpu)])
+                              ("Check again", self._reread_gpu)],
+                      lead=GROUP_GAP)
         self._refit_page()
         self._note(inner,
                    "Applied through LACT, which puts the old settings back "
@@ -5060,6 +5137,18 @@ class Panel:
             self._cec_vars[name] = variable
             self._cec_rows[name] = (switch, named, explain)
 
+        # Collected and sent together rather than each switch going off as it
+        # is clicked. Every one of these starts or stops a unit and half of
+        # them are about whether the machine goes to sleep, so a row of them
+        # set in one pass is a row of decisions somebody made together - and a
+        # slip of the finger is undone by clicking back rather than by waiting
+        # for a service to start and stop again. The settings below already
+        # work this way.
+        self.cec_apply = ttk.Button(inner, text="Apply", style="Tonal.TButton",
+                                    command=self._apply_cec_features)
+        self.cec_apply.pack(anchor="w", pady=(GROUP_GAP, 0))
+        self._cec_changed()
+
     def _build_cec_actions(self, parent):
         """Four things that happen once and leave nothing behind.
 
@@ -5217,6 +5306,9 @@ class Panel:
         for key, variable in self._cec_menus.items():
             variable.set(self._label_for(
                 key, values.get(key) or fallbacks.get(key, "")))
+        # The switches now stand where the machine has them, so there is
+        # nothing left to apply.
+        self._cec_changed()
 
     def _reread_cec(self, then=None):
         """Ask the toolkit about itself again, and redraw from the answer."""
@@ -5251,21 +5343,58 @@ class Panel:
         if not self._cec_asked:
             self._reread_cec()
 
-    def _cec_toggled(self, name):
-        """A switch was clicked. Run it, then believe the machine, not the click."""
+    def _cec_toggled(self, _name):
+        """A switch was clicked. Nothing reaches the machine until Apply."""
         if self._cec_settling:
             return                          # we are the ones who set it
-        wanted = bool(self._cec_vars[name].get())
-        label = cec.BY_NAME[name][1]
+        self._cec_changed()
+
+    def _cec_pending(self):
+        """The switches that are not where the machine has them.
+
+        Asked of the status rather than remembered from the clicks, so a
+        switch turned on and off again is no change at all rather than two.
+        """
+        if self._cec is None:
+            # Nothing has been read yet - at construction, and on a machine
+            # whose toolkit will not answer. There is nothing to compare a
+            # switch against, so there is nothing to apply.
+            return []
+        return [(name, bool(variable.get()))
+                for name, variable in self._cec_vars.items()
+                if bool(variable.get()) != cec.feature_on(self._cec, name)]
+
+    def _cec_changed(self):
+        """Let Apply be pressed only when there is something to apply."""
+        button = getattr(self, "cec_apply", None)
+        if button is None:
+            return                          # the page is still being built
+        button.state(["!disabled"] if self._cec_pending() else ["disabled"])
+
+    def _apply_cec_features(self):
+        self._run_cec_toggles(self._cec_pending())
+
+    def _run_cec_toggles(self, left):
+        """One switch at a time, because the runner holds one command.
+
+        Chained rather than started together: each of these is a systemctl
+        call through a helper, and two at once is the second one refused - see
+        Runner.start - which would leave half a page applied and no way to
+        tell which half.
+        """
+        if not left:
+            self._reread_cec()
+            return
+        name, wanted = left[0]
         self._write("%s %s...\n" % ("Turning on" if wanted else "Turning off",
-                                    label))
-        started = self.runner.start(cec.toggle_command(name, wanted),
-                                    lambda _code: self._reread_cec())
+                                    cec.BY_NAME[name][1]))
+        started = self.runner.start(
+            cec.toggle_command(name, wanted),
+            lambda _code, rest=left[1:]: self._run_cec_toggles(rest))
         if not started:
-            # Refused because something else is running. The switch has
-            # already moved under the pointer, and nothing is going to happen
-            # to justify it - so put it back rather than leave the page
-            # claiming a state nobody applied.
+            # Refused because something else is running. Nothing was applied,
+            # so the switches go back to what the machine says rather than
+            # standing as this window's opinion.
             self._settle_cec_switches()
 
     def _cec_action(self, key):
