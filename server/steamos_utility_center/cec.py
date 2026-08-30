@@ -107,7 +107,12 @@ FEATURES = (
      "Volume buttons control the television",
      "Game Mode shows + and - instead of a slider, and they change the "
      "volume on the receiver or soundbar over CEC. Needs a reboot before "
-     "Game Mode picks up the new controls."),
+     "Game Mode picks up the new controls.\n"
+     "It needs something on the HDMI chain that renders the sound and takes "
+     "volume over CEC: an AV receiver or a soundbar. A television playing "
+     "its own speakers usually will not - the feature is called System Audio "
+     "Control and most sets do not implement it. \u201cAsk about volume\u201d "
+     "below puts the question to yours and reports what it says."),
     ("usb-wake", SYSTEM_SERVICE,
      "Let a controller wake the machine",
      "Allows matching Bluetooth radios and controller receivers to wake this "
@@ -283,11 +288,35 @@ def toggle_command(name, on, home=None, source_dir=None):
 # settings: each one happens once, now, and changes nothing that outlives it -
 # which is what makes them the way to find out whether any of this works
 # before turning a feature on and rebooting into it.
+# The setting that says which device is supposed to render the sound.
+AUDIO_ADDRESS = "CEC_AUDIO_LOGICAL_ADDRESS"
+
+# The one action here that is not a toolkit subcommand, because the question
+# is not about the toolkit.
+#
+# Volume over CEC is the System Audio Control feature, and it is written for
+# an amplifier. A television that does not implement it does not say so: it
+# accepts the volume key, acts on nothing, and answers nothing - so the switch
+# looks broken and everything in the log says the message was sent. That was
+# an evening's work to establish once.
+#
+# Asked directly, the same television answers immediately. On the set this was
+# found on:
+#
+#   GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
+#       Received from TV (0): FEATURE_ABORT reason: refused (0x04)
+#       Approximate response time: 26 ms
+#
+# Which is the difference between "will not" and "did not hear", and it is
+# worth a button.
+AUDIO_PROBE = "audio-probe"
+
 ACTIONS = (
     ("wake", "Wake the television", ["wake"]),
     ("standby", "Send standby", ["standby"]),
     ("volume-up", "Volume up", ["volume", "up"]),
     ("volume-down", "Volume down", ["volume", "down"]),
+    (AUDIO_PROBE, "Ask about volume", None),
 )
 
 # The three discoveries, which write what they find into the config. Separate
@@ -302,9 +331,24 @@ DISCOVERIES = (
 )
 
 
-def action_command(key, home=None):
+def audio_probe_command(settings=None):
+    """Ask whichever device is meant to have the volume whether it does.
+
+    A refusal comes back as FEATURE_ABORT in a few milliseconds; a device
+    that does implement it reports its mode. Either is an answer, which is
+    more than sending a volume key gets you - see AUDIO_PROBE.
+    """
+    settings = settings or {}
+    target = str(settings.get(AUDIO_ADDRESS, "")).strip() or "0"
+    return [CEC_CTL, "-d", configured_device(settings), "--to", target,
+            "--give-system-audio-mode-status"]
+
+
+def action_command(key, home=None, settings=None):
+    if key == AUDIO_PROBE:
+        return audio_probe_command(settings)
     for name, _label, tail in ACTIONS:
-        if name == key:
+        if name == key and tail is not None:
             return [command_path(home)] + tail
     for name, _label, _said in DISCOVERIES:
         if name == key:

@@ -769,7 +769,7 @@ use, so there is no password and no Apply after the first time.
 | **Turn the television off with the machine** | Sends standby before this machine sleeps or shuts down |
 | **Sleep when the television does** | Suspends this machine when the TV broadcasts standby |
 | **Sleep when the television switches away** | Suspends after the TV has been on another input for a while |
-| **Volume buttons control the television** | Game Mode shows `+`/`-` and they change the receiver's volume. Needs a reboot to appear |
+| **Volume buttons control the television** | Game Mode shows `+`/`-` and they change the receiver's volume. Needs a reboot to appear, and an amplifier &mdash; see below |
 | **Let a controller wake the machine** | Allows Bluetooth radios and controller receivers to wake it from suspend |
 | **Recover Gamescope after a wake** | Restarts Gamescope if the display comes back wrong. A repair for one fault &mdash; leave it off unless you have it |
 
@@ -783,6 +783,21 @@ asking the bus and the sound server. The other forty live in
 `/etc/steamos-cec-toolkit.conf` with a paragraph of explanation each; the
 page writes to a user file that shadows it, so what you set here survives the
 toolkit being installed over the top.
+
+**Volume needs an amplifier, not a television.** Volume over CEC is the
+System Audio Control feature and it is written for an AV receiver or a
+soundbar. A television playing its own speakers usually does not implement
+it &mdash; and does not say so: it accepts the volume key, acts on nothing,
+and answers nothing, so the switch looks broken while every log says the
+message was sent. **Ask about volume** on the CEC page puts the question
+directly, and a set that will not do it answers in milliseconds:
+
+```
+GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
+    Received from TV (0): FEATURE_ABORT  reason: refused (0x04)
+```
+
+That is a "no" from the television, not a fault here.
 
 **If the adapter comes out, switch the features off.** They keep working the
 only way they can: by trying. Leave them on with the adapter gone and every

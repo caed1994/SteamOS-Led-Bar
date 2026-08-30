@@ -5516,8 +5516,11 @@ class Panel:
             self._settle_cec_switches()
 
     def _cec_action(self, key):
-        if not self.runner.start(cec.action_command(key),
-                                 lambda _code: self._reread_cec()):
+        # The settings, because one of these asks the television a question
+        # and has to ask the device the settings name - see cec.AUDIO_PROBE.
+        if not self.runner.start(
+                cec.action_command(key, settings=cec.config(self._cec)),
+                lambda _code: self._reread_cec()):
             return
 
     def _save_cec_config(self):

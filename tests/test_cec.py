@@ -332,6 +332,60 @@ REGISTERED = UNREGISTERED.replace(
 NO_PICTURE = UNREGISTERED.replace("3.0.0.0", "f.f.f.f")
 
 
+class AudioProbeTest(unittest.TestCase):
+    """Asking the television whether it does volume at all.
+
+    Established the hard way on a Samsung: it accepts every volume key,
+    acts on none of them, and answers nothing - so the switch looked broken
+    and every log said the message had been sent. Asked directly it replied
+    in 26 ms:
+
+        GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
+            Received from TV (0): FEATURE_ABORT reason: refused (0x04)
+
+    Which is the difference between "will not" and "did not hear".
+    """
+
+    def test_it_asks_the_device_the_settings_name(self):
+        command = cec.audio_probe_command(
+            {"CEC_DEVICE": "/dev/cec1", cec.AUDIO_ADDRESS: "5"})
+        self.assertEqual(command[:5],
+                         ["cec-ctl", "-d", "/dev/cec1", "--to", "5"])
+        self.assertIn("--give-system-audio-mode-status", command)
+
+    def test_no_settings_means_the_usual_adapter_and_the_television(self):
+        command = cec.audio_probe_command()
+        self.assertEqual(command[:5],
+                         ["cec-ctl", "-d", cec.DEFAULT_DEVICE, "--to", "0"])
+
+    def test_an_empty_address_is_the_television_rather_than_nothing(self):
+        """A blank setting must not become "--to " with no target."""
+        command = cec.audio_probe_command({cec.AUDIO_ADDRESS: "  "})
+        self.assertEqual(command[4], "0")
+
+    def test_it_asks_and_changes_nothing(self):
+        """A Try it button that altered the volume would not be a question."""
+        command = cec.audio_probe_command()
+        for word in ("--user-control-pressed", "--playback", "--standby"):
+            self.assertNotIn(word, command)
+
+    def test_it_is_offered_beside_the_other_things_to_try(self):
+        labels = dict((name, label) for name, label, _tail in cec.ACTIONS)
+        self.assertIn(cec.AUDIO_PROBE, labels)
+        self.assertEqual(labels[cec.AUDIO_PROBE], "Ask about volume")
+
+    def test_the_toolkit_actions_still_go_through_the_toolkit(self):
+        """It is the one action here that is not a toolkit subcommand."""
+        self.assertTrue(cec.action_command("wake")[0].endswith("toolkitctl"))
+        self.assertEqual(cec.action_command(cec.AUDIO_PROBE)[0], "cec-ctl")
+
+    def test_the_switch_says_what_the_feature_needs(self):
+        """It promised the television and delivers only with an amplifier."""
+        said = dict((name, text) for name, _k, _l, text in cec.FEATURES)
+        self.assertIn("System Audio Control", said["external-volume"])
+        self.assertIn("soundbar", said["external-volume"])
+
+
 class AdapterRegistrationTest(unittest.TestCase):
     """Reading whether the adapter is on the bus at all.
 
