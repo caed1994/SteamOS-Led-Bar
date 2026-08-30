@@ -3107,6 +3107,106 @@ class WrappingTest(unittest.TestCase):
                       "width, so the sections are wrapping short")
 
 
+class FoldTest(unittest.TestCase):
+    """Opening a block's Details shows a paragraph. That is the whole job.
+
+    Reported: the Check again button under the blocks came back in pieces -
+    half its label, arcs of whatever had been behind it - whenever the CPU or
+    graphics details were unfolded, and put itself right the moment the
+    pointer touched it. Drawn wrong rather than laid out wrong: measured, it
+    kept its size and its place throughout.
+
+    The cause was that a fold called refresh_status(), which asks the machine
+    everything again and then destroys and rebuilds every block. The button
+    lives outside the blocks, so it survives that and is moved by the growing
+    page - across ground that had just been destroyed and not yet redrawn,
+    and X copies a moved window's pixels rather than repainting them.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        was = self.panel_module.ledpanel.power_part
+        self.panel_module.ledpanel.power_part = (
+            lambda current, available: self.panel_module.ledpanel.Part(
+                "power", "CPU power", True, "Running powersave.",
+                ["Wanted: powersave", "Running: powersave"]))
+        self.addCleanup(lambda: setattr(self.panel_module.ledpanel,
+                                        "power_part", was))
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+        self.panel._open_section("status")
+        self.panel.refresh_status()
+        self._settle()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _settle(self):
+        for _ in range(4):
+            self.root.update_idletasks()
+            self.root.update()
+
+    def test_the_detail_is_built_before_anybody_opens_it(self):
+        self.assertIn("power", self.panel._part_details)
+        self.assertFalse(self.panel._part_details["power"].winfo_ismapped())
+
+    def test_opening_and_closing_shows_and_hides_it(self):
+        holder = self.panel._part_details["power"]
+        self.panel._fold_part("power")
+        self._settle()
+        self.assertTrue(holder.winfo_ismapped())
+        self.panel._fold_part("power")
+        self._settle()
+        self.assertFalse(holder.winfo_ismapped())
+
+    def test_the_arrow_says_which_way_it_is(self):
+        arrow = self.panel._fold_arrows["power"]
+        self.assertIn("\u25be", str(arrow.cget("text")))
+        self.panel._fold_part("power")
+        self._settle()
+        self.assertIn("\u25b4", str(arrow.cget("text")))
+
+    def test_it_does_not_ask_the_machine_anything(self):
+        """A fold is a paragraph, not a fresh look at the hardware.
+
+        The old one re-ran every check, the LACT socket and a KDE Connect
+        probe with a two-second timeout, to show text it already had.
+        """
+        asked = []
+        plain = self.panel._read_parts
+        self.panel._read_parts = lambda: (asked.append(1), plain())[1]
+        self.panel._fold_part("power")
+        self._settle()
+        self.assertEqual(asked, [])
+
+    def test_nothing_on_the_page_is_destroyed_and_rebuilt(self):
+        """The artefact's actual cause, asserted rather than described.
+
+        The blocks used to be thrown away and made again on every fold, and
+        the one widget outside them was dragged across the hole that left.
+        """
+        def everything():
+            found = []
+            def walk(widget):
+                for child in widget.winfo_children():
+                    found.append(str(child))
+                    walk(child)
+            walk(self.panel.parts_box)
+            return found
+
+        before = everything()
+        self.panel._fold_part("power")
+        self._settle()
+        self.assertEqual(everything(), before)
+
+
 class AdapterGoneNoticeTest(unittest.TestCase):
     """The warning on the page where the switches actually are."""
 

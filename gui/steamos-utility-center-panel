@@ -5584,6 +5584,10 @@ class Panel:
         # again on the next read, which is every few seconds while something
         # is running.
         self._shown_parts = set()
+        # Handles into the blocks, so a fold can be opened without rebuilding
+        # them - see _fold_part. Refilled by every refresh_status.
+        self._part_details = {}
+        self._fold_arrows = {}
         self.parts_box = ttk.Frame(outer, style="Page.TFrame")
         self.parts_box.pack(fill="x")
         row = ttk.Frame(outer, style="Page.TFrame")
@@ -5642,6 +5646,7 @@ class Panel:
                            else "Details \u25be")
             fold.pack(side="left", padx=(0, ROW_GAP))
             self._fold_buttons.add(str(fold))
+            self._fold_arrows[part.key] = fold
         if part.repair:
             ttk.Button(buttons, text=ledpanel.REPAIR_LABELS[part.repair],
                        style="Tonal.TButton",
@@ -5655,11 +5660,26 @@ class Panel:
         self._wrapped.append(said)
         self._wrap_insets[str(said)] = PART_INDENT
 
-        if part.detail and part.key in self._open_parts:
-            self._build_part_detail(inner, part)
+        if part.detail:
+            # Built whether or not it is open, and hidden with grid_remove.
+            # Opening one used to re-read the whole machine and rebuild every
+            # block from scratch - see _fold_part - which is a lot of work to
+            # show a paragraph that had already been worked out, and it left
+            # the one widget that survives the rebuild, the Check again
+            # button, being moved across ground that had just been destroyed
+            # and not yet redrawn. Reported as a button that came back in
+            # pieces until the pointer touched it.
+            holder = self._build_part_detail(inner, part)
+            self._part_details[part.key] = holder
+            if part.key not in self._open_parts:
+                holder.grid_remove()
 
     def _build_part_detail(self, inner, part):
-        """What is behind a block, which is a list of Checks or of lines."""
+        """What is behind a block, which is a list of Checks or of lines.
+
+        Returns the frame so the fold can show and hide it without this
+        having to run again.
+        """
         holder = ttk.Frame(inner, style="OnCard.TFrame")
         holder.grid(row=2, column=1, columnspan=2, sticky="ew",
                     pady=(ROW_GAP, 0))
@@ -5681,10 +5701,37 @@ class Panel:
                 ttk.Label(holder, text=item.detail, wraplength=460,
                           justify="left", style="Muted.TLabel").grid(
                               row=row, column=2, sticky="w", pady=2)
+        return holder
 
     def _fold_part(self, key):
+        """Show or hide one block's detail. Nothing else.
+
+        It used to call refresh_status(), which asks the machine everything
+        again - systemctl, the LACT socket, and a KDE Connect probe with a
+        two-second timeout - and then destroys and rebuilds every block on
+        the page. All to show a paragraph that had already been worked out
+        by the time the button was drawn.
+
+        It also left an artefact. The Check again button lives outside the
+        blocks, so it survives the rebuild, and the growing page moves it -
+        across ground that had just been destroyed and not yet redrawn. X
+        copies a moved window's pixels rather than repainting them, so it
+        arrived carrying the wreckage: half the label, and arcs of whatever
+        had been underneath. It came back on its own as soon as the pointer
+        touched it, which is what says "drawn wrong" rather than "laid out
+        wrong".
+        """
         self._open_parts.symmetric_difference_update({key})
-        self.refresh_status()
+        holder = self._part_details.get(key)
+        if holder is not None:
+            if key in self._open_parts:
+                holder.grid()
+            else:
+                holder.grid_remove()
+        arrow = self._fold_arrows.get(key)
+        if arrow is not None:
+            arrow.configure(text="Details \u25b4" if key in self._open_parts
+                            else "Details \u25be")
         self._refit_page()
         self._fit_window()
 
@@ -5960,6 +6007,8 @@ class Panel:
             child.destroy()
         self._forget_dead_labels()
         self._fold_buttons = set()
+        self._part_details = {}
+        self._fold_arrows = {}
         parts = self._read_parts()
         for part in parts:
             self._build_part(part)
