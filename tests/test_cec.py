@@ -516,6 +516,25 @@ class RegisterUnitTest(unittest.TestCase):
     def test_it_is_the_mode_that_registers_and_nothing_else(self):
         self.assertIn("--register-cec", self.text)
 
+    def test_it_is_ordered_after_nothing_at_all(self):
+        """Reported: systemd deleted a session job to break an ordering ring.
+
+        This unit is WantedBy=default.target, and in a SteamOS session
+        graphical-session.target reaches back to default.target through
+        gamescope-session and steamos-manager-session-cleanup. So an
+        After= on any session target closes a ring, and systemd breaks a ring
+        by deleting one of the jobs in it - here graphical-session-pre.target's
+        own start. A whole session's ordering rearranged, to wait for
+        something this already waits for by itself.
+
+        Written as "no After= at all" rather than as a list of targets to
+        avoid, because the next one to reach round would be a different name
+        and the same evening.
+        """
+        after = [line for line in self.text.splitlines()
+                 if line.strip().startswith("After=")]
+        self.assertEqual(after, [], "an ordering cycle waiting to happen")
+
     def test_it_is_installed_and_removed_with_the_other_user_units(self):
         """Named in the one list both scripts walk, not in either of them.
 

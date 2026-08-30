@@ -10,7 +10,13 @@ Description=Put the CEC adapter on the bus before anything tries to wake the TV
 # is a real address to find. Before= a unit that is not installed is allowed
 # and does nothing, so this is harmless on a machine with no CEC toolkit.
 Before=steamos-cec-boot-wake.service
-After=graphical-session.target
+# And nothing else. An After= on graphical-session.target was here for one
+# release and closed an ordering cycle: this unit is WantedBy=default.target,
+# graphical-session.target reaches back to default.target through
+# gamescope-session and steamos-manager-session-cleanup, and systemd broke the
+# ring by deleting graphical-session-pre.target's own start job - which is a
+# session-wide price for a belt this does not need. Waiting for the picture is
+# done inside the program, where it can be given up on and said out loud.
 
 [Service]
 Type=oneshot

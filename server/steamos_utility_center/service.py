@@ -1482,11 +1482,16 @@ def run_list_ports():
     return 0
 
 
-# How long to wait for a picture before giving up on registering. The unit
-# runs at session start, and the adapter cannot know where it sits on the
-# television until the link is up and its EDID has been read - which on a set
-# that is still waking up is not immediate.
-CEC_LINK_WAIT = 30.0
+# How long to wait for a picture before giving up on registering.
+#
+# Short on purpose, and it took a second look to see why. The unit holds the
+# toolkit's wake service behind it, and the case where there is no picture is
+# usually a television that is *off* - which is the very thing the wake was
+# going to fix. Waiting there is not thoroughness: it is standing in the way
+# of the fix for half a minute and then giving up anyway. So this covers only
+# the honest case, a link that is still coming up while the session starts,
+# and gets out of the way otherwise.
+CEC_LINK_WAIT = 10.0
 CEC_LINK_POLL = 1.0
 
 
