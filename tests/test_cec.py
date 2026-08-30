@@ -534,6 +534,22 @@ class AdapterAppearsLateTest(unittest.TestCase):
         self._go([["/dev/cec0"]])
         self.assertEqual(self.ran[0], ["cec-ctl", "-d", "/dev/cec0"])
 
+    def test_saying_none_turned_up_says_how_long_it_waited(self):
+        """The message that cost an evening said neither of the two things.
+
+        "No CEC adapter on this machine" reads as settled fact, and it was
+        printed in the same second the unit started - so a machine whose
+        adapter was merely slow looked exactly like one that has no CEC, and
+        the log gave nobody a reason to look further.
+        """
+        import io as text_io
+        import contextlib
+        said = text_io.StringIO()
+        with contextlib.redirect_stdout(said):
+            self._go([[]], wait=3.0)
+        self.assertIn("3s", said.getvalue())
+        self.assertIn("--register-cec", said.getvalue())
+
     def test_a_machine_with_no_adapter_gives_up_inside_the_budget(self):
         """Most machines have no CEC at all, and this unit runs on all of them.
 
@@ -689,6 +705,31 @@ class TellTheToolkitTest(unittest.TestCase):
             sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
             now=lambda: clock[0], wait=3.0)
         self.assertEqual(self._told(), [])
+
+
+class RegisterFlagTest(unittest.TestCase):
+    """--register-cec, and the seconds it now takes.
+
+    Given by hand it is a way to find out whether a slow adapter ever turns
+    up, on a machine where the unit's own budget says it did not.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import service
+        self.parser = service.build_parser()
+        self.service = service
+
+    def test_the_bare_flag_asks_for_the_unit_s_own_wait(self):
+        args = self.parser.parse_args(["--register-cec"])
+        self.assertEqual(args.register_cec, self.service.CEC_LINK_WAIT)
+
+    def test_a_number_after_it_is_the_wait(self):
+        args = self.parser.parse_args(["--register-cec", "60"])
+        self.assertEqual(args.register_cec, 60.0)
+
+    def test_not_asking_for_it_is_not_a_zero_wait(self):
+        """None, not 0. A falsy wait would read as "do not register"."""
+        self.assertIsNone(self.parser.parse_args([]).register_cec)
 
 
 class RegisterUnitTest(unittest.TestCase):

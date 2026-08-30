@@ -1590,8 +1590,15 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
         sleep(CEC_LINK_POLL)
 
     if not devices:
-        print("No CEC adapter on this machine; nothing to register.",
-              flush=True)
+        # Which of the two it is matters, and the message used to say neither:
+        # a machine with no CEC at all and one whose adapter had not turned up
+        # yet read exactly the same, in the same second, and looked like the
+        # question had been asked and answered.
+        print("No CEC adapter appeared in %s within %gs, so there is nothing "
+              "to register. If this machine has one, it is slower than that "
+              "to come up - try a longer wait by hand: "
+              "steamos-utility-center --register-cec 60"
+              % (cec_module.ADAPTERS, wait), flush=True)
         return 0
 
     waiting = list(devices)
@@ -1825,11 +1832,14 @@ def build_parser():
                        help="flash on your phone's notifications, which KDE "
                             "Connect brings to the desktop (run as your normal "
                             "user, not with sudo)")
-    modes.add_argument("--register-cec", action="store_true",
-                       dest="register_cec",
+    modes.add_argument("--register-cec", nargs="?", const=CEC_LINK_WAIT,
+                       type=float, metavar="SECONDS", dest="register_cec",
                        help="claim a logical address for any CEC adapter that "
                             "has none, so the toolkit's wake commands have an "
-                            "address to send from (run as your normal user)")
+                            "address to send from (run as your normal user). "
+                            "SECONDS is how long to wait for the adapter and "
+                            "for its picture; give a longer one by hand to "
+                            "find out whether a slow adapter turns up at all")
     modes.add_argument("--check-config", action="store_true",
                        dest="check_config",
                        help="load and validate the configuration and exit; "
@@ -1877,9 +1887,9 @@ def main(argv=None):
     # this machine is plugged into has nothing to do with the LED bar's
     # settings, and failing for want of a config file it does not read would
     # be a puzzle at session start.
-    if args.register_cec:
+    if args.register_cec is not None:
         configure_logging("warning")
-        return run_register_cec()
+        return run_register_cec(wait=args.register_cec)
 
     overrides = {
         "DEVICE": args.device,
