@@ -1554,6 +1554,9 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
     in cec.py. Deliberately timid: an adapter that already holds an address is
     left alone, one with no picture is waited for and then left alone, and
     anything cec-ctl says that this does not understand is left alone too.
+    `wait` is the whole budget: the adapter appearing and then its picture
+    share it, so the toolkit's wake service is never held up for longer than
+    that however the session start goes.
     Doing nothing is always a safe answer here; taking the bus off Steam's own
     daemon would not be.
 
@@ -1565,11 +1568,26 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
         stderr=subprocess.STDOUT, timeout=15, check=False))
     sleep = sleep or time.sleep
     now = now or time.monotonic
-    if devices is None:
-        devices = sorted(glob.glob(cec_module.ADAPTERS))
     if settings is None:
         settings = _read_toolkit_settings()
     told = False
+
+    # The device node first, and waited for rather than looked for once.
+    #
+    # A session start races the adapter's own enumeration, and losing that
+    # race silently is how a machine ends up with an adapter nobody ever
+    # registers - which is the state an unplug and replug is famous for
+    # curing, because the second time round the device appears while
+    # everything that cares is already running. Waiting here is honest
+    # waiting: an adapter that is coming will come, unlike a picture, which
+    # needs somebody to turn the television on.
+    deadline = now() + wait
+    while devices is None:
+        found = sorted(glob.glob(cec_module.ADAPTERS))
+        if found or now() >= deadline:
+            devices = found
+            break
+        sleep(CEC_LINK_POLL)
 
     if not devices:
         print("No CEC adapter on this machine; nothing to register.",
@@ -1577,7 +1595,6 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
         return 0
 
     waiting = list(devices)
-    deadline = now() + wait
     done = 0
     while waiting:
         for device in list(waiting):

@@ -485,6 +485,94 @@ class RegisterRunTest(unittest.TestCase):
                          ["/dev/cec0", "/dev/cec1"])
 
 
+class AdapterAppearsLateTest(unittest.TestCase):
+    """Reported: it works after unplugging the adapter and plugging it back.
+
+    Which is the shape of a race. A session start runs against the adapter's
+    own enumeration, and a run that looks once and finds nothing goes away
+    for good - so the adapter is never registered, and pulling it out and
+    putting it back is what finally lets something see it appear.
+
+    Looked for repeatedly now, inside the same budget the picture gets, so
+    the toolkit's wake service is not held up any longer either way.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import service
+        self.service = service
+        self.ran = []
+        was = service.glob
+        self.addCleanup(lambda: setattr(service, "glob", was))
+
+    def _go(self, appearances, wait=5.0):
+        """`appearances` is what each look at /dev finds, in order."""
+        seen = list(appearances)
+
+        class Stub:
+            @staticmethod
+            def glob(_pattern):
+                return seen.pop(0) if len(seen) > 1 else seen[0]
+
+        self.service.glob = Stub
+        clock = [0.0]
+
+        def run(command):
+            self.ran.append(list(command))
+            return Answer(0, UNREGISTERED if command[0] == "cec-ctl" else "")
+
+        return self.service.run_register_cec(
+            run=run, settings={"CEC_DEVICE": "/dev/cec0",
+                               cec.PHYSICAL_ADDRESS: "1.0.0.0"},
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0], wait=wait)
+
+    def test_an_adapter_that_turns_up_a_moment_late_is_still_registered(self):
+        self._go([[], [], ["/dev/cec0"]])
+        self.assertIn("--playback", self.ran[-1])
+
+    def test_one_that_is_there_at_once_is_not_waited_for(self):
+        self._go([["/dev/cec0"]])
+        self.assertEqual(self.ran[0], ["cec-ctl", "-d", "/dev/cec0"])
+
+    def test_a_machine_with_no_adapter_gives_up_inside_the_budget(self):
+        """Most machines have no CEC at all, and this unit runs on all of them.
+
+        It must not sit there: it is holding the toolkit's wake service, and
+        on a machine with nothing to hold it for that is pure delay.
+        """
+        self.assertEqual(self._go([[]], wait=3.0), 0)
+        self.assertEqual(self.ran, [])
+
+    def test_the_budget_is_shared_with_the_wait_for_a_picture(self):
+        """Both waits come out of one clock.
+
+        Otherwise an adapter that appears late and then has no picture would
+        hold the wake service for twice as long as the unit promises.
+        """
+        seen = [[], [], ["/dev/cec0"]]
+
+        class Stub:
+            @staticmethod
+            def glob(_pattern):
+                return seen.pop(0) if len(seen) > 1 else seen[0]
+
+        self.service.glob = Stub
+        clock = [0.0]
+        self.service.run_register_cec(
+            run=lambda command: Answer(0, NO_PICTURE),
+            settings={}, wait=5.0,
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0])
+        self.assertLessEqual(clock[0], 5.0 + cec_poll_slack(),
+                             "it waited past its own budget")
+
+
+def cec_poll_slack():
+    """One poll: the loop checks the clock after sleeping, not before."""
+    from steamos_utility_center import service
+    return service.CEC_LINK_POLL
+
+
 class ToolkitSettingsTest(unittest.TestCase):
     """Reading the toolkit's own settings, and when to add to them."""
 
