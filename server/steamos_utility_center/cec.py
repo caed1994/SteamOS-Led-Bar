@@ -328,6 +328,111 @@ def set_config_command(values, home=None):
     return [command_path(home), "set-config", json.dumps(values, sort_keys=True)]
 
 
+# -- the adapter's own place on the bus --------------------------------------
+#
+# Before a CEC adapter can say anything as itself it has to claim a logical
+# address. Nothing in the toolkit ever does: every wake path asks the adapter
+# which address it holds, and when the answer is none - "CEC logical address
+# is not allocated yet" in its log - falls back to "pretend to be 4" and sends
+# anyway. Those messages carry an initiator the adapter does not own, and the
+# bus has no reason to act on them.
+#
+# Standby is the exception, which is what hid this for so long. Its first two
+# sends carry no initiator at all, so they go out from the unregistered
+# address as a broadcast - which an adapter that has claimed nothing is still
+# allowed to do, and which a television accepts. So the television turned off
+# on request and would not turn back on, and every line in the log said the
+# wake had been sent.
+#
+# Found on a machine whose adapter reported a good physical address (3.0.0.0,
+# so HDMI 3) and "Logical Address Mask: 0x0000" - a working cable, a listening
+# television, and an adapter that was not on the bus.
+#
+# What the panel adds is that missing step, and only when it is missing: if
+# anything at all is registered - Steam's own cecd, an earlier run of this -
+# the adapter is left exactly as it is. It is never taken off whoever has it.
+
+CEC_CTL = "cec-ctl"
+
+# Every adapter on the machine rather than the one the toolkit is configured
+# for. Registering an adapter nobody has claimed cannot disturb anything, and
+# a machine with two of them is a machine where the configured one is the more
+# likely to be wrong.
+ADAPTERS = "/dev/cec*"
+
+# What the television will show as the source's name. Registering as a
+# playback device is what claims logical address 4, which is what every one of
+# the toolkit's wake paths already assumes it will find.
+REGISTERED_NAME = "SteamOS"
+
+# f.f.f.f is what an adapter reports when it has no picture to belong to - no
+# link, or one whose EDID has not been read yet. Claiming an address then
+# would put us on the bus at an address that means nothing.
+NO_PHYSICAL_ADDRESS = "f.f.f.f"
+
+
+def adapter_state_command(device):
+    """How to ask one adapter what it is. Reports; changes nothing."""
+    return [CEC_CTL, "-d", device]
+
+
+def register_command(device):
+    """How to claim logical address 4 for an adapter that has none."""
+    return [CEC_CTL, "-d", device, "--playback", "--osd-name", REGISTERED_NAME]
+
+
+def _field(text, name):
+    """One "Name : value" line of cec-ctl's report, or "" if it said none."""
+    for line in (text or "").splitlines():
+        left, sep, right = line.partition(":")
+        if sep and left.strip().lower() == name.lower():
+            return right.strip()
+    return ""
+
+
+def adapter_registered(text):
+    """Whether this adapter holds a logical address. None when it did not say.
+
+    Two fields answer it and either will do - the mask is the one to trust,
+    the count is there for a cec-ctl that words it differently. None rather
+    than False when neither is present, because "the answer was not in a shape
+    this understands" and "the adapter is not on the bus" want opposite
+    responses: the first is a reason to leave well alone.
+    """
+    mask = _field(text, "Logical Address Mask")
+    if mask:
+        try:
+            return int(mask, 0) != 0
+        except ValueError:
+            pass
+    count = _field(text, "Logical Addresses")
+    if count:
+        try:
+            return int(count, 0) != 0
+        except ValueError:
+            pass
+    return None
+
+
+def adapter_physical_address(text):
+    """Where this adapter sits on the television, or "" with no picture."""
+    found = _field(text, "Physical Address")
+    if not found or found.lower() == NO_PHYSICAL_ADDRESS:
+        return ""
+    return found
+
+
+def wants_registering(text):
+    """Whether this adapter is one we should claim an address for.
+
+    Both halves have to be true, and the physical address is the half that is
+    easy to forget: an adapter with no link reports one that means nothing, so
+    registering it would claim a place on a bus it cannot see.
+    """
+    return adapter_registered(text) is False and bool(
+        adapter_physical_address(text))
+
+
 def device(status):
     """What the status says about the adapter itself.
 

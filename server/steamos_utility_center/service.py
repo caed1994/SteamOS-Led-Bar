@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import glob
 import itertools
 import logging
 import os
@@ -17,6 +18,7 @@ import sys
 import time
 
 from . import config as config_module
+from . import cec as cec_module
 from . import desktop, elf, load, notify, phone, render, serialport, shim
 from . import steamworks
 from . import temperature
@@ -1480,6 +1482,92 @@ def run_list_ports():
     return 0
 
 
+# How long to wait for a picture before giving up on registering. The unit
+# runs at session start, and the adapter cannot know where it sits on the
+# television until the link is up and its EDID has been read - which on a set
+# that is still waking up is not immediate.
+CEC_LINK_WAIT = 30.0
+CEC_LINK_POLL = 1.0
+
+
+def run_register_cec(devices=None, run=None, sleep=None, now=None,
+                     wait=CEC_LINK_WAIT):
+    """Claim a logical address for any CEC adapter that has none.
+
+    The step the toolkit assumes has already happened - see the long comment
+    in cec.py. Deliberately timid: an adapter that already holds an address is
+    left alone, one with no picture is waited for and then left alone, and
+    anything cec-ctl says that this does not understand is left alone too.
+    Doing nothing is always a safe answer here; taking the bus off Steam's own
+    daemon would not be.
+
+    Everything it uses is injectable because the machine this is tested on has
+    no CEC adapter, no television and no cec-ctl.
+    """
+    run = run or (lambda command: subprocess.run(
+        command, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=15, check=False))
+    sleep = sleep or time.sleep
+    now = now or time.monotonic
+    if devices is None:
+        devices = sorted(glob.glob(cec_module.ADAPTERS))
+
+    if not devices:
+        print("No CEC adapter on this machine; nothing to register.",
+              flush=True)
+        return 0
+
+    waiting = list(devices)
+    deadline = now() + wait
+    done = 0
+    while waiting:
+        for device in list(waiting):
+            answer = run(cec_module.adapter_state_command(device))
+            text = getattr(answer, "stdout", "") or ""
+            if getattr(answer, "returncode", 1) != 0:
+                print("%s: cec-ctl would not report on it: %s"
+                      % (device, text.strip()), flush=True)
+                waiting.remove(device)
+                continue
+            registered = cec_module.adapter_registered(text)
+            if registered is None:
+                print("%s: cannot tell whether it is on the bus, so leaving "
+                      "it alone." % device, flush=True)
+                waiting.remove(device)
+                continue
+            if registered:
+                print("%s: already on the bus; leaving it alone." % device,
+                      flush=True)
+                waiting.remove(device)
+                continue
+            if not cec_module.adapter_physical_address(text):
+                continue                # no picture yet - come back to it
+            waiting.remove(device)
+            result = run(cec_module.register_command(device))
+            if getattr(result, "returncode", 1) != 0:
+                said = (getattr(result, "stdout", "") or "").strip()
+                print("%s: could not claim a logical address: %s"
+                      % (device, said), flush=True)
+                continue
+            done += 1
+            print("%s: registered at %s as a playback device."
+                  % (device, cec_module.adapter_physical_address(text)),
+                  flush=True)
+        if waiting and now() >= deadline:
+            for device in waiting:
+                print("%s: no picture after %gs, so there is nothing to "
+                      "register against." % (device, wait), flush=True)
+            break
+        if waiting:
+            sleep(CEC_LINK_POLL)
+    if not done:
+        # Not a failure: an adapter somebody else already has is the good
+        # case, and the unit exiting non-zero for it would paint the session
+        # red for doing the right thing.
+        print("Nothing needed registering.", flush=True)
+    return 0
+
+
 def dump_line(snapshot, written, seen):
     """One state change, with how long since Steam's previous one.
 
@@ -1658,6 +1746,11 @@ def build_parser():
                        help="flash on your phone's notifications, which KDE "
                             "Connect brings to the desktop (run as your normal "
                             "user, not with sudo)")
+    modes.add_argument("--register-cec", action="store_true",
+                       dest="register_cec",
+                       help="claim a logical address for any CEC adapter that "
+                            "has none, so the toolkit's wake commands have an "
+                            "address to send from (run as your normal user)")
     modes.add_argument("--check-config", action="store_true",
                        dest="check_config",
                        help="load and validate the configuration and exit; "
@@ -1700,6 +1793,14 @@ def main(argv=None):
     if args.list_ports:
         configure_logging("warning")
         return run_list_ports()
+
+    # Before the configuration is loaded, like --list-ports: which television
+    # this machine is plugged into has nothing to do with the LED bar's
+    # settings, and failing for want of a config file it does not read would
+    # be a puzzle at session start.
+    if args.register_cec:
+        configure_logging("warning")
+        return run_register_cec()
 
     overrides = {
         "DEVICE": args.device,

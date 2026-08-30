@@ -105,9 +105,13 @@ POWER_COMMAND_LINK="$ROOT/usr/local/bin/$NAME-power"
 
 WATCHER_UNIT="$NAME-achievements.service"
 PHONE_UNIT="$NAME-phone.service"
+# Not a watcher at all - it runs once at session start and exits - but it is a
+# user unit installed and enabled by exactly the same machinery, and giving it
+# a second machinery of its own is how the two come to disagree.
+CEC_UNIT="$NAME-cec.service"
 # Everything installed into the user's systemd, walked rather than named twice:
 # a unit added to one script and missed in the other is a file nobody removes.
-WATCHER_UNITS=("$WATCHER_UNIT" "$PHONE_UNIT")
+WATCHER_UNITS=("$WATCHER_UNIT" "$PHONE_UNIT" "$CEC_UNIT")
 # Must match WantedBy= in those units: it is where the enable symlink goes.
 WATCHER_WANTS="default.target.wants"
 

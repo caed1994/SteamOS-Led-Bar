@@ -1,0 +1,24 @@
+[Unit]
+# A *user* unit, and it has to be: the CEC adapter belongs to the logged-in
+# session, and this runs before the toolkit's own wake service in the same
+# session. Log: journalctl --user -u steamos-utility-center-cec -b
+Description=Put the CEC adapter on the bus before anything tries to wake the TV
+# The step the CEC toolkit assumes has already happened. Its boot-wake service
+# asks the adapter which logical address it holds and, when the answer is
+# none, sends anyway from an address the adapter does not own - which is a
+# message the television has no reason to act on. Ordered before it so there
+# is a real address to find. Before= a unit that is not installed is allowed
+# and does nothing, so this is harmless on a machine with no CEC toolkit.
+Before=steamos-cec-boot-wake.service
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=@INSTALL_DIR@/steamos-utility-center --register-cec
+# It reports and exits. Nothing here retries: an adapter that could not be
+# registered at session start is one with no picture, and the next boot is
+# the next chance. Waiting for the link is done inside, where it can say so.
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target

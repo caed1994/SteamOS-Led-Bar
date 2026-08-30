@@ -309,6 +309,228 @@ class DeviceTest(unittest.TestCase):
         self.assertFalse(cec.usable({}))
 
 
+# What cec-ctl reported on the machine this was found on: a good physical
+# address, and no place on the bus at all. Kept verbatim, spacing included -
+# the parsing is the whole point and a tidied-up copy would not test it.
+UNREGISTERED = """\
+Driver version           : 7.2.0
+Available Logical Addresses: 4
+DRM Connector Info       : card 0, connector 93
+Physical Address         : 3.0.0.0
+Logical Address Mask     : 0x0000
+CEC Version              : 2.0
+OSD Name                 : ''
+Logical Addresses        : 0
+"""
+
+REGISTERED = UNREGISTERED.replace(
+    "Logical Address Mask     : 0x0000",
+    "Logical Address Mask     : 0x0010").replace(
+    "Logical Addresses        : 0",
+    "Logical Addresses        : 1")
+
+NO_PICTURE = UNREGISTERED.replace("3.0.0.0", "f.f.f.f")
+
+
+class AdapterRegistrationTest(unittest.TestCase):
+    """Reading whether the adapter is on the bus at all.
+
+    The bug this is about: the toolkit's wake paths ask the adapter which
+    logical address it holds, and when it holds none they send anyway from
+    address 4 - which nothing owns, so the television has no reason to listen.
+    Standby went out from the unregistered address as a broadcast and worked
+    the whole time, which is why it looked like a television that would turn
+    off but not on.
+    """
+
+    def test_an_adapter_with_no_address_is_read_as_such(self):
+        self.assertIs(cec.adapter_registered(UNREGISTERED), False)
+        self.assertEqual(cec.adapter_physical_address(UNREGISTERED), "3.0.0.0")
+        self.assertTrue(cec.wants_registering(UNREGISTERED))
+
+    def test_an_adapter_already_on_the_bus_is_left_alone(self):
+        self.assertIs(cec.adapter_registered(REGISTERED), True)
+        self.assertFalse(cec.wants_registering(REGISTERED))
+
+    def test_an_adapter_with_no_picture_is_not_registered_either(self):
+        """f.f.f.f is "I do not know where I am", not an address.
+
+        Claiming a place on the bus against it would put this machine on the
+        television at somewhere that means nothing.
+        """
+        self.assertEqual(cec.adapter_physical_address(NO_PICTURE), "")
+        self.assertFalse(cec.wants_registering(NO_PICTURE))
+
+    def test_an_answer_this_does_not_understand_is_not_a_no(self):
+        """None, and None must not read as "not registered".
+
+        Anything else and a cec-ctl that words its report differently would
+        have the adapter taken off whoever holds it, on every session start.
+        """
+        for text in ("", "cec-ctl: no such device",
+                     "Physical Address : 3.0.0.0"):
+            self.assertIsNone(cec.adapter_registered(text), text)
+            self.assertFalse(cec.wants_registering(text), text)
+
+    def test_the_count_answers_when_the_mask_is_missing(self):
+        self.assertIs(cec.adapter_registered(
+            "Logical Addresses        : 1"), True)
+        self.assertIs(cec.adapter_registered(
+            "Logical Addresses        : 0"), False)
+
+    def test_the_commands_are_what_cec_ctl_takes(self):
+        self.assertEqual(cec.adapter_state_command("/dev/cec1"),
+                         ["cec-ctl", "-d", "/dev/cec1"])
+        self.assertIn("--playback", cec.register_command("/dev/cec1"))
+        # Named, because this is what the television shows as the source.
+        self.assertIn(cec.REGISTERED_NAME, cec.register_command("/dev/cec1"))
+
+    def test_reading_the_adapter_changes_nothing(self):
+        """The report has to be a report: it runs before every decision."""
+        for word in ("--playback", "--to", "--raw-msg", "-f"):
+            self.assertNotIn(word, cec.adapter_state_command("/dev/cec0"))
+
+
+class Answer:
+    """What subprocess.run hands back, as much of it as this reads."""
+
+    def __init__(self, returncode=0, stdout=""):
+        self.returncode, self.stdout = returncode, stdout
+
+
+class RegisterRunTest(unittest.TestCase):
+    """The one thing this project does to the CEC bus, and its timidity.
+
+    Every path out that is not "claim an address nobody holds" has to leave
+    the adapter exactly as it was: Steam's own daemon may be using it, and
+    taking the bus off it to fix a television that is already on would be a
+    worse bug than the one being fixed.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import service
+        self.service = service
+        self.ran = []
+
+    def _run(self, answers):
+        def run(command):
+            self.ran.append(list(command))
+            for match, answer in answers:
+                if match in command:
+                    return answer
+            return Answer(0, "")
+        return run
+
+    def _go(self, answers, devices=("/dev/cec0",), wait=3.0):
+        clock = [0.0]
+        return self.service.run_register_cec(
+            devices=list(devices), run=self._run(answers),
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0], wait=wait)
+
+    def test_an_unregistered_adapter_is_put_on_the_bus(self):
+        self.assertEqual(self._go([("-d", Answer(0, UNREGISTERED))]), 0)
+        self.assertIn("--playback", self.ran[-1])
+
+    def test_an_adapter_already_on_the_bus_is_only_read(self):
+        self._go([("-d", Answer(0, REGISTERED))])
+        self.assertEqual(self.ran, [["cec-ctl", "-d", "/dev/cec0"]])
+
+    def test_an_adapter_this_cannot_read_is_left_alone(self):
+        self._go([("-d", Answer(1, "cec-ctl: cannot open /dev/cec0"))])
+        self.assertEqual(len(self.ran), 1)
+
+    def test_an_answer_it_does_not_understand_is_left_alone(self):
+        self._go([("-d", Answer(0, "something else entirely"))])
+        self.assertEqual(len(self.ran), 1)
+
+    def test_it_waits_for_a_picture_and_then_gives_up(self):
+        """An adapter with no link has nowhere to register against.
+
+        It is waited for rather than refused, because a television that is
+        still waking up gets there - and then given up on rather than waited
+        for forever, because the unit is holding the toolkit's own wake
+        service behind it.
+        """
+        self._go([("-d", Answer(0, NO_PICTURE))], wait=3.0)
+        sent = [word for row in self.ran for word in row]
+        self.assertNotIn("--playback", sent)
+        self.assertGreater(len(self.ran), 1, "it did not wait at all")
+
+    def test_a_picture_arriving_late_is_still_registered(self):
+        answers = [Answer(0, NO_PICTURE), Answer(0, NO_PICTURE),
+                   Answer(0, UNREGISTERED)]
+        def run(command):
+            self.ran.append(list(command))
+            if "--playback" in command:
+                return Answer(0, "")
+            return answers.pop(0) if answers else Answer(0, UNREGISTERED)
+        clock = [0.0]
+        self.service.run_register_cec(
+            devices=["/dev/cec0"], run=run,
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0], wait=30.0)
+        self.assertIn("--playback", self.ran[-1])
+
+    def test_a_machine_with_no_adapter_is_not_a_failure(self):
+        """The unit is installed for everyone; most machines have no CEC."""
+        self.assertEqual(self._go([], devices=()), 0)
+        self.assertEqual(self.ran, [])
+
+    def test_every_adapter_is_considered(self):
+        self._go([("-d", Answer(0, UNREGISTERED))],
+                 devices=("/dev/cec0", "/dev/cec1"))
+        read = [row for row in self.ran if "--playback" not in row]
+        self.assertEqual(sorted(row[2] for row in read),
+                         ["/dev/cec0", "/dev/cec1"])
+
+
+class RegisterUnitTest(unittest.TestCase):
+    """The unit that runs it, and the one line in it that matters."""
+
+    UNIT = os.path.join(HERE, "..", "server",
+                        "steamos-utility-center-cec.service")
+
+    def setUp(self):
+        with open(self.UNIT) as handle:
+            self.text = handle.read()
+
+    def test_it_runs_before_the_toolkit_tries_to_wake_the_television(self):
+        """The whole point of the unit's existence.
+
+        After it, the adapter is already on the bus and the toolkit's own
+        boot-wake service finds a real logical address to send from instead
+        of falling back to one nothing owns.
+        """
+        self.assertIn("Before=steamos-cec-boot-wake.service", self.text)
+
+    def test_it_is_a_oneshot_so_the_ordering_means_something(self):
+        """Before= a Type=simple unit only orders the *start*.
+
+        Which would order this against nothing: the wake would go out while
+        the address was still being claimed. oneshot is what makes the
+        toolkit's service wait for this one to finish.
+        """
+        self.assertIn("Type=oneshot", self.text)
+
+    def test_it_is_the_mode_that_registers_and_nothing_else(self):
+        self.assertIn("--register-cec", self.text)
+
+    def test_it_is_installed_and_removed_with_the_other_user_units(self):
+        """Named in the one list both scripts walk, not in either of them.
+
+        A unit added to the installer and missed in the uninstaller is a file
+        nobody removes - which is what the shared list exists to stop.
+        """
+        shared_path = os.path.join(HERE, "..", "scripts", "user-unit.sh")
+        with open(shared_path) as handle:
+            shared = handle.read()
+        self.assertIn('CEC_UNIT="$NAME-cec.service"', shared)
+        self.assertIn(
+            'WATCHER_UNITS=("$WATCHER_UNIT" "$PHONE_UNIT" "$CEC_UNIT")',
+            shared)
+
+
 class RequirementsTest(unittest.TestCase):
 
     def test_a_machine_with_everything_is_missing_nothing(self):
