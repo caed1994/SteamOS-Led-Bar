@@ -474,11 +474,16 @@ def layout_part(layout, labels=None):
         return Part("keyboard", "Keyboard layout", None,
                     "Left to the system.")
     named = (labels or {}).get(layout, layout)
-    return Part("keyboard", "Keyboard layout", True, named,
-                ["Applies to Game Mode at the next login."])
+    # In the line itself rather than behind a fold. There is one sentence to
+    # say about a keyboard layout, and hiding one sentence behind a Details
+    # button that has to be found and clicked is a worse deal than the line
+    # being a little longer.
+    return Part("keyboard", "Keyboard layout", True,
+                "%s. Applies to Game Mode at the next login." % named)
 
 
-def panel_part(version, update_state=None, update_said="", behind=""):
+def panel_part(version, update_state=None, update_said="", behind="",
+               installed=None, head=""):
     """The program itself. Always installed - you are looking at it.
 
     `behind` is install_is_behind()'s sentence, and it is the one thing here
@@ -488,16 +493,33 @@ def panel_part(version, update_state=None, update_said="", behind=""):
     that had been written, pushed and pulled sat there not running while
     everybody read logs from the old one.
     """
+    # Both commits, because the question this block gets asked is which
+    # code is actually running - and a version number does not answer it: it
+    # changes when somebody remembers to change it, and never between two
+    # commits on the same afternoon.
+    installed = installed_commit() if installed is None else installed
+    detail = []
+    if installed:
+        detail.append("Installed from: %s" % installed[:12])
+    if head:
+        detail.append("This clone: %s%s"
+                      % (head[:12],
+                         "" if head == installed else "  (not installed yet)"))
+
     # Named at call time rather than imported above it: this block sits
     # before the update constants in the file, and moving it below them would
     # put the parts a long way from the checks they are built out of.
     if behind:
-        return Part("panel", "This panel", False, behind)
+        return Part("panel", "This panel", False, behind, detail)
     if update_state == UPDATE_AVAILABLE:
         return Part("panel", "This panel", True,
                     "Version %s. %s" % (version, update_said or
-                                        "An update is available."))
-    return Part("panel", "This panel", True, "Version %s." % version)
+                                        "An update is available."), detail)
+    if installed:
+        return Part("panel", "This panel", True,
+                    "Version %s, installed from %s."
+                    % (version, installed[:7]), detail)
+    return Part("panel", "This panel", True, "Version %s." % version, detail)
 
 
 # Which part answers for which section, where the two are not the same word.

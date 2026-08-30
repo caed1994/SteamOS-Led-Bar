@@ -829,6 +829,39 @@ class InstalledCommitTest(unittest.TestCase):
         self.assertEqual(
             ledpanel.install_is_behind(".", installed="aaaa", head=""), "")
 
+    def test_both_commits_are_shown_even_when_they_agree(self):
+        """The question this block is asked is which code is running.
+
+        A version number does not answer it: it changes when somebody
+        remembers to change it, and never between two commits on the same
+        afternoon. So the commit is in the line, and both are in the fold.
+        """
+        part = ledpanel.panel_part("1.0.0", installed="abc1234def567",
+                                   head="abc1234def567")
+        self.assertIn("abc1234", part.verdict)
+        self.assertEqual(part.detail, ["Installed from: abc1234def56",
+                                       "This clone: abc1234def56"])
+
+    def test_a_clone_ahead_is_marked_as_such_in_the_fold_too(self):
+        part = ledpanel.panel_part("1.0.0", installed="aaaaaaa11111",
+                                   head="bbbbbbb22222")
+        self.assertIn("not installed yet", part.detail[1])
+
+    def test_no_stamp_leaves_the_line_as_it_was(self):
+        """An install from before the stamp existed has nothing to show."""
+        part = ledpanel.panel_part("1.0.0", installed="", head="")
+        self.assertEqual(part.verdict, "Version 1.0.0.")
+        self.assertEqual(part.detail, [])
+
+    def test_the_keyboard_layout_says_its_one_sentence_in_the_line(self):
+        """One sentence behind a Details button is a worse deal than a
+        slightly longer line - reported as a fold that was not worth opening.
+        """
+        part = ledpanel.layout_part("de", {"de": "German (de)"})
+        self.assertEqual(part.detail, [])
+        self.assertIn("Game Mode", part.verdict)
+        self.assertIn("German (de)", part.verdict)
+
     def test_a_stale_install_is_a_fault_and_not_a_footnote(self):
         """It has to reach the headline, or it is invisible all over again."""
         part = ledpanel.panel_part("1.0", behind="Installed from aaaaaaa ...")

@@ -5609,7 +5609,8 @@ class Panel:
             ledpanel.panel_part(VERSION, getattr(self, "_update_state", None),
                                 self.update_state.cget("text")
                                 if hasattr(self, "update_state") else "",
-                                ledpanel.install_is_behind(SOURCE_DIR)),
+                                ledpanel.install_is_behind(SOURCE_DIR),
+                                head=ledpanel.head_commit(SOURCE_DIR)),
         ]
 
     def _build_part(self, part):

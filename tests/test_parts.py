@@ -272,12 +272,15 @@ class LayoutPartTest(unittest.TestCase):
 
     def test_a_layout_that_is_set_is_named_the_way_the_menu_names_it(self):
         part = ledpanel.layout_part("de", {"de": "German"})
-        self.assertEqual(part.verdict, "German")
+        self.assertTrue(part.verdict.startswith("German."), part.verdict)
 
     def test_it_says_when_it_takes_effect(self):
-        # The thing everybody gets wrong about this setting.
+        # The thing everybody gets wrong about this setting - and it is in the
+        # line now rather than behind a fold, because one sentence is not
+        # worth a Details button somebody has to find and click.
         part = ledpanel.layout_part("de")
-        self.assertIn("login", " ".join(part.detail).lower())
+        self.assertIn("login", part.verdict.lower())
+        self.assertEqual(part.detail, [])
 
 
 class PanelPartTest(unittest.TestCase):
