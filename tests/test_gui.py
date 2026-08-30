@@ -705,6 +705,50 @@ class UpdateVerdictTest(unittest.TestCase):
         self.assertIn("would stop", script)
 
 
+class PageSummaryTest(unittest.TestCase):
+    """The sentence under a section's title has to be about that section.
+
+    Reported with a screenshot: the HDMI CEC page read
+
+        HDMI CEC Mods
+        Everything is in order.
+
+    directly above a card saying "Not installed yet". Both sentences were
+    true - the summary is counted across every part, and a part that is
+    simply absent is not a fault, because a machine that never wanted CEC is
+    not a broken machine. But printed under that heading it answers a
+    question nobody asked.
+    """
+
+    def _parts(self, installed=False):
+        return [ledpanel.cec_part(None, installed),
+                ledpanel.panel_part("1.0")]
+
+    def test_the_page_s_own_part_speaks_first_when_it_has_news(self):
+        self.assertEqual(ledpanel.summary_for(self._parts(), "cec"),
+                         "HDMI CEC: Not installed.")
+
+    def test_the_sweep_is_what_a_page_without_a_part_gets(self):
+        self.assertEqual(ledpanel.summary_for(self._parts(), "status"),
+                         ledpanel.parts_summary(self._parts()))
+
+    def test_good_news_does_not_shout_over_the_rest_of_the_window(self):
+        """Only anything-but-good speaks. A working part has nothing to add.
+
+        Otherwise every page would report its own part instead of the one
+        thing that is actually wrong somewhere else, which is what the
+        headline is for.
+        """
+        parts = [ledpanel.panel_part("1.0")]
+        self.assertEqual(ledpanel.summary_for(parts, "app"),
+                         "Everything is in order.")
+
+    def test_a_section_whose_part_is_named_differently_still_finds_it(self):
+        """The sidebar says "strip"; the part is called "led"."""
+        self.assertEqual(ledpanel.SECTION_PARTS["strip"], "led")
+        self.assertEqual(ledpanel.SECTION_PARTS["keyboard"], "layout")
+
+
 class InstalledCommitTest(unittest.TestCase):
     """Telling "pulled" and "installed" apart, which cost two evenings.
 

@@ -463,6 +463,33 @@ def panel_part(version, update_state=None, update_said="", behind=""):
     return Part("panel", "This panel", True, "Version %s." % version)
 
 
+# Which part answers for which section, where the two are not the same word.
+# Only the pages that have one: Status shows every block already, and App
+# Settings answers for the panel through its own block.
+SECTION_PARTS = {"strip": "led", "cec": "cec", "keyboard": "layout"}
+
+
+def summary_for(parts, section=""):
+    """The sentence over one page, not always the one over all of them.
+
+    Reported: the HDMI CEC page said "Everything is in order." directly under
+    its own title, above a card reading "Not installed yet". Both were true.
+    The sentence is counted across every part and a part that is not
+    installed is not a problem - a machine that never wanted CEC is not a
+    broken machine - but a global answer printed under a section's heading
+    reads as an answer about that section.
+
+    So the page's own part speaks first whenever it has anything but good
+    news, and the sweep across all of them is what a page without a part of
+    its own still gets.
+    """
+    key = SECTION_PARTS.get(section, section)
+    mine = next((part for part in parts if part.key == key), None)
+    if mine is not None and mine.ok is not True:
+        return "%s: %s" % (mine.name, mine.verdict)
+    return parts_summary(parts)
+
+
 def parts_summary(parts):
     """One sentence for the top of the window, over every part.
 

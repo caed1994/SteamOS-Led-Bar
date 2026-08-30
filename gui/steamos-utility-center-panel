@@ -5946,9 +5946,21 @@ class Panel:
         # problem count was printed over the HDMI CEC page, and a machine
         # whose adapter had gone read "everything is in order".
         broken = [part for part in parts if part.ok is False]
+        # About the page you are standing on when that page has anything to
+        # say - see ledpanel.summary_for. Neither good news nor bad for a part
+        # that is only absent: "Not installed." in green is a contradiction,
+        # in red it is a machine told it has a fault for not wanting a
+        # feature.
+        section = getattr(self, "section", "") or ""
+        mine = next((part for part in parts
+                     if part.key == ledpanel.SECTION_PARTS.get(section,
+                                                               section)), None)
         self.headline.configure(
-            text=ledpanel.parts_summary(parts),
-            style="Page.Bad.TLabel" if broken else "Page.Good.TLabel")
+            text=ledpanel.summary_for(parts, section),
+            style="Page.Muted.TLabel" if mine is not None and mine.ok is None
+            else "Page.Bad.TLabel" if broken or (mine is not None
+                                                 and mine.ok is False)
+            else "Page.Good.TLabel")
         # And the foot of the window, which asks a narrower question still -
         # see ledpanel.bar_is_live.
         self._say_link(ledpanel.bar_is_live(self._checks))

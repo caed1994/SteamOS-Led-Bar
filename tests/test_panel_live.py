@@ -3107,6 +3107,56 @@ class WrappingTest(unittest.TestCase):
                       "width, so the sections are wrapping short")
 
 
+class HeadlineTest(unittest.TestCase):
+    """What the line under the section's title says, on the page it is on.
+
+    Reported with a photograph: "Everything is in order." over a card reading
+    "Not installed yet", on the page about the thing that was not installed.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        # The toolkit is not installed on this machine and is not made to
+        # look installed here: absent is the state under test.
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _headline(self, section):
+        self.panel._open_section(section)
+        self.panel.refresh_status()
+        for _ in range(4):
+            self.root.update_idletasks()
+            self.root.update()
+        return str(self.panel.headline.cget("text"))
+
+    def test_the_cec_page_says_cec_is_not_installed(self):
+        self.assertIn("Not installed", self._headline("cec"))
+
+    def test_it_is_not_painted_as_a_fault_for_being_absent(self):
+        """A machine that never wanted CEC has nothing wrong with it.
+
+        Green would contradict the card; red would be telling somebody they
+        have a problem because they did not install an optional thing.
+        """
+        self._headline("cec")
+        self.assertEqual(str(self.panel.headline.cget("style")),
+                         "Page.Muted.TLabel")
+
+    def test_another_page_still_gets_the_answer_over_the_whole_window(self):
+        said = self._headline("status")
+        self.assertNotIn("Not installed", said)
+
+
 class CardTest(unittest.TestCase):
     """A card is not one picture stretched behind it, and here is why.
 
