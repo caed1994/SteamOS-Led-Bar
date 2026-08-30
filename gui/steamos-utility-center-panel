@@ -5243,7 +5243,13 @@ class Panel:
         # What leaving these on costs once the adapter has gone. Shown only
         # when it is true, and here rather than only on the status page
         # because this is where the switches are - see adapter_gone_cost.
+        #
+        # In the error colour rather than the muted one every other
+        # explanation on this page wears: those describe what a switch does
+        # and are there to be read once, this one is a bill being run up
+        # right now. _note is still what builds it, so it wraps with the rest.
         self.cec_cost = self._note(inner, "")
+        self.cec_cost.configure(style="Bad.TLabel")
         self._cec_changed()
 
     def _say_cec_cost(self):

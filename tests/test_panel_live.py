@@ -3154,6 +3154,28 @@ class AdapterGoneNoticeTest(unittest.TestCase):
         self.assertIn("Turn them off",
                       str(self.panel.cec_cost.cget("text")))
 
+    def test_it_is_written_in_the_colour_of_bad_news(self):
+        """Not the muted grey the other explanations on this page wear.
+
+        Those say what a switch does and are read once. This one is a bill
+        being run up on every start, and it has to be told apart from them
+        at a glance.
+        """
+        self._open()
+        style = ttk.Style(self.root)
+        self.assertEqual(str(self.panel.cec_cost.cget("style")),
+                         "Bad.TLabel")
+        self.assertEqual(
+            str(style.lookup("Bad.TLabel", "foreground")).lower(),
+            str(self.panel.roles["error"]).lower())
+
+    def test_it_still_stands_on_the_ground_it_is_packed_onto(self):
+        """A colour change is the usual way to get this one wrong."""
+        style = ttk.Style(self.root)
+        self.assertEqual(
+            str(style.lookup("Bad.TLabel", "background")).lower(),
+            str(self.panel.roles["surface"]).lower())
+
     def test_it_takes_no_room_when_there_is_nothing_to_say(self):
         """A card growing a blank line when nothing is wrong looks broken."""
         self.reachable = True
