@@ -485,6 +485,124 @@ class RegisterRunTest(unittest.TestCase):
                          ["/dev/cec0", "/dev/cec1"])
 
 
+class ToolkitSettingsTest(unittest.TestCase):
+    """Reading the toolkit's own settings, and when to add to them."""
+
+    def test_the_user_file_shadows_the_system_one(self):
+        found = cec.read_settings(
+            ["CEC_PHYSICAL_ADDRESS=\nCEC_DEVICE=/dev/cec0",
+             "CEC_PHYSICAL_ADDRESS='1.0.0.0'"])
+        self.assertEqual(found[cec.PHYSICAL_ADDRESS], "1.0.0.0")
+        self.assertEqual(cec.configured_device(found), "/dev/cec0")
+
+    def test_comments_and_blank_lines_are_not_settings(self):
+        found = cec.read_settings(["# a note\n\nCEC_DEVICE=/dev/cec1\n"])
+        self.assertEqual(found, {"CEC_DEVICE": "/dev/cec1"})
+
+    def test_an_empty_address_is_one_worth_filling_in(self):
+        for value in ("", "   ", None):
+            settings = {} if value is None else {cec.PHYSICAL_ADDRESS: value}
+            self.assertTrue(cec.wants_physical_address(settings), repr(value))
+
+    def test_an_address_somebody_chose_is_left_alone(self):
+        self.assertFalse(cec.wants_physical_address(
+            {cec.PHYSICAL_ADDRESS: "2.0.0.0"}))
+
+    def test_an_unset_device_means_the_usual_one(self):
+        self.assertEqual(cec.configured_device({}), cec.DEFAULT_DEVICE)
+        self.assertEqual(cec.configured_device({"CEC_DEVICE": " "}),
+                         cec.DEFAULT_DEVICE)
+
+    def test_the_paths_are_the_two_the_toolkit_reads(self):
+        system, user = cec.settings_paths("/home/deck")
+        self.assertEqual(system, "/etc/steamos-cec-toolkit.conf")
+        self.assertTrue(user.startswith("/home/deck/"))
+        self.assertIn("steamos-cec-toolkit", user)
+
+
+class TellTheToolkitTest(unittest.TestCase):
+    """Filling in the address the toolkit ships without.
+
+    All three of its wake paths broadcast <Active Source> only when this is
+    set, and skip it when it is not - which wakes a television without ever
+    switching it over. Nothing but `discover-cec` writes it, and the toolkit's
+    installer does not run that.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import service
+        self.service = service
+        self.ran = []
+        was = cec.command_path
+        cec.command_path = lambda home=None: __file__   # a path that exists
+        self.addCleanup(lambda: setattr(cec, "command_path", was))
+
+    def _run(self, command):
+        self.ran.append(list(command))
+        return Answer(0, UNREGISTERED if command[0] == "cec-ctl" else "")
+
+    def _go(self, settings, devices=("/dev/cec0",)):
+        clock = [0.0]
+        return self.service.run_register_cec(
+            devices=list(devices), run=self._run, settings=settings,
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0], wait=3.0)
+
+    def _told(self):
+        return [row for row in self.ran if "set-config" in row]
+
+    def test_an_empty_address_is_filled_in_from_the_adapter(self):
+        self._go({"CEC_DEVICE": "/dev/cec0", cec.PHYSICAL_ADDRESS: ""})
+        self.assertEqual(len(self._told()), 1)
+        self.assertIn('"CEC_PHYSICAL_ADDRESS": "3.0.0.0"', self._told()[0][-1])
+
+    def test_an_address_already_there_is_not_written_over(self):
+        self._go({"CEC_DEVICE": "/dev/cec0",
+                  cec.PHYSICAL_ADDRESS: "2.0.0.0"})
+        self.assertEqual(self._told(), [])
+
+    def test_only_the_adapter_the_toolkit_is_set_to_use(self):
+        """A machine with two adapters must not be told about the other one."""
+        self._go({"CEC_DEVICE": "/dev/cec1", cec.PHYSICAL_ADDRESS: ""},
+                 devices=("/dev/cec0",))
+        self.assertEqual(self._told(), [])
+
+    def test_an_adapter_already_on_the_bus_still_gets_its_address_told(self):
+        """The two faults are independent, and so are their fixes.
+
+        An adapter Steam's own daemon has registered is left alone - but the
+        toolkit still does not know where it is plugged in, and that is the
+        half that switches the input.
+        """
+        self.ran = []
+        def run(command):
+            self.ran.append(list(command))
+            return Answer(0, REGISTERED if command[0] == "cec-ctl" else "")
+        self.service.run_register_cec(
+            devices=["/dev/cec0"], run=run,
+            settings={"CEC_DEVICE": "/dev/cec0", cec.PHYSICAL_ADDRESS: ""})
+        self.assertEqual(len(self._told()), 1)
+
+    def test_no_toolkit_means_nothing_to_tell(self):
+        cec.command_path = lambda home=None: "/nowhere/steamos-cec-toolkitctl"
+        self._go({"CEC_DEVICE": "/dev/cec0", cec.PHYSICAL_ADDRESS: ""})
+        self.assertEqual(self._told(), [])
+
+    def test_an_adapter_with_no_picture_tells_nothing(self):
+        """f.f.f.f is not an address, and writing it is worse than none."""
+        self.ran = []
+        def run(command):
+            self.ran.append(list(command))
+            return Answer(0, NO_PICTURE if command[0] == "cec-ctl" else "")
+        clock = [0.0]
+        self.service.run_register_cec(
+            devices=["/dev/cec0"], run=run,
+            settings={"CEC_DEVICE": "/dev/cec0", cec.PHYSICAL_ADDRESS: ""},
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0], wait=3.0)
+        self.assertEqual(self._told(), [])
+
+
 class RegisterUnitTest(unittest.TestCase):
     """The unit that runs it, and the one line in it that matters."""
 

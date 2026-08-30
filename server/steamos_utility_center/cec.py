@@ -371,6 +371,63 @@ REGISTERED_NAME = "SteamOS"
 NO_PHYSICAL_ADDRESS = "f.f.f.f"
 
 
+# Where the toolkit keeps its own settings. Two files, the user's shadowing
+# the system's, which is the order its own programs read them in.
+SYSTEM_SETTINGS = "/etc/steamos-cec-toolkit.conf"
+USER_SETTINGS = ".config/steamos-cec-toolkit/config.conf"
+
+# The setting that says where this machine sits on the television. Every wake
+# path needs it to broadcast <Active Source>, which is the message that
+# switches the input - and all three skip that message when it is empty,
+# saying so in the log and carrying on. It ships empty, and the only thing
+# that ever writes it is `toolkitctl discover-cec`, which the toolkit's
+# installer does not run: it runs discover-audio and nothing else. So on a
+# machine where nobody has pressed Discover by hand, the television is woken
+# but never switched over.
+PHYSICAL_ADDRESS = "CEC_PHYSICAL_ADDRESS"
+DEVICE_SETTING = "CEC_DEVICE"
+DEFAULT_DEVICE = "/dev/cec0"
+
+
+def settings_paths(home=None):
+    """The toolkit's two settings files, least specific first."""
+    return [SYSTEM_SETTINGS,
+            os.path.join(home or os.path.expanduser("~"), USER_SETTINGS)]
+
+
+def read_settings(texts):
+    """The toolkit's settings, from the text of its files in reading order.
+
+    Its own parser, kept to the letter: KEY=value, # is a comment, and one
+    layer of quotes comes off - the toolkit writes the file with shlex.quote,
+    so a path with a space in it comes back wrapped.
+    """
+    values = {}
+    for text in texts:
+        for line in (text or "").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def wants_physical_address(settings):
+    """Whether the toolkit has no idea where this machine is plugged in.
+
+    Only when it is empty. A value somebody chose is theirs, right or wrong -
+    overwriting it on every session start would be this panel arguing with
+    the person using it.
+    """
+    return not settings.get(PHYSICAL_ADDRESS, "").strip()
+
+
+def configured_device(settings):
+    """Which adapter the toolkit is set to talk to."""
+    return settings.get(DEVICE_SETTING, "").strip() or DEFAULT_DEVICE
+
+
 def adapter_state_command(device):
     """How to ask one adapter what it is. Reports; changes nothing."""
     return [CEC_CTL, "-d", device]

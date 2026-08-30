@@ -1495,8 +1495,59 @@ CEC_LINK_WAIT = 10.0
 CEC_LINK_POLL = 1.0
 
 
+def _read_toolkit_settings(read=None):
+    """The CEC toolkit's own settings, or {} where it has none to read."""
+    read = read or _read_text
+    return cec_module.read_settings(
+        read(path) for path in cec_module.settings_paths())
+
+
+def _read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def _tell_the_toolkit_where_it_is(device, address, settings, run):
+    """Write the physical address into the toolkit's settings, if it has none.
+
+    The other half of the same evening's bug. Knowing the address is what lets
+    the wake paths broadcast <Active Source>, which is the message that
+    switches the television over - and they all skip it when the setting is
+    empty. It ships empty and only `discover-cec` ever fills it in, which the
+    toolkit's installer never runs.
+
+    This already has the address in its hand: it read it to decide whether the
+    adapter was worth registering. So it is written through the toolkit's own
+    set-config, which needs no root and lands in the user file that shadows
+    /etc - the same place pressing Discover would put it.
+
+    Only for the adapter the toolkit is set to use, and only when there is no
+    value there: a machine with two adapters must not be told about the other
+    one, and a value somebody chose is theirs.
+    """
+    if device != cec_module.configured_device(settings):
+        return False
+    if not cec_module.wants_physical_address(settings):
+        return False
+    if not os.path.exists(cec_module.command_path()):
+        return False                    # no toolkit, nothing to tell
+    answer = run(cec_module.set_config_command(
+        {cec_module.PHYSICAL_ADDRESS: address}))
+    if getattr(answer, "returncode", 1) != 0:
+        print("could not tell the toolkit it is at %s: %s"
+              % (address, (getattr(answer, "stdout", "") or "").strip()),
+              flush=True)
+        return False
+    print("Told the CEC toolkit this machine is at %s, so waking can switch "
+          "the input over as well." % address, flush=True)
+    return True
+
+
 def run_register_cec(devices=None, run=None, sleep=None, now=None,
-                     wait=CEC_LINK_WAIT):
+                     wait=CEC_LINK_WAIT, settings=None):
     """Claim a logical address for any CEC adapter that has none.
 
     The step the toolkit assumes has already happened - see the long comment
@@ -1516,6 +1567,9 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
     now = now or time.monotonic
     if devices is None:
         devices = sorted(glob.glob(cec_module.ADAPTERS))
+    if settings is None:
+        settings = _read_toolkit_settings()
+    told = False
 
     if not devices:
         print("No CEC adapter on this machine; nothing to register.",
@@ -1540,12 +1594,16 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
                       "it alone." % device, flush=True)
                 waiting.remove(device)
                 continue
+            address = cec_module.adapter_physical_address(text)
+            if address and not told:
+                told = _tell_the_toolkit_where_it_is(
+                    device, address, settings, run)
             if registered:
                 print("%s: already on the bus; leaving it alone." % device,
                       flush=True)
                 waiting.remove(device)
                 continue
-            if not cec_module.adapter_physical_address(text):
+            if not address:
                 continue                # no picture yet - come back to it
             waiting.remove(device)
             result = run(cec_module.register_command(device))
@@ -1556,8 +1614,7 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
                 continue
             done += 1
             print("%s: registered at %s as a playback device."
-                  % (device, cec_module.adapter_physical_address(text)),
-                  flush=True)
+                  % (device, address), flush=True)
         if waiting and now() >= deadline:
             for device in waiting:
                 print("%s: no picture after %gs, so there is nothing to "
@@ -1565,7 +1622,7 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
             break
         if waiting:
             sleep(CEC_LINK_POLL)
-    if not done:
+    if not done and not told:
         # Not a failure: an adapter somebody else already has is the good
         # case, and the unit exiting non-zero for it would paint the session
         # red for doing the right thing.
