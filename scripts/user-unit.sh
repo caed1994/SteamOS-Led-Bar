@@ -119,6 +119,12 @@ CEC_UNIT="$NAME-cec.service"
 # Everything installed into the user's systemd, walked rather than named twice:
 # a unit added to one script and missed in the other is a file nobody removes.
 WATCHER_UNITS=("$WATCHER_UNIT" "$PHONE_UNIT" "$CEC_UNIT")
+# A drop-in over one of the CEC toolkit's units, which is not ours - it takes
+# the boot wake out of the session's way without touching the vendored tree.
+# See server/steamos-cec-boot-wake-override.conf for what it changes and why.
+CEC_WAKE_UNIT="steamos-cec-boot-wake.service"
+CEC_WAKE_DROPIN="10-$NAME.conf"
+CEC_WAKE_SOURCE="steamos-cec-boot-wake-override.conf"
 # Must match WantedBy= in those units: it is where the enable symlink goes.
 WATCHER_WANTS="default.target.wants"
 

@@ -946,6 +946,81 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertNotIn("pacman -Syu", self.text)
 
 
+class CecWakeDropInTest(unittest.TestCase):
+    """Taking the toolkit's boot wake out of the session's way.
+
+    Measured on a machine where installing the CEC toolkit took the boot from
+    28 seconds to 55:
+
+        26.050s steamos-cec-boot-wake.service
+           64ms steamos-utility-center-cec.service
+        default.target @26.231s
+
+    The service is not slow by accident - it settles for eight seconds and
+    then retries four times, because a television that has just been switched
+    on is not ready at once. That is right, and it is the wrong thing for a
+    desktop session to wait for. As Type=oneshot it counts as still starting
+    the whole time, so default.target waits for the last attempt.
+    """
+
+    def setUp(self):
+        with open(INSTALLER) as handle:
+            self.installer = handle.read()
+        with open(os.path.join(HERE, "..", "uninstall.sh")) as handle:
+            self.uninstaller = handle.read()
+        with open(os.path.join(HERE, "..", "scripts", "user-unit.sh")) as one:
+            self.shared = one.read()
+        self.source = os.path.join(HERE, "..", "server",
+                                   "steamos-cec-boot-wake-override.conf")
+
+    def test_it_changes_the_one_line_that_holds_the_session(self):
+        with open(self.source) as handle:
+            text = handle.read()
+        self.assertIn("[Service]", text)
+        self.assertIn("Type=simple", text)
+
+    def test_it_changes_nothing_else(self):
+        """A drop-in that reached further would be a fork in disguise.
+
+        The service still sends what it sent, in the same order, over the same
+        26 seconds - beside the session instead of in front of it.
+        """
+        with open(self.source) as handle:
+            lines = [line.strip() for line in handle
+                     if line.strip() and not line.startswith("#")]
+        self.assertEqual(lines, ["[Service]", "Type=simple"])
+
+    def test_the_vendored_unit_itself_is_untouched(self):
+        """The tree has to stay one we can diff against upstream."""
+        unit = os.path.join(HERE, "..", "vendor", "steamos-cec-toolkit",
+                            "systemd", "user", "steamos-cec-boot-wake.service")
+        with open(unit) as handle:
+            self.assertIn("Type=oneshot", handle.read())
+
+    def test_both_scripts_name_it_from_the_one_place(self):
+        for name in ('CEC_WAKE_UNIT="steamos-cec-boot-wake.service"',
+                     'CEC_WAKE_DROPIN="10-$NAME.conf"'):
+            self.assertIn(name, self.shared)
+
+    def test_the_installer_writes_it(self):
+        self.assertIn("$CEC_WAKE_DROPIN", self.installer)
+        self.assertIn("install_cec_wake_dropin", self.installer)
+
+    def test_the_uninstaller_takes_it_away_again(self):
+        """Ours to remove, even though the unit it covers is not.
+
+        Left behind it would go on changing somebody else's service after
+        this project is gone.
+        """
+        self.assertIn("$CEC_WAKE_DROPIN", self.uninstaller)
+        self.assertIn("rmdir", self.uninstaller)
+
+    def test_it_does_not_take_a_directory_that_is_not_empty(self):
+        """Somebody may have overrides of their own in there."""
+        self.assertIn("rmdir \"$dropin\" 2>/dev/null || true",
+                      self.uninstaller)
+
+
 class InstalledStampTest(unittest.TestCase):
     """The installer records what it installed, and update.sh says it must run.
 

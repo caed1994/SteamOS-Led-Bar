@@ -799,6 +799,17 @@ GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
 
 That is a "no" from the television, not a fault here.
 
+**Waking the television does not hold up the session.** The toolkit's boot
+wake settles for eight seconds and then retries four times five seconds
+apart, because a set that has just been switched on is not ready at once.
+That is right, and as a `Type=oneshot` unit it also meant `default.target`
+was not reached until the last attempt - measured, installing the toolkit
+took one machine's boot from 28 seconds to 55, all of it that one service.
+The installer drops a one-line override beside it (`Type=simple`), so it
+sends exactly what it sent before, over the same 26 seconds, beside the
+session rather than in front of it. The uninstaller takes the override away
+again; the toolkit's own unit is never edited.
+
 **If the adapter comes out, switch the features off.** They keep working the
 only way they can: by trying. Leave them on with the adapter gone and every
 start spends over a minute reaching for a television that is not there

@@ -73,6 +73,17 @@ remove_user_units() {
         rm -f "$WATCHER_DIR/$unit" "$WATCHER_DIR/$WATCHER_WANTS/$unit"
         removed=1
     done
+
+    # The drop-in over the toolkit's own unit. Ours to remove even though the
+    # unit it covers is not: leaving it behind would go on changing somebody
+    # else's service after this project is gone. The directory goes too, but
+    # only when it is empty - somebody may have overrides of their own in it.
+    local dropin="$WATCHER_DIR/$CEC_WAKE_UNIT.d"
+    if [[ -f "$dropin/$CEC_WAKE_DROPIN" ]]; then
+        rm -f "$dropin/$CEC_WAKE_DROPIN"
+        rmdir "$dropin" 2>/dev/null || true
+        removed=1
+    fi
     [[ $removed -eq 1 ]] || return 0
 
     user_systemctl daemon-reload || true
