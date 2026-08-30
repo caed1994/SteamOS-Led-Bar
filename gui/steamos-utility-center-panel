@@ -5583,7 +5583,8 @@ class Panel:
                                       in syssettings.layouts())),
             ledpanel.panel_part(VERSION, getattr(self, "_update_state", None),
                                 self.update_state.cget("text")
-                                if hasattr(self, "update_state") else ""),
+                                if hasattr(self, "update_state") else "",
+                                ledpanel.install_is_behind(SOURCE_DIR)),
         ]
 
     def _build_part(self, part):

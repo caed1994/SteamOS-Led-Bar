@@ -173,6 +173,24 @@ install -m 0755 "$SOURCE_DIR/server/steamos-utility-center" "$INSTALL_DIR/steamo
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-center-power" "$INSTALL_DIR/steamos-utility-center-power"
 find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
 
+# Which commit those files came from, so the panel can say when the clone has
+# moved on without them. Written last of the three, so a stamp that is there
+# is a stamp for files that are all there too.
+#
+# safe.directory because this runs as root over somebody else's clone, and
+# git refuses to read one it thinks belongs to a stranger - refuses loudly
+# and usefully in a terminal, and pointlessly here, where the answer is only
+# ever shown back to the person who owns it. A clone git will not talk about
+# leaves no stamp rather than a wrong one: the panel says "not recorded",
+# which is true and is not a claim that anything is up to date.
+if stamp="$(git -C "$SOURCE_DIR" -c "safe.directory=$SOURCE_DIR" \
+        rev-parse HEAD 2>/dev/null)" && [[ -n "$stamp" ]]; then
+    printf '%s\n' "$stamp" > "$STAMP_PATH"
+    chmod 0644 "$STAMP_PATH"
+else
+    rm -f "$STAMP_PATH"
+fi
+
 # A name to type. Everything lives in /var/lib so it survives a SteamOS
 # update, and nothing there is on anybody's PATH - so every command in the
 # README was one people could read and not run. A symlink costs nothing and

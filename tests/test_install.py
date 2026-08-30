@@ -946,6 +946,63 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertNotIn("pacman -Syu", self.text)
 
 
+class InstalledStampTest(unittest.TestCase):
+    """The installer records what it installed, and update.sh says it must run.
+
+    Two halves of the same mistake. Pulling changes the clone; installing
+    changes what runs. The window showed only the first, and update.sh stopped
+    without a word about the second - so a machine that had fetched a fix sat
+    there running the copy from before it, while everybody read its logs and
+    wondered why the fix had not worked.
+    """
+
+    def setUp(self):
+        with open(INSTALLER) as handle:
+            self.installer = handle.read()
+        with open(os.path.join(HERE, "..", "scripts", "user-unit.sh")) as one:
+            self.shared = one.read()
+        with open(os.path.join(HERE, "..", "scripts", "update.sh")) as two:
+            self.updater = two.read()
+
+    def test_the_path_is_named_where_both_scripts_can_see_it(self):
+        """Inside INSTALL_DIR, which the uninstaller's rm -rf covers."""
+        self.assertIn('STAMP_PATH="$INSTALL_DIR/installed-from"', self.shared)
+
+    def test_the_installer_writes_the_commit_it_installed_from(self):
+        self.assertIn("$STAMP_PATH", self.installer)
+        self.assertIn("rev-parse HEAD", self.installer)
+
+    def test_it_reads_the_clone_as_a_directory_git_will_talk_about(self):
+        """This runs as root over somebody else's clone.
+
+        Without safe.directory git refuses to answer, and every install would
+        then quietly leave no stamp - which reads as "not recorded" forever
+        and puts the whole comparison back to being useless.
+        """
+        self.assertIn("safe.directory=$SOURCE_DIR", self.installer)
+
+    def test_a_clone_it_cannot_read_leaves_no_stamp_not_a_stale_one(self):
+        """Worse than no answer is last install's answer, kept.
+
+        The old file would then claim the running files came from a commit
+        they did not, which is the one output nobody could catch.
+        """
+        self.assertIn('rm -f "$STAMP_PATH"', self.installer)
+
+    def test_the_stamp_is_written_after_the_files_it_describes(self):
+        stamped = self.installer.index("$STAMP_PATH")
+        binary = 'install -m 0755 "$SOURCE_DIR/server/steamos-utility-center"'
+        for step in ('cp -r "$SOURCE_DIR/server/steamos_utility_center"',
+                     binary):
+            self.assertLess(self.installer.index(step), stamped,
+                            "%s runs after the stamp that vouches for it"
+                            % step)
+
+    def test_the_updater_says_the_installer_still_has_to_run(self):
+        """It changes the clone and nothing else, and used to end there."""
+        self.assertIn("install.sh", self.updater.split("Updated $BRANCH")[-1])
+
+
 class PanelIconTest(unittest.TestCase):
     """The name the installer files the icon under, and the one the
     uninstaller globs for.

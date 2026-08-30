@@ -441,11 +441,21 @@ def layout_part(layout, labels=None):
                 ["Applies to Game Mode at the next login."])
 
 
-def panel_part(version, update_state=None, update_said=""):
-    """The program itself. Always installed - you are looking at it."""
+def panel_part(version, update_state=None, update_said="", behind=""):
+    """The program itself. Always installed - you are looking at it.
+
+    `behind` is install_is_behind()'s sentence, and it is the one thing here
+    that counts as a fault. Pulling and installing are two steps, the window
+    only ever showed the first, and a clone several commits ahead of the
+    running copy looked exactly like a machine that was up to date - so a fix
+    that had been written, pushed and pulled sat there not running while
+    everybody read logs from the old one.
+    """
     # Named at call time rather than imported above it: this block sits
     # before the update constants in the file, and moving it below them would
     # put the parts a long way from the checks they are built out of.
+    if behind:
+        return Part("panel", "This panel", False, behind)
     if update_state == UPDATE_AVAILABLE:
         return Part("panel", "This panel", True,
                     "Version %s. %s" % (version, update_said or
@@ -703,6 +713,47 @@ def parse_branches(text):
 
 def head_commit(source_dir):
     return _git(source_dir, "rev-parse", "HEAD")
+
+
+# Where the installer records the commit it installed from - the same path
+# scripts/user-unit.sh names for it, spelled here because this side has no
+# shell to source.
+STAMP_PATH = os.path.join(INSTALL_DIR, "installed-from")
+
+
+def installed_commit():
+    """The commit the running files came from, or "" if nothing recorded one.
+
+    "" is not "old": an install from before this was written, or from a clone
+    git would not talk about, leaves no stamp - and answering "out of date" to
+    a question nobody asked is worse than answering "not recorded".
+    """
+    try:
+        with open(STAMP_PATH, encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip().split()[0]
+    except (OSError, IndexError):
+        return ""
+
+
+def install_is_behind(source_dir, installed=None, head=None):
+    """The sentence to show when the clone has moved on without the install.
+
+    "" when there is nothing to say, which is every case but the one: both
+    commits known and different. Not knowing either is not evidence, and this
+    is read by a status line that has no business guessing.
+
+    Written because "pulled" and "installed" are two steps and the window
+    showed only the first. A clone three commits ahead of the running copy
+    looked exactly like an up-to-date machine, and two evenings went into
+    working out from timestamps which of the two somebody had done.
+    """
+    installed = installed_commit() if installed is None else installed
+    head = head_commit(source_dir) if head is None else head
+    if not installed or not head or installed == head:
+        return ""
+    return ("Installed from %s, but this clone is at %s. Run the installer "
+            "to put the new files in place - pulling on its own only "
+            "changes the clone." % (installed[:7], head[:7]))
 
 
 def module_changed(source_dir, since):

@@ -705,6 +705,71 @@ class UpdateVerdictTest(unittest.TestCase):
         self.assertIn("would stop", script)
 
 
+class InstalledCommitTest(unittest.TestCase):
+    """Telling "pulled" and "installed" apart, which cost two evenings.
+
+    The window showed the clone's commit and nothing else, so a machine three
+    commits behind what it had just fetched looked exactly like an up-to-date
+    one. Logs were read from the old copy while everybody discussed the new
+    code. The installer stamps what it installed; this is the comparison.
+    """
+
+    def test_two_different_commits_are_worth_saying(self):
+        said = ledpanel.install_is_behind(".", installed="aaaaaaa1111",
+                                          head="bbbbbbb2222")
+        self.assertIn("aaaaaaa", said)
+        self.assertIn("bbbbbbb", said)
+        self.assertIn("installer", said)
+
+    def test_the_same_commit_is_worth_nothing(self):
+        self.assertEqual(
+            ledpanel.install_is_behind(".", installed="same", head="same"), "")
+
+    def test_not_knowing_is_not_evidence(self):
+        """An install from before the stamp existed leaves none.
+
+        Answering "out of date" to that would be inventing a fault, and this
+        is read by a status light that has no business guessing.
+        """
+        self.assertEqual(
+            ledpanel.install_is_behind(".", installed="", head="bbbb"), "")
+        self.assertEqual(
+            ledpanel.install_is_behind(".", installed="aaaa", head=""), "")
+
+    def test_a_stale_install_is_a_fault_and_not_a_footnote(self):
+        """It has to reach the headline, or it is invisible all over again."""
+        part = ledpanel.panel_part("1.0", behind="Installed from aaaaaaa ...")
+        self.assertIs(part.ok, False)
+        self.assertIn("aaaaaaa", ledpanel.parts_summary([part]))
+
+    def test_it_wins_over_there_being_an_update_to_fetch(self):
+        """Both are true at once, and only one of them is actionable here.
+
+        "An update is available" after you have already fetched it is the
+        sentence that made this invisible in the first place.
+        """
+        part = ledpanel.panel_part("1.0", ledpanel.UPDATE_AVAILABLE,
+                                   "3 commits waiting", behind="behind now")
+        self.assertEqual(part.verdict, "behind now")
+
+    def test_a_missing_stamp_reads_as_unknown_rather_than_as_a_crash(self):
+        was = ledpanel.STAMP_PATH
+        ledpanel.STAMP_PATH = os.path.join(HERE, "no-such-stamp")
+        self.addCleanup(lambda: setattr(ledpanel, "STAMP_PATH", was))
+        self.assertEqual(ledpanel.installed_commit(), "")
+
+    def test_a_stamp_is_read_back_as_the_commit_it_holds(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as where:
+            path = os.path.join(where, "installed-from")
+            with open(path, "w") as handle:
+                handle.write("abc1234def\n")
+            was = ledpanel.STAMP_PATH
+            ledpanel.STAMP_PATH = path
+            self.addCleanup(lambda: setattr(ledpanel, "STAMP_PATH", was))
+            self.assertEqual(ledpanel.installed_commit(), "abc1234def")
+
+
 class ProfileListingTest(unittest.TestCase):
     """What the profile dialog offers, and where a name ends up."""
 

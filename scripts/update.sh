@@ -123,4 +123,17 @@ echo "Updated $BRANCH to $(git rev-parse --short HEAD):"
 git log --oneline --no-decorate -20 "$BEFORE..$AFTER" | sed 's/^/  /'
 COUNT="$(git rev-list --count "$BEFORE..$AFTER")"
 [[ "$COUNT" -gt 20 ]] && echo "  ... and $((COUNT - 20)) more"
+
+# Said out loud, because it is the half everybody forgets. This changes the
+# clone and nothing else: the files that actually run live in /var/lib and
+# are put there by the installer. Two people have now read logs from the old
+# copy while looking at the new commits, which is a mistake this script
+# invited by stopping here without a word. The panel's own button runs the
+# installer straight after and does not need telling; somebody at a terminal
+# does. (The panel's status page says so too, from the commit the installer
+# stamps - see install_is_behind.)
+echo
+echo "That was the clone. The files that run are installed separately:"
+echo "  sudo $SOURCE_DIR/install.sh"
+echo "Until then this machine keeps running what it had."
 exit 0

@@ -36,6 +36,13 @@ NAME="steamos-utility-center"
 ROOT="${ROOT:-}"
 
 INSTALL_DIR="$ROOT/var/lib/$NAME"
+# Which commit the files in there came from. Written by the installer, read by
+# the panel, and the answer to a question that has now cost two evenings:
+# "pulled" and "installed" are two steps, and nothing on screen told them
+# apart - so a clone three commits ahead of the running copy looked exactly
+# like an up-to-date machine. Inside INSTALL_DIR, so the uninstaller's one
+# rm -rf takes it with everything else.
+STAMP_PATH="$INSTALL_DIR/installed-from"
 CONFIG_PATH="$ROOT/etc/$NAME.conf"
 POWER_CONFIG_PATH="$ROOT/etc/$NAME-power.conf"
 UNIT_DIR="$ROOT/etc/systemd/system"
