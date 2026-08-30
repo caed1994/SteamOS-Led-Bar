@@ -5240,7 +5240,25 @@ class Panel:
         self.cec_apply = ttk.Button(inner, text="Apply", style="Tonal.TButton",
                                     command=self._apply_cec_features)
         self.cec_apply.pack(anchor="w", pady=(GROUP_GAP, 0))
+        # What leaving these on costs once the adapter has gone. Shown only
+        # when it is true, and here rather than only on the status page
+        # because this is where the switches are - see adapter_gone_cost.
+        self.cec_cost = self._note(inner, "")
         self._cec_changed()
+
+    def _say_cec_cost(self):
+        """Show the price of an adapter that is out with the features on.
+
+        Packed and unpacked rather than emptied: a label with no text still
+        takes a line, and a card that grows a blank row when nothing is wrong
+        is a card that looks broken.
+        """
+        said = ledpanel.adapter_gone_cost(self._cec)
+        self.cec_cost.configure(text=said)
+        if said:
+            self.cec_cost.pack(anchor="w", pady=(GROUP_GAP, 0))
+        else:
+            self.cec_cost.pack_forget()
 
     def _build_cec_actions(self, parent):
         """Four things that happen once and leave nothing behind.
@@ -5330,6 +5348,7 @@ class Panel:
         if there:
             self._say_cec_adapter()
             self._settle_cec_switches()
+            self._say_cec_cost()
         else:
             self._say_cec_needs()
         # The foot of the window reports the same adapter from every page, so

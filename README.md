@@ -784,6 +784,15 @@ asking the bus and the sound server. The other forty live in
 page writes to a user file that shadows it, so what you set here survives the
 toolkit being installed over the top.
 
+**If the adapter comes out, switch the features off.** They keep working the
+only way they can: by trying. Leave them on with the adapter gone and every
+start spends over a minute reaching for a television that is not there
+&mdash; eight seconds waiting for the device, twelve for a logical address,
+four times over &mdash; before giving up and letting the session finish.
+Nothing is broken and nothing says so, which is why the panel now says it for
+you on the CEC page and on **Status &amp; repair**. Switching them back on
+when the adapter returns costs nothing.
+
 **Debugging it.** The toolkit is in the repository rather than fetched, so
 its scripts can be read and changed like everything else here. If you change
 something worth keeping, `vendor/steamos-cec-toolkit/UPSTREAM` records the

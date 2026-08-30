@@ -376,6 +376,39 @@ def power_part(current, available):
     return Part("power", "CPU power", True, "Running %s." % governor, detail)
 
 
+def features_on(status):
+    """The CEC features currently switched on, by name."""
+    return [name for name, _kind, _label, _said in cec_module.FEATURES
+            if cec_module.feature_on(status, name)]
+
+
+def adapter_gone_cost(status):
+    """What leaving the features on costs once the adapter is not there.
+
+    Reported by somebody who unplugged his adapter and went back to a plain
+    monitor: the machine took a minute and a half longer to start, and
+    nothing said why. Every feature is still on, and the toolkit's wake
+    service does not know the adapter has gone - it waits eight seconds for
+    the device, then twelve for a logical address, four times over, before
+    giving up and letting the session finish.
+
+    "" when there is nothing to say, which is every case but the one: the
+    adapter unreachable *and* something still switched on. An adapter that is
+    out with every feature off costs nothing and is nobody's problem.
+    """
+    if status is None or cec_module.usable(status):
+        return ""
+    on = features_on(status)
+    if not on:
+        return ""
+    return ("%d HDMI CEC feature%s still switched on, and the adapter cannot "
+            "be reached. Every start then spends over a minute trying to "
+            "reach a television that is not there before giving up. Turn "
+            "them off while the adapter is out; switching them back on when "
+            "it returns costs nothing."
+            % (len(on), " is" if len(on) == 1 else "s are"))
+
+
 def cec_part(status, installed):
     """HDMI CEC: is the toolkit there, and can it reach the television."""
     if not installed:
@@ -390,10 +423,14 @@ def cec_part(status, installed):
     detail = ["Adapter: %s" % (device.get("device") or "none configured"),
               "Features on: %s" % (", ".join(on) if on else "none")]
     if not cec_module.usable(status):
+        # The cost of leaving it like this goes in the detail rather than the
+        # verdict: the verdict is one line in a headline, and this is the
+        # paragraph you want once you have opened the block.
+        cost = adapter_gone_cost(status)
         return Part("cec", "HDMI CEC", False,
                     "%s cannot be reached, so nothing can be sent."
                     % (device.get("device") or "The adapter"),
-                    detail, repair="install-cec")
+                    detail + ([cost] if cost else []), repair="install-cec")
     return Part("cec", "HDMI CEC", True,
                 "Ready on %s, %d feature(s) on."
                 % (device.get("device"), len(on)), detail)

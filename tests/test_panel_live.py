@@ -3107,6 +3107,67 @@ class WrappingTest(unittest.TestCase):
                       "width, so the sections are wrapping short")
 
 
+class AdapterGoneNoticeTest(unittest.TestCase):
+    """The warning on the page where the switches actually are."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        was = cec.installed
+        cec.installed = lambda home=None: True
+        self.addCleanup(lambda: setattr(cec, "installed", was))
+        self.reachable = False
+        self.on = {"steam-button"}
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: {
+                "cec_device": {"device": "/dev/cec0",
+                               "exists": self.reachable,
+                               "readable": self.reachable,
+                               "writable": self.reachable},
+                "services": dict((name, {"is_enabled": True})
+                                 for name in self.on),
+                "system_services": {},
+                "external_volume": {"enabled": False},
+                "config": {"CEC_DEVICE": "/dev/cec0"}})
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _open(self):
+        self.panel._open_section("cec")
+        self.panel._reread_cec()
+        for _ in range(4):
+            self.root.update_idletasks()
+            self.root.update()
+
+    def test_it_is_shown_when_the_adapter_is_out_and_a_feature_is_on(self):
+        self._open()
+        self.assertTrue(self.panel.cec_cost.winfo_ismapped())
+        self.assertIn("Turn them off",
+                      str(self.panel.cec_cost.cget("text")))
+
+    def test_it_takes_no_room_when_there_is_nothing_to_say(self):
+        """A card growing a blank line when nothing is wrong looks broken."""
+        self.reachable = True
+        self._open()
+        self.assertFalse(self.panel.cec_cost.winfo_ismapped())
+
+    def test_it_goes_away_again_when_the_adapter_comes_back(self):
+        self._open()
+        self.assertTrue(self.panel.cec_cost.winfo_ismapped())
+        self.reachable = True
+        self._open()
+        self.assertFalse(self.panel.cec_cost.winfo_ismapped())
+
+
 class HeadlineTest(unittest.TestCase):
     """What the line under the section's title says, on the page it is on.
 

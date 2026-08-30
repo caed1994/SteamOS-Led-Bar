@@ -705,6 +705,55 @@ class UpdateVerdictTest(unittest.TestCase):
         self.assertIn("would stop", script)
 
 
+class AdapterGoneCostTest(unittest.TestCase):
+    """Saying what an adapter that has gone costs, while the switches stay on.
+
+    Reported: somebody unplugged his CEC adapter, went back to a plain
+    monitor, and the machine took well over a minute longer to start with
+    nothing on screen to say why. Every feature was still on, and the
+    toolkit's wake service does not know the adapter has gone: eight seconds
+    for the device, twelve for a logical address, four times over.
+    """
+
+    def _status(self, reachable=False, on=("steam-button",)):
+        return {
+            "cec_device": {"device": "/dev/cec0", "exists": reachable,
+                           "readable": reachable, "writable": reachable},
+            "services": dict((name, {"is_enabled": True}) for name in on),
+            "system_services": {}, "external_volume": {"enabled": False}}
+
+    def test_features_on_and_no_adapter_is_worth_saying(self):
+        said = ledpanel.adapter_gone_cost(self._status())
+        self.assertIn("over a minute", said)
+        self.assertIn("Turn them off", said)
+
+    def test_a_reachable_adapter_costs_nothing_to_leave_on(self):
+        self.assertEqual(
+            ledpanel.adapter_gone_cost(self._status(reachable=True)), "")
+
+    def test_an_adapter_that_is_out_with_nothing_on_is_nobody_s_problem(self):
+        self.assertEqual(
+            ledpanel.adapter_gone_cost(self._status(on=())), "")
+
+    def test_no_status_at_all_says_nothing(self):
+        """Not installed, or it would not answer. Neither is this to report."""
+        self.assertEqual(ledpanel.adapter_gone_cost(None), "")
+
+    def test_it_counts_what_is_on_and_says_it_in_the_right_number(self):
+        one = ledpanel.adapter_gone_cost(self._status(on=("steam-button",)))
+        self.assertIn("1 HDMI CEC feature is", one)
+        two = ledpanel.adapter_gone_cost(
+            self._status(on=("steam-button", "boot-wake")))
+        self.assertIn("2 HDMI CEC features are", two)
+
+    def test_the_status_block_carries_it_where_it_can_be_read(self):
+        """In the detail rather than the verdict: the verdict is a headline."""
+        part = ledpanel.cec_part(self._status(), True)
+        self.assertIs(part.ok, False)
+        self.assertTrue(any("over a minute" in line
+                            for line in (part.detail or [])))
+
+
 class PageSummaryTest(unittest.TestCase):
     """The sentence under a section's title has to be about that section.
 
