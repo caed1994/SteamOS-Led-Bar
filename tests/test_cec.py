@@ -108,6 +108,34 @@ class FeatureTableTest(unittest.TestCase):
         self.assertEqual(kinds, {cec.USER_SERVICE, cec.SYSTEM_SERVICE,
                                  cec.EXTERNAL_VOLUME, cec.RESUME_WAKE})
 
+    def test_no_explanation_runs_past_two_short_lines(self):
+        """Reported: the page was a wall of prose nobody read.
+
+        These are switches on a page with nine of them. What each one does is
+        worth a sentence; how it does it, what it is configured by, and which
+        televisions misbehave are worth a README - and were all in here.
+
+        Counted rather than eyeballed, because prose grows back: every time
+        something is learned about one of these the temptation is to write it
+        down right here, where it is read most and belongs least.
+        """
+        for name, _kind, _label, said in cec.FEATURES:
+            self.assertLessEqual(len(said), 160,
+                                 "%s: %d characters" % (name, len(said)))
+            self.assertNotIn("\n", said, name)
+
+    def test_no_explanation_names_a_setting_the_page_already_offers(self):
+        """The config keys were spelled out in the prose *and* in the fields.
+
+        CEC_SLEEP_TV_ACTION and INPUT_INACTIVE_SUSPEND_DELAY_SECONDS both
+        have a box of their own further down the same page, with a label in
+        words. Naming them here as well was the switch explaining the page to
+        itself.
+        """
+        for name, _kind, _label, said in cec.FEATURES:
+            for key, _label2, _help, _choices in cec.SHOWN:
+                self.assertNotIn(key, said, "%s names %s" % (name, key))
+
     def test_no_feature_is_listed_twice(self):
         names = [name for name, _k, _l, _s in cec.FEATURES]
         self.assertEqual(len(names), len(set(names)))
@@ -382,8 +410,8 @@ class AudioProbeTest(unittest.TestCase):
     def test_the_switch_says_what_the_feature_needs(self):
         """It promised the television and delivers only with an amplifier."""
         said = dict((name, text) for name, _k, _l, text in cec.FEATURES)
-        self.assertIn("System Audio Control", said["external-volume"])
         self.assertIn("soundbar", said["external-volume"])
+        self.assertIn("Ask about volume", said["external-volume"])
 
 
 class AdapterRegistrationTest(unittest.TestCase):

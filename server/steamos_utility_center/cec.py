@@ -79,49 +79,35 @@ RESUME_WAKE_REPORT = "resume_wake_enabled"
 FEATURES = (
     ("steam-button", USER_SERVICE,
      "Steam button wakes the television",
-     "A press of Home or Guide on the controller powers the TV and receiver "
-     "on and switches the input back to this machine."),
+     "Home or Guide on the controller turns the television on and switches "
+     "it to this machine."),
     ("boot-wake", USER_SERVICE,
      "Wake the television at start",
-     "The same wake and input switch when Game Mode starts after a cold "
-     "boot, instead of waiting for a button."),
+     "The same, when Game Mode starts after a cold boot."),
     ("resume-wake", RESUME_WAKE,
      "Wake the television on resume",
-     "The same wake and input switch when this machine comes back from "
-     "suspend. The toolkit enables this only alongside the Steam button and "
-     "cannot switch it afterwards, so this one goes through our own helper."),
+     "The same, when this machine wakes from sleep."),
     ("power-standby", SYSTEM_SERVICE,
      "Turn the television off with the machine",
-     "Sends HDMI-CEC standby before this machine sleeps or shuts down. Some "
-     "televisions cold-boot from that - CEC_SLEEP_TV_ACTION in the config "
-     "file sends Inactive Source instead for those."),
+     "Turns the television off when this machine sleeps or shuts down."),
     ("tv-standby", USER_SERVICE,
      "Sleep when the television does",
-     "Suspends this machine when the television broadcasts standby, so "
-     "turning off the TV turns off the machine."),
+     "Turning the television off puts this machine to sleep."),
     ("input-away-suspend", USER_SERVICE,
      "Sleep when the television switches away",
-     "Suspends this machine once the TV has been on another input for a "
-     "while. The delay is INPUT_INACTIVE_SUSPEND_DELAY_SECONDS."),
+     "Sleeps once the television has been on another input for a while."),
     ("external-volume", EXTERNAL_VOLUME,
      "Volume buttons control the television",
-     "Game Mode shows + and - instead of a slider, and they change the "
-     "volume on the receiver or soundbar over CEC. Needs a reboot before "
-     "Game Mode picks up the new controls.\n"
-     "It needs something on the HDMI chain that renders the sound and takes "
-     "volume over CEC: an AV receiver or a soundbar. A television playing "
-     "its own speakers usually will not - the feature is called System Audio "
-     "Control and most sets do not implement it. \u201cAsk about volume\u201d "
-     "below puts the question to yours and reports what it says."),
+     "Game Mode gets + and - instead of a slider. Needs an AV receiver or "
+     "a soundbar - most televisions refuse. \u201cAsk about volume\u201d "
+     "below says whether yours does."),
     ("usb-wake", SYSTEM_SERVICE,
      "Let a controller wake the machine",
-     "Allows matching Bluetooth radios and controller receivers to wake this "
-     "machine from suspend, so the Steam button can reach it at all. Whether "
-     "it works depends on the hardware, not on this switch."),
+     "Lets a controller wake this machine from sleep, so the Steam button "
+     "can reach it."),
     ("gamescope-recovery", USER_SERVICE,
      "Recover Gamescope after a wake",
-     "Restarts Gamescope when the display comes back in a bad state after "
-     "CEC switched the input. A repair for a specific fault - leave it off "
+     "Restarts Gamescope if the picture comes back wrong. Leave it off "
      "unless you have that fault."),
 )
 
