@@ -424,6 +424,7 @@ class RegisterRunTest(unittest.TestCase):
     def _go(self, answers, devices=("/dev/cec0",), wait=3.0):
         clock = [0.0]
         return self.service.run_register_cec(
+            installed=True,
             devices=list(devices), run=self._run(answers),
             sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
             now=lambda: clock[0], wait=wait)
@@ -467,6 +468,7 @@ class RegisterRunTest(unittest.TestCase):
             return answers.pop(0) if answers else Answer(0, UNREGISTERED)
         clock = [0.0]
         self.service.run_register_cec(
+            installed=True,
             devices=["/dev/cec0"], run=run,
             sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
             now=lambda: clock[0], wait=30.0)
@@ -522,6 +524,7 @@ class AdapterAppearsLateTest(unittest.TestCase):
             return Answer(0, UNREGISTERED if command[0] == "cec-ctl" else "")
 
         return self.service.run_register_cec(
+            installed=True,
             run=run, settings={"CEC_DEVICE": "/dev/cec0",
                                cec.PHYSICAL_ADDRESS: "1.0.0.0"},
             sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
@@ -576,6 +579,7 @@ class AdapterAppearsLateTest(unittest.TestCase):
         self.service.glob = Stub
         clock = [0.0]
         self.service.run_register_cec(
+            installed=True,
             run=lambda command: Answer(0, NO_PICTURE),
             settings={}, wait=5.0,
             sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
@@ -588,6 +592,56 @@ def cec_poll_slack():
     """One poll: the loop checks the clock after sleeping, not before."""
     from steamos_utility_center import service
     return service.CEC_LINK_POLL
+
+
+class NoToolkitTest(unittest.TestCase):
+    """A machine that never wanted HDMI CEC must not pay for this unit.
+
+    Reported after the fact: with the adapter unplugged the boot was long
+    again - and part of that was ours. This waits for an adapter to turn up,
+    which is right on a machine whose adapter is slow and pure delay on one
+    that has none. Measured at exactly the budget, every boot, for nothing,
+    on every machine without a CEC adapter - which is most of them.
+
+    The toolkit is the test, not the adapter: this unit exists to give the
+    toolkit's wake service an address to send from, so without the toolkit
+    there is nothing to prepare and nothing worth waiting for.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import service
+        self.service = service
+        self.ran, self.slept = [], []
+
+    def _run(self, command):
+        self.ran.append(list(command))
+        return Answer(0, "")
+
+    def _go(self, installed):
+        return self.service.run_register_cec(
+            installed=installed, run=self._run,
+            sleep=lambda seconds: self.slept.append(seconds),
+            now=lambda: 0.0, wait=15.0)
+
+    def test_no_toolkit_means_no_waiting_at_all(self):
+        self.assertEqual(self._go(False), 0)
+        self.assertEqual(self.slept, [], "it waited for an adapter anyway")
+        self.assertEqual(self.ran, [])
+
+    def test_it_is_not_a_failure_to_have_no_toolkit(self):
+        """The unit is installed for everybody; most people want none of it."""
+        self.assertEqual(self._go(False), 0)
+
+    def test_with_the_toolkit_there_it_still_waits(self):
+        """The waiting is the fix, and it has to survive the guard."""
+        self.service.run_register_cec(
+            devices=[], installed=True, run=self._run,
+            sleep=lambda seconds: self.slept.append(seconds),
+            now=lambda: 0.0, wait=15.0)
+        # devices=[] is "looked and found none", which does not wait either -
+        # the wait is for the glob, and that is covered next door. What this
+        # asserts is only that the guard did not swallow the run.
+        self.assertEqual(self.ran, [])
 
 
 class HandItBackTest(unittest.TestCase):
@@ -625,6 +679,7 @@ class HandItBackTest(unittest.TestCase):
     def _go(self, wait=10.0):
         clock = [0.0]
         return self.service.run_register_cec(
+            installed=True,
             devices=["/dev/cec0"], run=self._run,
             settings={"CEC_DEVICE": "/dev/cec0",
                       cec.PHYSICAL_ADDRESS: "3.0.0.0"},
@@ -674,6 +729,7 @@ class HandItBackTest(unittest.TestCase):
         """The permissions are per adapter; the daemon is not one of them."""
         clock = [0.0]
         self.service.run_register_cec(
+            installed=True,
             devices=["/dev/cec0", "/dev/cec1"], run=self._run,
             settings={"CEC_DEVICE": "/dev/cec0",
                       cec.PHYSICAL_ADDRESS: "3.0.0.0"},
@@ -745,6 +801,7 @@ class TellTheToolkitTest(unittest.TestCase):
     def _go(self, settings, devices=("/dev/cec0",)):
         clock = [0.0]
         return self.service.run_register_cec(
+            installed=True,
             devices=list(devices), run=self._run, settings=settings,
             sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
             now=lambda: clock[0], wait=3.0)
@@ -780,6 +837,7 @@ class TellTheToolkitTest(unittest.TestCase):
             self.ran.append(list(command))
             return Answer(0, REGISTERED if command[0] == "cec-ctl" else "")
         self.service.run_register_cec(
+            installed=True,
             devices=["/dev/cec0"], run=run,
             settings={"CEC_DEVICE": "/dev/cec0", cec.PHYSICAL_ADDRESS: ""})
         self.assertEqual(len(self._told()), 1)
@@ -797,6 +855,7 @@ class TellTheToolkitTest(unittest.TestCase):
             return Answer(0, NO_PICTURE if command[0] == "cec-ctl" else "")
         clock = [0.0]
         self.service.run_register_cec(
+            installed=True,
             devices=["/dev/cec0"], run=run,
             settings={"CEC_DEVICE": "/dev/cec0", cec.PHYSICAL_ADDRESS: ""},
             sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),

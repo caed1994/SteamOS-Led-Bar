@@ -1590,7 +1590,7 @@ def _nudge_the_daemon(device, run, restarted):
 
 
 def run_register_cec(devices=None, run=None, sleep=None, now=None,
-                     wait=CEC_LINK_WAIT, settings=None):
+                     wait=CEC_LINK_WAIT, settings=None, installed=None):
     """Claim a logical address for any CEC adapter that has none.
 
     The step the toolkit assumes has already happened - see the long comment
@@ -1615,6 +1615,19 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
         settings = _read_toolkit_settings()
     told = False
 
+    # Nothing to prepare the ground for, so do not spend a second on it.
+    #
+    # This unit exists to give the CEC toolkit's wake service a logical
+    # address to send from. Without the toolkit there is no wake service, and
+    # waiting fifteen seconds for an adapter nobody would use is fifteen
+    # seconds added to every boot of every machine that has never wanted HDMI
+    # CEC - which is most of them. Measured, on the machine this was written
+    # on: exactly the budget, every time, for nothing.
+    if not (cec_module.installed() if installed is None else installed):
+        print("The CEC toolkit is not installed, so there is nothing here "
+              "that would use a CEC adapter.", flush=True)
+        return 0
+
     # The device node first, and waited for rather than looked for once.
     #
     # A session start races the adapter's own enumeration, and losing that
@@ -1637,9 +1650,14 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
         # a machine with no CEC at all and one whose adapter had not turned up
         # yet read exactly the same, in the same second, and looked like the
         # question had been asked and answered.
-        print("No CEC adapter appeared in %s within %gs, so there is nothing "
-              "to register. If this machine has one, it is slower than that "
-              "to come up - try a longer wait by hand: "
+        print("No CEC adapter appeared in %s within %gs, so there is "
+              "nothing to register.\n"
+              "The CEC toolkit is installed, so its own wake service is "
+              "about to spend a further minute or so failing to reach a "
+              "television. If the adapter is gone for good, turn the HDMI "
+              "CEC features off on the panel's CEC page and both waits go "
+              "away.\n"
+              "If it is only slow, try a longer wait by hand: "
               "steamos-utility-center --register-cec 60"
               % (cec_module.ADAPTERS, wait), flush=True)
         return 0
