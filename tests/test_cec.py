@@ -480,8 +480,9 @@ class RegisterRunTest(unittest.TestCase):
     def test_every_adapter_is_considered(self):
         self._go([("-d", Answer(0, UNREGISTERED))],
                  devices=("/dev/cec0", "/dev/cec1"))
-        read = [row for row in self.ran if "--playback" not in row]
-        self.assertEqual(sorted(row[2] for row in read),
+        read = [row for row in self.ran
+                if row[:1] == ["cec-ctl"] and "--playback" not in row]
+        self.assertEqual(sorted({row[2] for row in read}),
                          ["/dev/cec0", "/dev/cec1"])
 
 
@@ -587,6 +588,102 @@ def cec_poll_slack():
     """One poll: the loop checks the clock after sleeping, not before."""
     from steamos_utility_center import service
     return service.CEC_LINK_POLL
+
+
+class HandItBackTest(unittest.TestCase):
+    """What an unplug and a replug do, and when we are allowed to do it.
+
+    The log that showed the need, from the machine this was reported on:
+
+        [10.0] Starting Repair SteamOS CEC device permissions...
+        [10.1] Finished Repair SteamOS CEC device permissions.
+        [12.4] kernel: Registered IR keymap rc-cec
+        [12.5] cecd: Could not add device /dev/cec0: EACCES
+
+    The permissions unit ran two seconds before the device existed and its
+    helper returns quietly when there is nothing there; the udev rule that
+    should also have done it lost a race with Steam's own daemon, which reads
+    the device once and never looks again. So nothing held a logical address,
+    and every wake went out from an address that was not ours.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import service
+        self.service = service
+        self.ran = []
+        # The adapter does not exist here, so os.access says no and the
+        # permissions branch is the one under test.
+        self.states = [UNREGISTERED]
+
+    def _run(self, command):
+        self.ran.append(list(command))
+        if command[0] == "cec-ctl" and "--playback" not in command:
+            return Answer(0, self.states[0] if len(self.states) == 1
+                          else self.states.pop(0))
+        return Answer(0, "")
+
+    def _go(self, wait=10.0):
+        clock = [0.0]
+        return self.service.run_register_cec(
+            devices=["/dev/cec0"], run=self._run,
+            settings={"CEC_DEVICE": "/dev/cec0",
+                      cec.PHYSICAL_ADDRESS: "3.0.0.0"},
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0], wait=wait)
+
+    def _words(self):
+        return [" ".join(row) for row in self.ran]
+
+    def test_the_daemon_gets_another_go_before_we_claim_anything(self):
+        """Its job, not ours. We are the last resort, not the first."""
+        self._go()
+        order = self._words()
+        restart = next(i for i, row in enumerate(order) if "restart" in row)
+        claim = next(i for i, row in enumerate(order) if "--playback" in row)
+        self.assertLess(restart, claim)
+
+    def test_the_permissions_are_repaired_through_the_toolkit_s_helper(self):
+        self._go()
+        self.assertIn("sudo -n " + cec.PERMISSIONS_HELPER, self._words())
+
+    def test_an_adapter_the_daemon_takes_is_then_left_alone(self):
+        """The good ending: it was only ever cecd's to hold."""
+        self.states = [UNREGISTERED, REGISTERED]
+        self._go()
+        self.assertNotIn("--playback",
+                         [word for row in self.ran for word in row])
+
+    def test_nothing_is_nudged_when_the_daemon_already_has_it(self):
+        """Never restart a daemon that is doing its job.
+
+        This is the rule the whole escalation hangs on: an adapter somebody
+        holds is left exactly as it is, and only an adapter nobody holds is
+        worth interrupting anything for.
+        """
+        self.states = [REGISTERED]
+        self._go()
+        self.assertEqual(self._words(), ["cec-ctl -d /dev/cec0"])
+
+    def test_the_daemon_is_given_one_go_and_not_a_loop(self):
+        """Otherwise a machine with no working adapter restarts it forever."""
+        self._go(wait=10.0)
+        restarts = [row for row in self._words() if "restart" in row]
+        self.assertEqual(len(restarts), 1)
+
+    def test_two_adapters_still_restart_the_one_daemon_once(self):
+        """The permissions are per adapter; the daemon is not one of them."""
+        clock = [0.0]
+        self.service.run_register_cec(
+            devices=["/dev/cec0", "/dev/cec1"], run=self._run,
+            settings={"CEC_DEVICE": "/dev/cec0",
+                      cec.PHYSICAL_ADDRESS: "3.0.0.0"},
+            sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            now=lambda: clock[0], wait=10.0)
+        self.assertEqual(
+            len([row for row in self._words() if "restart" in row]), 1)
+        self.assertEqual(
+            len([row for row in self._words()
+                 if cec.PERMISSIONS_HELPER in row]), 2)
 
 
 class ToolkitSettingsTest(unittest.TestCase):

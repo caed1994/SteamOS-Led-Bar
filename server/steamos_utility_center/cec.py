@@ -428,6 +428,56 @@ def configured_device(settings):
     return settings.get(DEVICE_SETTING, "").strip() or DEFAULT_DEVICE
 
 
+# What an unplug and a replug do, in commands.
+#
+# Reported: the television works after pulling the adapter out and putting it
+# back, and not after a plain reboot. The log says why, and it is a race
+# nobody wins by waiting:
+#
+#   [10.0] Starting Repair SteamOS CEC device permissions...
+#   [10.1] Finished Repair SteamOS CEC device permissions.
+#   [12.4] kernel: Registered IR keymap rc-cec          <- the device, at last
+#   [12.5] cecd: Could not add device /dev/cec0: EACCES: Permission denied
+#
+# The toolkit's permissions unit is ordered after udev and runs once, and its
+# helper returns quietly when the device is not there yet - so on a machine
+# where the adapter takes twelve seconds it repairs nothing. The udev rule
+# that should also do it fires as the device appears, and Steam's own daemon
+# is listening for exactly that moment: it opens the device before the rule's
+# program has finished, is refused, and never tries again. Nothing then holds
+# a logical address, and every wake goes out from an address that is not ours.
+#
+# A replug is the cure because the second time round the ACL is already there.
+# These two are that cure without the walk to the television: reapply the
+# permissions, then give the daemon another go at the device it gave up on.
+PERMISSIONS_HELPER = ("/var/lib/steamos-cec-toolkit"
+                      "/steamos-cec-permissions-apply")
+
+# Steam's own CEC daemon, and a user service - it belongs to the session that
+# has the television.
+DAEMON_UNIT = "cecd.service"
+
+
+def repair_permissions_command():
+    """Reapply the adapter's ACL, through the toolkit's own NOPASSWD helper.
+
+    No password: the toolkit's installer writes a sudoers rule for exactly
+    this program, which is what lets the panel repair a device it cannot
+    write without asking for anything.
+    """
+    return ["sudo", "-n", PERMISSIONS_HELPER]
+
+
+def restart_daemon_command():
+    """Hand the device back to Steam's daemon after it has given up on it.
+
+    The same thing `toolkitctl repair-cec-permissions` does, and for the same
+    reason: the daemon reads the device once, at startup and on a udev add,
+    and a refusal at that moment is permanent until something restarts it.
+    """
+    return ["systemctl", "--user", "restart", DAEMON_UNIT]
+
+
 def adapter_state_command(device):
     """How to ask one adapter what it is. Reports; changes nothing."""
     return [CEC_CTL, "-d", device]

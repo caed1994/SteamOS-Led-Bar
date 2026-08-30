@@ -1488,10 +1488,14 @@ def run_list_ports():
 # toolkit's wake service behind it, and the case where there is no picture is
 # usually a television that is *off* - which is the very thing the wake was
 # going to fix. Waiting there is not thoroughness: it is standing in the way
-# of the fix for half a minute and then giving up anyway. So this covers only
-# the honest case, a link that is still coming up while the session starts,
-# and gets out of the way otherwise.
-CEC_LINK_WAIT = 10.0
+# of the fix and then giving up anyway.
+#
+# It is the whole budget, not one of three: the adapter turning up, the
+# daemon's second go at it, and the picture all come out of this. Fifteen
+# rather than ten because of the middle one - on the machine this was
+# measured on the device itself arrived at twelve seconds, and restarting a
+# daemon and reading the answer takes a couple more.
+CEC_LINK_WAIT = 15.0
 CEC_LINK_POLL = 1.0
 
 
@@ -1544,6 +1548,45 @@ def _tell_the_toolkit_where_it_is(device, address, settings, run):
     print("Told the CEC toolkit this machine is at %s, so waking can switch "
           "the input over as well." % address, flush=True)
     return True
+
+
+def _nudge_the_daemon(device, run, restarted):
+    """Repair the adapter's permissions and give Steam's daemon another go.
+
+    What an unplug and a replug do, without the walk to the television - see
+    the long comment in cec.py for the log that showed why they are needed.
+    The daemon reads the device once and a refusal is permanent, so a restart
+    is the only way it looks again.
+
+    Reached only when nothing at all holds a logical address, so there is
+    nothing to interrupt: a daemon that has the adapter is left alone one
+    branch earlier. Both steps are best effort and neither is required to
+    have worked - claiming the address ourselves is still waiting behind it.
+
+    The permissions are per adapter and the daemon is not: `restarted` is how
+    a machine with two of them restarts one service once rather than once
+    each, which is thrashing rather than thoroughness.
+    """
+    did = False
+    if not os.access(device, os.R_OK | os.W_OK):
+        answer = run(cec_module.repair_permissions_command())
+        if getattr(answer, "returncode", 1) == 0:
+            print("%s: could not be written; repaired its permissions."
+                  % device, flush=True)
+            did = True
+        else:
+            print("%s: cannot be written and repairing it failed: %s"
+                  % (device, (getattr(answer, "stdout", "") or "").strip()),
+                  flush=True)
+    if restarted:
+        return did
+    restarted.add(cec_module.DAEMON_UNIT)
+    answer = run(cec_module.restart_daemon_command())
+    if getattr(answer, "returncode", 1) == 0:
+        print("Nothing held a CEC address, so Steam's daemon was given "
+              "another go at it.", flush=True)
+        did = True
+    return did
 
 
 def run_register_cec(devices=None, run=None, sleep=None, now=None,
@@ -1602,6 +1645,7 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
         return 0
 
     waiting = list(devices)
+    nudged, restarted = set(), set()
     done = 0
     while waiting:
         for device in list(waiting):
@@ -1627,6 +1671,16 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
                       flush=True)
                 waiting.remove(device)
                 continue
+            # Nothing holds an address. Before claiming one ourselves, do what
+            # a replug does: repair the permissions and hand the device back
+            # to Steam's daemon, which is whose job this is. Once per adapter,
+            # and only from here - if the daemon had the device we would have
+            # left above without touching anything.
+            if device not in nudged:
+                nudged.add(device)
+                if _nudge_the_daemon(device, run, restarted):
+                    done += 1           # something was put right
+                    continue            # give it a moment, then read again
             if not address:
                 continue                # no picture yet - come back to it
             waiting.remove(device)
@@ -1647,6 +1701,9 @@ def run_register_cec(devices=None, run=None, sleep=None, now=None,
         if waiting:
             sleep(CEC_LINK_POLL)
     if not done and not told:
+        # done counts everything this put right, the daemon's second go
+        # included - saying "nothing needed registering" after restarting a
+        # service would be the log disowning what it had just done.
         # Not a failure: an adapter somebody else already has is the good
         # case, and the unit exiting non-zero for it would paint the session
         # red for doing the right thing.
