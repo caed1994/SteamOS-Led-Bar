@@ -1,18 +1,17 @@
 # SteamOS Utility Center
 
-A toolbox for the Steam Machine, run from one window: the LED bar mirrored
-onto a WS2812 strip driven by an **ESP connected over USB**, CPU and GPU
-power, HDMI CEC, and the Game Mode keyboard layout.
+A toolbox for the Steam Machine. One window controls all of it: the LED bar on
+a WS2812 strip, the CPU and GPU power, HDMI CEC, and the Game Mode keyboard
+layout. An **ESP microcontroller connected by USB** drives the strip.
 
-The LED half is where it started and is still the largest part of it.
-Colour, brightness and effects come straight from the Personalization menu
-in SteamOS Game Mode, download progress included.
+The LED part is the first part of this project and is still the largest. The
+colour, the brightness and the effects come from the Personalization menu in
+SteamOS Game Mode. The download progress bar comes from there also.
 
 ![the rainbow effect on a 17 LED strip](docs/previews/rainbow.png)
 
-**[Every effect, playing &rarr;](https://caed1994.github.io/SteamOS-Utility-Center/)**
-&mdash; all twenty of them on a simulated strip, with the explanation beside
-each.
+**[All the effects &rarr;](https://caed1994.github.io/SteamOS-Utility-Center/)**
+Twenty effects on a simulated strip, each with an explanation.
 
 ## Contents
 
@@ -24,7 +23,7 @@ each.
 6. [Notifications](#notifications)
 7. [The control panel](#the-control-panel)
 8. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
-9. [Updating and removing](#updating-and-removing)
+9. [Updates and removal](#updates-and-removal)
 10. [How it works](#how-it-works)
 11. [Credits and licence](#credits-and-licence)
 
@@ -36,12 +35,14 @@ cd ~/SteamOS-Utility-Center
 sudo ./install.sh
 ```
 
-That is the whole install &mdash; kernel module, service, control panel and
-all. Keep the folder, you need it again after every SteamOS update.
+This installs all of it: the kernel module, the service and the control panel.
+Keep the directory. You need it again after each SteamOS update.
 
-It asks four questions: LED count, serial port, baud rate, firmware. All have
-defaults, so pressing Enter four times is a complete install. Anything it wants
-to install on your system it asks about first:
+The installer asks four questions: the LED count, the serial port, the baud
+rate and the firmware. Each question has a default. If you press Enter four
+times, the installation is complete.
+
+The installer asks before it installs anything on your system:
 
 ```
 ==> The kernel module has to be built, and this machine is missing:
@@ -50,22 +51,28 @@ to install on your system it asks about first:
 Install them with pacman now? [y]:
 ```
 
-Say no and it prints the commands and carries on. To skip the questions
-entirely:
+If you answer no, the installer prints the commands and continues. To install
+with no questions, use these:
 
 ```bash
 sudo ./install.sh --leds 60 --yes             # never flashes
 sudo ./install.sh --leds 60 --yes --flash 1   # unless you ask
 ```
 
-Then wire the strip up ([docs/WIRING.md](docs/WIRING.md)), plug the ESP in,
-open **Settings > Personalization** in Game Mode and pick a colour or an
-effect. The strip follows immediately. If it does not, `journalctl -u
-steamos-utility-center -f` says why.
+Then connect the strip. [docs/WIRING.md](docs/WIRING.md) tells you how. Connect
+the ESP. Open **Settings > Personalization** in Game Mode and select a colour or
+an effect. The strip follows immediately. If the strip does not follow, this
+command gives the reason:
 
-On a completely fresh SteamOS, `sudo` has no password yet: run `passwd` once
-before anything else. To do the preparation by hand, or if you are not on
-SteamOS:
+```bash
+journalctl -u steamos-utility-center -f
+```
+
+On a new SteamOS installation, `sudo` has no password. Run `passwd` first.
+
+Caution: The kernel headers have the name of your kernel. They do not have the
+name `linux`. To prepare the machine manually, or on a system that is not
+SteamOS, use these commands:
 
 ```bash
 sudo steamos-readonly disable
@@ -75,20 +82,17 @@ sudo pacman -S base-devel
 sudo pacman -S "$(cat /usr/lib/modules/$(uname -r)/pkgbase)-headers"
 ```
 
-That last line matters: the headers are named after your exact kernel, not
-after `linux`.
-
 ## What you need
 
 | | |
 | --- | --- |
 | **ESP8266** (NodeMCU, D1 mini) or **ESP32** | connected by USB |
-| **WS2812/WS2812B strip** (NeoPixel) | any length. Data on GPIO2 (D4), shared ground, separate 5 V supply from roughly 20 LEDs up &ndash; [docs/WIRING.md](docs/WIRING.md) |
-| **Python 3.9+** | preinstalled on SteamOS. No extra packages, not even pyserial |
-| **make, gcc, kernel headers** | for the kernel module. The installer works out which headers package you need |
-| **PlatformIO** | only to flash the ESP. The installer offers it on every run and adds it to your PATH in `~/.bashrc` |
+| **WS2812/WS2812B strip** (NeoPixel) | any length. Data on GPIO2 (D4), shared ground, and a separate 5 V supply from approximately 20 LEDs. See [docs/WIRING.md](docs/WIRING.md) |
+| **Python 3.9 or later** | installed on SteamOS. No other packages are necessary, not even pyserial |
+| **make, gcc, kernel headers** | for the kernel module. The installer finds the correct headers package |
+| **PlatformIO** | only to flash the ESP. The installer offers it on each run and adds it to your PATH in `~/.bashrc` |
 
-PlatformIO by hand, if you skipped it:
+To install PlatformIO manually, use these commands:
 
 ```bash
 curl -fsSL -o get-platformio.py \
@@ -97,51 +101,53 @@ python3 get-platformio.py
 echo 'export PATH="$HOME/.platformio/penv/bin:$PATH"' >> ~/.bashrc
 ```
 
-Not `pip`: the SteamOS rootfs is read-only and `pip install --user` lands
-somewhere the next system update resets.
+Do not use `pip`. The SteamOS root filesystem is read-only, and
+`pip install --user` writes to a location that the next system update erases.
 
-To flash the firmware separately, run **one** of these, matching your wiring.
-Each flash overwrites the last:
+To flash the firmware separately, run **one** of these commands. Select the
+command for your wiring. Each flash replaces the last one.
 
 | Your hardware and wiring | Command |
 | ------------------------ | ------- |
 | ESP8266, data on **GPIO2 (D4)** | `./flash-esp.sh` |
-| ESP8266, existing **D5/GPIO14** wiring | `./flash-esp.sh esp8266_gpio14` |
+| ESP8266, data on **D5/GPIO14** | `./flash-esp.sh esp8266_gpio14` |
 | ESP32, data on **GPIO16** | `./flash-esp.sh esp32dev` |
 
-> The two ESP8266 builds drive **different pins**. If your strip is on D5 and
-> you flash the first one it stays dark. That is the wrong pin, not a fault.
+Caution: The two ESP8266 builds drive different pins. If your strip is on D5
+and you flash the first build, the strip stays dark. This is the wrong pin. It
+is not a fault.
 
 ## Settings
 
-Everything lives in `/etc/steamos-utility-center.conf` as `NAME=value` lines. The
-[control panel](#the-control-panel) edits the same file with a window.
+The settings are `NAME=value` lines in `/etc/steamos-utility-center.conf`. The
+[control panel](#the-control-panel) writes to the same file.
 
 ```bash
 sudo nano /etc/steamos-utility-center.conf
 sudo systemctl restart steamos-utility-center
 ```
 
-The restart is required, nothing happens without it.
+The restart is necessary. Without it, nothing changes.
 
 | What you want | Setting |
 | ------------- | ------- |
 | The bar fills from the wrong end | `REVERSE=1` |
 | Your strip does not have 17 LEDs | `LED_COUNT=60` |
-| Too bright, or the strip runs off USB power | `MAX_BRIGHTNESS=80` |
-| Effects run too fast | `SPEED=0.5` |
-| Patrol with three dots | `PATROL_DOTS=3` |
-| Show the temperature instead of the rainbow | `RAINBOW_SHOWS=temperature` |
-| Show how busy the CPU and GPU are | `RAINBOW_SHOWS=load` |
-| An effect of your own in Desktop Mode | `DESKTOP_SCENE=breath` |
+| The strip is too bright, or it uses USB power | `MAX_BRIGHTNESS=80` |
+| The effects are too fast | `SPEED=0.5` |
+| The patrol effect has three dots | `PATROL_DOTS=3` |
+| Show the temperature in place of the rainbow | `RAINBOW_SHOWS=temperature` |
+| Show the CPU and GPU load | `RAINBOW_SHOWS=load` |
+| A different effect in Desktop Mode | `DESKTOP_SCENE=breath` |
 | A different effect on the desktop than in a game | `DESKTOP_SCENE=aurora` |
-| Strip stays dark although an effect is on | `MIN_BRIGHTNESS=40` |
-| Dimmed colours look blotchy | `GAMMA=2.2` |
-| A fixed port instead of auto-detection | `SERIAL_PORT=/dev/steamos-led-esp` |
+| The strip is dark although an effect is on | `MIN_BRIGHTNESS=40` |
+| Dim colours look irregular | `GAMMA=2.2` |
+| A fixed port in place of the automatic search | `SERIAL_PORT=/dev/steamos-led-esp` |
 
-Every option is also a command line switch and an environment variable
-(`STEAMOS_LED_LED_COUNT=60`), so a value can be tried before it is written
-down. The service holds the USB port exclusively, so stop it first:
+Each option is also a command line option and an environment variable
+(`STEAMOS_LED_LED_COUNT=60`). You can thus test a value before you write it to
+the file. The service opens the USB port exclusively, so stop the service
+first:
 
 ```bash
 sudo systemctl stop steamos-utility-center
@@ -151,171 +157,179 @@ sudo systemctl start steamos-utility-center
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `LED_COUNT` | `17` | LEDs on the strip |
-| `REVERSE` | `0` | flip the direction |
-| `MAPPING` | `stretch` | how the 17 logical LEDs spread out: `stretch` (interpolated), `repeat` (tiled), `crop` (1:1, rest dark) |
-| `MAX_BRIGHTNESS` | `255` | brightness ceiling, notification flashes included |
-| `MIN_BRIGHTNESS` | `0` | brightness floor, for when Steam reports 0 |
-| `GAMMA` | `1.0` | `2.2` looks smoother when dimmed |
-| `SPEED` | `1.0` | animation speed (`0.5` is half as fast) |
-| `PATROL_DOTS` | `1` | dots in the patrol effect |
-| `STANDBY_PULSE` | `1` | breathe white while suspended |
+| `LED_COUNT` | `17` | the number of LEDs on the strip |
+| `REVERSE` | `0` | reverse the direction |
+| `MAPPING` | `stretch` | how the 17 logical LEDs go onto the strip: `stretch` (interpolated), `repeat` (tiled), `crop` (1:1, the remainder is dark) |
+| `MAX_BRIGHTNESS` | `255` | the maximum brightness. This includes the notification flashes |
+| `MIN_BRIGHTNESS` | `0` | the minimum brightness, for when Steam reports 0 |
+| `GAMMA` | `1.0` | `2.2` is smoother at low brightness |
+| `SPEED` | `1.0` | the animation speed (`0.5` is half speed) |
+| `PATROL_DOTS` | `1` | the number of dots in the patrol effect |
+| `STANDBY_PULSE` | `1` | show a white breath effect during suspend |
 | `DESKTOP_SCENE` | `steam` | what the bar shows in [Desktop Mode](#desktop-mode): `steam`, `off`, `color`, `breath`, `patrol`, `rainbow`, `fire`, `aurora`, `temperature`, `load` |
-| `DESKTOP_COLOR` / `DESKTOP_BRIGHTNESS` | `#ffffff` / `128` | the colour and brightness that scene uses |
-| `DESKTOP_SPEED` | `1.0` | how fast that scene runs, the way Steam's own speed slider works |
+| `DESKTOP_COLOR` / `DESKTOP_BRIGHTNESS` | `#ffffff` / `128` | the colour and the brightness of that scene |
+| `DESKTOP_SPEED` | `1.0` | the speed of that scene. It operates as Steam's own speed control |
 | `RAINBOW_SHOWS` | `rainbow` | what the [rainbow entry](#the-rainbow-slot) shows: `rainbow`, `temperature`, `load`, `fire` or `aurora` |
 | `TEMPERATURE_MIN` / `TEMPERATURE_MAX` | `40.0` / `80.0` | where the temperature gauge is green and where it is red |
 | `TEMPERATURE_SENSOR` | `auto` | which sensor the temperature gauge reads |
 | `LOAD_CPU_COLOR` / `LOAD_GPU_COLOR` | `#ff6e00` / `#1a9fff` | the two halves of the load gauge |
 | `LOAD_SWAP` | `0` | put the GPU on the left and the CPU on the right |
-| `SERIAL_PORT` | `auto` | serial port; `auto` looks for known USB-serial chips |
-| `BAUD` | `230400` | preferred baud rate, corrected on connect if needed |
+| `SERIAL_PORT` | `auto` | the serial port. `auto` looks for known USB-serial chips |
+| `BAUD` | `230400` | the preferred baud rate. The service corrects it at connection if it is necessary |
 | `BAUD_AUTODETECT` | `1` | if there is no reply, try the other firmware baud rates |
-| `DEVICE` | `/dev/valve-leds-shim` | character device of the kernel module |
-| `FPS` / `IDLE_FPS` | `60` / `4` | frame rate while animating / idle |
-| `LOG_LEVEL` | `info` | `debug` logs every state change |
+| `DEVICE` | `/dev/valve-leds-shim` | the character device of the kernel module |
+| `FPS` / `IDLE_FPS` | `60` / `4` | the frame rate during an animation and when idle |
+| `LOG_LEVEL` | `info` | `debug` writes each state change to the log |
 
-The notification settings are in their [own table](#notifications).
+The notification settings are in a [table of their own](#notifications).
 
 ## Effects
 
-Steam writes an effect number and its parameters. The animation runs on the PC,
-exactly as it runs on the microcontroller of a real Steam Machine.
+Steam writes an effect number and its parameters. The animation runs on the PC.
+It runs in the same way as it runs on the microcontroller of a real Steam
+Machine.
 
 | No. | Effect | What it does | |
 | --- | ------ | ------------ | --- |
-| 0 | off | strip off | |
-| 1 | manual | pixel colours exactly as Steam set them, download bar included | |
-| 2 | normal | static colour | |
-| 3 | rainbow | travelling hue gradient | ![rainbow](docs/previews/rainbow.png) |
-| 4 | breath | breathing, base colour from the snapshot | ![breath](docs/previews/breath.png) |
-| 5 | patrol | dots sweeping back and forth (`PATROL_DOTS`) | ![patrol](docs/previews/patrol.png) |
-| 6 | factory | red, green, blue, white in turn | ![factory](docs/previews/factory.png) |
-| 7 | demo | rainbow with a breathing envelope | |
+| 0 | off | the strip is off | |
+| 1 | manual | the pixel colours that Steam set. This includes the download bar | |
+| 2 | normal | one static colour | |
+| 3 | rainbow | a hue gradient that moves | ![rainbow](docs/previews/rainbow.png) |
+| 4 | breath | a breath effect. The base colour comes from the snapshot | ![breath](docs/previews/breath.png) |
+| 5 | patrol | dots that move from side to side (`PATROL_DOTS`) | ![patrol](docs/previews/patrol.png) |
+| 6 | factory | red, green, blue and white in sequence | ![factory](docs/previews/factory.png) |
+| 7 | demo | a rainbow with a breath envelope | |
 
-How fast they run comes from Steam, and `SPEED` scales all of them together.
+Steam sets the speed of each effect. `SPEED` scales all of them together.
 
-Every animation on this page comes out of `render.py` frame by frame;
-`python3 tools/make-previews.py` rebuilds them and the
-[interactive catalogue](https://caed1994.github.io/SteamOS-Utility-Center/).
+`render.py` makes each animation on this page, frame by frame. To build them
+again, and also the
+[interactive catalogue](https://caed1994.github.io/SteamOS-Utility-Center/), run
+`python3 tools/make-previews.py`.
 
 ### Desktop Mode
 
-Steam only sets the LEDs in Game Mode, so on the desktop the bar keeps whatever
-the last session left. Give it something of its own on the panel's **Desktop
-mode** page:
+Steam sets the LEDs in Game Mode only. On the desktop, the bar keeps what the
+last session left. To give the desktop a scene of its own, use the panel's
+**Desktop mode** page:
 
 | Setting | Meaning |
 | ------- | ------- |
-| `DESKTOP_SCENE` | `steam` (default), `off`, `color`, `breath`, `patrol`, `rainbow`, `fire`, `aurora`, `temperature`, `load` |
+| `DESKTOP_SCENE` | `steam` (the default), `off`, `color`, `breath`, `patrol`, `rainbow`, `fire`, `aurora`, `temperature`, `load` |
 | `DESKTOP_COLOR` | the colour for `color`, `breath` and `patrol` (`#ffffff`) |
-| `DESKTOP_BRIGHTNESS` | 0&ndash;255 (`128`) &mdash; not for `load`, whose brightness is part of the reading |
-| `DESKTOP_SPEED` | how fast it runs (`1.0`) &mdash; not for `temperature`, which stands still, nor for `load` |
+| `DESKTOP_BRIGHTNESS` | 0 to 255 (`128`). It does not apply to `load`, whose brightness is part of the reading |
+| `DESKTOP_SPEED` | the speed (`1.0`). It does not apply to `temperature`, which does not move, or to `load` |
 
-**Every effect, not just Steam's.** `fire`, `aurora`, `temperature` and `load`
-are the four that have to share the [rainbow slot](#the-rainbow-slot) in Game
-Mode, because Steam's LED menu cannot be extended. Nothing on the desktop is
-picking from that menu, so here each of them is a scene of its own and
-`RAINBOW_SHOWS` has no say: `DESKTOP_SCENE=rainbow` is Steam's rainbow, and
-`DESKTOP_SCENE=fire` is fire whatever the slot is set to. The two modes can
-show different effects, which is the point of them being separate settings.
+**All the effects are available, not only Steam's.** In Game Mode, `fire`,
+`aurora`, `temperature` and `load` must share the
+[rainbow slot](#the-rainbow-slot), because SteamOS does not permit new entries
+in its LED menu. The desktop does not use that menu. Each of the four is thus a
+scene of its own here, and `RAINBOW_SHOWS` has no effect on them.
+`DESKTOP_SCENE=rainbow` gives Steam's rainbow. `DESKTOP_SCENE=fire` gives fire,
+whatever the slot shows. The two modes can show different effects.
 
-`temperature` and `load` read the same `TEMPERATURE_*` and `LOAD_*` settings
-here as they do in the slot, and the panel keeps those rows on the Strip page
-as soon as either mode asks for the gauge.
+On the desktop, `temperature` and `load` read the same `TEMPERATURE_*` and
+`LOAD_*` settings as in the slot. The panel keeps those rows on the Strip page
+if either mode uses the gauge.
 
-**Game Mode stays Steam's.** Switch over and the bar goes back to Steam's own
-LED settings, untouched. Notifications still flash over a scene, and a download
-started on the desktop still shows its progress bar.
+**Game Mode stays Steam's.** When you go to Game Mode, the bar returns to
+Steam's own LED settings. Notifications continue to flash above a scene. A
+download that starts on the desktop continues to show its progress bar.
 
-If the bar keeps your scene during a game, or never shows it at all:
+If the bar keeps your scene during a game, or never shows it, run this command:
 
 ```bash
 steamos-utility-center --desktop
 ```
 
-It says which mode it thinks the machine is in, and what it saw before now.
+It gives the mode that it detects and what it saw before now.
 
-### Before Steam has started, and while the machine sleeps
+### Before Steam starts, and during suspend
 
-Until Game Mode has set the LEDs there is nothing to show, so the strip
-breathes amber through the boot and hands over the moment Steam does. A
-[Desktop Mode scene](#desktop-mode) takes over instead, if one is set.
+Before Game Mode sets the LEDs there is nothing to show. The strip shows an
+amber breath effect during the boot and gives control to Steam immediately. If
+you set a [Desktop Mode scene](#desktop-mode), that scene starts in place of
+the breath effect.
 
 ![the startup breath](docs/previews/startup.png)
 
-Suspend the machine and the strip keeps a slow white breath going. Wake it and
-the normal effect comes back; `STANDBY_PULSE=0` switches it off.
+During suspend, the strip shows a slow white breath effect. After the wake, the
+normal effect returns. `STANDBY_PULSE=0` disables the breath effect.
 
 ![the standby breath](docs/previews/standby.png)
 
-Both are dim on purpose &mdash; the standby one peaks at 30 of 255. That is the
-whole animation, not a broken image.
+Both effects are dim. The standby effect has a maximum of 30 of 255. This is
+the complete animation. The image is not defective.
 
-**The ESP draws both itself**, since nothing runs during a suspend. So it has
-to stay powered &mdash; a BIOS setting often called *ErP*, *Wake on USB* or
-*USB power in S3* &mdash; and it needs the firmware from this version.
+**The ESP makes both effects itself**, because nothing runs during a suspend.
+The ESP must thus stay powered. The BIOS setting has the name *ErP*, *Wake on
+USB* or *USB power in S3*. The ESP also needs the firmware from this version.
 
-To try it without suspending anything:
+To test the effects without a suspend, use these commands:
 
 ```bash
 echo standby > /run/steamos-utility-center/notify
 echo resume  > /run/steamos-utility-center/notify
 ```
 
-If the resume never arrives, the service takes the strip back after half a
-minute of running time.
+If the resume signal does not come, the service takes control of the strip
+after 30 seconds of operation.
 
 ## The rainbow slot
 
-Steam's LED menu cannot be extended, so anything of ours has to take over an
-entry it already offers. `RAINBOW_SHOWS` decides what stands in the rainbow's
-place:
+SteamOS does not permit new entries in its LED menu. An effect of ours must
+thus replace an entry that Steam already has. `RAINBOW_SHOWS` selects what
+replaces the rainbow:
 
-| `RAINBOW_SHOWS` | What the bar does | |
-| --------------- | ----------------- | --- |
-| `rainbow` | Steam's own rainbow, untouched. The default | |
-| `temperature` | how hot the machine is, as one colour across the whole bar | ![temperature](docs/previews/temperature.png) |
-| `load` | how busy the CPU and GPU are, as two bars out of the middle | ![load](docs/previews/load.png) |
-| `fire` | flame drifting along the strip | ![fire](docs/previews/fire.png) |
-| `aurora` | slow curtains of green and violet | ![aurora](docs/previews/aurora.png) |
+| `RAINBOW_SHOWS` | What the bar shows | |
+| --------------- | ------------------ | --- |
+| `rainbow` | Steam's own rainbow. This is the default | |
+| `temperature` | the temperature of the machine, as one colour on the full bar | ![temperature](docs/previews/temperature.png) |
+| `load` | the CPU and GPU load, as two bars from the centre | ![load](docs/previews/load.png) |
+| `fire` | a flame that moves along the strip | ![fire](docs/previews/fire.png) |
+| `aurora` | slow green and violet curtains | ![aurora](docs/previews/aurora.png) |
 
-Set it, then pick **Rainbow** in Steam's LED menu:
+Set the option, then select **Rainbow** in Steam's LED menu:
 
 ```bash
 sudo sed -i 's/^RAINBOW_SHOWS=.*/RAINBOW_SHOWS=aurora/' /etc/steamos-utility-center.conf
 sudo systemctl restart steamos-utility-center
 ```
 
-Every other effect Steam offers keeps working, and `RAINBOW_SHOWS=rainbow`
-gives the rainbow back. To look at one without going into Game Mode, stop the
-service and run `--simulate rainbow`. If a choice cannot work on your machine
-&mdash; `temperature` with no sensor, `load` with no counters &mdash; the
-rainbow is drawn instead and the log says why.
+The other Steam effects continue to operate. `RAINBOW_SHOWS=rainbow` gives the
+rainbow again. To see one effect without Game Mode, stop the service and run
+`--simulate rainbow`.
 
-**The slot is a Game Mode limitation only.** On the desktop these four are
-[scenes of their own](#desktop-mode), so `RAINBOW_SHOWS` and `DESKTOP_SCENE`
-can name different effects and both get what they asked for.
+If your machine cannot show your selection, the service draws the rainbow and
+writes the reason to the log. Two examples: `temperature` with no sensor, and
+`load` with no counters.
+
+**The slot is a Game Mode limit only.** On the desktop, these four effects are
+[scenes of their own](#desktop-mode). `RAINBOW_SHOWS` and `DESKTOP_SCENE` can
+thus name different effects, and each mode shows what it names.
 
 ### Temperature
 
-The whole strip stays lit and the colour carries the reading:
+The full strip stays lit. The colour gives the reading:
 
 ```
- 30 C  #00ff00   green, and so is anything cooler
+ 30 C  #00ff00   green, and all lower temperatures
  50 C  #7fff00
  60 C  #ffff00   yellow
  70 C  #ff7f00
- 80 C  #ff0000   red, and so is anything hotter
+ 80 C  #ff0000   red, and all higher temperatures
 ```
 
-`TEMPERATURE_MIN` is where green ends and `TEMPERATURE_MAX` where red begins,
-with yellow halfway between; the defaults are 40 and 80. Move both up for a part
-that idles hot, or bring them together to see smaller changes &mdash; at 35/65
-the same 50 C already reads yellow. They have to stay at least 5 degrees apart.
+`TEMPERATURE_MIN` is the end of green. `TEMPERATURE_MAX` is the start of red.
+Yellow is between the two. The defaults are 40 and 80.
 
-`TEMPERATURE_SENSOR=auto` picks the CPU or GPU package sensor ahead of the dozen
-other things a PC measures. To see what your machine reports:
+Increase both values for a part that is hot when it is idle. Decrease the
+distance between them to see smaller changes. At 35/65, a temperature of 50 C
+is yellow. The two values must be 5 degrees apart or more.
+
+`TEMPERATURE_SENSOR=auto` selects the CPU or GPU package sensor before the
+other sensors of the machine. To see what your machine reports, use this
+command:
 
 ```bash
 /var/lib/steamos-utility-center/steamos-utility-center --temperature
@@ -335,27 +349,28 @@ Between the marks the colour is mixed, so it moves as the machine does.
 Right now: #ffd200 across all 17 LEDs
 ```
 
-Put another path into `TEMPERATURE_SENSOR` to watch something else. A machine
-that reports no temperature at all gets the rainbow.
+To read a different sensor, write its path into `TEMPERATURE_SENSOR`. If the
+machine reports no temperature, the service draws the rainbow.
 
 ### Load
 
-Two bars grow out of the middle: the CPU to the left, the GPU to the right.
-The counters are read four times a second, but the bar glides towards each
-reading over about a second and is redrawn every frame, so it walks rather
-than stepping.
+Two bars grow from the centre. The CPU bar goes to the left and the GPU bar
+goes to the right.
 
-`LOAD_CPU_COLOR` and `LOAD_GPU_COLOR` set the two halves, from the panel's
-Strip page or by hand. The shipped amber and blue sit about as far apart as
-two colours on a strip can, which is what makes the gauge read as two bars
-rather than one uneven one; two colours near each other still work, they just
-stop working as two.
+The service reads the counters four times each second. The bar moves to each
+new reading during approximately one second, and the service draws it at each
+frame. The bar thus moves smoothly and does not step.
 
-`LOAD_SWAP` puts the GPU on the left and the CPU on the right, moving the
-reading and its colour together. It is not `REVERSE`, which turns the whole
-strip around and so moves every effect - this moves the two halves of this one
-gauge, which is what a strip mounted the other way up needs once `REVERSE` has
-already had its say.
+`LOAD_CPU_COLOR` and `LOAD_GPU_COLOR` set the two halves. Set them from the
+panel's Strip page or in the file. The default amber and blue are almost the
+maximum distance apart. This distance is what makes the gauge read as two bars.
+Two colours that are near each other also operate, but they read as one bar.
+
+`LOAD_SWAP` puts the GPU on the left and the CPU on the right. It moves the
+reading and its colour together. It is not the same as `REVERSE`, which
+reverses the full strip and thus moves each effect. `LOAD_SWAP` moves the two
+halves of this one gauge. Use it for a strip that is installed the other way up
+after `REVERSE` is already set.
 
 ```bash
 /var/lib/steamos-utility-center/steamos-utility-center --load
@@ -370,14 +385,15 @@ Two bars grow out of the middle: CPU to the left in amber, GPU to the
 right in blue. Read every 0.25 s, averaged over 1 s.
 ```
 
-**The GPU half depends on your driver.** amdgpu publishes `gpu_busy_percent`,
-which is what a Steam Machine has; most others do not. Without it the CPU is
-drawn on both halves, and `--load` says which of the two you got.
+**The GPU half needs a driver that reports the load.** amdgpu publishes
+`gpu_busy_percent`, and a Steam Machine has amdgpu. Most other drivers do not
+publish it. Without it, the service draws the CPU load on both halves.
+`--load` gives the driver that your machine has.
 
 ## Notifications
 
-A notification takes over the whole bar for a few seconds and hands it straight
-back to whatever Steam was showing:
+A notification takes the full bar for some seconds and then returns it to the
+Steam effect:
 
 ```
  0.00s |·················|
@@ -388,7 +404,7 @@ back to whatever Steam was showing:
  3.21s |·······+#+·······|
 ```
 
-Try it with the service running:
+To test it while the service runs, use these commands:
 
 ```bash
 steamos-utility-center --notify achievement
@@ -396,11 +412,13 @@ steamos-utility-center --notify message
 steamos-utility-center --notify '#00ff88'
 ```
 
-That writes one word into a named pipe, `/run/steamos-utility-center/notify`.
-**Anything that can write a line can flash the bar**, no library and no API.
-Known words are `achievement`, `message`, `friend`, `phone` and `warning`;
-anything else is read as a colour (`#rrggbb` or `r,g,b`). Either can carry a shape for that
-one flash:
+Each command writes one word into a named pipe,
+`/run/steamos-utility-center/notify`. **Any program that can write a line can
+flash the bar.** No library and no API are necessary.
+
+The known words are `achievement`, `message`, `friend`, `phone` and `warning`.
+The service reads any other word as a colour (`#rrggbb` or `r,g,b`). A word can
+also carry a shape for that one flash:
 
 ```bash
 echo achievement > /run/steamos-utility-center/notify
@@ -408,9 +426,9 @@ echo alternate:achievement > /run/steamos-utility-center/notify
 steamos-utility-center --notify comet:#1a9fff
 ```
 
-A trigger may also say who it is from, after an `@`. That is what
-`NOTIFY_REPEAT_GAP` is keyed on, so ten messages from one person are one flash
-and somebody else in the same few seconds still gets through:
+A trigger can also give its source, after an `@` character. `NOTIFY_REPEAT_GAP`
+uses that source. Ten messages from one person are thus one flash, and a
+different person in the same seconds also gets a flash:
 
 ```bash
 echo 'phone@anna' > /run/steamos-utility-center/notify
@@ -420,117 +438,128 @@ echo 'phone@bob'  > /run/steamos-utility-center/notify   # somebody else: flashe
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `NOTIFY` | `1` | the master switch; with this off nothing flashes at all |
+| `NOTIFY` | `1` | the main switch. With this off, nothing flashes |
 | `NOTIFY_ACHIEVEMENTS` | `1` | watch for achievement unlocks |
 | `NOTIFY_MESSAGES` | `1` | watch for friend messages |
-| `NOTIFY_FRIEND_ONLINE` | `1` | watch for friends coming online |
-| `NOTIFY_PHONE` | `0` | watch the phone's notifications - see [Your phone](#your-phone) for the rest |
-| `NOTIFY_WARNING` | `1` | watch every sensor for overheating |
-| `NOTIFY_DURATION` | `3.5` | seconds one flash lasts |
-| `NOTIFY_REPEAT_GAP` | `10` | quiet seconds before the same trigger may flash again. "The same" means the same `@` tag where a trigger carries one &mdash; for the phone, the same conversation |
-| `NOTIFY_FIFO` | `/run/steamos-utility-center/notify` | the pipe to listen on |
-| `NOTIFY_STYLE` | `bloom` | default shape |
-| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` / `PHONE_COLOR` | `#ffff00` / `#8000ff` / `#00ff00` / `#00ffff` | what each one flashes. The panel offers eight hues and white; the file takes any colour |
-| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` / `PHONE_STYLE` | `default` | shape for that one kind, or `default` to follow `NOTIFY_STYLE` |
+| `NOTIFY_FRIEND_ONLINE` | `1` | watch for friends that come online |
+| `NOTIFY_PHONE` | `0` | watch the phone's notifications. See [Your phone](#your-phone) |
+| `NOTIFY_WARNING` | `1` | watch each sensor for a high temperature |
+| `NOTIFY_DURATION` | `3.5` | the length of one flash, in seconds |
+| `NOTIFY_REPEAT_GAP` | `10` | the quiet seconds before the same trigger can flash again. Where a trigger carries an `@` tag, the same trigger means the same tag. For the phone, it means the same conversation |
+| `NOTIFY_FIFO` | `/run/steamos-utility-center/notify` | the pipe to read |
+| `NOTIFY_STYLE` | `bloom` | the default shape |
+| `ACHIEVEMENT_COLOR` / `MESSAGE_COLOR` / `FRIEND_COLOR` / `PHONE_COLOR` | `#ffff00` / `#8000ff` / `#00ff00` / `#00ffff` | the colour of each flash. The panel offers eight hues and white. The file accepts any colour |
+| `ACHIEVEMENT_STYLE` / `MESSAGE_STYLE` / `FRIEND_STYLE` / `PHONE_STYLE` | `default` | the shape for that one kind, or `default` to use `NOTIFY_STYLE` |
 
 ### The shapes
 
 | Shape | What it looks like | |
 | ----- | ------------------ | --- |
-| `bloom` | grows out of the middle, breathes once, retracts | ![bloom](docs/previews/shape-bloom.png) |
-| `pulse` | the whole bar swells three times and fades | ![pulse](docs/previews/shape-pulse.png) |
-| `double_flash` | two short blinks, a pause, and again | ![double flash](docs/previews/shape-double-flash.png) |
-| `comet` | a bright head with a fading tail, once across the bar | ![comet](docs/previews/shape-comet.png) |
-| `alternate` | the two halves flash in turn | ![alternate](docs/previews/shape-alternate.png) |
-| `sparkle` | grains of light flicker on and die out all over the bar | ![sparkle](docs/previews/shape-sparkle.png) |
+| `bloom` | it grows from the centre, breathes one time, and retracts | ![bloom](docs/previews/shape-bloom.png) |
+| `pulse` | the full bar increases three times and then fades | ![pulse](docs/previews/shape-pulse.png) |
+| `double_flash` | two short flashes, a pause, then two more | ![double flash](docs/previews/shape-double-flash.png) |
+| `comet` | a bright head with a tail that fades, one time along the bar | ![comet](docs/previews/shape-comet.png) |
+| `alternate` | the two halves flash in sequence | ![alternate](docs/previews/shape-alternate.png) |
+| `sparkle` | points of light appear and fade at random on the bar | ![sparkle](docs/previews/shape-sparkle.png) |
 
-Shown in Steam blue, except `alternate`: a warning is always red, in that
-shape, and `NOTIFY_WARNING` only says whether it fires at all. `comet` is the
-only shape with a direction and the only one `REVERSE` applies to.
+The images show Steam blue, except `alternate`. A warning is always red and
+always uses that shape. `NOTIFY_WARNING` controls only whether it flashes.
+`comet` is the only shape with a direction, and thus the only shape that
+`REVERSE` applies to.
 
-Flashes queue rather than interrupt each other, so an achievement and a message
-in the same tick show gold, then purple. A repeat does not queue: the same
-trigger is ignored while it is showing and for `NOTIFY_REPEAT_GAP` seconds
-after. The gap is per trigger, so an achievement during a chat storm still gets
-through.
+Flashes go into a queue. They do not interrupt each other. An achievement and a
+message in the same moment thus show gold, then purple.
 
-### Overheating
+A repeat does not go into the queue. The service ignores the same trigger while
+it shows and for `NOTIFY_REPEAT_GAP` seconds after it. The gap applies to each
+trigger separately, so an achievement during many messages still flashes.
 
-The one notification the **service** produces on its own, with no game and no
-Steam involved. It reads every sensor and flashes red when one has stayed
-within a few degrees of **its own** critical point for a minute. The thresholds
-come from the parts: hwmon publishes the manufacturer's limits next to each
-reading, so an APU at 95 °C is fine while an NVMe drive at 95 °C is ten degrees
-past its limit.
+### High temperature warning
 
-A sensor publishing no limit is not watched, which on current AMD hardware means
-`k10temp` is left alone. Only `crit` counts and `max` is ignored, because a DDR5
-module reports `max 55` with `crit 85`.
+This is the one notification that the **service** makes itself. It needs no
+game and no Steam.
 
-`--temperature` lists every sensor with the limits it publishes and the
-temperature it is watched at, so you can see what it would do before switching
-it on. It is not connected to the [gauge](#temperature): the gauge shows one
-sensor you picked, this watches all of them.
+The service reads each sensor. It flashes red when one sensor stays within some
+degrees of **its own** critical point for one minute. The limits come from the
+parts: hwmon publishes the manufacturer's limits with each reading. An APU at
+95 °C is thus correct, but an NVMe drive at 95 °C is ten degrees above its
+limit.
+
+The service does not watch a sensor that publishes no limit. On current AMD
+hardware this means that `k10temp` is not watched. Only `crit` counts and `max`
+is ignored, because a DDR5 module reports `max 55` with `crit 85`.
+
+`--temperature` lists each sensor with its limits and the temperature at which
+the service watches it. You can thus see the behaviour before you enable it.
+This warning is separate from the [gauge](#temperature). The gauge shows one
+sensor that you select. The warning watches all of them.
 
 ### Achievements, messages and friends
 
-The bar flashes the moment an achievement unlocks, purple for a Steam message
-and green when a friend logs in, with **no API key, no internet and no public
-profile** &mdash; by asking the Steam client on your own machine through Valve's
-local Steamworks API. All three need a **running game**, because Steamworks has
-to be initialised as an app. Desktop Mode and Game Mode both work.
+The bar flashes when an achievement unlocks. It flashes purple for a Steam
+message and green when a friend comes online. This needs **no API key, no
+internet connection and no public profile**. The service asks the Steam client
+on your own machine through Valve's local Steamworks API.
 
-`install.sh` sets this up as a user service that starts with your session.
-Nothing else to do:
+All three need a **game that runs**, because Steamworks must start as an app.
+Desktop Mode and Game Mode both operate.
+
+`install.sh` installs this as a user service that starts with your session.
+Nothing else is necessary:
 
 ```bash
 systemctl --user status steamos-utility-center-achievements
 journalctl --user -u steamos-utility-center-achievements -f
 ```
 
-To see what your machine can do, start a game and run these as your normal
-user, not with `sudo`:
+To see what your machine can do, start a game and run these commands as your
+normal user. Do not use `sudo`:
 
 ```bash
 /var/lib/steamos-utility-center/steamos-utility-center --steam-check
 steamos-utility-center --probe-messages
 ```
 
-Pass `--skip-watcher` to the installer to leave it out, or disable it later with
-`systemctl --user disable --now steamos-utility-center-achievements`. The three switches
-are independent; with all three off the watcher attaches to nothing.
+To install without the watcher, give `--skip-watcher` to the installer. To
+disable it later, use
+`systemctl --user disable --now steamos-utility-center-achievements`. The three
+switches are independent. With all three off, the watcher attaches to nothing.
 
-**The log shows it restarting after every game, which is on purpose**: Steam
-will not report a game as stopped while anything is still registered as an
-instance of it.
+**The log shows a restart after each game. This is correct.** Steam does not
+report a game as stopped while an instance of it is still registered.
 
-Friend messages need a Steamworks library new enough to deliver callbacks, which
-not every machine has; `--probe-messages` says whether yours does. Friends
-coming online ask Steam for less, so that one works where chat does not.
+Friend messages need a Steamworks library that is new enough to deliver
+callbacks. Not all machines have one. `--probe-messages` gives the answer for
+your machine. Friends that come online need less from Steam, so that part
+operates where chat does not.
 
 ### Your phone
 
-The bar can flash for a WhatsApp message, or anything else your phone puts in
-its notification shade. **KDE Connect** carries it over: pair the phone in KDE
-Connect's settings, switch its notification sync on, and a user service reads
-those notifications and flashes the bar.
+The bar can flash for a WhatsApp message, or for anything else in the
+notification list of your phone. **KDE Connect** carries the notification to
+the PC. Pair the phone in the KDE Connect settings and enable its notification
+sync. A user service then reads those notifications and flashes the bar.
 
-Android only &mdash; iOS does not let one app read another's notifications.
-Nothing here talks to WhatsApp or to any other app: it reads the
-*notification*, so an app you have silenced on the phone stays silent here too.
+This is for Android only. iOS does not let one app read the notifications of
+another app.
 
-**Off until you switch it on**, in the panel under *Notifications* > *From your
-phone*, or with `NOTIFY_PHONE=1`. Apply restarts the bridge for you; after
-editing the file by hand:
+Nothing here communicates with WhatsApp or with any other app. The service
+reads the *notification*. An app that is silent on the phone is thus silent
+here also.
+
+**This is off until you enable it.** Use the panel, at *Notifications* > *From
+your phone*, or set `NOTIFY_PHONE=1`. Apply restarts the bridge for you. If you
+edit the file manually, restart the bridge:
 
 ```bash
 systemctl --user restart steamos-utility-center-phone
 ```
 
-*Status* then shows two more rows under the LED bar: the bridge running, and KDE Connect
-naming your phone. Both have to be there for anything to flash.
+*Status* then shows two more rows below the LED bar: the bridge, and KDE
+Connect with the name of your phone. Both must be present before the bar can
+flash.
 
-To watch it work, as yourself and not with `sudo`:
+To see the bridge operate, run this command as yourself. Do not use `sudo`:
 
 ```bash
 steamos-utility-center --watch-phone --print
@@ -543,29 +572,30 @@ Reading the phone's notifications from KDE Connect
   com.android.calendar         -> phone
 ```
 
-That flashes nothing. It names every notification it sees and what it would
-have flashed, and says what would stop the real thing from lighting anything.
-To try the bar on its own, without involving the phone:
+This command flashes nothing. It gives each notification that it sees and the
+flash that it would make. It also gives the reason if the real bridge would
+flash nothing. To test the bar alone, without the phone, run
 `steamos-utility-center --notify phone`.
 
 | Option | Panel | Meaning |
 | ------ | ----- | ------- |
-| `NOTIFY_PHONE` | yes | flash on the phone's notifications at all (default `0`) |
-| `PHONE_COLOR` / `PHONE_STYLE` | yes | what one looks like (`#00ffff` / `default`) |
-| `PHONE_APPS` | file only | a look per app: `WhatsApp:#25d366:double_flash, Signal:#3a76f0` |
-| `PHONE_APPS_ONLY` | file only | ignore apps that list does not name (default `0`) |
+| `NOTIFY_PHONE` | yes | flash for the phone's notifications (the default is `0`) |
+| `PHONE_COLOR` / `PHONE_STYLE` | yes | the appearance of one flash (`#00ffff` / `default`) |
+| `PHONE_APPS` | file only | an appearance for each app: `WhatsApp:#25d366:double_flash, Signal:#3a76f0` |
+| `PHONE_APPS_ONLY` | file only | ignore the apps that the list does not name (the default is `0`) |
 
-**Game Mode works too**, with one thing to set up. KDE Connect's daemon dies
-with the desktop session, so the bridge starts it again itself &mdash; but your
-systemd has to keep running when no session is open, or the bridge is not there
-either. `install.sh` turns that on and *Status* checks it:
+**Game Mode also operates**, but you must prepare one thing. The KDE Connect
+daemon stops with the desktop session, so the bridge starts it again itself.
+Your systemd must continue to run when no session is open. If it does not, the
+bridge is not there either. `install.sh` enables this, and *Status* verifies
+it:
 
 ```bash
 sudo loginctl enable-linger $USER
 ```
 
-There is no terminal in Game Mode, so the bridge writes what it found to the
-journal. Afterwards, back on the desktop:
+Game Mode has no terminal, so the bridge writes what it finds to the journal.
+Read it on the desktop:
 
 ```bash
 journalctl --user -u steamos-utility-center-phone --since "1 hour ago"
@@ -573,46 +603,48 @@ journalctl --user -u steamos-utility-center-phone --since "1 hour ago"
 
 ## The control panel
 
-Everything after the first install has a window. `install.sh` also puts it in
-the application menu as **SteamOS Utility Center**.
+The control panel does all the work after the first installation. `install.sh`
+also puts it in the application menu as **SteamOS Utility Center**.
 
 ```bash
 ./gui/steamos-utility-center-panel
 ```
 
-**Two levels.** The list down the left edge picks a *section* &mdash; what kind
-of thing you are configuring &mdash; and the LED strip, which is the one with
-enough settings to need it, has its own list of pages inside.
+**The panel has two levels.** The list at the left edge selects a *section*.
+The LED strip has more settings than the other sections, so it has its own list
+of pages.
 
 | Section | What is in it |
 | ------- | ------------- |
-| **LED Strip** | everything about the bar. Seven pages, below |
-| **CPU & GPU power** | the CPU governor and energy preference, and the graphics card if [LACT](#the-graphics-card) is running &mdash; see [CPU power](#cpu-power) |
-| **HDMI CEC Mods** | talking to the television over HDMI &mdash; see [HDMI CEC](#hdmi-cec) |
-| **Keyboard Layout** | the layout Game Mode uses &mdash; see [Keyboard layout](#keyboard-layout) |
-| **Status** | how every part of the toolbox is doing, each with the button that repairs it |
-| **App Settings** | this program itself: its [look](#light-and-dark) and its [updates](#updating-and-removing) |
-| **About** | version, licence and credits, at the foot of the list |
+| **LED Strip** | all the settings for the bar, on seven pages. See below |
+| **CPU & GPU power** | the CPU governor and the energy preference. It also has the graphics card if [LACT](#the-graphics-card) runs. See [CPU power](#cpu-power) |
+| **HDMI CEC Mods** | control of the television over HDMI. See [HDMI CEC](#hdmi-cec) |
+| **Keyboard Layout** | the layout that Game Mode uses. See [Keyboard layout](#keyboard-layout) |
+| **Status** | the condition of each part of the toolbox, each with the button that repairs it |
+| **App Settings** | this program: its [appearance](#light-and-dark) and its [updates](#updates-and-removal) |
+| **About** | the version, the licence and the credits |
 
 | LED Strip page | What is on it |
 | -------------- | ------------- |
-| **Strip** | length, direction, brightness limits, patrol dots, effect speed, what the [rainbow slot](#the-rainbow-slot) shows |
-| **Desktop mode** | what the bar shows while Steam is not driving it &mdash; see [Desktop Mode](#desktop-mode) |
-| **Notifications** | one line per thing that can flash - switch, colour, shape - grouped by where it comes from, and how long a flash lasts |
-| **Advanced** | mapping, gamma, repeat cooldown, frame rates, log level |
-| **Preview** | the effects this project added, animated on *your* strip - its length, mapping, direction and brightness ceiling, all read live from the window |
-| **Test** | fire each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor and load counter lists &mdash; and flash the ESP |
+| **Strip** | the length, the direction, the brightness limits, the patrol dots, the effect speed, and what the [rainbow slot](#the-rainbow-slot) shows |
+| **Desktop mode** | what the bar shows while Steam does not control it. See [Desktop Mode](#desktop-mode) |
+| **Notifications** | one line for each thing that can flash, with its switch, colour and shape. The lines are in groups by source. The page also sets the length of a flash |
+| **Advanced** | the mapping, the gamma, the repeat gap, the frame rates and the log level |
+| **Preview** | the effects that this project adds, on *your* strip. The panel reads the length, the mapping, the direction and the maximum brightness from the window |
+| **Test** | start each notification, try each flash shape, run the self-test, the Steam check, the message probe, the sensor list and the load counter list. This page also flashes the ESP |
 
-A line across the foot carries a light for the LED bar and, once
-[HDMI CEC](#hdmi-cec) is installed, a second one for the adapter &mdash; each
-grey until it has been read, then green or red. When a command fails, a
-warning appears beside them saying so &mdash; not what went wrong, which is on
-standard error along with everything else the window's commands print.
+A line at the bottom of the window carries one light for the LED bar. After you
+install [HDMI CEC](#hdmi-cec), it carries a second light for the adapter. Each
+light is grey until the panel reads its condition, then green or red.
 
-**There is no log pane.** What the window's commands print goes to standard
-error, so running the panel from a terminal shows all of it &mdash; and the
-install and repair work the panel starts is the same work `install.sh` does,
-which is the better place to watch it:
+When a command fails, a warning appears beside the lights. The warning does not
+give the error. The error goes to standard error with the other output of the
+window's commands.
+
+**The window has no log pane.** The output of the window's commands goes to
+standard error. If you start the panel from a terminal, you see all of it. The
+installation and repair work that the panel starts is the same work that
+`install.sh` does, and `install.sh` is the better place to watch it:
 
 ```bash
 ./gui/steamos-utility-center-panel          # its commands' output lands in this terminal
@@ -621,381 +653,413 @@ which is the better place to watch it:
 
 ### Status
 
-One block per part of the toolbox &mdash; the LED bar, CPU power, the
-[graphics card](#the-graphics-card), HDMI CEC, the keyboard layout and the
-panel itself &mdash; each with a light, a sentence
-saying how it is, a fold for the detail behind it, and the one button that
-repairs *that* part. The repairs stay here rather than moving to the pages
-they belong to: this is where you find out something is broken, and walking to
-another section for the fix is the walk this page saves.
+The Status page has one block for each part of the toolbox: the LED bar, the
+CPU power, the [graphics card](#the-graphics-card), HDMI CEC, the keyboard
+layout and the panel.
 
-The light has three states, and the third is the point. Grey is **not
-installed**, which is not a fault: a machine that never wanted HDMI CEC is not
-a machine with a problem, and it is not counted as one in the sentence at the
-top of the window.
+Each block has a light, one sentence about its condition, a fold with the
+detail, and the button that repairs *that* part. The repair buttons are here
+and not on the pages that they belong to. This page is where you find out that
+something is defective, and a walk to another section is what this page
+prevents.
 
-A part that is broken unfolds itself once, so the page never says something is
-wrong and hides what. Fold it away and it stays away &mdash; the page is
-re-read every time a command finishes.
+The light has three states. Grey is **not installed**, and this is not a fault.
+A machine that does not want HDMI CEC is not a machine with a problem, and the
+sentence at the top of the window does not count it as one.
+
+A part that is defective opens its fold one time. The page thus never says that
+something is defective and then hides the detail. If you close the fold, it
+stays closed. The panel reads the machine again after each command.
 
 ### Light and dark
 
-**App Settings > Colours**, three answers:
+**App Settings > Colours** has three answers:
 
 | | |
 | --- | --- |
-| **Dark** | the default, and what the window is designed for |
-| **Light** | regardless of the desktop |
-| **Follow the desktop** | dark or light as your Plasma theme is |
+| **Dark** | the default, and the design of the window |
+| **Light** | light, whatever the desktop uses |
+| **Follow the desktop** | dark or light, as your Plasma theme is |
 
-The accent colour comes from Plasma in all three. The choice takes effect at
-once &mdash; there is no Apply for it &mdash; and is remembered in
-`~/.config/steamos-utility-center-panel.conf`. Nothing outside this window reads that
-file.
+All three take the accent colour from Plasma. The selection takes effect
+immediately. There is no Apply button for it. The panel keeps the selection in
+`~/.config/steamos-utility-center-panel.conf`. No other program reads that file.
 
-**The preview stage stays dark whichever you pick.** A canvas has no alpha, so
-the glow around each LED is drawn as a colour already mixed with the
-background behind it, and that only works against one known colour. A strip of
-light judged against a pale window would be a washed-out one anyway.
+**The preview stage stays dark in all three.** A canvas has no alpha channel,
+so the panel draws the glow around each LED as a colour that it already mixed
+with the background. This operates against one known colour only. A strip of
+light against a pale window is also difficult to judge.
 
-**Apply and Reload sit under all of them.** Apply writes every setting from
-every page and is greyed out while the window and the files agree. It asks for
-your password and restarts the service only when something the service reads
-has actually changed &mdash; the **System** page's settings are your own, in
-your own home, and go in without either. **After a SteamOS update, press
-*Rebuild and reinstall***: the update brings a new kernel and the module was
-built for the old one. Your configuration is kept and the ESP is never
-reflashed.
+**Apply and Reload are below all the pages.** Apply writes each setting from
+each page. It is grey while the window and the files agree.
 
-**Save profile** writes everything the window can set into a file of its own
-and **Load profile** reads one back. Profiles land in `profiles/` inside the
-clone and are ignored by git. Loading does not apply: the settings land in the
-window, then you press Apply. The serial port, the baud rate and the device are
-not in the window, so they can never arrive from another machine.
+Apply asks for your password and restarts the service only when a setting that
+the service reads is different. The **System** page's settings are in your own
+home directory, and Apply writes them with no password and no restart.
 
-The panel runs as you, not as root. Flashing the bar and asking Steam questions
-need no rights; writing the config, the self-test and repairing each ask once
-for your password. **In Game Mode that half cannot work** &mdash; there is no
-password prompt there &mdash; so add the panel as a non-Steam game for the Test
-tab, and do the rest in Desktop Mode.
+Caution: After a SteamOS update, press **Rebuild and reinstall**. The update
+brings a new kernel, and the module was built for the previous kernel. The
+panel keeps your configuration and does not flash the ESP.
 
-The window takes its colours from your Plasma accent. To change its icon, drop
-a PNG in as `gui/steamos-utility-center-panel.png` and run `sudo ./install.sh --yes`.
+**Save profile** writes each setting that the window can set into a file.
+**Load profile** reads one back. The panel puts profiles in `profiles/` in the
+clone, and git ignores that directory.
 
-> The panel needs Python's `tkinter`. It is present on SteamOS, but a system
-> update can remove it (`sudo pacman -S tk` brings it back). Nothing is only
-> available in the panel: every button runs a command you can also type, and
-> the panel prints the command it ran.
+Load does not apply. The settings go into the window, then you press Apply. The
+serial port, the baud rate and the device are not in the window, so they can
+never come from another machine.
+
+The panel runs as you and not as root. To flash the bar and to ask Steam
+questions, it needs no rights. To write the configuration, to run the self-test
+and to repair a part, it asks one time for your password.
+
+**That second half cannot operate in Game Mode**, because Game Mode has no
+password prompt. Add the panel as a non-Steam game for the Test page, and do
+the other work in Desktop Mode.
+
+The window takes its colours from your Plasma accent colour. To change its
+icon, put a PNG at `gui/steamos-utility-center-panel.png` and run
+`sudo ./install.sh --yes`.
+
+Caution: The panel needs Python's `tkinter`. SteamOS has it, but a system
+update can remove it. `sudo pacman -S tk` installs it again. The panel is not
+necessary for any function: each button runs a command that you can also type,
+and the panel prints the command that it runs.
 
 ### CPU power
 
-Two settings at the top of the **CPU & GPU power** page, both read off your own machine
-rather than from a list:
+The **CPU & GPU power** page has two settings at the top. The panel reads both
+from your machine and not from a list.
 
 | | |
 | --- | --- |
-| **Governor** | what decides the clock |
-| **Energy preference** | a hint about where in its range the firmware should sit |
+| **Governor** | what controls the clock |
+| **Energy preference** | a hint about the position in the range that the firmware must use |
 
-What exists depends on the cpufreq driver, and **AMD and Intel behave the
-same way here**:
+The cpufreq driver decides what is available. **AMD and Intel behave in the
+same way here:**
 
 | Driver | What you get |
 | ------ | ------------ |
-| `amd-pstate` / `intel_pstate`, active | `powersave` and `performance`, plus the EPP |
-| `amd-pstate` / `intel_cpufreq`, passive | the classic governors (`schedutil`, `ondemand`, …), usually no EPP |
-| `acpi-cpufreq` and older | the classic governors, no EPP at all |
+| `amd-pstate` / `intel_pstate`, active | `powersave` and `performance`, and the EPP |
+| `amd-pstate` / `intel_cpufreq`, passive | the classic governors (`schedutil`, `ondemand`, and others), usually with no EPP |
+| `acpi-cpufreq` and older drivers | the classic governors, with no EPP |
 
-A Steam Machine ships with `amd-pstate` in active mode. Everything here reads
-the generic cpufreq files, so none of it is written for one vendor. To see
-what yours has:
+A Steam Machine has `amd-pstate` in active mode. All of this reads the generic
+cpufreq files, so none of it is written for one manufacturer. To see what your
+machine has, run this command:
 
 ```bash
 steamos-utility-center-power --report
 ```
 
-**The governor rules the preference.** The preference row is only on the page
-when it is a setting at all, and it is written only then:
+**The governor controls the preference.** The preference row is on the page
+only when it is a setting, and the panel writes it only then:
 
 | Governor | Preference |
 | -------- | ---------- |
-| *Leave it to SteamOS* | not shown, not written &mdash; the CPU is not being managed here, so neither half is asserted |
-| `performance` | not shown, not written &mdash; the firmware is pinned to its top preference and the kernel refuses the file |
-| anything else | shown, and written with the governor |
+| *Leave it to SteamOS* | not shown and not written. The panel does not manage the CPU, so it sets neither value |
+| `performance` | not shown and not written. The firmware is at its highest preference and the kernel refuses the file |
+| any other governor | shown, and written with the governor |
 
-So there is no "leave it alone" for the preference: either you are managing
-the CPU, in which case both are set, or you are not, in which case nothing is
-touched. `powersave` is not a battery mode here &mdash; it is the setting that
-lets the firmware range at all.
+There is thus no "leave it alone" for the preference. Either you manage the
+CPU, and the panel sets both values, or you do not, and the panel changes
+nothing.
 
-The governor defaults to leaving the CPU exactly as SteamOS set it, so a fresh
-install changes nothing. What you pick is applied straight away and written to
-`/etc/steamos-utility-center-power.conf`; `steamos-utility-center-power.service` puts it back at
-every boot, and is only enabled once you have set a governor. Uninstalling
-disables it and stops reapplying, but does not put the governor back &mdash;
-nothing recorded what it was before.
+`powersave` is not a battery mode here. It is the setting that lets the
+firmware use its full range.
+
+The default governor leaves the CPU as SteamOS set it, so a new installation
+changes nothing. The panel applies your selection immediately and writes it to
+`/etc/steamos-utility-center-power.conf`.
+`steamos-utility-center-power.service` sets it again at each boot. The
+installer enables that service only after you set a governor.
+
+The uninstaller disables the service and stops the reapplication. It does not
+put the original governor back, because nothing recorded it.
 
 ### HDMI CEC
 
-CEC is the channel already in the HDMI cable that lets devices on it turn each
-other on and switch each other's inputs. With an adapter that exposes it, this
-machine can behave like a console: press a controller's Steam button and the
-television wakes and switches to it; put the machine to sleep and the
-television goes with it.
+CEC is a channel in the HDMI cable. The devices on the cable use it to switch
+each other on and to change each other's inputs. With an adapter that has CEC,
+this machine can behave as a console. Press the Steam button on a controller
+and the television comes on and changes to this input. Put the machine into
+suspend and the television goes off with it.
 
-**Almost none of the CEC work is this project's.** It began as the
+**Almost none of the CEC work is this project's.** It started as the
 [SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit) by Twsts,
-MIT-licensed, and lives here under `cec-toolkit/` as a fork of it: five things
-in it did not work on the machines this was built on, and those fixes are now
-in that tree rather than worked around from outside &mdash;
-`cec-toolkit/README.md` lists them, `cec-toolkit/ORIGIN` records the commit it
-was forked from. It stays a module of its own, installable and usable with no
-part of this panel. What this panel adds is the installation and the switches;
-both it and the toolkit's own Decky plugin drive the same
-`steamos-cec-toolkitctl` helper.
+which is MIT-licensed. It is here under `cec-toolkit/` as a fork of that
+project. Five things in it did not operate on the machines that this project
+was built on. Those five fixes are now in that directory and not in a
+workaround outside it. `cec-toolkit/README.md` lists them, and
+`cec-toolkit/ORIGIN` records the commit of the fork.
 
-**What it needs.** A CEC adapter the kernel exposes as `/dev/cec0` &mdash; a
-DisplayPort-to-HDMI adapter with CEC support, since the machine's own output
-usually is not one &mdash; plus `cec-ctl` from v4l-utils, `varlinkctl` from
-systemd, and the python `dbus_next` module. The section names whichever of
-those are missing before you install rather than after.
+The toolkit stays a module of its own. You can install and use it with no part
+of this panel. This panel adds the installation and the switches. The panel and
+the toolkit's own Decky plugin both use the same `steamos-cec-toolkitctl`
+helper.
 
-**Installing** asks for your password once and switches nothing on. Each
-feature then gets a switch that takes effect as you click it: the toolkit's
-installer leaves a sudoers rule covering exactly the helpers those switches
-use, so there is no password and no Apply after the first time.
+**What it needs.** It needs a CEC adapter that the kernel gives as `/dev/cec0`.
+Use a DisplayPort-to-HDMI adapter with CEC support, because the machine's own
+output usually does not have CEC. It also needs `cec-ctl` from v4l-utils,
+`varlinkctl` from systemd, and the python `dbus_next` module. The panel gives
+the names of the missing parts before the installation and not after it.
+
+**The installation** asks one time for your password and enables nothing. Each
+feature then has a switch that takes effect when you click it. The toolkit's
+installer writes a sudoers rule for the helpers that those switches use. There
+is thus no password and no Apply after the first time.
 
 | Switch | What it does |
 | ------ | ------------ |
-| **Steam button wakes the television** | Home or Guide on a controller powers the TV and receiver on and switches the input back here |
-| **Wake the television at start** | The same, when Game Mode starts after a cold boot |
-| **Turn the television off with the machine** | Sends standby before this machine sleeps or shuts down |
-| **Sleep when the television does** | Suspends this machine when the TV broadcasts standby |
-| **Sleep when the television switches away** | Suspends after the TV has been on another input for a while |
-| **Volume buttons control the television** | Game Mode shows `+`/`-` and they change the receiver's volume. Needs a reboot to appear, and an amplifier &mdash; see below |
-| **Let a controller wake the machine** | Allows Bluetooth radios and controller receivers to wake it from suspend |
-| **Recover Gamescope after a wake** | Restarts Gamescope if the display comes back wrong. A repair for one fault &mdash; leave it off unless you have it |
+| **Steam button wakes the television** | Home or Guide on a controller switches the TV and the receiver on and changes the input to this machine |
+| **Wake the television at start** | the same, when Game Mode starts after a cold boot |
+| **Turn the television off with the machine** | sends standby before this machine suspends or shuts down |
+| **Sleep when the television does** | suspends this machine when the TV broadcasts standby |
+| **Sleep when the television switches away** | suspends after the TV is on another input for some time |
+| **Volume buttons control the television** | Game Mode shows `+` and `-`, and they change the receiver volume. It needs a reboot to appear, and an amplifier. See below |
+| **Let a controller wake the machine** | lets Bluetooth radios and controller receivers wake the machine from suspend |
+| **Recover Gamescope after a wake** | restarts Gamescope if the display comes back in a bad state. This is a repair for one fault. Leave it off unless you have that fault |
 
-**Try it** sends a single wake, standby or volume step and leaves nothing
-behind, which is how to find out whether any of it reaches the television
-before switching a feature on and rebooting into it.
+**Try it** sends one wake, standby or volume command and leaves nothing behind.
+Use it to find out whether the television receives anything, before you enable
+a feature and reboot.
 
-Three settings are on the page &mdash; the adapter, which device carries the
-volume, and the HDMI sound card &mdash; and **Discover** fills them in by
-asking the bus and the sound server. The other forty live in
-`/etc/steamos-cec-toolkit.conf` with a paragraph of explanation each; the
-page writes to a user file that shadows it, so what you set here survives the
-toolkit being installed over the top.
+The page has three settings: the adapter, the device that carries the volume,
+and the HDMI sound card. **Discover** fills them in. It asks the CEC bus and
+the sound server.
 
-**Volume needs an amplifier, not a television.** Volume over CEC is the
-System Audio Control feature and it is written for an AV receiver or a
-soundbar. A television playing its own speakers usually does not implement
-it &mdash; and does not say so: it accepts the volume key, acts on nothing,
-and answers nothing, so the switch looks broken while every log says the
-message was sent. **Ask about volume** on the CEC page puts the question
-directly, and a set that will not do it answers in milliseconds:
+The other forty settings are in `/etc/steamos-cec-toolkit.conf`, each with a
+paragraph of explanation. The page writes to a user file that has priority over
+that file. What you set on the page thus stays after an installation over the
+top.
+
+**Volume needs an amplifier and not a television.** Volume over CEC is the
+System Audio Control feature, and it is written for an AV receiver or a
+soundbar. A television that uses its own speakers usually does not implement
+it, and it does not say so. It accepts the volume command, does nothing, and
+answers nothing. The switch thus looks defective while each log says that the
+message went out.
+
+**Ask about volume** on the CEC page asks the question directly. A television
+that does not do it answers in milliseconds:
 
 ```
 GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
     Received from TV (0): FEATURE_ABORT  reason: refused (0x04)
 ```
 
-That is a "no" from the television, not a fault here.
+That is a "no" from the television. It is not a fault here.
 
-**The controller wake finds your Bluetooth radio, whatever it calls itself.**
-The toolkit looks for one three ways &mdash; an exact `vendor:product` list,
-a regular expression over the device's name, and the Bluetooth USB class
-&mdash; and on anything but a Steam Deck all three could miss. Measured on an
-AM5 board:
+**The controller wake finds your Bluetooth radio, whatever its name is.** The
+toolkit looks for a radio in three ways: an exact `vendor:product` list, a
+regular expression over the device name, and the Bluetooth USB class. On a
+machine that is not a Steam Deck, all three can fail. This is the measurement
+from an AM5 board:
 
 ```
 0e8d:0616 MediaTek Inc. Wireless_Device
 class=ef sub=02 proto=01
 ```
 
-Not the Intel id the list carries; a Bluetooth radio whose name does not
-contain the word Bluetooth; and `ef/02/01` is Interface Association, which
-means "my classes are in my interfaces" &mdash; what every wifi-and-bluetooth
-combo chip says, so the **device** class check could never match one.
-`matched:0`, and no reason given. The class check now looks one level down, at
-the interfaces, where the answer is. **Which radios can wake it** on the CEC
-page asks the toolkit what it matched and says so in a sentence.
+The list has the Intel id and not this one. The name of this Bluetooth radio
+does not contain the word Bluetooth. And `ef/02/01` is Interface Association,
+which means "my classes are in my interfaces". Each combined wifi and Bluetooth
+chip gives that class, so the **device** class check could never match one. The
+helper gave `matched:0` and no reason.
 
-**Waking the television does not hold up the session.** The boot wake settles
-for eight seconds and then retries four times five seconds apart, because a
-set that has just been switched on is not ready at once. That is right, and as
-a `Type=oneshot` unit it also meant `default.target` was not reached until the
-last attempt &mdash; measured, installing the toolkit took one machine's boot
-from 28 seconds to 55, all of it that one service. Its unit says `Type=simple`
-now, so it sends exactly what it sent before, over the same 26 seconds, beside
-the session rather than in front of it.
+The class check now looks one level lower, at the interfaces, where the answer
+is. **Which radios can wake it** on the CEC page asks the toolkit what it
+matched and gives the answer in a sentence.
 
-**Something puts the adapter on the bus.** Nothing used to. Every path that
-sends CEC asks the adapter which logical address it holds and, getting none,
-sent from an address it did not own &mdash; which a television has no reason to
-act on, and which is why unplugging the adapter and plugging it back in was the
-famous cure. `steamos-cec-register` runs once at session start, before the rest:
-it waits for the device, leaves alone any adapter Steam's own `cecd` already
-has, repairs the permissions and restarts `cecd` when nothing holds an address,
-records where this machine is plugged in so waking can switch the input over,
-and claims an address itself only as a last resort.
+**The wake of the television does not delay the session.** The boot wake waits
+eight seconds and then makes four attempts, five seconds apart. A television
+that is new on is not ready immediately, so this is correct.
 
-**If the adapter comes out, switch the features off.** They keep working the
-only way they can: by trying. Leave them on with the adapter gone and every
-start spends over a minute reaching for a television that is not there
-&mdash; eight seconds waiting for the device, twelve for a logical address,
-four times over &mdash; before giving up and letting the session finish.
-Nothing is broken and nothing says so, which is why the panel now says it for
-you on the CEC page and on **Status &amp; repair**. Switching them back on
-when the adapter returns costs nothing.
+As a `Type=oneshot` unit it also meant that `default.target` waited for the
+last attempt. The measurement: the toolkit took the boot of one machine from 28
+seconds to 55 seconds, and that one service was all of it. Its unit now says
+`Type=simple`. It sends what it sent before, over the same 26 seconds, beside
+the session and not in front of it.
 
-**Debugging it.** The toolkit is in the repository rather than fetched, so its
-scripts can be read and changed like everything else here.
-`cec-toolkit/ORIGIN` records the commit it was forked from, which is what makes
-taking a later upstream change a three-way diff rather than a guess. Do not
-repair an install by running upstream's release installer: it would put the
-unfixed programs back.
+**Something puts the adapter on the CEC bus.** Before the fork, nothing did.
+Each path that sends CEC asks the adapter for its logical address. It received
+none and then sent from an address that it did not own. A television has no
+reason to act on such a message. This is why the known repair was to disconnect
+the adapter and connect it again.
+
+`steamos-cec-register` runs one time at the session start, before the other
+units. It waits for the device. It does not touch an adapter that Steam's own
+`cecd` holds. It repairs the permissions and restarts `cecd` when nothing holds
+an address. It records the position of this machine, so that a wake can also
+change the input. It claims an address itself only as the last step.
+
+**If you remove the adapter, switch the features off.** They continue to
+operate in the only way that they can, which is to make attempts. With the
+features on and the adapter gone, each start spends more than one minute on a
+television that is not there: eight seconds for the device, twelve seconds for
+a logical address, four times.
+
+Nothing is defective and nothing says so. The panel thus says it for you, on
+the CEC page and on **Status & repair**. When the adapter returns, switch the
+features on again. This costs nothing.
+
+**To debug it**, read the scripts. The toolkit is in the repository and not
+downloaded, so you can read and change its scripts as you can the other files
+here. `cec-toolkit/ORIGIN` records the commit of the fork, which makes a later
+upstream change a three-way comparison and not a guess.
+
+Caution: Do not repair an installation with the release installer of the
+upstream project. It replaces the programs with the versions that have the five
+faults.
 
 ### The graphics card
 
-Under the CPU settings, and **only when [LACT](https://github.com/ilya-zlobintsev/LACT)
-is running**. LACT is somebody else's daemon and nothing here installs it: if
-`/run/lactd.sock` is not there, this part of the page is not either.
+This block is below the CPU settings. It appears **only when
+[LACT](https://github.com/ilya-zlobintsev/LACT) runs**. LACT is another
+person's daemon and nothing here installs it. If `/run/lactd.sock` is not
+there, this part of the page is not there either.
 
-None of the graphics work is this project's. What the panel adds is a block
-that reads the card through LACT's socket and writes back through it, so the
-things people reach for are in the same window as everything else.
+None of the graphics work is this project's. This panel adds a block that reads
+the card through the LACT socket and writes back through it. The settings that
+people use are thus in the same window as the other settings.
 
 | | |
 | --- | --- |
-| **Profile** | switches between the profiles you made in LACT. Choosing one takes effect at once, because a profile carries its own settings and replaces everything below it |
-| **Power limit** | the card's TDP, in watts |
-| **Maximum GPU clock** / **Maximum VRAM clock** | ceilings, not targets |
-| **Voltage offset** | undervolting, in millivolts either side of stock |
-| **Fan** | off, a fixed speed, or a curve you drag by its points |
-| **The card's own fan settings** | Zero RPM and its stop temperature, target temperature, acoustic limit and target, minimum fan speed &mdash; **RDNA3 and newer only**, see below |
+| **Profile** | changes between the profiles that you made in LACT. A selection takes effect immediately, because a profile carries its own settings and replaces each setting below it |
+| **Power limit** | the TDP of the card, in watts |
+| **Maximum GPU clock** / **Maximum VRAM clock** | limits, not targets |
+| **Voltage offset** | the undervolt, in millivolts above or below the standard value |
+| **Fan** | off, one fixed speed, or a curve that you move by its points |
+| **The card's own fan settings** | Zero RPM and its stop temperature, the target temperature, the acoustic limit and target, and the minimum fan speed. **RDNA3 and newer cards only.** See below |
 
-**Only what your card actually reports is drawn.** The ranges come from LACT's
-own description of that GPU, so a card with no clocks table &mdash; which is
-most integrated graphics, and may be this machine &mdash; gets a power slider
-and nothing else. Four sliders that write nowhere would be worse than one that
-works.
+**The panel draws only what your card reports.** The ranges come from LACT's
+own description of that GPU. A card with no clocks table thus gets a power
+control and nothing else. Most integrated graphics have no clocks table, and
+this machine can be one of them. Four controls that write nowhere are worse
+than one control that operates.
 
-**The last row is the firmware's, not LACT's.** Those settings live in the
-card itself and apply whether or not the switch above them is on &mdash; which
-is the point, since leaving the card to look after its own fan is what most
-people do. They appear only on cards that have them: LACT reads each one out
-of sysfs and reports the ones whose file exists, so a 6000-series card shows
-none of them and a 7000 or 9000 series shows what it has. Not every RDNA3 card
-exposes all six, and a partial answer is ordinary rather than a fault.
+**The last row belongs to the firmware and not to LACT.** Those settings are in
+the card. They apply whether or not the switch above them is on. This is
+correct, because most people let the card control its own fan.
 
-**Clocks and voltage need overdrive turned on in the amdgpu driver**, which is
-a modprobe option and a reboot. LACT's own window has the switch for it and
-its wiki has the
-[page](https://github.com/ilya-zlobintsev/LACT/wiki/Overclocking-(AMD)).
-Until then those sliders may be there and refused.
+Those settings appear only on the cards that have them. LACT reads each one
+from sysfs and reports the ones whose file exists. A 6000-series card thus
+shows none of them, and a 7000-series or 9000-series card shows what it has.
+Not all RDNA3 cards have all six. A partial answer is normal and is not a
+fault.
 
-**Applying asks whether to keep it.** LACT puts the old settings back by
-itself unless the change is confirmed within a few seconds, so the panel shows
-a countdown and answers "put them back" if nobody presses anything &mdash;
-which is exactly the case that timer exists for. A clock the card cannot hold
-makes the screen go black, and then nobody is going to press anything.
+**The clocks and the voltage need overdrive in the amdgpu driver.** This is a
+modprobe option and a reboot. The LACT window has the switch for it, and the
+LACT wiki has the
+[page](https://github.com/ilya-zlobintsev/LACT/wiki/Overclocking-(AMD)). Before
+you enable overdrive, those controls can be present and refused.
 
-**No password.** LACT's daemon gives its socket to the `wheel` group, which on
-SteamOS the desktop user is in. If yours is set up differently, `admin_group`
-in `/etc/lact/config.yaml` names the group that may talk to it, and the block
-says so rather than failing quietly.
+**Apply asks whether to keep the change.** LACT puts the old settings back
+itself if you do not confirm the change in some seconds. The panel thus shows a
+countdown and answers "put them back" if nobody presses a button. This is the
+case that the timer exists for: a clock that the card cannot hold makes the
+screen black, and then nobody can press a button.
+
+**No password is necessary.** The LACT daemon gives its socket to the `wheel`
+group, and on SteamOS the desktop user is in that group. If your machine is
+different, `admin_group` in `/etc/lact/config.yaml` names the group that can
+use the socket. The block says so and does not fail quietly.
 
 ### Keyboard layout
 
-Game Mode has no keyboard settings of its own. gamescope builds its keymap
-through libxkbcommon, which falls back to `XKB_DEFAULT_LAYOUT` when nothing
-else has said otherwise &mdash; so a German keyboard types as a US one until
-that variable is set for the session.
+Game Mode has no keyboard settings. gamescope builds its keymap with
+libxkbcommon, which uses `XKB_DEFAULT_LAYOUT` when nothing else sets the
+layout. A German keyboard thus types as a US keyboard until that variable is
+set for the session.
 
-The **System** page sets it. It writes one line into a file of your own:
+The **System** page sets it. The page writes one line into a file in your home
+directory:
 
 ```
 ~/.config/environment.d/10-keyboard.conf
 ```
 
-which systemd's user manager reads at login. So it **takes effect at the next
-login**, not immediately, and it needs no password &mdash; nothing outside
-your home is touched.
+The systemd user manager reads that file at login. The setting thus **takes
+effect at the next login** and not immediately. It needs no password, because
+nothing outside your home directory changes.
 
 | | |
 | --- | --- |
-| Governs | Game Mode: gamescope, its on-screen keyboard, and games under it |
-| Does **not** govern | Desktop Mode, where Plasma keeps its own layout in the system settings |
-| Undo | pick **Leave it to the system**, which removes the line and the file |
+| It controls | Game Mode: gamescope, its on-screen keyboard, and the games below it |
+| It does **not** control | Desktop Mode, where Plasma keeps its own layout in the system settings |
+| To undo it | select **Leave it to the system**, which removes the line and the file |
 
-The menu offers nineteen layouts rather than all ninety-nine the system knows:
-the panel's drop-down does not scroll, and on a 1280&times;800 screen a longer
-list runs off the bottom edge where it cannot be clicked. For anything else,
-write the code into the file by hand &mdash; the panel keeps it, shows it in
-the menu as its own entry, and never replaces it:
+The menu offers nineteen layouts and not the ninety-nine that the system knows.
+The panel's drop-down list does not scroll, and on a 1280 x 800 screen a longer
+list goes below the bottom edge where you cannot click it.
+
+For another layout, write the code into the file manually. The panel keeps it,
+shows it in the menu as an entry of its own, and never replaces it:
 
 ```bash
 mkdir -p ~/.config/environment.d
 echo "XKB_DEFAULT_LAYOUT=kz" > ~/.config/environment.d/10-keyboard.conf
 ```
 
-Two layouts to switch between are a comma-separated list (`de,us`). Other
-`XKB_DEFAULT_*` variables in that file &mdash; a model, a variant, switching
-options &mdash; are left alone: the panel edits its own line and nothing else.
+To change between two layouts, write a list with a comma (`de,us`). The panel
+does not touch the other `XKB_DEFAULT_*` variables in that file, such as a
+model, a variant or the change options. It edits its own line only.
 
 ## Diagnostics and troubleshooting
 
-**Start with the self test.** It bypasses both Steam and the kernel module, so
-it tells you whether wiring, firmware and the USB path are sound. If it looks
-right, the problem sits between Steam and the service; if it does not, it is
-hardware or firmware.
+**Start with the self test.** It does not use Steam and it does not use the
+kernel module. It thus tells you whether the wiring, the firmware and the USB
+path are correct. If the test is correct, the fault is between Steam and the
+service. If the test is not correct, the fault is in the hardware or the
+firmware.
 
-The service holds the serial port exclusively, so stop it first. These all live
-in `/var/lib/steamos-utility-center/`, and `sudo systemctl start
-steamos-utility-center` puts things back afterwards.
+The service opens the serial port exclusively, so stop the service first. These
+programs are in `/var/lib/steamos-utility-center/`. Afterwards,
+`sudo systemctl start steamos-utility-center` starts the service again.
 
 | Command | Purpose |
 | ------- | ------- |
-| `steamos-utility-center --self-test` | test patterns, without Steam or the kernel module |
-| `steamos-utility-center --list-ports` | list connected USB serial devices |
+| `steamos-utility-center --self-test` | show test patterns, without Steam and without the kernel module |
+| `steamos-utility-center --list-ports` | list the connected USB serial devices |
 | `steamos-utility-center --simulate rainbow` | show one effect continuously |
-| `steamos-utility-center --dump` | show what Steam writes, without driving the LEDs, and how long since its previous write |
-| `steamos-utility-center --temperature` | list sensors and what the [gauge](#temperature) makes of them |
-| `steamos-utility-center --load` | show which CPU and GPU [load counters](#load) this machine has |
-| `steamos-utility-center --desktop` | the [Desktop Mode](#desktop-mode) scene, who has the bar, and what the service recorded about Game Mode |
+| `steamos-utility-center --dump` | show what Steam writes, and the time since its previous write, without control of the LEDs |
+| `steamos-utility-center --temperature` | list the sensors and what the [gauge](#temperature) makes of them |
+| `steamos-utility-center --load` | show the CPU and GPU [load counters](#load) that this machine has |
+| `steamos-utility-center --desktop` | show the [Desktop Mode](#desktop-mode) scene, which program controls the bar, and what the service recorded about Game Mode |
 | `steamos-utility-center --check-config` | load the configuration, validate it and print it |
 | `steamos-utility-center -v` | run in the foreground with debug output |
 
-Follow the log with `journalctl -u steamos-utility-center -f`.
+To follow the log, run `journalctl -u steamos-utility-center -f`.
 
-| Symptom | Cause and fix |
-| ------- | ------------- |
-| `/dev/valve-leds-shim not found` | module not loaded: `sudo modprobe leds-valve-shim`, otherwise `sudo ./install.sh --rebuild-module` |
-| Bar dead after a SteamOS update | module gone or no longer matching the kernel: `sudo ./install.sh --rebuild-module` |
-| `cannot build the kernel module, missing: headers` | say yes when the installer offers to install them. The package is named after your kernel, `linux-neptune-616-headers`, not `linux-headers` |
-| `pacman` refuses everything with a signature error | keyring never initialised: `sudo pacman-key --init && sudo pacman-key --populate` |
-| `pacman` cannot write anything | rootfs is read-only: `sudo steamos-readonly disable` |
-| `sudo` rejects your password on a fresh Deck | there is no password yet, run `passwd` once |
-| `no ESP serial device found` | check `--list-ports`; if empty, try another USB cable, charging cables often have no data wires |
-| Strip stays dark while the service runs | run the self test. If that works, Steam is reporting brightness 0: `MIN_BRIGHTNESS=40` |
-| Desktop Mode scene never shows, or shows during a game | `steamos-utility-center --desktop` on the desktop: it reads back whether the service ever recognised a Game Mode session |
-| Red and green swapped | colour order of the firmware, see [docs/WIRING.md](docs/WIRING.md#colour-order) |
-| Download bar fills from the wrong end | `REVERSE=1` |
-| Dark after switching firmware | the GPIO2 and GPIO14 builds drive different pins, does the firmware match your wiring? |
-| Flicker, LEDs dropping out | baud rate too high: back to 230400 in firmware *and* config, or move the data line to GPIO2 |
-| First LED misbehaves | 3.3 V logic level too low, use a 74AHCT125 or 1N4148, see [docs/WIRING.md](docs/WIRING.md) |
-| Only part of the strip lights up | `LED_COUNT` is wrong, or above the firmware's `MAX_LEDS` |
-| Strip stays lit after unplugging | it should go dark after 5 s; if not, the firmware is outdated |
-| While flashing: `No module named 'intelhex'` | `flash-esp.sh` installs it; otherwise `~/.platformio/penv/bin/python -m pip install intelhex` |
+| Symptom | Cause and repair |
+| ------- | ---------------- |
+| `/dev/valve-leds-shim not found` | the module is not loaded. Run `sudo modprobe leds-valve-shim`. If that fails, run `sudo ./install.sh --rebuild-module` |
+| the bar is dead after a SteamOS update | the module is gone, or it does not match the kernel. Run `sudo ./install.sh --rebuild-module` |
+| `cannot build the kernel module, missing: headers` | answer yes when the installer offers to install them. The package has the name of your kernel, `linux-neptune-616-headers`, and not `linux-headers` |
+| `pacman` refuses each package with a signature error | the keyring is not initialised. Run `sudo pacman-key --init && sudo pacman-key --populate` |
+| `pacman` cannot write | the root filesystem is read-only. Run `sudo steamos-readonly disable` |
+| `sudo` refuses your password on a new Deck | there is no password. Run `passwd` one time |
+| `no ESP serial device found` | look at `--list-ports`. If it is empty, use another USB cable. Charging cables often have no data wires |
+| the strip is dark while the service runs | run the self test. If the test is correct, Steam reports brightness 0. Set `MIN_BRIGHTNESS=40` |
+| the Desktop Mode scene never shows, or it shows during a game | run `steamos-utility-center --desktop` on the desktop. It reports whether the service recognised a Game Mode session |
+| red and green are exchanged | the colour order of the firmware. See [docs/WIRING.md](docs/WIRING.md#colour-order) |
+| the download bar fills from the wrong end | set `REVERSE=1` |
+| the strip is dark after a firmware change | the GPIO2 and GPIO14 builds drive different pins. Verify that the firmware matches your wiring |
+| the LEDs flicker or go off | the baud rate is too high. Set 230400 in the firmware *and* in the configuration, or move the data line to GPIO2 |
+| the first LED is wrong | the 3.3 V logic level is too low. Use a 74AHCT125 or a 1N4148. See [docs/WIRING.md](docs/WIRING.md) |
+| only part of the strip is lit | `LED_COUNT` is wrong, or it is above the firmware's `MAX_LEDS` |
+| the strip stays lit after you disconnect it | it must go dark after 5 s. If it does not, the firmware is old |
+| during a flash: `No module named 'intelhex'` | `flash-esp.sh` installs it. If that fails, run `~/.platformio/penv/bin/python -m pip install intelhex` |
 
-## Updating and removing
+## Updates and removal
 
-From the control panel: *App Settings* > *Update*, pick a branch, **Check for
-updates**, then **Update and install**. Local edits or commits of your own stop
-it with a message naming them, rather than being resolved behind your back.
+Use the control panel: *App Settings* > *Update*, select a branch, press
+**Check for updates**, then press **Update and install**. If you have local
+changes or commits, the update stops and names them. It does not resolve them
+for you.
 
-The same thing from the terminal:
+The same work from the terminal:
 
 ```bash
 cd ~/SteamOS-Utility-Center
@@ -1003,20 +1067,22 @@ git pull
 sudo ./install.sh --yes
 ```
 
-Your `/etc/steamos-utility-center.conf` is left untouched. The ESP firmware only
-needs reflashing when something in `firmware/` changed.
+The installer does not change `/etc/steamos-utility-center.conf`. Flash the ESP
+firmware again only when something in `firmware/` changed.
 
-> **After a SteamOS system update** the kernel module is gone, since the rootfs
-> is reset and a module only ever matches one kernel:
-> ```bash
-> cd ~/SteamOS-Utility-Center && sudo ./install.sh --rebuild-module
-> ```
-> The service itself lives in `/var/lib/` and survives updates.
+Caution: After a SteamOS system update, the kernel module is gone. The update
+resets the root filesystem, and a module matches one kernel only.
 
 ```bash
-sudo ./uninstall.sh                    # everything it installed, gone
-sudo ./uninstall.sh --keep-conf        # keep the settings
-sudo ./uninstall.sh --keep-module      # keep the kernel module
+cd ~/SteamOS-Utility-Center && sudo ./install.sh --rebuild-module
+```
+
+The service is in `/var/lib/` and a system update does not remove it.
+
+```bash
+sudo ./uninstall.sh                    # removes everything it installed
+sudo ./uninstall.sh --keep-conf        # keeps the settings
+sudo ./uninstall.sh --keep-module      # keeps the kernel module
 ```
 
 ## How it works
@@ -1035,20 +1101,21 @@ sudo ./uninstall.sh --keep-module      # keep the kernel module
   ESP8266 / ESP32  ->  WS2812B
 ```
 
-The kernel module presents Steam with an LED bar that does not exist and exposes
-the written state as a snapshot. The service reads it, renders the effects on
-the PC and sends finished pixels to the ESP, which keeps the strip length free
-and the firmware small.
+The kernel module gives Steam an LED bar that does not exist and publishes the
+written state as a snapshot. The service reads the snapshot, renders the
+effects on the PC, and sends complete pixels to the ESP. The strip length is
+thus free and the firmware stays small.
 
-The service reconnects when the ESP is unplugged and plugged back in, and waits
-if the kernel module only shows up later. Every packet is CRC16 protected and
-the parser resynchronises after interference. If the link goes quiet for 5 s the
-firmware blanks the strip, so a pulled cable leaves no LEDs stuck on. Stopping
-the service clears the strip, and the systemd unit runs with no network access
-and `ProtectSystem=strict`.
+The service connects again when you disconnect the ESP and connect it again. It
+waits if the kernel module appears later. Each packet has a CRC16, and the
+parser synchronises again after interference.
+
+If the link is quiet for 5 s, the firmware makes the strip dark. A disconnected
+cable thus leaves no LEDs lit. A stop of the service also makes the strip dark.
+The systemd unit runs with no network access and with `ProtectSystem=strict`.
 
 ```
-leds-valve-shim/          kernel module (GPL-2.0+, vendored unmodified)
+leds-valve-shim/          kernel module (GPL-2.0+, an unmodified copy)
 cec-toolkit/              HDMI CEC, a module of its own (MIT, forked)
 server/steamos_utility_center/       service: config, shim, render, link, serialport
 server/steamos-utility-center            executable entry point
@@ -1059,12 +1126,13 @@ firmware/led-client/      PlatformIO project for ESP8266/ESP32
 tools/make-previews.py    rebuilds the animations on this page
 udev/                     rule for /dev/steamos-led-esp
 docs/PROTOCOL.md          frame format and message types
+docs/STYLE.md             how to write the text in this project
 docs/WIRING.md            wiring, power, level shifting
 tests/                    unit and integration tests
 tests/firmware/           firmware tests against Arduino stubs
 ```
 
-Tests run without hardware and without third-party packages:
+The tests need no hardware and no third-party packages:
 
 ```bash
 python3 -m unittest discover -s tests   # effects, protocol, config, plus an
@@ -1075,48 +1143,53 @@ python3 -m unittest discover -s tests   # effects, protocol, config, plus an
 
 ## Credits and licence
 
-Inspired by
-**[rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release)**,
-which mirrors the same bar over Wi-Fi. This one went a different way, but the
-idea started there and so did the kernel module.
+**[rpf16rj/steamos-led-bar-release](https://github.com/rpf16rj/steamos-led-bar-release)**
+is the inspiration for this project. It mirrors the same bar over Wi-Fi. This
+project took a different direction, but the idea started there, and so did the
+kernel module.
 
-`leds-valve-shim/` is vendored **unmodified** and licensed **GPL-2.0-or-later**.
-It names **Valve Corporation** and **Anna Oake** as its authors, and that licence
-applies to that directory on its own terms: anyone changing the code in there has
-to release those changes under GPL-2.0+ as well. The vendored commit, the
-checksums and the full licence text are in
+`leds-valve-shim/` is an **unmodified** copy and is licensed
+**GPL-2.0-or-later**. It names **Valve Corporation** and **Anna Oake** as its
+authors. That licence applies to that directory on its own terms: a person who
+changes the code in it must release those changes under GPL-2.0+ also. The
+commit, the checksums and the full licence text are in
 [leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
 
-`cec-toolkit/` began as the
+`cec-toolkit/` started as the
 **[SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit)** by
-**Twsts**, licensed **MIT**, and is a fork of it at the commit its `ORIGIN`
-file records. Nearly every part of [HDMI CEC](#hdmi-cec) is that project's
-work; this one adds the installation, the switches, and five fixes listed in
-[cec-toolkit/README.md](cec-toolkit/README.md). Its Decky plugin and
-screenshots were left out, nothing else. The copyright and the MIT terms stay
-with it &mdash; the fixes are a second copyright line in
-[cec-toolkit/LICENSE](cec-toolkit/LICENSE), not a licence change: the work is
-not ours to relicense, and keeping it MIT is what leaves the door open to
-sending a fix back.
+**Twsts**, licensed **MIT**. It is a fork at the commit that its `ORIGIN` file
+records. Almost all of [HDMI CEC](#hdmi-cec) is that project's work. This
+project adds the installation, the switches, and five fixes that
+[cec-toolkit/README.md](cec-toolkit/README.md) lists. Its Decky plugin and its
+screenshots are not here. Nothing else was left out.
 
-The graphics card settings are **[LACT](https://github.com/ilya-zlobintsev/LACT)**
-by **Ilya Zlobintsev**, MIT-licensed. None of it is included here and nothing
-installs it: the panel talks to its daemon over the socket it already listens
-on, and shows nothing at all when it is not running. Every bit of the
-knowing-what-a-GPU-will-take is that project's.
+The copyright and the MIT terms stay with that work. The fixes are a second
+copyright line in [cec-toolkit/LICENSE](cec-toolkit/LICENSE) and not a licence
+change. The work is not ours to relicense, and the MIT licence keeps the
+possibility to send a fix back.
 
-The firmware is built on **[NeoPixelBus](https://github.com/Makuna/NeoPixelBus)**
-by Michael C. Miller (LGPL-3.0-or-later), which clocks the WS2812 protocol, and
-the Arduino cores for [ESP8266](https://github.com/esp8266/Arduino) and
-[ESP32](https://github.com/espressif/arduino-esp32), each under its own licence.
-PlatformIO fetches all of them at build time; none is redistributed here, but
-they end up inside the binary you flash, which is why they are named.
+The graphics card settings are
+**[LACT](https://github.com/ilya-zlobintsev/LACT)** by **Ilya Zlobintsev**,
+which is MIT-licensed. None of it is here and nothing installs it. The panel
+communicates with the LACT daemon over the socket that it already opens, and
+shows nothing when the daemon does not run. All the knowledge about what a GPU
+accepts is that project's.
 
-The bar, its effects and the parameters this reproduces are **Valve's** design,
-and the renderer here is a reimplementation of what a real Steam Machine runs on
-its own microcontroller. Achievement detection loads `libsteam_api.so` out of
-your own Steam installation at runtime; nothing from the Steamworks SDK is
-redistributed here. Everything else was written for this project.
+The firmware uses **[NeoPixelBus](https://github.com/Makuna/NeoPixelBus)** by
+Michael C. Miller (LGPL-3.0-or-later), which clocks the WS2812 protocol. It
+also uses the Arduino cores for
+[ESP8266](https://github.com/esp8266/Arduino) and
+[ESP32](https://github.com/espressif/arduino-esp32), each under its own
+licence. PlatformIO downloads all of them at build time. None of them is in
+this repository, but they are in the binary that you flash. This is why they
+are named here.
 
-Copyright &copy; 2026 caed1994. Licensed **GPL-3.0-or-later**; the full text is
+The bar, its effects and the parameters that this project reproduces are
+**Valve's** design. The renderer here is a new implementation of what a real
+Steam Machine runs on its own microcontroller. Achievement detection loads
+`libsteam_api.so` from your own Steam installation at run time. Nothing from
+the Steamworks SDK is in this repository. The remainder was written for this
+project.
+
+Copyright &copy; 2026 caed1994. Licensed **GPL-3.0-or-later**. The full text is
 in [LICENSE](LICENSE).
