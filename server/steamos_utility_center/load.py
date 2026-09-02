@@ -1,14 +1,16 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""How busy the CPU and the GPU are, for the load gauge.
+"""The CPU load and the GPU load, for the load gauge.
 
-Two very different kernel interfaces for the same kind of number. The CPU
-publishes running totals in /proc/stat and expects you to do the arithmetic:
-the load over an interval is the difference between two readings, so the first
-one can only ever produce a baseline. The GPU publishes the answer directly in
-sysfs as a percentage, but only on drivers that bother - amdgpu does, which is
-what a Steam Machine has.
+The kernel gives the two numbers through two different interfaces.
+
+The CPU interface is /proc/stat, which publishes totals from the boot. The
+caller must do the arithmetic. The load in an interval is the difference
+between two readings, so the first reading gives only a baseline.
+
+The GPU interface is sysfs, which publishes the answer as a percentage. Only
+some drivers publish it. amdgpu does, and a Steam Machine has amdgpu.
 """
 
 from __future__ import annotations
@@ -23,15 +25,18 @@ LOG = logging.getLogger(__name__)
 
 CPU_STAT = "/proc/stat"
 
-# amdgpu, and i915 on new enough kernels. Nothing else publishes it, so a
-# machine without one shows the CPU alone rather than half a dark bar.
+# amdgpu, and i915 on a new kernel. No other driver publishes it. A machine
+# with another driver thus shows the CPU alone and not one dark half.
 GPU_BUSY_GLOB = "/sys/class/drm/card*/device/gpu_busy_percent"
 
-# How often the counters are read, and how hard the reading is damped. Faster
-# than the temperature gauge, because load is what the machine is doing right
-# now. Damped harder than the reading rate, because it is also the noisier of
-# the two: a game's frame pacing swings the counters far more than the bar
-# should follow.
+# The read interval of the counters, and the strength of the average.
+#
+# The interval is shorter than the interval of the temperature gauge, because
+# the load is the immediate condition of the machine.
+#
+# The average is stronger than the read interval, because the load is also the
+# more irregular of the two numbers. The frame pacing of a game moves the
+# counters much more than the bar must follow.
 READ_INTERVAL = 0.25
 SMOOTHING_SECONDS = 1.0
 
@@ -45,18 +50,18 @@ def _read_text(path):
 
 
 def read_cpu_totals(path=CPU_STAT):
-    """(busy, total) jiffies since boot, or None if /proc/stat is not there.
+    """Returns (busy, total) jiffies from the boot, or None with no /proc/stat.
 
-    Idle and iowait are both "not working": a core waiting on the SSD is not
-    one you can give more work to, but it is also not one that is doing any.
+    Idle and iowait both count as "no work". A core that waits for the SSD
+    cannot accept more work, but it also does no work.
     """
     text = _read_text(path)
     if not text:
         return None
     for line in text.splitlines():
         fields = line.split()
-        # "cpu" alone is the total across cores; "cpu0" and friends are the
-        # per-core breakdown, which is one number more than a bar can show.
+        # "cpu" alone is the total of the cores. "cpu0" and the others give
+        # one number for each core, which is more than a bar can show.
         if not fields or fields[0] != "cpu":
             continue
         try:
@@ -72,7 +77,7 @@ def read_cpu_totals(path=CPU_STAT):
 
 
 def find_gpu_busy(pattern=GPU_BUSY_GLOB):
-    """The first readable gpu_busy_percent, or None on a driver without one."""
+    """Returns the first gpu_busy_percent it can read, or None."""
     for path in sorted(glob.glob(pattern)):
         if _read_text(path) is not None:
             return path
@@ -80,7 +85,7 @@ def find_gpu_busy(pattern=GPU_BUSY_GLOB):
 
 
 def read_gpu_percent(path):
-    """The GPU's busy percentage as a fraction, or None."""
+    """Returns the GPU load as a fraction of 1, or None."""
     text = _read_text(path)
     if text is None:
         return None
@@ -91,11 +96,11 @@ def read_gpu_percent(path):
 
 
 class LoadSource:
-    """How busy the two big chips are, each 0..1, read at a sane rate.
+    """The CPU load and the GPU load, each from 0 to 1.
 
-    Both are handed out smoothed and from one place, because they are drawn
-    as one picture: reading them at different moments would show a frame that
-    never actually happened.
+    One class gives both numbers, and it gives both as an average. The gauge
+    draws them as one picture. Two readings at two moments would make a frame
+    that did not occur.
     """
 
     def __init__(self, interval=READ_INTERVAL, smoothing=SMOOTHING_SECONDS,
@@ -107,8 +112,8 @@ class LoadSource:
         self.gpu_path = None
         self._resolved = False
         self._totals = None
-        # Where the counters last said we are, and where the bar has got to on
-        # its way there. Two things, because they move at different rates.
+        # The last value from the counters, and the value that the bar shows
+        # now. They are two values, because they move at different rates.
         self._cpu_read = None
         self._gpu_read = None
         self._cpu = None
@@ -118,7 +123,7 @@ class LoadSource:
         self._complained = False
 
     def resolve(self):
-        """Settle on a GPU file, once. Returns the path, or None."""
+        """Selects a GPU file one time. Returns the path, or None."""
         if not self._resolved:
             self._resolved = True
             self.gpu_path = find_gpu_busy(self.gpu_pattern)
@@ -130,17 +135,17 @@ class LoadSource:
         return self.gpu_path
 
     def fractions(self, now=None):
-        """(cpu, gpu) as fractions of 1, or None when neither can be read.
+        """Returns (cpu, gpu) as fractions of 1, or None if it reads neither.
 
-        Either entry may be None on its own: a machine can have a CPU counter
-        and no GPU one, which is a gauge with something to say and half the
-        detail, not a gauge that has failed.
+        One entry alone can be None. A machine can have a CPU counter and no
+        GPU counter. That gauge has half of the detail. It is not a gauge that
+        failed.
 
-        Reading and showing run at different rates on purpose. The counters can
-        only be read every `interval` - the CPU's are running totals, and the
-        load between two of them needs both. But the value handed out moves a
-        little on every call, so the bar glides at whatever rate it is drawn
-        rather than stepping four times a second.
+        The read rate and the draw rate are different, and this is deliberate.
+        The counters permit one read in each `interval`, because the CPU
+        counters are totals and a load needs two of them. The value that this
+        returns moves a small amount at each call. The bar thus moves smoothly
+        at the draw rate and does not step four times each second.
         """
         now = time.monotonic() if now is None else now
         if self._taken is None or now - self._taken >= self.interval:
@@ -149,10 +154,10 @@ class LoadSource:
             path = self.resolve()
             self._gpu_read = read_gpu_percent(path) if path else None
 
-            # Not "both values are None": on the first reading the CPU has no
-            # baseline to subtract from yet, which is a gauge warming up rather
-            # than a machine that cannot answer. _totals stays None only when
-            # /proc/stat itself could not be read.
+            # This is not the same as "both values are None". At the first
+            # reading the CPU has no baseline to subtract. That gauge is in
+            # its first interval. It is not a machine that cannot answer.
+            # _totals stays None only when /proc/stat itself is unreadable.
             if self._totals is None and path is None and not self._complained:
                 self._complained = True
                 LOG.warning("no CPU or GPU load to read - the gauge falls back "
@@ -172,19 +177,20 @@ class LoadSource:
         return self._cpu, self._gpu
 
     def _sample_cpu(self):
-        """The CPU's share of the time since the last reading, 0..1."""
+        """Returns the CPU part of the time from the last reading, 0 to 1."""
         totals = read_cpu_totals(self.stat_path)
         if totals is None:
             return None
         previous, self._totals = self._totals, totals
         if previous is None:
-            # The very first reading has nothing to subtract from. Reporting
-            # the since-boot average here would show a fresh machine at 2%
-            # while it compiles something, so say nothing for one interval.
+            # The first reading has nothing to subtract. The average from
+            # the boot would show a new machine at 2% while it compiles
+            # something. Report nothing for one interval instead.
             return None
         busy = totals[0] - previous[0]
         total = totals[1] - previous[1]
         if total <= 0:
-            # The clock did not tick between readings, or the counters wrapped.
+            # The clock did not move between the readings, or the counters
+            # returned to zero.
             return None
         return max(0.0, min(busy / float(total), 1.0))

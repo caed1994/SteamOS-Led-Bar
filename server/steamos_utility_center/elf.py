@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Just enough ELF parsing to list what a shared object exports.
+"""The part of ELF that lists what a shared object exports.
 
-The flat Steamworks accessors carry a version suffix that depends on the SDK a
-library was built from, so reading the dynamic symbol table turns a guess into
-a lookup - and lets `--steam-check` say what a library actually offers. Stock
-SteamOS has no binutils, hence no shelling out to nm or objdump.
+The flat Steamworks accessors carry a version suffix. The suffix depends on the
+SDK that built the library. A read of the dynamic symbol table thus replaces a
+guess with a lookup, and it lets `--steam-check` report what a library gives.
+
+SteamOS does not have binutils, so this module cannot start nm or objdump.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ class ElfError(ValueError):
 
 
 def elf_class(path):
-    """1 for a 32-bit object, 2 for 64-bit, None if it is not an ELF file."""
+    """Returns 1 for a 32-bit object, 2 for 64-bit, None for other files."""
     try:
         with open(path, "rb") as handle:
             header = handle.read(5)
@@ -45,7 +46,7 @@ def _unpack(fmt, data, offset):
 
 
 def exported_symbols(path):
-    """Every name in the dynamic symbol table of an ELF shared object."""
+    """Returns each name in the dynamic symbol table of a shared object."""
     with open(path, "rb") as handle:
         data = handle.read()
 
@@ -103,7 +104,7 @@ def exported_symbols(path):
             (name_index,) = _unpack(name_fmt, data, position)
             (shndx,) = _unpack(endian + "H", data, position + shndx_offset)
             if not name_index or shndx == 0:
-                continue        # unnamed, or imported rather than exported
+                continue        # it has no name, or it is an import
             end = strings.find(b"\x00", name_index)
             if end < 0:
                 continue

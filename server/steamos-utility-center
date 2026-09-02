@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Entry point wrapper so the service runs straight from its install dir."""
+"""The entry point, so that the service runs from its installation directory."""
 
 import os
 import sys

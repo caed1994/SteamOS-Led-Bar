@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Reader for the leds-valve-shim character device.
+"""The reader for the leds-valve-shim character device.
 
-The shim exposes the LED state Steam writes in Game Mode as a packed 100 byte
-snapshot. read() is non-blocking and always returns the current state; poll()
-reports EPOLLIN whenever the sequence counter advanced.
+The shim publishes the LED state that Steam writes in Game Mode. The state is
+a packed snapshot of 100 bytes.
+
+read() does not block and always returns the current state. poll() reports
+EPOLLIN each time the sequence counter increases.
 """
 
 from __future__ import annotations
@@ -19,10 +21,10 @@ DEFAULT_DEVICE = "/dev/valve-leds-shim"
 MAGIC = 0x564C4544  # "VLED"
 LOGICAL_LEDS = 17
 
-# Where the module starts its counter, and where it stays until something
-# writes. A snapshot still carrying it means Steam has not touched the LEDs
-# since the module loaded - which is most of a boot, and the module reports
-# "off" all the while.
+# The initial value of the counter in the module. It keeps this value until
+# something writes. A snapshot with this value thus means that Steam did not
+# write to the LEDs after the module load. This is the condition for most of a
+# boot, and the module reports "off" for all of that time.
 UNTOUCHED_SEQ = 1
 
 HEADER_SIZE = 32
@@ -51,19 +53,19 @@ EFFECT_NAMES = {
     EFFECT_DEMO: "demo",
 }
 
-# Effects the real hardware animates on its own. The snapshot only changes when
-# Steam writes new settings, so these have to be animated locally.
+# The effects that the real hardware animates itself. The snapshot changes only
+# when Steam writes new settings, so this service animates these effects.
 ANIMATED_EFFECTS = frozenset(
     (EFFECT_RAINBOW, EFFECT_BREATH, EFFECT_PATROL, EFFECT_FACTORY, EFFECT_DEMO)
 )
 
 
 class SnapshotError(ValueError):
-    """Raised when the device returns something that is not a valid snapshot."""
+    """The device returned data that is not a valid snapshot."""
 
 
 class Snapshot:
-    """Decoded LED state as written by Steam."""
+    """The decoded LED state that Steam wrote."""
 
     __slots__ = (
         "seq", "monotonic_ns", "enabled", "effect", "brightness_scale",
@@ -95,20 +97,21 @@ class Snapshot:
         return bool(self.enabled) and self.effect in ANIMATED_EFFECTS
 
     def base_color(self):
-        """The colour Steam picked, used as the tint for animated effects."""
+        """Returns the colour that Steam selected, for an animated effect."""
         for red, green, blue, _brightness in self.pixels:
             if red or green or blue:
                 return (red, green, blue)
         return (255, 255, 255)
 
     def key(self, brightness=True):
-        """Everything that changes the rendered output, for change detection.
+        """Returns each field that changes the rendered output.
 
-        The brightness can be left out, for a caller asking whether two of
-        these are the same thing at different brightnesses rather than two
-        different things - see desktop.py, where Steam fading its own effect
-        down and back up is not Steam changing what it is showing. One field
-        list either way, so the two questions cannot drift apart.
+        The caller can leave the brightness out. That caller asks whether two
+        snapshots are the same effect at two brightnesses, and not two
+        different effects. desktop.py asks that question, because a fade of an
+        effect by Steam is not a change of the effect.
+
+        One list of fields answers both questions. Two lists become different.
         """
         return (
             self.enabled, self.effect,
@@ -172,14 +175,14 @@ class ShimSource:
                 self.fd = -1
 
     def read(self):
-        """Read the current snapshot; returns None on a transient read error."""
+        """Reads the current snapshot. Returns None after a read error."""
         data = os.read(self.fd, SNAPSHOT_SIZE)
         if not data:
             return None
         return parse(data)
 
     def wait(self, timeout):
-        """Block up to ``timeout`` seconds for a state change."""
+        """Waits up to ``timeout`` seconds for a change of state."""
         return bool(self._poll.poll(timeout * 1000.0))
 
     def __enter__(self):
@@ -191,7 +194,7 @@ class ShimSource:
 
 
 def encode(snapshot, seq=0):
-    """Build a raw snapshot buffer. Used by the simulator and the tests."""
+    """Builds a raw snapshot buffer, for the simulator and the tests."""
     header = _HEADER.pack(
         MAGIC, 1, SNAPSHOT_SIZE, seq, 0,
         snapshot.enabled, snapshot.effect, snapshot.brightness_scale,
@@ -207,11 +210,11 @@ def encode(snapshot, seq=0):
 
 def make_snapshot(effect=EFFECT_MANUAL, color=(255, 255, 255), brightness=255,
                   enabled=1, delay=8, patrol_num=3, color_shift=5):
-    """Convenience constructor for simulation and self tests.
+    """Makes a snapshot for the simulator and the self tests.
 
-    Defaults mirror the module's own (VALVE_DELAY_DEFAULT,
-    VALVE_PATROL_NUM_DEFAULT, VALVE_COLOR_SHIFT_DEFAULT), so simulated output
-    matches an untouched device.
+    The defaults are the defaults of the module: VALVE_DELAY_DEFAULT,
+    VALVE_PATROL_NUM_DEFAULT and VALVE_COLOR_SHIFT_DEFAULT. The simulated
+    output thus agrees with a device that nothing wrote to.
     """
     pixels = [(color[0], color[1], color[2], 255) for _ in range(LOGICAL_LEDS)]
     return Snapshot(0, 0, enabled, effect, brightness, delay, 0, 0,

@@ -1,35 +1,38 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""How the CPU trades speed against power, and how to change it.
+"""How the CPU balances speed against power, and how to change it.
 
-Two knobs, and they are not independent.
+There are two settings, and they are not independent.
 
-The *governor* decides the clock. The *EPP* - energy performance preference -
-is a hint to the firmware about where in its range to sit. Which of them exist
-depends on the cpufreq driver, and the two families behave the same way:
+The *governor* controls the clock. The *EPP*, the energy performance
+preference, is a hint to the firmware about the position in its range. The
+cpufreq driver decides which of the two exists. The two families behave in the
+same way:
 
     amd-pstate / intel_pstate, active   performance and powersave, plus an EPP
     amd-pstate / intel_cpufreq, passive the classic governors, usually no EPP
     acpi-cpufreq and older              the classic governors, no EPP at all
 
-Nothing here is written for one vendor. Everything but one reporting line goes
-through the generic cpufreq files, which is why this works on Intel as it does
-on the AMD part a Steam Machine has - the pinning rule below included, since
-intel_pstate pins the preference under `performance` exactly as amd-pstate
-does. The exception is driver_mode, which reads a file only AMD publishes and
-is reported beside driver() rather than instead of it.
+No part of this module is written for one manufacturer. Each line except one
+uses the generic cpufreq files. This module thus operates on Intel as it
+operates on the AMD part in a Steam Machine. The rule below is also the same,
+because intel_pstate fixes the preference under `performance` as amd-pstate
+does.
 
-So nothing here has a list of its own. Everything offered is read out of sysfs
-at the moment it is asked for, and a machine that offers neither gets a page
-that says so rather than a menu that writes to files it does not have.
+The exception is driver_mode. It reads a file that only AMD publishes, and it
+is reported beside driver() and not in place of it.
 
-The one interaction worth knowing: under the `performance` governor the
-firmware is pinned to its top preference and the EPP file stops accepting
-anything else. That is the kernel's rule, not ours - see epp_applies.
+This module thus has no list of its own. It reads each available value from
+sysfs at the moment of the question. A machine with neither setting gets a page
+that says so, and not a menu that writes to files that are not there.
 
-Nothing in here writes anything. Applying needs root and lives in
-steamos-utility-center-power, which this module is the reading half of.
+One interaction is important. Under the `performance` governor, the firmware is
+at its highest preference and the EPP file refuses each other value. This is
+the kernel's rule. See epp_applies.
+
+Nothing in this module writes. To apply a setting needs root, and that work is
+in steamos-utility-center-power. This module is the read half.
 """
 
 from __future__ import annotations
@@ -46,46 +49,50 @@ GOVERNORS_AVAILABLE = "scaling_available_governors"
 EPP = "energy_performance_preference"
 EPP_AVAILABLE = "energy_performance_available_preferences"
 
-# What "leave it alone" is spelled as, the same way the keyboard layout does
-# it: the absence of a setting rather than a value it could take. A machine
-# with nothing set here is the ordinary one, and this project should not be
-# holding an opinion about the CPU until somebody asks it to.
+# How this project writes "leave it alone". It is the absence of a setting and
+# not a value that the setting can take. The keyboard layout uses the same
+# method. A machine with nothing set here is the normal machine, and this
+# project must have no opinion about the CPU until a person asks for one.
 UNSET = ""
 
-# The governor that pins the firmware to its top preference, so the EPP file
-# is refused while it is set. Named because two places have to agree about it:
-# the panel, which greys the EPP menu, and the applier, which does not treat
-# that refusal as a failure.
+# The governor that fixes the firmware at its highest preference. The EPP file
+# refuses a write while this governor is set. It has a name because two places
+# must agree about it: the panel, which makes the EPP menu grey, and the
+# program that applies the setting, which does not count that refusal as a
+# failure.
 PINNED_GOVERNOR = "performance"
 
-# What the drivers with an EPP offer, for the one moment the machine will not
-# say. While the pinning governor is set the kernel collapses
-# energy_performance_available_preferences to that single value - so a list
-# read then reports what is choosable *now* rather than what the hardware can
-# do, and switching away from that governor in the same sitting would be
-# choosing from a list of one.
+# The values that the drivers with an EPP give, for the one moment when the
+# machine does not answer.
 #
-# These five are amd-pstate's and intel_pstate's alike - between them every
-# machine that has this file at all, which is why one list serves both. Used
-# only while the reported list is untrustworthy; anywhere else the machine is
-# asked.
+# While the fixing governor is set, the kernel reduces
+# energy_performance_available_preferences to that one value. A read then gives
+# the values that are available *now* and not the values that the hardware has.
+# To change away from that governor in the same session would thus be a
+# selection from a list of one.
+#
+# These five values are the values of amd-pstate and of intel_pstate. Together
+# they cover each machine that has the file, so one list serves both. This list
+# is used only while the reported list is not correct. Everywhere else, this
+# module asks the machine.
 PINNED_FALLBACK = ("default", "performance", "balance_performance",
                    "balance_power", "power")
 
 DEFAULTS = {
     "CPU_GOVERNOR": UNSET,
-    # Not UNSET. The preference is only ever written alongside a governor -
-    # see epp_in_play - so there is no case where "leave the file alone" is a
-    # thing this can mean: either the CPU is being managed here, in which case
-    # both are set, or it is not, in which case neither is written.
+    # Not UNSET. This project writes the preference only with a governor. See
+    # epp_in_play. There is thus no case in which "leave the file alone" has a
+    # meaning here. Either this project manages the CPU and sets both values,
+    # or it does not and writes neither.
     "CPU_EPP": "default",
 }
 
-# Wording for the values these files use, for anything showing them to a
-# person. Only where the kernel's own word is not one: "powersave" reads like
-# a mode you would only pick on battery, and on amd-pstate active it is the
-# ordinary one - it is the setting that lets the firmware range at all, and
-# `performance` is the one that pins it.
+# The words for the values of these files, for a display to a person. This
+# table has an entry only where the kernel's own word is not clear.
+#
+# "powersave" reads as a mode for a battery. On amd-pstate in active mode it is
+# the normal mode: it is the setting that lets the firmware use its full range.
+# `performance` is the setting that fixes the firmware at one point.
 LABELS = {
     "powersave": "Powersave - the firmware picks the clock",
     "performance": "Performance - hold the top of the range",
@@ -105,22 +112,21 @@ def _read(path):
 
 
 def policies(root=""):
-    """Every cpufreq policy directory, sorted. Empty when there is no cpufreq.
+    """Returns each cpufreq policy directory, sorted. Empty with no cpufreq.
 
-    Every CPU rather than the first: the files are per policy, and a machine
-    that only had cpu0 written to would be running its cores under different
-    governors with nothing on screen to say so.
+    It returns each CPU and not the first CPU. There is one set of files for
+    each policy. A machine with a write to cpu0 only would run its cores under
+    different governors, and the screen would not say so.
     """
     return sorted(glob.glob(root + CPUFREQ))
 
 
 def driver(root=""):
-    """Which cpufreq driver is running: intel_pstate, amd-pstate-epp, ...
+    """Returns the cpufreq driver: intel_pstate, amd-pstate-epp, and others.
 
-    The generic answer, and the one worth leading a report with. Every machine
-    with cpufreq has this file, where amd_pstate/status exists on exactly one
-    family - so a report built on that one alone told an Intel machine only
-    what it was not.
+    This is the generic answer and the first line of a report. Each machine
+    with cpufreq has this file. amd_pstate/status exists on one family only. A
+    report from that file alone told an Intel machine what it was not.
     """
     found = policies(root)
     if not found:
@@ -129,23 +135,22 @@ def driver(root=""):
 
 
 def driver_mode(root=""):
-    """What amd_pstate says it is in, or "" when it is not amd_pstate.
+    """Returns the amd_pstate mode, or "" on a machine without amd_pstate.
 
-    Only AMD publishes its mode under a name like this; on Intel the same
-    distinction is in the driver's own name - intel_pstate is the active one
-    and intel_cpufreq is that driver in passive mode. So this is reported
-    beside driver() rather than instead of it.
+    AMD alone publishes its mode under this name. On Intel the same difference
+    is in the name of the driver: intel_pstate is the active driver, and
+    intel_cpufreq is the same driver in passive mode. This function is thus
+    reported beside driver() and not in place of it.
 
-    Worth reporting rather than only acting on: active and passive offer
-    different governors and only one of them reliably has an EPP, so a page
-    that showed the wrong set would look broken to somebody who had read the
-    wiki.
+    The mode is worth a report and not only an action. Active mode and passive
+    mode give different governors, and only one of them has an EPP each time. A
+    page with the wrong set looks defective to a person who read the wiki.
     """
     return _read(root + PSTATE_STATUS)
 
 
 def _offered(name, root=""):
-    """The values one cpufreq file accepts, as reported by the first policy."""
+    """Returns the values that one cpufreq file accepts, from policy 0."""
     found = policies(root)
     if not found:
         return ()
@@ -157,17 +162,19 @@ def governors(root=""):
 
 
 def epp_values(root=""):
-    """What the preference will take once a governor that allows it is set.
+    """Returns the values that the preference accepts under a governor.
 
-    Not simply what the file says right now. While the pinning governor is
-    running the kernel collapses this list to that one value, so reading it
-    then answers "what may I choose at this instant" - and the question being
-    asked is always "what may I choose once I have applied the governor I am
-    about to apply", which is a different one.
+    This is not the current content of the file. While the fixing governor
+    runs, the kernel reduces this list to that one value. A read then answers
+    "what can I select at this moment".
 
-    This is the bug that reached a screenshot: with the performance governor
-    already applied, picking powersave and a preference in the same sitting
-    was refused, because the check read a list of one.
+    The question here is always different: "what can I select after I apply the
+    governor that I am about to apply".
+
+    This was a defect that a user reported with a screenshot. With the
+    performance governor already applied, a selection of powersave and a
+    preference in the same session was refused, because the check read a list
+    of one value.
     """
     reported = _offered(EPP_AVAILABLE, root)
     if not reported:
@@ -178,16 +185,18 @@ def epp_values(root=""):
 
 
 def epp_in_play(values, root=""):
-    """Whether the preference is a setting at all, for these values.
+    """Returns whether the preference is a setting, for these values.
 
-    Three ways it is not, and all three mean the same thing to everything
-    that asks: do not offer it, do not validate it, do not write it.
+    Three conditions make it not a setting. Each of the three means the same
+    thing to each caller: do not offer it, do not validate it, do not write it.
 
-    Without a governor of ours, because then this project is not managing how
-    the CPU runs and should not be asserting half of it - a preference set
-    behind a governor nobody chose is a setting whose effect depends on what
-    SteamOS happens to default to. Under the pinning governor, because the
-    kernel refuses the file. And on a machine whose driver has no such file.
+    The first condition is a machine with no governor of ours. This project
+    then does not manage the CPU and must not set one half of it. The effect of
+    a preference under a governor that nobody selected depends on the SteamOS
+    default.
+
+    The second condition is the fixing governor, under which the kernel refuses
+    the file. The third condition is a driver that has no such file.
     """
     if values.get("CPU_GOVERNOR", UNSET) == UNSET:
         return False
@@ -197,7 +206,7 @@ def epp_in_play(values, root=""):
 
 
 def current(root=""):
-    """What is set right now, as {key: value}. Empty strings when unreadable."""
+    """Returns the current settings as {key: value}. "" if unreadable."""
     found = policies(root)
     if not found:
         return {"CPU_GOVERNOR": UNSET, "CPU_EPP": UNSET}
@@ -206,7 +215,7 @@ def current(root=""):
 
 
 def available(root=""):
-    """Everything a page needs to build itself, in one read of the machine."""
+    """Returns each value that a page needs, in one read of the machine."""
     return {
         "driver": driver(root),
         "mode": driver_mode(root),
@@ -218,25 +227,25 @@ def available(root=""):
 
 
 def epp_applies(governor):
-    """Whether the EPP setting reaches the firmware under this governor.
+    """Returns whether the EPP reaches the firmware under this governor.
 
-    False under `performance`, where the kernel pins the preference and
-    refuses writes to the file. A page that offered the menu anyway would be
-    offering a setting the machine will not take.
+    It returns False under `performance`. The kernel then fixes the preference
+    and refuses a write to the file. A page that offered the menu would offer a
+    setting that the machine does not accept.
     """
     return governor != PINNED_GOVERNOR
 
 
 def validate(values, root=""):
-    """Refuse a value this machine does not offer.
+    """Refuses a value that this machine does not offer.
 
-    Checked against the machine rather than against a list here, because the
-    list depends on the driver's mode - and a config file carried over from a
-    machine in a different mode is exactly how you get a governor that does
-    not exist written into sysfs.
+    The check is against the machine and not against a list in this file,
+    because the list depends on the mode of the driver. A configuration file
+    from a machine in a different mode is how a governor that does not exist
+    reaches sysfs.
 
-    A machine with no cpufreq at all accepts only "leave it alone", which is
-    what an unset setting already is.
+    A machine with no cpufreq accepts "leave it alone" only, and that is what
+    an unset setting already is.
     """
     governor = values.get("CPU_GOVERNOR", UNSET)
     if governor != UNSET and governor not in governors(root):
@@ -246,9 +255,9 @@ def validate(values, root=""):
             % (governor, (": " + ", ".join(offered)) if offered
                else " - it has no cpufreq at all"))
 
-    # Only when it is a setting at all. Checked against what will be on offer
-    # once the governor above has been applied, which is not what the file
-    # reports while a pinning governor is still running - see epp_values.
+    # Only when it is a setting. The check uses the values that are available
+    # after the governor above is applied. That is not what the file reports
+    # while a fixing governor still runs. See epp_values.
     if not epp_in_play(values, root):
         return
     epp = values.get("CPU_EPP", UNSET)
