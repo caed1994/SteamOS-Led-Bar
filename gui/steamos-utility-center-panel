@@ -390,12 +390,14 @@ ABOUT_LINES = (
     ("Project", "github.com/caed1994/SteamOS-Utility-Center"),
     ("Licence",
      "GPL-3.0-or-later. The firmware, the kernel shim, the service and this "
-     "panel are all in the one repository. Two directories are somebody "
-     "else's under their own terms - see vendor/ and leds-valve-shim/."),
+     "panel are all in the one repository. Two directories carry somebody "
+     "else's copyright under their own terms - see cec-toolkit/ and "
+     "leds-valve-shim/."),
     ("HDMI CEC",
-     "Every part of it is the SteamOS CEC Toolkit by Twsts, MIT-licensed, "
-     "kept in this repository under vendor/. This panel installs it and "
-     "switches its features on and off; none of the CEC work is ours."),
+     "Almost all of it is the SteamOS CEC Toolkit by Twsts, MIT-licensed. "
+     "cec-toolkit/ is a fork of it: this panel installs it, switches its "
+     "features on and off, and fixes five things in it. The idea and the "
+     "work are that project's."),
     ("Graphics card",
      "LACT by Ilya Zlobintsev, MIT-licensed. Nothing here installs it and "
      "nothing here is copied from it - the panel talks to its daemon over "
@@ -5132,10 +5134,10 @@ class Panel:
                 "cable: wake the screen and switch the input to it, turn it "
                 "off when the machine sleeps, and put the television's own "
                 "volume on Game Mode's volume buttons.",
-                "This installs the SteamOS CEC Toolkit, which is somebody "
-                "else's work kept in this repository under vendor/. Nothing "
-                "is switched on by installing it - each feature gets a "
-                "switch here afterwards."):
+                "This installs the SteamOS CEC Toolkit, almost all of it "
+                "somebody else's work, kept in this repository under "
+                "cec-toolkit/. Nothing is switched on by installing it - "
+                "each feature gets a switch here afterwards."):
             said = ttk.Label(inner, text=text, style="Muted.TLabel", justify="left",
                              wraplength=CARD_WRAP)
             said.pack(anchor="w", pady=(ROW_GAP, 0))
@@ -5175,12 +5177,12 @@ class Panel:
         row.pack(anchor="w", pady=(GROUP_GAP, 0))
         ttk.Button(row, text="Check again", style="Tonal.TButton",
                    command=self._reread_cec).pack(side="left")
-        # Beside the adapter rather than under the switch it serves, because
-        # it is the one thing on this page that asks for a password, and the
-        # switches next door do not. See ledpanel.wake_ids_command.
-        ttk.Button(row, text="Find the Bluetooth radio", style="Text.TButton",
-                   command=self._find_wake_ids).pack(side="left",
-                                                     padx=(ROW_GAP, 0))
+        # Beside the adapter rather than under the switch it serves: it is a
+        # question about the machine, like the adapter line above it, and not
+        # another thing to switch on. See ledpanel.wake_radios_command.
+        ttk.Button(row, text="Which radios can wake it", style="Text.TButton",
+                   command=self._ask_wake_radios).pack(side="left",
+                                                       padx=(ROW_GAP, 0))
         ttk.Button(row, text="Remove HDMI CEC", style="Text.TButton",
                    command=self._remove_cec).pack(side="left",
                                                   padx=(ROW_GAP, 0))
@@ -5545,23 +5547,30 @@ class Panel:
 
     def _install_cec(self):
         if not self._ask("HDMI CEC",
-                         "This installs the SteamOS CEC Toolkit from vendor/ "
-                         "and asks for your password once.\n\nNothing is "
-                         "switched on by installing it.",
+                         "This installs the SteamOS CEC Toolkit from "
+                         "cec-toolkit/ and asks for your password once."
+                         "\n\nNothing is switched on by installing it.",
                          confirm="Install"):
             return
         self.runner.start(ledpanel.install_cec_command(SOURCE_DIR),
                           lambda _code: self._reread_cec())
 
-    def _find_wake_ids(self):
-        """Let every Bluetooth radio here wake the machine.
+    def _ask_wake_radios(self):
+        """Which radios the toolkit found, and whether they may wake.
 
-        Run by the installer already; offered on its own for a radio plugged
-        in since - and for the machine this was found on, whose radio the
-        toolkit's own three ways of looking all missed.
+        "Let a controller wake the machine" is on and it still does not is a
+        state with nowhere to look: the toolkit switches wakeup on for the
+        radios it matches and says so nowhere the page can read. This asks it,
+        and says the answer in a sentence rather than leaving the JSON to be
+        read - the raw answer is above it either way.
         """
-        self.runner.start(ledpanel.wake_ids_command(SOURCE_DIR),
-                          lambda _code: self._reread_cec())
+        self.runner.start(
+            ledpanel.wake_radios_command(),
+            lambda _code: self._say_wake_radios(
+                "".join(self.runner.transcript)))
+
+    def _say_wake_radios(self, said):
+        self.runner.sink("\n%s\n" % cec.wake_radios_said(said))
 
     def _remove_cec(self):
         if not self._ask("HDMI CEC",

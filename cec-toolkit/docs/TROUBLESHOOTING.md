@@ -25,28 +25,30 @@ how often a SteamOS update breaks the toolkit, but it cannot protect Decky
 Loader, SteamOS internals, WirePlumber behavior changes, or files outside the
 configured keep-list.
 
-The Decky plugin should make this visible in `Status`:
+`steamos-cec-toolkitctl status` makes this visible:
 
-- helper or sudoers entries show `Missing`
-- `CEC volume buttons` is `Off`
-- `Relative volume` is `Inactive`
-- an `Install` section appears and lists missing pieces
+- helper or sudoers entries report missing
+- `external_volume_enabled` is false
+- `relative_volume` is inactive
 
-Repair by rerunning the latest installer:
+Repair by reinstalling this module - from the SteamOS Utility Center's HDMI CEC
+page, or by hand from the checkout:
 
 ```bash
-bash <(curl -fsSL https://github.com/Twsts/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)
+./install.sh
 ```
+
+Do **not** repair with upstream's release installer. This is a fork; that
+installer would put the unfixed programs and units back. See ORIGIN.
 
 To also run SteamOS atomic-update verification when the SteamOS image provides
 `holo-sync-var`:
 
 ```bash
-bash <(curl -fsSL https://github.com/Twsts/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh) --verify
+./install.sh --verify
 ```
 
-Then open the plugin, run `Discover CEC Devices`, and re-enable the features
-you want. User-level runtime config is stored in
+Then re-enable the features you want. User-level runtime config is stored in
 `~/.config/steamos-cec-toolkit/config.conf` and should normally survive OS
 updates.
 
@@ -253,9 +255,9 @@ STEAM_BUTTON_BYTE=
 STEAM_BUTTON_MASK=
 ```
 
-For non-Steam-Controller gamepads, use the Decky plugin's `Discover Controllers`
-action first. Generic controller wake listens for gamepad-like Linux input
-devices and supported Home/Guide button events.
+For non-Steam-Controller gamepads, run `steamos-cec-toolkitctl discover-input`
+first. Generic controller wake listens for gamepad-like Linux input devices
+and supported Home/Guide button events.
 
 The included parser is known to target the original Steam Controller. Other
 controllers may need a small code change.

@@ -112,19 +112,9 @@ POWER_COMMAND_LINK="$ROOT/usr/local/bin/$NAME-power"
 
 WATCHER_UNIT="$NAME-achievements.service"
 PHONE_UNIT="$NAME-phone.service"
-# Not a watcher at all - it runs once at session start and exits - but it is a
-# user unit installed and enabled by exactly the same machinery, and giving it
-# a second machinery of its own is how the two come to disagree.
-CEC_UNIT="$NAME-cec.service"
 # Everything installed into the user's systemd, walked rather than named twice:
 # a unit added to one script and missed in the other is a file nobody removes.
-WATCHER_UNITS=("$WATCHER_UNIT" "$PHONE_UNIT" "$CEC_UNIT")
-# A drop-in over one of the CEC toolkit's units, which is not ours - it takes
-# the boot wake out of the session's way without touching the vendored tree.
-# See server/steamos-cec-boot-wake-override.conf for what it changes and why.
-CEC_WAKE_UNIT="steamos-cec-boot-wake.service"
-CEC_WAKE_DROPIN="10-$NAME.conf"
-CEC_WAKE_SOURCE="steamos-cec-boot-wake-override.conf"
+WATCHER_UNITS=("$WATCHER_UNIT" "$PHONE_UNIT")
 # Must match WantedBy= in those units: it is where the enable symlink goes.
 WATCHER_WANTS="default.target.wants"
 
@@ -255,6 +245,20 @@ OLD_SYSTEM_UNITS=("steamos-led-serial.service:$UNIT_PATH"
                   "steamos-led-power.service:$POWER_UNIT_PATH")
 OLD_USER_UNITS=("steamos-led-achievements.service:$WATCHER_UNIT"
                 "steamos-led-phone.service:$PHONE_UNIT")
+
+# What this project used to install into the desktop session and does not any
+# more. Not renames - there is nothing they became - so they cannot go in the
+# list above, and a file with no replacement still has to be taken away or
+# systemd goes on running it at every login.
+#
+#   $NAME-cec.service      put the CEC adapter on the bus before the CEC
+#                          toolkit's wake service. The CEC module does that
+#                          itself now - cec-toolkit/bin/steamos-cec-register.
+#   the drop-in            set Type=simple on that toolkit's boot wake, so it
+#                          stopped holding the session up. Its own unit says
+#                          Type=simple now.
+RETIRED_USER_UNITS=("$NAME-cec.service")
+RETIRED_USER_DROPINS=("steamos-cec-boot-wake.service.d/10-$NAME.conf")
 
 # old config -> where it is carried to. Moved rather than deleted: these hold
 # the answers somebody gave the installer and every setting they have changed
@@ -413,6 +417,34 @@ remove_old_install() {  # remove_old_install [purge]
     fi
     remove_old_user_files
     return 0
+}
+
+# Units and drop-ins this project no longer installs, taken out of a session
+# that still has them. Shared by the installer and the uninstaller: an upgrade
+# has to remove them too, or the machine goes on running last release's units
+# beside this one's.
+#
+# A drop-in's directory goes only when it is empty - it belongs to somebody
+# else's unit, and they may have overrides of their own in it.
+remove_retired_user_files() {
+    # Returns 0 only when it actually removed something - both callers say so
+    # out loud, and "there is no desktop user" is not something to announce.
+    watcher_user_dirs || return 1
+
+    local unit dropin gone=1
+    for unit in "${RETIRED_USER_UNITS[@]}"; do
+        [[ -f "$WATCHER_DIR/$unit" ]] || continue
+        user_systemctl stop "$unit" || true
+        rm -f "$WATCHER_DIR/$unit" "$WATCHER_DIR/$WATCHER_WANTS/$unit"
+        gone=0
+    done
+    for dropin in "${RETIRED_USER_DROPINS[@]}"; do
+        [[ -f "$WATCHER_DIR/$dropin" ]] || continue
+        rm -f "$WATCHER_DIR/$dropin"
+        rmdir "$WATCHER_DIR/$(dirname "$dropin")" 2>/dev/null || true
+        gone=0
+    done
+    return $gone
 }
 
 # The user half of that, which uninstall.sh's own remove_user_units and

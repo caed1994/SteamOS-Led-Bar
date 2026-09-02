@@ -3207,12 +3207,12 @@ class FoldTest(unittest.TestCase):
         self.assertEqual(everything(), before)
 
 
-class WakeIdButtonTest(unittest.TestCase):
-    """The button for the radio the toolkit cannot find by itself.
+class WakeRadioButtonTest(unittest.TestCase):
+    """The button that answers "which radios can wake this machine?".
 
-    It shipped as a command with nothing calling it, which is half a fix: the
-    step runs when HDMI CEC is installed, and reinstalling the whole toolkit
-    to add one line to a config file is not a thing to ask of anybody.
+    A question, not a repair. The toolkit switches wakeup on for the radios it
+    matches and reports that nowhere the page reads, so "the switch is on and
+    it still does not wake" was a state with nowhere at all to look.
     """
 
     @classmethod
@@ -3258,24 +3258,30 @@ class WakeIdButtonTest(unittest.TestCase):
         return found
 
     def test_the_page_offers_it(self):
-        self.assertIn("Find the Bluetooth radio", self._buttons())
+        self.assertIn("Which radios can wake it", self._buttons())
 
-    def test_it_runs_the_action_that_writes_the_ids(self):
+    def test_it_asks_the_toolkits_own_helper(self):
         started = []
         self.panel.runner.start = lambda command, then=None: (
             started.append(list(command)), True)[1]
-        self.panel._find_wake_ids()
-        self.assertEqual(started[0][-1], "wake-ids")
-        self.assertEqual(started[0][0], "pkexec")
+        self.panel._ask_wake_radios()
+        self.assertEqual(started[0][-1], "status")
+        # No password: the toolkit's installer writes a NOPASSWD rule for
+        # exactly this program, so the button asks for nothing.
+        self.assertEqual(started[0][:2], ["sudo", "-n"])
+        self.assertNotIn("pkexec", started[0])
 
-    def test_it_reads_the_machine_back_afterwards(self):
-        """It changes what the status reports, so the page has to catch up."""
-        read = []
-        self.panel._reread_cec = lambda then=None: read.append(1)
+    def test_it_says_the_answer_rather_than_leaving_the_json(self):
+        said = []
+        self.panel.runner.sink = lambda text, tag=None: said.append(text)
+        self.panel.runner.transcript = [
+            '{"helper":{"devices":[{"label":"MediaTek (0e8d:0616)",'
+            '"after":"enabled"}]}}']
         self.panel.runner.start = lambda command, then=None: (
             then(0) if then else None, True)[1]
-        self.panel._find_wake_ids()
-        self.assertEqual(len(read), 1)
+        self.panel._ask_wake_radios()
+        self.assertIn("0e8d:0616", "".join(said))
+        self.assertIn("wake this machine", "".join(said))
 
 
 class AdapterGoneNoticeTest(unittest.TestCase):

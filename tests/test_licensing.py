@@ -25,11 +25,14 @@ SUFFIXES = (".py", ".sh", ".cpp", ".h")
 SCRIPTS = ("server/steamos-utility-center", "gui/steamos-utility-center-panel",
            "systemd-sleep/steamos-utility-center")
 
-# Somebody else's code, under somebody else's licence, which this project does
-# not get to relabel. The kernel shim carries its own SPDX line saying GPL-2.0+;
-# vendor/ holds whole upstream trees, each with its own LICENCE file - see
-# vendor/README.md, and NotRelabelledTest below for what is checked instead.
-VENDORED = ("leds-valve-shim", "vendor")
+# Code under somebody else's licence, which this project does not get to
+# relabel. The kernel shim carries its own SPDX line saying GPL-2.0+;
+# cec-toolkit/ is a fork of an MIT project, kept MIT with its own LICENSE file
+# beside its own ORIGIN - see the tests below for what is checked instead.
+#
+# A fork is still somebody else's copyright. Ours is a second line in that
+# LICENSE, not a licence change, and not a GPL-3 header on every file in it.
+OTHERS = ("leds-valve-shim", "cec-toolkit")
 
 
 def tracked():
@@ -41,7 +44,7 @@ def tracked():
 
 def ours():
     for name in tracked():
-        if name.split("/")[0] in VENDORED:
+        if name.split("/")[0] in OTHERS:
             continue
         if name.endswith(SUFFIXES) or name in SCRIPTS:
             yield name
@@ -90,34 +93,27 @@ class SpdxHeaderTest(unittest.TestCase):
             self.assertIn("SPDX-License-Identifier: GPL-2.0+",
                           handle.readline())
 
-    def test_every_vendored_tree_carries_its_own_licence_and_its_provenance(self):
+    def test_the_cec_module_carries_its_own_licence_and_its_provenance(self):
         """Left out of the header sweep, so checked for the other thing.
 
-        A vendored tree is not ours to put a GPL-3 header on, and the reason
-        that is safe rather than sloppy is that the tree says what it is under
-        and where it came from. Without both, an excluded directory is just
-        code with no licence anybody can find.
+        A fork of somebody else's project is not ours to put a GPL-3 header
+        on, and the reason that is safe rather than sloppy is that the tree
+        says what it is under and where it came from. Without both, an
+        excluded directory is just code with no licence anybody can find.
         """
-        where = os.path.join(REPO, "vendor")
-        trees = sorted(name for name in os.listdir(where)
-                       if os.path.isdir(os.path.join(where, name)))
-        self.assertTrue(trees, "vendor/ has nothing in it - drop the "
-                               "exclusion rather than leaving it open")
-        for tree in trees:
-            for needed in ("LICENSE", "UPSTREAM"):
-                self.assertTrue(
-                    os.path.exists(os.path.join(where, tree, needed)),
-                    "vendor/%s has no %s" % (tree, needed))
+        where = os.path.join(REPO, "cec-toolkit")
+        for needed in ("LICENSE", "ORIGIN"):
+            self.assertTrue(os.path.exists(os.path.join(where, needed)),
+                            "cec-toolkit has no %s" % needed)
 
-    def test_the_vendored_trees_are_not_quietly_relabelled(self):
+    def test_the_cec_module_is_not_quietly_relabelled(self):
         # The failure this is about is somebody running a formatter or a
-        # header-adder across the repository: our line appearing in somebody
-        # else's file is a licence claim on work that is not ours.
+        # header-adder across the repository: our line appearing in a file
+        # that is not only ours is a licence claim on work we did not do.
+        # Fixing five bugs in a fork does not make its copyright ours.
         for name in tracked():
-            if name.split("/")[0] != "vendor":
+            if name.split("/")[0] != "cec-toolkit":
                 continue
-            if name == "vendor/README.md":
-                continue                    # ours, about the directory itself
             with open(os.path.join(REPO, name), "rb") as handle:
                 text = handle.read().decode("utf-8", "replace")
             self.assertNotIn("SPDX-License-Identifier: " + LICENCE, text,

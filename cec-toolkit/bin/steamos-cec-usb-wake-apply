@@ -12,6 +12,8 @@ USB_WAKE_EXCLUDE="${USB_WAKE_EXCLUDE:-hub|host controller|keyboard|mouse|touchpa
 USB_WAKE_USB_IDS="${USB_WAKE_USB_IDS:-8087:0032}"
 USB_WAKE_BLUETOOTH_CLASS="${USB_WAKE_BLUETOOTH_CLASS:-1}"
 USB_WAKE_STATE_FILE="${USB_WAKE_STATE_FILE:-/var/lib/steamos-cec-toolkit/usb-wake-state}"
+# Where the USB bus is, so this can be pointed at a made-up one in a test.
+USB_WAKE_SYSFS="${USB_WAKE_SYSFS:-/sys/bus/usb/devices}"
 USB_WAKE_STATE="${1:-on}"
 
 case "$USB_WAKE_STATE" in
@@ -23,6 +25,31 @@ case "$USB_WAKE_STATE" in
     exit 2
     ;;
 esac
+
+# Whether any of this device's interfaces is a Bluetooth radio.
+#
+# The device-class check below is right for a plain USB Bluetooth dongle and
+# blind to every wifi-and-Bluetooth combo chip, which is what a current board
+# has. Measured on an AM5 board:
+#
+#   0e8d:0616 MediaTek Inc. Wireless_Device
+#   class=ef sub=02 proto=01
+#
+# ef/02/01 is Interface Association: "I am several things, my classes are in
+# my interfaces". So bDeviceClass can never be e0 on one of these and the
+# check could never match - the output said "matched":0 and nothing in it
+# explained why. The answer is one level down, where the descriptor points.
+has_bluetooth_interface() {
+  local device_dir="$1" interface class sub proto
+  for interface in "$device_dir"/*:*; do
+    [[ -r "$interface/bInterfaceClass" ]] || continue
+    class="$(cat "$interface/bInterfaceClass" 2>/dev/null || true)"
+    sub="$(cat "$interface/bInterfaceSubClass" 2>/dev/null || true)"
+    proto="$(cat "$interface/bInterfaceProtocol" 2>/dev/null || true)"
+    [[ "$class$sub$proto" == "e00101" ]] && return 0
+  done
+  return 1
+}
 
 json_escape() {
   local value="${1//\\/\\\\}"
@@ -71,7 +98,7 @@ if [[ "$target_state" == "enabled" ]]; then
   : > "$USB_WAKE_STATE_FILE"
 fi
 
-for wakeup in /sys/bus/usb/devices/*/power/wakeup; do
+for wakeup in "$USB_WAKE_SYSFS"/*/power/wakeup; do
   [[ -e "$wakeup" ]] || continue
   device_dir="${wakeup%/power/wakeup}"
   product="$(cat "$device_dir/product" 2>/dev/null || true)"
@@ -86,8 +113,12 @@ for wakeup in /sys/bus/usb/devices/*/power/wakeup; do
   label_lower="$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')"
 
   bluetooth_class_match=0
-  if [[ "$USB_WAKE_BLUETOOTH_CLASS" == 1 && "$device_class" == e0 && "$device_subclass" == 01 && "$device_protocol" == 01 ]]; then
-    bluetooth_class_match=1
+  if [[ "$USB_WAKE_BLUETOOTH_CLASS" == 1 ]]; then
+    if [[ "$device_class" == e0 && "$device_subclass" == 01 && "$device_protocol" == 01 ]]; then
+      bluetooth_class_match=1
+    elif has_bluetooth_interface "$device_dir"; then
+      bluetooth_class_match=1
+    fi
   fi
 
   if [[ "$bluetooth_class_match" -ne 1 && ! " $USB_WAKE_USB_IDS " =~ " $usb_id " && ! "$label_lower" =~ $USB_WAKE_MATCH ]]; then

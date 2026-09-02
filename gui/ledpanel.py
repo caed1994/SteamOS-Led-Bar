@@ -1263,8 +1263,8 @@ def _where(path):
 
 # -- HDMI CEC ----------------------------------------------------------------
 #
-# The CEC work itself is the vendored SteamOS CEC Toolkit and the reading of
-# it is server/steamos_utility_center/cec.py. What belongs here is the same thing the
+# The CEC work itself is the SteamOS CEC Toolkit under cec-toolkit/ and the
+# reading of it is server/steamos_utility_center/cec.py. What belongs here is the same thing the
 # rest of this file holds: the commands the window runs, in one place, so a
 # window that is hard to drive under a test is not also the only record of
 # what it would have executed.
@@ -1282,15 +1282,14 @@ def install_cec_command(source_dir, remove=False):
             cec_module.source_dir(source_dir)]
 
 
-def wake_ids_command(source_dir):
-    """Let every Bluetooth radio here wake the machine.
+def wake_radios_command():
+    """Ask which radios the toolkit found, and whether they may wake.
 
-    Run as part of installing HDMI CEC, and offered on its own for a radio
-    plugged in afterwards - see add_bluetooth_wake_ids in the script for what
-    the toolkit's own three ways of finding one miss.
+    A question rather than a repair: the toolkit switches wakeup on for the
+    radios it matches, and this is the only way to find out which ones those
+    were - see cec.wake_radios_command.
     """
-    return ["pkexec", os.path.join(source_dir, "scripts", "install-cec.sh"),
-            "wake-ids"]
+    return cec_module.wake_radios_command()
 
 
 def cec_status(home=None, run=None):

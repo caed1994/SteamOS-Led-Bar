@@ -1,6 +1,8 @@
 MIT License
 
-Copyright (c) 2026 contributors
+Copyright (c) 2026 contributors      (SteamOS CEC Toolkit, the work this
+                                      was forked from - see ORIGIN)
+Copyright (c) 2026 caed1994          (the changes made in this fork)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,0 +1,31 @@
+[Unit]
+Description=Put the CEC adapter on the bus before anything wakes the television
+# Ordered before everything here that sends CEC. Each of those asks the
+# adapter which logical address it holds, and without this the answer is none
+# - so they send from an address the adapter does not own and the television
+# ignores them. Before= a unit that is not installed is allowed and does
+# nothing, so this is harmless with either feature switched off.
+Before=steamos-cec-boot-wake.service steamos-cec-steam-button.service
+After=cecd.service
+Wants=cecd.service
+# And nothing else. An After=graphical-session.target was tried once and
+# closed an ordering cycle: this is WantedBy=default.target,
+# graphical-session.target reaches back to default.target through
+# gamescope-session and steamos-manager-session-cleanup, and systemd broke the
+# ring by deleting graphical-session-pre.target's own start job - a
+# session-wide price for a belt this does not need. Waiting for the picture is
+# done inside the program, where it can be given up on and said out loud.
+
+[Service]
+Type=oneshot
+# oneshot, and it has to be: Before= only means "finished before" for a
+# service systemd counts as finished. The wait inside is bounded at fifteen
+# seconds and only reaches that when the television is off.
+ExecStart=%h/.local/bin/steamos-cec-register
+RemainAfterExit=yes
+# It reports and exits. Nothing here retries: an adapter that could not be
+# registered at session start is one with no picture, and the next boot is the
+# next chance.
+
+[Install]
+WantedBy=default.target

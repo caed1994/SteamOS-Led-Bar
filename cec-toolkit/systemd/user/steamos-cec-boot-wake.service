@@ -1,0 +1,28 @@
+[Unit]
+Description=Wake TV and activate SteamOS HDMI-CEC source at session start
+After=cecd.service steamos-cec-register.service
+Wants=cecd.service
+
+[Service]
+# Not oneshot, and the difference is a doubled boot. Measured on a machine
+# where installing this module took default.target from 28 s to 55 s:
+#
+#   26.050s steamos-cec-boot-wake.service
+#   default.target @26.231s
+#
+# The service is not slow by accident. It settles for eight seconds and then
+# makes four attempts five seconds apart, because a television that has just
+# been switched on is not ready at once. That is the right thing to do - and
+# the wrong thing to make a desktop session wait for. As oneshot it counts as
+# "still starting" the whole time, so default.target was not reached until the
+# last attempt was over, and the session sat there while nothing was wrong.
+#
+# Type=simple lets systemd count it as started the moment it is running. It
+# sends exactly what it sent before, in the same order, over the same 26
+# seconds - beside the session instead of in front of it. Nothing is ordered
+# after it, so nothing loses anything by that.
+Type=simple
+ExecStart=%h/.local/bin/steamos-cec-boot-wake
+
+[Install]
+WantedBy=default.target

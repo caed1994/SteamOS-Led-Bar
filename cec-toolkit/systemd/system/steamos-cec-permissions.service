@@ -1,0 +1,18 @@
+[Unit]
+Description=Repair SteamOS CEC device permissions
+After=systemd-udevd.service
+
+[Service]
+# Not oneshot. It waits for the device, and a oneshot that waits holds
+# multi-user.target behind it - which on a machine whose adapter is unplugged
+# would be twenty seconds added to every boot for nothing. Nothing is ordered
+# after this, so beside the boot is exactly where the waiting belongs.
+Type=simple
+# --wait, because being ordered after udev is not the same as the device
+# existing. A DP-to-HDMI adapter can enumerate ten seconds after udev is up,
+# and without the wait this ran, found nothing, and returned happy - leaving
+# cecd to be refused the device the moment it did appear. See the helper.
+ExecStart=/var/lib/steamos-cec-toolkit/steamos-cec-permissions-apply --wait 20
+
+[Install]
+WantedBy=multi-user.target

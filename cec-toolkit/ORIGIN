@@ -1,0 +1,52 @@
+# Where this module came from.
+#
+# Read as a shell file: tests and scripts source it rather than parsing the
+# prose around it, so the three values below are the record.
+
+ORIGIN_URL=https://github.com/Twsts/steamos-cec-toolkit
+ORIGIN_TAG=v0.1.26
+ORIGIN_COMMIT=cc48b949dfea349d517fa8a9fd385ce19d4e2d5e
+
+# This is a fork, not a copy.
+#
+# It began as the SteamOS CEC Toolkit by Twsts, taken at the commit above and
+# kept unmodified in vendor/ for a while. That stopped making sense. Five
+# things in it did not work on the machines this project runs on, and each one
+# was worked around from the outside - a unit of ours to register the adapter,
+# a drop-in to stop its boot wake blocking the session, a repair pass for the
+# permissions race, a step to write the physical address its installer never
+# writes, and a search for Bluetooth radios its USB wake could not see. Five
+# workarounds is not a vendored tree any more; it is a fork with the changes
+# in the wrong repository.
+#
+# So the fixes are in here now, where the bugs are, and the workarounds are
+# gone. See README.md for what changed. The tree is still a module of its own:
+# it installs and uninstalls itself, it is managed through
+# steamos-cec-toolkitctl, and nothing in this panel is needed to run it.
+#
+# What was left behind when it was taken, and why:
+#
+#   decky/   the Game Mode plugin. This panel is the UI here, and the toolkit
+#            is managed through steamos-cec-toolkitctl either way - the plugin
+#            is one of two front ends for the same helper, not a dependency of
+#            it. Nothing in this tree installs it; the docs still mention it
+#            where they describe how the pieces fit together.
+#   assets/  8.6 MB of screenshots of that plugin.
+#
+# Taking upstream changes:
+#
+#   git clone https://github.com/Twsts/steamos-cec-toolkit /tmp/cec
+#   git -C /tmp/cec diff v0.1.26 <newer tag> -- bin systemd config udev \
+#       wireplumber docs install.sh uninstall.sh VERSION
+#
+# That diff is what upstream changed since the fork point, so it applies onto
+# this tree and shows our own changes as the conflicts. This is worth doing
+# and worth not pretending is automatic: the values above are the fork point
+# and stay the fork point, because that is what a diff needs. VERSION says
+# what this tree is, which is no longer what upstream calls anything.
+#
+# Licence: MIT, upstream's, in LICENSE beside this file, with a second
+# copyright line for the changes made here. It stays MIT rather than being
+# taken into this project's GPL-3.0-or-later: the copyright is not ours to
+# move, and keeping the whole module under one licence is what leaves the door
+# open to sending a fix back.

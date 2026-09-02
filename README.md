@@ -743,12 +743,15 @@ machine can behave like a console: press a controller's Steam button and the
 television wakes and switches to it; put the machine to sleep and the
 television goes with it.
 
-**None of the CEC work is this project's.** It is the
+**Almost none of the CEC work is this project's.** It began as the
 [SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit) by Twsts,
-MIT-licensed, kept in this repository under `vendor/steamos-cec-toolkit/` at
-the tag recorded in that directory's `UPSTREAM` file. What this project adds
-is the installation and the switches. The toolkit's own Decky plugin is not
-installed and is not needed; both it and this panel drive the same
+MIT-licensed, and lives here under `cec-toolkit/` as a fork of it: five things
+in it did not work on the machines this was built on, and those fixes are now
+in that tree rather than worked around from outside &mdash;
+`cec-toolkit/README.md` lists them, `cec-toolkit/ORIGIN` records the commit it
+was forked from. It stays a module of its own, installable and usable with no
+part of this panel. What this panel adds is the installation and the switches;
+both it and the toolkit's own Decky plugin drive the same
 `steamos-cec-toolkitctl` helper.
 
 **What it needs.** A CEC adapter the kernel exposes as `/dev/cec0` &mdash; a
@@ -802,7 +805,7 @@ That is a "no" from the television, not a fault here.
 **The controller wake finds your Bluetooth radio, whatever it calls itself.**
 The toolkit looks for one three ways &mdash; an exact `vendor:product` list,
 a regular expression over the device's name, and the Bluetooth USB class
-&mdash; and on anything but a Steam Deck all three can miss. Measured on an
+&mdash; and on anything but a Steam Deck all three could miss. Measured on an
 AM5 board:
 
 ```
@@ -813,22 +816,29 @@ class=ef sub=02 proto=01
 Not the Intel id the list carries; a Bluetooth radio whose name does not
 contain the word Bluetooth; and `ef/02/01` is Interface Association, which
 means "my classes are in my interfaces" &mdash; what every wifi-and-bluetooth
-combo chip says, so the class check cannot match one. `matched:0`, and no
-reason given. Installing HDMI CEC now looks one level down, at the
-interfaces, and adds what it finds to `USB_WAKE_USB_IDS`. Plug a radio in
-later and **Find the Bluetooth radio** on the CEC page does the same on its
-own, as does `scripts/install-cec.sh wake-ids` from a terminal.
+combo chip says, so the **device** class check could never match one.
+`matched:0`, and no reason given. The class check now looks one level down, at
+the interfaces, where the answer is. **Which radios can wake it** on the CEC
+page asks the toolkit what it matched and says so in a sentence.
 
-**Waking the television does not hold up the session.** The toolkit's boot
-wake settles for eight seconds and then retries four times five seconds
-apart, because a set that has just been switched on is not ready at once.
-That is right, and as a `Type=oneshot` unit it also meant `default.target`
-was not reached until the last attempt - measured, installing the toolkit
-took one machine's boot from 28 seconds to 55, all of it that one service.
-The installer drops a one-line override beside it (`Type=simple`), so it
-sends exactly what it sent before, over the same 26 seconds, beside the
-session rather than in front of it. The uninstaller takes the override away
-again; the toolkit's own unit is never edited.
+**Waking the television does not hold up the session.** The boot wake settles
+for eight seconds and then retries four times five seconds apart, because a
+set that has just been switched on is not ready at once. That is right, and as
+a `Type=oneshot` unit it also meant `default.target` was not reached until the
+last attempt &mdash; measured, installing the toolkit took one machine's boot
+from 28 seconds to 55, all of it that one service. Its unit says `Type=simple`
+now, so it sends exactly what it sent before, over the same 26 seconds, beside
+the session rather than in front of it.
+
+**Something puts the adapter on the bus.** Nothing used to. Every path that
+sends CEC asks the adapter which logical address it holds and, getting none,
+sent from an address it did not own &mdash; which a television has no reason to
+act on, and which is why unplugging the adapter and plugging it back in was the
+famous cure. `steamos-cec-register` runs once at session start, before the rest:
+it waits for the device, leaves alone any adapter Steam's own `cecd` already
+has, repairs the permissions and restarts `cecd` when nothing holds an address,
+records where this machine is plugged in so waking can switch the input over,
+and claims an address itself only as a last resort.
 
 **If the adapter comes out, switch the features off.** They keep working the
 only way they can: by trying. Leave them on with the adapter gone and every
@@ -839,12 +849,12 @@ Nothing is broken and nothing says so, which is why the panel now says it for
 you on the CEC page and on **Status &amp; repair**. Switching them back on
 when the adapter returns costs nothing.
 
-**Debugging it.** The toolkit is in the repository rather than fetched, so
-its scripts can be read and changed like everything else here. If you change
-something worth keeping, `vendor/steamos-cec-toolkit/UPSTREAM` records the
-commit the tree came from, which is what makes a later upstream merge a
-three-way diff rather than a guess &mdash; and upstream is a better home for a
-fix than this fork is.
+**Debugging it.** The toolkit is in the repository rather than fetched, so its
+scripts can be read and changed like everything else here.
+`cec-toolkit/ORIGIN` records the commit it was forked from, which is what makes
+taking a later upstream change a three-way diff rather than a guess. Do not
+repair an install by running upstream's release installer: it would put the
+unfixed programs back.
 
 ### The graphics card
 
@@ -1039,6 +1049,7 @@ and `ProtectSystem=strict`.
 
 ```
 leds-valve-shim/          kernel module (GPL-2.0+, vendored unmodified)
+cec-toolkit/              HDMI CEC, a module of its own (MIT, forked)
 server/steamos_utility_center/       service: config, shim, render, link, serialport
 server/steamos-utility-center            executable entry point
 server/steamos-utility-center.service    systemd unit template
@@ -1076,13 +1087,17 @@ to release those changes under GPL-2.0+ as well. The vendored commit, the
 checksums and the full licence text are in
 [leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
 
-`vendor/steamos-cec-toolkit/` is the
+`cec-toolkit/` began as the
 **[SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit)** by
-**Twsts**, licensed **MIT** and vendored at the commit its `UPSTREAM` file
-records. Every part of [HDMI CEC](#hdmi-cec) is that project's work; this one
-adds the installation and the switches. Its Decky plugin and screenshots were
-left out, nothing else. The copyright and the MIT terms stay with it, in
-[vendor/steamos-cec-toolkit/LICENSE](vendor/steamos-cec-toolkit/LICENSE).
+**Twsts**, licensed **MIT**, and is a fork of it at the commit its `ORIGIN`
+file records. Nearly every part of [HDMI CEC](#hdmi-cec) is that project's
+work; this one adds the installation, the switches, and five fixes listed in
+[cec-toolkit/README.md](cec-toolkit/README.md). Its Decky plugin and
+screenshots were left out, nothing else. The copyright and the MIT terms stay
+with it &mdash; the fixes are a second copyright line in
+[cec-toolkit/LICENSE](cec-toolkit/LICENSE), not a licence change: the work is
+not ours to relicense, and keeping it MIT is what leaves the door open to
+sending a fix back.
 
 The graphics card settings are **[LACT](https://github.com/ilya-zlobintsev/LACT)**
 by **Ilya Zlobintsev**, MIT-licensed. None of it is included here and nothing

@@ -3,9 +3,10 @@
 
 """Talking to the television over HDMI, through the CEC toolkit.
 
-None of the CEC work is ours. It is the SteamOS CEC Toolkit, vendored under
-vendor/steamos-cec-toolkit - see vendor/README.md for where it came from and
-why it lives in the repository rather than being fetched.
+Almost none of the CEC work is ours. It is the SteamOS CEC Toolkit, a fork of
+somebody else's project kept as a module of its own under cec-toolkit/ - see
+cec-toolkit/ORIGIN for where it came from and cec-toolkit/README.md for what
+was changed in it and why.
 
 This module is the seam between that toolkit and this panel, and it is thin on
 purpose. The toolkit already ships `steamos-cec-toolkitctl`, which reports
@@ -46,10 +47,10 @@ import shutil
 # are user systemd units and a WirePlumber config in somebody's home.
 COMMAND = ".local/bin/steamos-cec-toolkitctl"
 
-# The vendored tree, relative to the repository root. The installer is run
+# The toolkit's tree, relative to the repository root. Its installer is run
 # from inside it and reads its own siblings, so it cannot be copied out on its
 # own - see scripts/install-cec.sh.
-SOURCE = os.path.join("vendor", "steamos-cec-toolkit")
+SOURCE = "cec-toolkit"
 
 # How a feature is turned on, which is not the same for all of them. The three
 # kinds differ in what they touch, and the toolkit gives each its own
@@ -274,8 +275,24 @@ def toggle_command(name, on, home=None, source_dir=None):
 # settings: each one happens once, now, and changes nothing that outlives it -
 # which is what makes them the way to find out whether any of this works
 # before turning a feature on and rebooting into it.
+# What actually speaks CEC, for the one action below that does not go through
+# the toolkit at all.
+CEC_CTL = "cec-ctl"
+
+# Which adapter to speak to. Read from the toolkit's own status rather than
+# guessed - see config() - and falling back to what the toolkit itself falls
+# back to, so a machine with the setting missing is asked the same question
+# the toolkit would ask.
+DEVICE_SETTING = "CEC_DEVICE"
+DEFAULT_DEVICE = "/dev/cec0"
+
 # The setting that says which device is supposed to render the sound.
 AUDIO_ADDRESS = "CEC_AUDIO_LOGICAL_ADDRESS"
+
+
+def configured_device(settings):
+    """Which adapter the toolkit is set to talk to."""
+    return str(settings.get(DEVICE_SETTING, "")).strip() or DEFAULT_DEVICE
 
 # The one action here that is not a toolkit subcommand, because the question
 # is not about the toolkit.
@@ -342,6 +359,56 @@ def action_command(key, home=None, settings=None):
     raise KeyError(key)
 
 
+# -- which radios can wake this machine --------------------------------------
+#
+# The one thing on the CEC page read straight from a helper rather than out of
+# `toolkitctl status`, because the status does not carry it: it says whether
+# the usb-wake service is enabled, not which radios it found - and "enabled,
+# and still nothing wakes it" is exactly the state somebody is in when they
+# ask. The helper's own `status` lists what it matched and whether each is
+# allowed to wake the machine, which is the answer.
+#
+# No password. The toolkit's installer writes a sudoers rule for exactly this
+# program, so this asks for nothing, the way every switch on the page does not.
+USB_WAKE_HELPER = "/var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-control"
+
+
+def wake_radios_command():
+    """Ask the toolkit which radios it found and whether they may wake."""
+    return ["sudo", "-n", USB_WAKE_HELPER, "status"]
+
+
+def wake_radios_said(text):
+    """What that answer means, in a sentence.
+
+    Three answers, told apart on purpose. They were not, once: finding nothing
+    and finding one that was already allowed printed the same line, so a
+    machine where this does not work at all read exactly like one where there
+    was nothing left to do - which is no way to answer "did it find mine?".
+    """
+    try:
+        found = json.loads(text)
+        radios = found["helper"]["devices"]
+        if not isinstance(radios, list):
+            raise TypeError
+    except (ValueError, TypeError, KeyError, IndexError):
+        return ("The toolkit's USB wake helper did not answer. Install HDMI "
+                "CEC first, or look at what the command printed above.")
+    if not radios:
+        return ("No radio on the USB bus matched. One built into the board "
+                "and not wired through USB cannot be switched on from here.")
+    named = ", ".join(str(radio.get("label", "")).strip() or "an unnamed radio"
+                      for radio in radios)
+    waking = [radio for radio in radios if radio.get("after") == "enabled"]
+    if len(waking) == len(radios):
+        return "Found %s, allowed to wake this machine." % named
+    if not waking:
+        return ("Found %s. Nothing there may wake this machine yet - turn on "
+                "\u201cLet a controller wake the machine\u201d above." % named)
+    return ("Found %s, of which %d of %d may wake this machine."
+            % (named, len(waking), len(radios)))
+
+
 def config(status):
     """The toolkit's configuration, as it reported it. Empty when it did not."""
     found = status.get("config")
@@ -356,218 +423,6 @@ def set_config_command(values, home=None):
     setting made here survives the toolkit being reinstalled over the top.
     """
     return [command_path(home), "set-config", json.dumps(values, sort_keys=True)]
-
-
-# -- the adapter's own place on the bus --------------------------------------
-#
-# Before a CEC adapter can say anything as itself it has to claim a logical
-# address. Nothing in the toolkit ever does: every wake path asks the adapter
-# which address it holds, and when the answer is none - "CEC logical address
-# is not allocated yet" in its log - falls back to "pretend to be 4" and sends
-# anyway. Those messages carry an initiator the adapter does not own, and the
-# bus has no reason to act on them.
-#
-# Standby is the exception, which is what hid this for so long. Its first two
-# sends carry no initiator at all, so they go out from the unregistered
-# address as a broadcast - which an adapter that has claimed nothing is still
-# allowed to do, and which a television accepts. So the television turned off
-# on request and would not turn back on, and every line in the log said the
-# wake had been sent.
-#
-# Found on a machine whose adapter reported a good physical address (3.0.0.0,
-# so HDMI 3) and "Logical Address Mask: 0x0000" - a working cable, a listening
-# television, and an adapter that was not on the bus.
-#
-# What the panel adds is that missing step, and only when it is missing: if
-# anything at all is registered - Steam's own cecd, an earlier run of this -
-# the adapter is left exactly as it is. It is never taken off whoever has it.
-
-CEC_CTL = "cec-ctl"
-
-# Every adapter on the machine rather than the one the toolkit is configured
-# for. Registering an adapter nobody has claimed cannot disturb anything, and
-# a machine with two of them is a machine where the configured one is the more
-# likely to be wrong.
-ADAPTERS = "/dev/cec*"
-
-# What the television will show as the source's name. Registering as a
-# playback device is what claims logical address 4, which is what every one of
-# the toolkit's wake paths already assumes it will find.
-REGISTERED_NAME = "SteamOS"
-
-# f.f.f.f is what an adapter reports when it has no picture to belong to - no
-# link, or one whose EDID has not been read yet. Claiming an address then
-# would put us on the bus at an address that means nothing.
-NO_PHYSICAL_ADDRESS = "f.f.f.f"
-
-
-# Where the toolkit keeps its own settings. Two files, the user's shadowing
-# the system's, which is the order its own programs read them in.
-SYSTEM_SETTINGS = "/etc/steamos-cec-toolkit.conf"
-USER_SETTINGS = ".config/steamos-cec-toolkit/config.conf"
-
-# The setting that says where this machine sits on the television. Every wake
-# path needs it to broadcast <Active Source>, which is the message that
-# switches the input - and all three skip that message when it is empty,
-# saying so in the log and carrying on. It ships empty, and the only thing
-# that ever writes it is `toolkitctl discover-cec`, which the toolkit's
-# installer does not run: it runs discover-audio and nothing else. So on a
-# machine where nobody has pressed Discover by hand, the television is woken
-# but never switched over.
-PHYSICAL_ADDRESS = "CEC_PHYSICAL_ADDRESS"
-DEVICE_SETTING = "CEC_DEVICE"
-DEFAULT_DEVICE = "/dev/cec0"
-
-
-def settings_paths(home=None):
-    """The toolkit's two settings files, least specific first."""
-    return [SYSTEM_SETTINGS,
-            os.path.join(home or os.path.expanduser("~"), USER_SETTINGS)]
-
-
-def read_settings(texts):
-    """The toolkit's settings, from the text of its files in reading order.
-
-    Its own parser, kept to the letter: KEY=value, # is a comment, and one
-    layer of quotes comes off - the toolkit writes the file with shlex.quote,
-    so a path with a space in it comes back wrapped.
-    """
-    values = {}
-    for text in texts:
-        for line in (text or "").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip().strip('"').strip("'")
-    return values
-
-
-def wants_physical_address(settings):
-    """Whether the toolkit has no idea where this machine is plugged in.
-
-    Only when it is empty. A value somebody chose is theirs, right or wrong -
-    overwriting it on every session start would be this panel arguing with
-    the person using it.
-    """
-    return not settings.get(PHYSICAL_ADDRESS, "").strip()
-
-
-def configured_device(settings):
-    """Which adapter the toolkit is set to talk to."""
-    return settings.get(DEVICE_SETTING, "").strip() or DEFAULT_DEVICE
-
-
-# What an unplug and a replug do, in commands.
-#
-# Reported: the television works after pulling the adapter out and putting it
-# back, and not after a plain reboot. The log says why, and it is a race
-# nobody wins by waiting:
-#
-#   [10.0] Starting Repair SteamOS CEC device permissions...
-#   [10.1] Finished Repair SteamOS CEC device permissions.
-#   [12.4] kernel: Registered IR keymap rc-cec          <- the device, at last
-#   [12.5] cecd: Could not add device /dev/cec0: EACCES: Permission denied
-#
-# The toolkit's permissions unit is ordered after udev and runs once, and its
-# helper returns quietly when the device is not there yet - so on a machine
-# where the adapter takes twelve seconds it repairs nothing. The udev rule
-# that should also do it fires as the device appears, and Steam's own daemon
-# is listening for exactly that moment: it opens the device before the rule's
-# program has finished, is refused, and never tries again. Nothing then holds
-# a logical address, and every wake goes out from an address that is not ours.
-#
-# A replug is the cure because the second time round the ACL is already there.
-# These two are that cure without the walk to the television: reapply the
-# permissions, then give the daemon another go at the device it gave up on.
-PERMISSIONS_HELPER = ("/var/lib/steamos-cec-toolkit"
-                      "/steamos-cec-permissions-apply")
-
-# Steam's own CEC daemon, and a user service - it belongs to the session that
-# has the television.
-DAEMON_UNIT = "cecd.service"
-
-
-def repair_permissions_command():
-    """Reapply the adapter's ACL, through the toolkit's own NOPASSWD helper.
-
-    No password: the toolkit's installer writes a sudoers rule for exactly
-    this program, which is what lets the panel repair a device it cannot
-    write without asking for anything.
-    """
-    return ["sudo", "-n", PERMISSIONS_HELPER]
-
-
-def restart_daemon_command():
-    """Hand the device back to Steam's daemon after it has given up on it.
-
-    The same thing `toolkitctl repair-cec-permissions` does, and for the same
-    reason: the daemon reads the device once, at startup and on a udev add,
-    and a refusal at that moment is permanent until something restarts it.
-    """
-    return ["systemctl", "--user", "restart", DAEMON_UNIT]
-
-
-def adapter_state_command(device):
-    """How to ask one adapter what it is. Reports; changes nothing."""
-    return [CEC_CTL, "-d", device]
-
-
-def register_command(device):
-    """How to claim logical address 4 for an adapter that has none."""
-    return [CEC_CTL, "-d", device, "--playback", "--osd-name", REGISTERED_NAME]
-
-
-def _field(text, name):
-    """One "Name : value" line of cec-ctl's report, or "" if it said none."""
-    for line in (text or "").splitlines():
-        left, sep, right = line.partition(":")
-        if sep and left.strip().lower() == name.lower():
-            return right.strip()
-    return ""
-
-
-def adapter_registered(text):
-    """Whether this adapter holds a logical address. None when it did not say.
-
-    Two fields answer it and either will do - the mask is the one to trust,
-    the count is there for a cec-ctl that words it differently. None rather
-    than False when neither is present, because "the answer was not in a shape
-    this understands" and "the adapter is not on the bus" want opposite
-    responses: the first is a reason to leave well alone.
-    """
-    mask = _field(text, "Logical Address Mask")
-    if mask:
-        try:
-            return int(mask, 0) != 0
-        except ValueError:
-            pass
-    count = _field(text, "Logical Addresses")
-    if count:
-        try:
-            return int(count, 0) != 0
-        except ValueError:
-            pass
-    return None
-
-
-def adapter_physical_address(text):
-    """Where this adapter sits on the television, or "" with no picture."""
-    found = _field(text, "Physical Address")
-    if not found or found.lower() == NO_PHYSICAL_ADDRESS:
-        return ""
-    return found
-
-
-def wants_registering(text):
-    """Whether this adapter is one we should claim an address for.
-
-    Both halves have to be true, and the physical address is the half that is
-    easy to forget: an adapter with no link reports one that means nothing, so
-    registering it would claim a place on a bus it cannot see.
-    """
-    return adapter_registered(text) is False and bool(
-        adapter_physical_address(text))
 
 
 def device(status):

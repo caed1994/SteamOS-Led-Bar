@@ -112,150 +112,10 @@ class ArgumentTest(unittest.TestCase):
         self.assertEqual(run("install").returncode, 2)
 
 
-class BluetoothWakeIdTest(unittest.TestCase):
-    """Finding the radio a controller talks to, which the toolkit misses.
-
-    It looks for one three ways - an exact vendor:product list, a regex over
-    the device's name, and the Bluetooth USB class - and on anything but a
-    Steam Deck all three miss. Measured on an AM5 board:
-
-        0e8d:0616 MediaTek Inc. Wireless_Device
-        class=ef sub=02 proto=01
-
-    Not the Intel id the list carries. A Bluetooth radio whose name does not
-    contain the word Bluetooth. And ef/02/01 is Interface Association - "my
-    classes are in my interfaces" - which is what every wifi-and-bluetooth
-    combo chip says, so the class check cannot match one. The toolkit printed
-    "matched":0 and no reason.
-    """
-
-    def _machine(self, where, devices):
-        """A fake /sys/bus/usb/devices, from {id: [(class, sub, proto)]}."""
-        usb = os.path.join(where, "usb")
-        for index, (usb_id, interfaces) in enumerate(devices.items()):
-            name = "1-%d" % (index + 1)
-            vendor, product = usb_id.split(":")
-            os.makedirs(os.path.join(usb, name), exist_ok=True)
-            for leaf, value in (("idVendor", vendor), ("idProduct", product)):
-                with open(os.path.join(usb, name, leaf), "w") as handle:
-                    handle.write(value)
-            for number, (klass, sub, proto) in enumerate(interfaces):
-                at = os.path.join(usb, "%s:1.%d" % (name, number))
-                os.makedirs(at, exist_ok=True)
-                for leaf, value in (("bInterfaceClass", klass),
-                                    ("bInterfaceSubClass", sub),
-                                    ("bInterfaceProtocol", proto)):
-                    with open(os.path.join(at, leaf), "w") as handle:
-                        handle.write(value)
-        return usb
-
-    def _config(self, where, text):
-        at = os.path.join(where, "root", "etc")
-        os.makedirs(at, exist_ok=True)
-        with open(os.path.join(at, "steamos-cec-toolkit.conf"), "w") as handle:
-            handle.write(text)
-        return os.path.join(where, "root")
-
-    def _ids(self, root):
-        path = os.path.join(root, "etc", "steamos-cec-toolkit.conf")
-        with open(path) as handle:
-            for line in handle:
-                if line.startswith("USB_WAKE_USB_IDS="):
-                    return line.split("=", 1)[1].strip().strip('"')
-        return None
-
-    def _run(self, where, devices, config='USB_WAKE_USB_IDS="8087:0032"\n'):
-        usb = self._machine(where, devices)
-        root = self._config(where, config)
-        done = run("wake-ids", env=dict(os.environ, SYSFS_USB=usb, ROOT=root))
-        return done, root
-
-    BLUETOOTH = ("e0", "01", "01")
-    KEYBOARD = ("03", "01", "01")
-
-    @AS_ROOT
-    def test_a_combo_chip_is_found_by_its_interface(self):
-        """The whole point: the class it hides is one level down."""
-        with tempfile.TemporaryDirectory() as where:
-            done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
-            self.assertEqual(done.returncode, 0, done.stderr)
-            self.assertEqual(self._ids(root), "8087:0032 0e8d:0616")
-
-    @AS_ROOT
-    def test_what_is_already_there_is_kept(self):
-        with tempfile.TemporaryDirectory() as where:
-            _done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
-            self.assertIn("8087:0032", self._ids(root))
-
-    @AS_ROOT
-    def test_running_it_twice_adds_nothing_the_second_time(self):
-        with tempfile.TemporaryDirectory() as where:
-            _done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
-            once = self._ids(root)
-            usb = os.path.join(where, "usb")
-            again = run("wake-ids",
-                        env=dict(os.environ, SYSFS_USB=usb, ROOT=root))
-            self.assertEqual(again.returncode, 0, again.stderr)
-            self.assertEqual(self._ids(root), once)
-            self.assertIn("already allowed", again.stdout)
-            # And it names what it found, so "did it find mine?" has an
-            # answer even on the run where there was nothing left to do.
-            self.assertIn("0e8d:0616", again.stdout)
-
-    @AS_ROOT
-    def test_two_bluetooth_interfaces_on_one_chip_are_one_id(self):
-        """A radio usually has several. It is still one device to allow."""
-        with tempfile.TemporaryDirectory() as where:
-            _done, root = self._run(
-                where, {"0e8d:0616": [self.BLUETOOTH, self.BLUETOOTH]})
-            self.assertEqual(self._ids(root), "8087:0032 0e8d:0616")
-
-    @AS_ROOT
-    def test_nothing_else_on_the_bus_is_allowed_to_wake_anything(self):
-        """A keyboard that wakes the machine is a machine that wakes itself."""
-        with tempfile.TemporaryDirectory() as where:
-            _done, root = self._run(where, {"24ae:9db6": [self.KEYBOARD]})
-            self.assertEqual(self._ids(root), "8087:0032")
-
-    @AS_ROOT
-    def test_finding_none_is_not_reported_as_nothing_left_to_do(self):
-        """The two were one sentence, and they are opposite answers.
-
-        A machine where this does not work at all read exactly like one where
-        every radio was already listed - which is no way to answer "did it
-        find mine?".
-        """
-        with tempfile.TemporaryDirectory() as where:
-            done, root = self._run(where, {})
-            self.assertEqual(done.returncode, 0, done.stderr)
-            self.assertIn("No Bluetooth radio", done.stdout)
-            self.assertNotIn("already allowed", done.stdout)
-            self.assertEqual(self._ids(root), "8087:0032")
-
-    @AS_ROOT
-    def test_it_names_what_it_found_whether_or_not_it_changed_anything(self):
-        with tempfile.TemporaryDirectory() as where:
-            done, _root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
-            self.assertIn("Found 0e8d:0616", done.stdout)
-
-    @AS_ROOT
-    def test_a_config_without_the_key_gets_one(self):
-        with tempfile.TemporaryDirectory() as where:
-            _done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]},
-                                    config="CEC_DEVICE=/dev/cec0\n")
-            self.assertEqual(self._ids(root), "0e8d:0616")
-
-    @AS_ROOT
-    def test_no_config_at_all_is_said_rather_than_crashed_over(self):
-        with tempfile.TemporaryDirectory() as where:
-            usb = self._machine(where, {"0e8d:0616": [self.BLUETOOTH]})
-            done = run("wake-ids", env=dict(os.environ, SYSFS_USB=usb,
-                                            ROOT=os.path.join(where, "none")))
-            self.assertEqual(done.returncode, 0)
-            self.assertIn("nothing to add", done.stderr)
-
-    def test_it_takes_no_arguments(self):
-        self.assertIn("wake-ids", run().stderr)
+# Finding the radio a controller talks to was tested here while this script
+# added what the toolkit's USB wake could not see. The class check is fixed in
+# the toolkit now, so the tests went with it - UsbWakeMatchTest in
+# tests/test_cec_toolkit.py, against cec-toolkit/bin/steamos-cec-usb-wake-apply.
 
 
 class SourceTest(unittest.TestCase):
@@ -271,7 +131,7 @@ class SourceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty:
             done = run("install", empty)
             self.assertEqual(done.returncode, 1)
-            self.assertIn("vendored toolkit", done.stderr)
+            self.assertIn("CEC toolkit", done.stderr)
             self.assertFalse(os.path.exists(RULE))
 
     @AS_ROOT
@@ -397,57 +257,6 @@ class BridgeTest(unittest.TestCase):
 
     @AS_ROOT
     @HAS_USER
-    def test_installing_looks_for_the_bluetooth_radio_too(self):
-        """Every install, not only the one that goes looking for it by hand.
-
-        The button on the CEC page is for a radio plugged in later. An
-        install that did not do it as well would leave every fresh machine
-        exactly where the one this was found on started: a controller that
-        cannot wake it, and a helper reporting "matched":0 with no reason.
-        """
-        with tempfile.TemporaryDirectory() as where:
-            usb = os.path.join(where, "usb", "1-12:1.0")
-            os.makedirs(usb)
-            for leaf, value in (("bInterfaceClass", "e0"),
-                                ("bInterfaceSubClass", "01"),
-                                ("bInterfaceProtocol", "01")):
-                with open(os.path.join(usb, leaf), "w") as handle:
-                    handle.write(value)
-            device = os.path.join(where, "usb", "1-12")
-            os.makedirs(device)
-            for leaf, value in (("idVendor", "0e8d"), ("idProduct", "0616")):
-                with open(os.path.join(device, leaf), "w") as handle:
-                    handle.write(value)
-            etc = os.path.join(where, "root", "etc")
-            os.makedirs(etc)
-            with open(os.path.join(etc, "steamos-cec-toolkit.conf"), "w") as f:
-                f.write('USB_WAKE_USB_IDS="8087:0032"\n')
-            with _fake_toolkit() as source:
-                done = run("install", source, SOMEBODY,
-                           env=dict(_no_pkexec(),
-                                    SYSFS_USB=os.path.join(where, "usb"),
-                                    ROOT=os.path.join(where, "root")))
-            self.assertEqual(done.returncode, 0, done.stderr)
-            self.assertIn("0e8d:0616", done.stdout)
-            with open(os.path.join(etc, "steamos-cec-toolkit.conf")) as handle:
-                self.assertIn("8087:0032 0e8d:0616", handle.read())
-
-    @AS_ROOT
-    @HAS_USER
-    def test_it_looks_after_the_toolkit_has_written_its_config(self):
-        """Order, not only presence.
-
-        The toolkit's own installer writes /etc/steamos-cec-toolkit.conf when
-        it is not already there. Looking for the radio before that would edit
-        a file about to be replaced, or none at all.
-        """
-        with open(SCRIPT) as handle:
-            text = handle.read()
-        ran = text.index('runuser -u "$TARGET"')
-        looked = text.rindex("add_bluetooth_wake_ids")
-        self.assertLess(ran, looked,
-                        "the radio is looked for before the toolkit installs")
-
     @AS_ROOT
     @HAS_USER
     def test_a_radio_it_cannot_add_does_not_fail_the_install(self):
@@ -513,14 +322,14 @@ class BridgeTest(unittest.TestCase):
         self.assertNotIn("ran=", done.stdout)
 
     def test_the_rule_lists_every_program_the_installers_sudo(self):
-        """Derived from the vendored tree, not from memory.
+        """Derived from the toolkit's own installers, not from memory.
 
         A `sudo` call upstream adds that this rule does not cover is an
         install that stops halfway with a password prompt nobody can answer -
         on somebody else's machine, with half the files written.
         """
         import re
-        tree = os.path.join(HERE, "..", "vendor", "steamos-cec-toolkit")
+        tree = os.path.join(HERE, "..", "cec-toolkit")
         called = set()
         for name in ("install.sh", "uninstall.sh"):
             with open(os.path.join(tree, name)) as handle:
@@ -616,17 +425,17 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(said["flags"].strip(), "")
 
 
-class VendoredTreeTest(unittest.TestCase):
+class ToolkitTreeTest(unittest.TestCase):
     """The bridge and the tree it drives have to agree about the file names."""
 
     def test_the_installers_it_looks_for_are_the_ones_that_are_there(self):
-        tree = os.path.join(HERE, "..", "vendor", "steamos-cec-toolkit")
+        tree = os.path.join(HERE, "..", "cec-toolkit")
         for name in ("install.sh", "uninstall.sh"):
             self.assertTrue(os.path.exists(os.path.join(tree, name)), name)
 
     def test_the_uninstaller_really_has_no_feature_flags(self):
         # The claim above, checked against the file rather than remembered.
-        with open(os.path.join(HERE, "..", "vendor", "steamos-cec-toolkit",
+        with open(os.path.join(HERE, "..", "cec-toolkit",
                                "uninstall.sh")) as handle:
             self.assertNotIn("--no-external-volume", handle.read())
 

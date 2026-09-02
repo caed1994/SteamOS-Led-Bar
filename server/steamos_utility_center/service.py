@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import errno
-import glob
 import itertools
 import logging
 import os
@@ -18,7 +17,6 @@ import sys
 import time
 
 from . import config as config_module
-from . import cec as cec_module
 from . import desktop, elf, load, notify, phone, render, serialport, shim
 from . import steamworks
 from . import temperature
@@ -1482,253 +1480,6 @@ def run_list_ports():
     return 0
 
 
-# How long to wait for a picture before giving up on registering.
-#
-# Short on purpose, and it took a second look to see why. The unit holds the
-# toolkit's wake service behind it, and the case where there is no picture is
-# usually a television that is *off* - which is the very thing the wake was
-# going to fix. Waiting there is not thoroughness: it is standing in the way
-# of the fix and then giving up anyway.
-#
-# It is the whole budget, not one of three: the adapter turning up, the
-# daemon's second go at it, and the picture all come out of this. Fifteen
-# rather than ten because of the middle one - on the machine this was
-# measured on the device itself arrived at twelve seconds, and restarting a
-# daemon and reading the answer takes a couple more.
-CEC_LINK_WAIT = 15.0
-CEC_LINK_POLL = 1.0
-
-
-def _read_toolkit_settings(read=None):
-    """The CEC toolkit's own settings, or {} where it has none to read."""
-    read = read or _read_text
-    return cec_module.read_settings(
-        read(path) for path in cec_module.settings_paths())
-
-
-def _read_text(path):
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            return handle.read()
-    except OSError:
-        return ""
-
-
-def _tell_the_toolkit_where_it_is(device, address, settings, run):
-    """Write the physical address into the toolkit's settings, if it has none.
-
-    The other half of the same evening's bug. Knowing the address is what lets
-    the wake paths broadcast <Active Source>, which is the message that
-    switches the television over - and they all skip it when the setting is
-    empty. It ships empty and only `discover-cec` ever fills it in, which the
-    toolkit's installer never runs.
-
-    This already has the address in its hand: it read it to decide whether the
-    adapter was worth registering. So it is written through the toolkit's own
-    set-config, which needs no root and lands in the user file that shadows
-    /etc - the same place pressing Discover would put it.
-
-    Only for the adapter the toolkit is set to use, and only when there is no
-    value there: a machine with two adapters must not be told about the other
-    one, and a value somebody chose is theirs.
-    """
-    if device != cec_module.configured_device(settings):
-        return False
-    if not cec_module.wants_physical_address(settings):
-        return False
-    if not os.path.exists(cec_module.command_path()):
-        return False                    # no toolkit, nothing to tell
-    answer = run(cec_module.set_config_command(
-        {cec_module.PHYSICAL_ADDRESS: address}))
-    if getattr(answer, "returncode", 1) != 0:
-        print("could not tell the toolkit it is at %s: %s"
-              % (address, (getattr(answer, "stdout", "") or "").strip()),
-              flush=True)
-        return False
-    print("Told the CEC toolkit this machine is at %s, so waking can switch "
-          "the input over as well." % address, flush=True)
-    return True
-
-
-def _nudge_the_daemon(device, run, restarted):
-    """Repair the adapter's permissions and give Steam's daemon another go.
-
-    What an unplug and a replug do, without the walk to the television - see
-    the long comment in cec.py for the log that showed why they are needed.
-    The daemon reads the device once and a refusal is permanent, so a restart
-    is the only way it looks again.
-
-    Reached only when nothing at all holds a logical address, so there is
-    nothing to interrupt: a daemon that has the adapter is left alone one
-    branch earlier. Both steps are best effort and neither is required to
-    have worked - claiming the address ourselves is still waiting behind it.
-
-    The permissions are per adapter and the daemon is not: `restarted` is how
-    a machine with two of them restarts one service once rather than once
-    each, which is thrashing rather than thoroughness.
-    """
-    did = False
-    if not os.access(device, os.R_OK | os.W_OK):
-        answer = run(cec_module.repair_permissions_command())
-        if getattr(answer, "returncode", 1) == 0:
-            print("%s: could not be written; repaired its permissions."
-                  % device, flush=True)
-            did = True
-        else:
-            print("%s: cannot be written and repairing it failed: %s"
-                  % (device, (getattr(answer, "stdout", "") or "").strip()),
-                  flush=True)
-    if restarted:
-        return did
-    restarted.add(cec_module.DAEMON_UNIT)
-    answer = run(cec_module.restart_daemon_command())
-    if getattr(answer, "returncode", 1) == 0:
-        print("Nothing held a CEC address, so Steam's daemon was given "
-              "another go at it.", flush=True)
-        did = True
-    return did
-
-
-def run_register_cec(devices=None, run=None, sleep=None, now=None,
-                     wait=CEC_LINK_WAIT, settings=None, installed=None):
-    """Claim a logical address for any CEC adapter that has none.
-
-    The step the toolkit assumes has already happened - see the long comment
-    in cec.py. Deliberately timid: an adapter that already holds an address is
-    left alone, one with no picture is waited for and then left alone, and
-    anything cec-ctl says that this does not understand is left alone too.
-    `wait` is the whole budget: the adapter appearing and then its picture
-    share it, so the toolkit's wake service is never held up for longer than
-    that however the session start goes.
-    Doing nothing is always a safe answer here; taking the bus off Steam's own
-    daemon would not be.
-
-    Everything it uses is injectable because the machine this is tested on has
-    no CEC adapter, no television and no cec-ctl.
-    """
-    run = run or (lambda command: subprocess.run(
-        command, text=True, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, timeout=15, check=False))
-    sleep = sleep or time.sleep
-    now = now or time.monotonic
-    if settings is None:
-        settings = _read_toolkit_settings()
-    told = False
-
-    # Nothing to prepare the ground for, so do not spend a second on it.
-    #
-    # This unit exists to give the CEC toolkit's wake service a logical
-    # address to send from. Without the toolkit there is no wake service, and
-    # waiting fifteen seconds for an adapter nobody would use is fifteen
-    # seconds added to every boot of every machine that has never wanted HDMI
-    # CEC - which is most of them. Measured, on the machine this was written
-    # on: exactly the budget, every time, for nothing.
-    if not (cec_module.installed() if installed is None else installed):
-        print("The CEC toolkit is not installed, so there is nothing here "
-              "that would use a CEC adapter.", flush=True)
-        return 0
-
-    # The device node first, and waited for rather than looked for once.
-    #
-    # A session start races the adapter's own enumeration, and losing that
-    # race silently is how a machine ends up with an adapter nobody ever
-    # registers - which is the state an unplug and replug is famous for
-    # curing, because the second time round the device appears while
-    # everything that cares is already running. Waiting here is honest
-    # waiting: an adapter that is coming will come, unlike a picture, which
-    # needs somebody to turn the television on.
-    deadline = now() + wait
-    while devices is None:
-        found = sorted(glob.glob(cec_module.ADAPTERS))
-        if found or now() >= deadline:
-            devices = found
-            break
-        sleep(CEC_LINK_POLL)
-
-    if not devices:
-        # Which of the two it is matters, and the message used to say neither:
-        # a machine with no CEC at all and one whose adapter had not turned up
-        # yet read exactly the same, in the same second, and looked like the
-        # question had been asked and answered.
-        print("No CEC adapter appeared in %s within %gs, so there is "
-              "nothing to register.\n"
-              "The CEC toolkit is installed, so its own wake service is "
-              "about to spend a further minute or so failing to reach a "
-              "television. If the adapter is gone for good, turn the HDMI "
-              "CEC features off on the panel's CEC page and both waits go "
-              "away.\n"
-              "If it is only slow, try a longer wait by hand: "
-              "steamos-utility-center --register-cec 60"
-              % (cec_module.ADAPTERS, wait), flush=True)
-        return 0
-
-    waiting = list(devices)
-    nudged, restarted = set(), set()
-    done = 0
-    while waiting:
-        for device in list(waiting):
-            answer = run(cec_module.adapter_state_command(device))
-            text = getattr(answer, "stdout", "") or ""
-            if getattr(answer, "returncode", 1) != 0:
-                print("%s: cec-ctl would not report on it: %s"
-                      % (device, text.strip()), flush=True)
-                waiting.remove(device)
-                continue
-            registered = cec_module.adapter_registered(text)
-            if registered is None:
-                print("%s: cannot tell whether it is on the bus, so leaving "
-                      "it alone." % device, flush=True)
-                waiting.remove(device)
-                continue
-            address = cec_module.adapter_physical_address(text)
-            if address and not told:
-                told = _tell_the_toolkit_where_it_is(
-                    device, address, settings, run)
-            if registered:
-                print("%s: already on the bus; leaving it alone." % device,
-                      flush=True)
-                waiting.remove(device)
-                continue
-            # Nothing holds an address. Before claiming one ourselves, do what
-            # a replug does: repair the permissions and hand the device back
-            # to Steam's daemon, which is whose job this is. Once per adapter,
-            # and only from here - if the daemon had the device we would have
-            # left above without touching anything.
-            if device not in nudged:
-                nudged.add(device)
-                if _nudge_the_daemon(device, run, restarted):
-                    done += 1           # something was put right
-                    continue            # give it a moment, then read again
-            if not address:
-                continue                # no picture yet - come back to it
-            waiting.remove(device)
-            result = run(cec_module.register_command(device))
-            if getattr(result, "returncode", 1) != 0:
-                said = (getattr(result, "stdout", "") or "").strip()
-                print("%s: could not claim a logical address: %s"
-                      % (device, said), flush=True)
-                continue
-            done += 1
-            print("%s: registered at %s as a playback device."
-                  % (device, address), flush=True)
-        if waiting and now() >= deadline:
-            for device in waiting:
-                print("%s: no picture after %gs, so there is nothing to "
-                      "register against." % (device, wait), flush=True)
-            break
-        if waiting:
-            sleep(CEC_LINK_POLL)
-    if not done and not told:
-        # done counts everything this put right, the daemon's second go
-        # included - saying "nothing needed registering" after restarting a
-        # service would be the log disowning what it had just done.
-        # Not a failure: an adapter somebody else already has is the good
-        # case, and the unit exiting non-zero for it would paint the session
-        # red for doing the right thing.
-        print("Nothing needed registering.", flush=True)
-    return 0
-
-
 def dump_line(snapshot, written, seen):
     """One state change, with how long since Steam's previous one.
 
@@ -1907,14 +1658,6 @@ def build_parser():
                        help="flash on your phone's notifications, which KDE "
                             "Connect brings to the desktop (run as your normal "
                             "user, not with sudo)")
-    modes.add_argument("--register-cec", nargs="?", const=CEC_LINK_WAIT,
-                       type=float, metavar="SECONDS", dest="register_cec",
-                       help="claim a logical address for any CEC adapter that "
-                            "has none, so the toolkit's wake commands have an "
-                            "address to send from (run as your normal user). "
-                            "SECONDS is how long to wait for the adapter and "
-                            "for its picture; give a longer one by hand to "
-                            "find out whether a slow adapter turns up at all")
     modes.add_argument("--check-config", action="store_true",
                        dest="check_config",
                        help="load and validate the configuration and exit; "
@@ -1957,14 +1700,6 @@ def main(argv=None):
     if args.list_ports:
         configure_logging("warning")
         return run_list_ports()
-
-    # Before the configuration is loaded, like --list-ports: which television
-    # this machine is plugged into has nothing to do with the LED bar's
-    # settings, and failing for want of a config file it does not read would
-    # be a puzzle at session start.
-    if args.register_cec is not None:
-        configure_logging("warning")
-        return run_register_cec(wait=args.register_cec)
 
     overrides = {
         "DEVICE": args.device,

@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# usage: steamos-cec-permissions-apply [--wait SECONDS]
+#
+# --wait is for the boot path, and it exists because the boot path used to do
+# nothing. The unit is ordered after udev and runs once, but on a machine
+# where the adapter is a DP-to-HDMI dongle the device node can be ten seconds
+# behind that - so the helper ran, found no /dev/cec*, returned quietly, and
+# cecd got EACCES the moment the device did appear. It reads the device once
+# and a refusal is permanent, so the whole of CEC was then dead until somebody
+# replugged the adapter.
+#
+# The udev rule that also runs this passes no arguments and must not wait:
+# udev kills a RUN+= program that takes its time, and there the device is
+# there by definition.
+WAIT_SECONDS=0
+if [[ "${1:-}" == "--wait" ]]; then
+  WAIT_SECONDS="${2:-0}"
+  shift 2
+fi
+
 SYSTEM_CONFIG_FILE="${STEAMOS_CEC_CONFIG:-/etc/steamos-cec-toolkit.conf}"
 if [[ -r "$SYSTEM_CONFIG_FILE" ]]; then
   # shellcheck disable=SC1090
@@ -35,6 +54,22 @@ apply_one() {
     chmod g+rw "$device"
   fi
 }
+
+any_device() {
+  [[ -e "$CEC_DEVICE" ]] && return 0
+  local device
+  for device in /dev/cec*; do
+    [[ -e "$device" ]] && return 0
+  done
+  return 1
+}
+
+if [[ "$WAIT_SECONDS" != 0 ]]; then
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! any_device && (( SECONDS < deadline )); do
+    sleep 1
+  done
+fi
 
 if [[ -e "$CEC_DEVICE" ]]; then
   apply_one "$CEC_DEVICE"

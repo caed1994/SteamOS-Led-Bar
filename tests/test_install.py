@@ -946,21 +946,21 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertNotIn("pacman -Syu", self.text)
 
 
-class CecWakeDropInTest(unittest.TestCase):
-    """Taking the toolkit's boot wake out of the session's way.
+class RetiredUserFilesTest(unittest.TestCase):
+    """What an older release put in the session and this one does not.
 
-    Measured on a machine where installing the CEC toolkit took the boot from
-    28 seconds to 55:
+    Two things, both about HDMI CEC, both now fixed inside the CEC module
+    instead:
 
-        26.050s steamos-cec-boot-wake.service
-           64ms steamos-utility-center-cec.service
-        default.target @26.231s
+        steamos-utility-center-cec.service    put the adapter on the bus
+        steamos-cec-boot-wake.service.d/      Type=simple over the toolkit's
+          10-steamos-utility-center.conf      own boot wake
 
-    The service is not slow by accident - it settles for eight seconds and
-    then retries four times, because a television that has just been switched
-    on is not ready at once. That is right, and it is the wrong thing for a
-    desktop session to wait for. As Type=oneshot it counts as still starting
-    the whole time, so default.target waits for the last attempt.
+    Neither is inert if it is left. The unit is enabled, so systemd goes on
+    starting it at every login with the program it names already gone; the
+    drop-in goes on changing somebody else's service after this project has
+    stopped writing it. So both the installer, upgrading, and the uninstaller,
+    leaving, have to take them away.
     """
 
     def setUp(self):
@@ -970,55 +970,54 @@ class CecWakeDropInTest(unittest.TestCase):
             self.uninstaller = handle.read()
         with open(os.path.join(HERE, "..", "scripts", "user-unit.sh")) as one:
             self.shared = one.read()
-        self.source = os.path.join(HERE, "..", "server",
-                                   "steamos-cec-boot-wake-override.conf")
 
-    def test_it_changes_the_one_line_that_holds_the_session(self):
-        with open(self.source) as handle:
-            text = handle.read()
-        self.assertIn("[Service]", text)
-        self.assertIn("Type=simple", text)
-
-    def test_it_changes_nothing_else(self):
-        """A drop-in that reached further would be a fork in disguise.
-
-        The service still sends what it sent, in the same order, over the same
-        26 seconds - beside the session instead of in front of it.
-        """
-        with open(self.source) as handle:
-            lines = [line.strip() for line in handle
-                     if line.strip() and not line.startswith("#")]
-        self.assertEqual(lines, ["[Service]", "Type=simple"])
-
-    def test_the_vendored_unit_itself_is_untouched(self):
-        """The tree has to stay one we can diff against upstream."""
-        unit = os.path.join(HERE, "..", "vendor", "steamos-cec-toolkit",
-                            "systemd", "user", "steamos-cec-boot-wake.service")
-        with open(unit) as handle:
-            self.assertIn("Type=oneshot", handle.read())
-
-    def test_both_scripts_name_it_from_the_one_place(self):
-        for name in ('CEC_WAKE_UNIT="steamos-cec-boot-wake.service"',
-                     'CEC_WAKE_DROPIN="10-$NAME.conf"'):
+    def test_they_are_named_once_where_both_scripts_can_see_them(self):
+        for name in ('RETIRED_USER_UNITS=("$NAME-cec.service")',
+                     'RETIRED_USER_DROPINS='):
             self.assertIn(name, self.shared)
 
-    def test_the_installer_writes_it(self):
-        self.assertIn("$CEC_WAKE_DROPIN", self.installer)
-        self.assertIn("install_cec_wake_dropin", self.installer)
+    def test_the_removal_lives_with_the_names(self):
+        self.assertIn("remove_retired_user_files()", self.shared)
 
-    def test_the_uninstaller_takes_it_away_again(self):
-        """Ours to remove, even though the unit it covers is not.
+    def test_the_unit_is_stopped_before_its_file_goes(self):
+        """A running unit whose file is deleted goes on running.
 
-        Left behind it would go on changing somebody else's service after
-        this project is gone.
+        Checked by reading rather than by running: the shell harness gives
+        these functions no session bus, so user_systemctl returns before it
+        reaches systemctl and there is no call to record.
         """
-        self.assertIn("$CEC_WAKE_DROPIN", self.uninstaller)
-        self.assertIn("rmdir", self.uninstaller)
+        body = self.shared[self.shared.index("remove_retired_user_files()"):]
+        body = body[:body.index("\n}\n")]
+        self.assertLess(body.index('user_systemctl stop "$unit"'),
+                        body.index('rm -f "$WATCHER_DIR/$unit"'))
+
+    def test_both_scripts_call_it(self):
+        # The installer as part of its migration, the uninstaller as part of
+        # taking the current units away.
+        self.assertIn("remove_retired_user_files", self.installer + self.shared)
+        self.assertIn("remove_retired_user_files", self.uninstaller)
 
     def test_it_does_not_take_a_directory_that_is_not_empty(self):
-        """Somebody may have overrides of their own in there."""
-        self.assertIn("rmdir \"$dropin\" 2>/dev/null || true",
-                      self.uninstaller)
+        """The drop-in directory belongs to somebody else's unit.
+
+        They may have overrides of their own in it, so it goes only when it is
+        empty - which is what rmdir does on its own, and why the failure is
+        swallowed rather than reported.
+        """
+        self.assertIn('rmdir "$WATCHER_DIR/$(dirname "$dropin")" '
+                      '2>/dev/null || true', self.shared)
+
+    def test_nothing_installs_them_any_more(self):
+        for gone in ("install_cec_wake_dropin", "CEC_WAKE_SOURCE",
+                     "$NAME-cec.service"):
+            self.assertNotIn(gone, self.installer, gone)
+
+    def test_the_unit_and_the_drop_in_are_gone_from_the_repository(self):
+        for gone in ("steamos-utility-center-cec.service",
+                     "steamos-cec-boot-wake-override.conf"):
+            self.assertFalse(
+                os.path.exists(os.path.join(HERE, "..", "server", gone)),
+                "%s is still here - it is the CEC module's job now" % gone)
 
 
 class InstalledStampTest(unittest.TestCase):
@@ -1395,6 +1394,49 @@ class MigrationTest(unittest.TestCase):
         done, calls = self._run("migrate_old_install", root, home, room)
         self.assertEqual(done.returncode, 0, done.stderr)
         return root, home, done, calls
+
+    def _retire(self, put=True, home=True):
+        """The CEC unit and drop-in an older release left in the session."""
+        room, root, where = self._root(old=False, home=home)
+        unit = ".config/systemd/user/steamos-utility-center-cec.service"
+        link = (".config/systemd/user/default.target.wants"
+                "/steamos-utility-center-cec.service")
+        dropin = (".config/systemd/user/steamos-cec-boot-wake.service.d"
+                  "/10-steamos-utility-center.conf")
+        if put:
+            for each in (unit, link, dropin):
+                self._put(where, each, "[Service]\n")
+        done, calls = self._run("remove_retired_user_files", root, where, room)
+        return where, done, calls, (unit, link, dropin)
+
+    def test_the_retired_cec_unit_and_its_symlink_are_taken_away(self):
+        """A unit file removed on its own leaves the enable symlink behind.
+
+        systemd then goes on trying to start something that is not there, at
+        every login, for as long as the account lasts.
+        """
+        where, done, _calls, (unit, link, dropin) = self._retire()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for gone in (unit, link, dropin):
+            self.assertFalse(os.path.exists(os.path.join(where, gone)), gone)
+
+    def test_the_drop_in_directory_goes_only_when_it_is_empty(self):
+        """It belongs to somebody else's unit, and they may have overrides."""
+        room, root, where = self._root(old=False)
+        directory = ".config/systemd/user/steamos-cec-boot-wake.service.d"
+        self._put(where, directory + "/10-steamos-utility-center.conf", "x\n")
+        self._put(where, directory + "/50-theirs.conf", "x\n")
+        done, _calls = self._run("remove_retired_user_files", root, where, room)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(os.path.exists(os.path.join(where, directory,
+                                                    "50-theirs.conf")))
+        self.assertTrue(os.path.isdir(os.path.join(where, directory)))
+
+    def test_a_session_that_never_had_them_reports_nothing_removed(self):
+        """Both callers say so out loud, so "nothing to do" must not read as
+        "removed them"."""
+        _where, done, _calls, _paths = self._retire(put=False)
+        self.assertEqual(done.returncode, 1)
 
     def test_the_old_service_is_stopped_before_its_file_is_taken_away(self):
         """The one ordering that matters on a running machine.

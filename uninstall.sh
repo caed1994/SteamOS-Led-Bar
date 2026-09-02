@@ -74,14 +74,10 @@ remove_user_units() {
         removed=1
     done
 
-    # The drop-in over the toolkit's own unit. Ours to remove even though the
-    # unit it covers is not: leaving it behind would go on changing somebody
-    # else's service after this project is gone. The directory goes too, but
-    # only when it is empty - somebody may have overrides of their own in it.
-    local dropin="$WATCHER_DIR/$CEC_WAKE_UNIT.d"
-    if [[ -f "$dropin/$CEC_WAKE_DROPIN" ]]; then
-        rm -f "$dropin/$CEC_WAKE_DROPIN"
-        rmdir "$dropin" 2>/dev/null || true
+    # And the ones older releases installed and this one does not - see
+    # RETIRED_USER_UNITS in scripts/user-unit.sh. Left behind, they would go on
+    # running at every login with nothing here to remove them.
+    if remove_retired_user_files; then
         removed=1
     fi
     [[ $removed -eq 1 ]] || return 0

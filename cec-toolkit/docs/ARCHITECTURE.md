@@ -3,7 +3,8 @@
 ## Components
 
 ```text
-Decky plugin (optional)
+A control panel - the SteamOS Utility Center's HDMI CEC page, or
+upstream's Decky plugin, or a terminal
   -> steamos-cec-toolkitctl
   -> systemd --user / Varlink / CEC test commands
 
@@ -17,8 +18,8 @@ SteamOS Game Mode
   -> AVR / soundbar
 ```
 
-The Decky plugin is a control panel for an already installed toolkit. It does
-not install sudoers rules or root-owned helpers.
+A control panel drives an already installed toolkit. None of them installs
+sudoers rules or root-owned helpers; install.sh does that, once.
 
 ## ExternalVolume
 

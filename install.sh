@@ -359,35 +359,18 @@ install_user_units() {
         LINGER_NOTE=" - but NOT across Game Mode, see above"
     fi
 
-    install_cec_wake_dropin
+    # Units this project used to install and does not any more - see
+    # RETIRED_USER_UNITS in scripts/user-unit.sh. Here rather than with the
+    # rest of the migration, because that half only runs on a machine that
+    # still has the old *names*: everybody upgrading from the last release
+    # has these, and nothing else would ever take them away.
+    if remove_retired_user_files; then
+        say "Removed the CEC units this project no longer installs"
+    fi
 
     user_systemctl daemon-reload || true
     WATCHER_STATUS="enabled for $WATCHER_USER, starts at next login$LINGER_NOTE"
     return 0
-}
-
-# One line over the CEC toolkit's boot wake, so the session stops waiting for
-# it - see server/steamos-cec-boot-wake-override.conf for the measurement and
-# the reasoning. Written whether or not the toolkit is installed: a drop-in
-# for a unit that is not there does nothing, and writing it now means it is
-# already in place when somebody installs the toolkit from the panel.
-install_cec_wake_dropin() {
-    local source="$SOURCE_DIR/server/$CEC_WAKE_SOURCE"
-    local into="$WATCHER_DIR/$CEC_WAKE_UNIT.d"
-    if [[ ! -f "$source" ]]; then
-        warn "$CEC_WAKE_SOURCE is not in the repository"
-        return 0
-    fi
-    runuser -u "$WATCHER_USER" -- mkdir -p "$into" || {
-        warn "cannot create $into"
-        return 0
-    }
-    install -m 0644 "$source" "$into/$CEC_WAKE_DROPIN" || {
-        warn "cannot write $into/$CEC_WAKE_DROPIN"
-        return 0
-    }
-    chown "$WATCHER_USER:$WATCHER_USER" "$into/$CEC_WAKE_DROPIN"
-    say "Taking the CEC boot wake out of the session's way"
 }
 
 # linger_is_on() is in scripts/user-unit.sh: the uninstaller asks the same

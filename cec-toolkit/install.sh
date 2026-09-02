@@ -140,6 +140,7 @@ install -m 0755 "$PROJECT_DIR/bin/steamos-cec-volume" "$HOME/.local/bin/steamos-
 install -m 0755 "$PROJECT_DIR/bin/steamos-cec-toolkitctl" "$HOME/.local/bin/steamos-cec-toolkitctl"
 install -m 0755 "$PROJECT_DIR/bin/steamos-cec-external-volume" "$HOME/.local/bin/steamos-cec-external-volume"
 install -m 0755 "$PROJECT_DIR/bin/steamos-cec-boot-wake" "$HOME/.local/bin/steamos-cec-boot-wake"
+install -m 0755 "$PROJECT_DIR/bin/steamos-cec-register" "$HOME/.local/bin/steamos-cec-register"
 install -m 0755 "$PROJECT_DIR/bin/steamos-cec-steam-button" "$HOME/.local/bin/steamos-cec-steam-button"
 install -m 0755 "$PROJECT_DIR/bin/steamos-cec-tv-standby-suspend" \
   "$HOME/.local/bin/steamos-cec-tv-standby-suspend"
@@ -227,6 +228,8 @@ install -m 0644 "$PROJECT_DIR/systemd/user/steamos-cec-steam-button.service" \
   "$HOME/.config/systemd/user/steamos-cec-steam-button.service"
 install -m 0644 "$PROJECT_DIR/systemd/user/steamos-cec-boot-wake.service" \
   "$HOME/.config/systemd/user/steamos-cec-boot-wake.service"
+install -m 0644 "$PROJECT_DIR/systemd/user/steamos-cec-register.service" \
+  "$HOME/.config/systemd/user/steamos-cec-register.service"
 install -m 0644 "$PROJECT_DIR/systemd/user/steamos-cec-tv-standby-suspend.service" \
   "$HOME/.config/systemd/user/steamos-cec-tv-standby-suspend.service"
 install -m 0644 "$PROJECT_DIR/systemd/user/steamos-cec-input-away-suspend.service" \
@@ -248,6 +251,19 @@ sudo udevadm control --reload-rules || true
 sudo /var/lib/steamos-cec-toolkit/steamos-cec-permissions-apply || true
 sudo systemctl enable --now steamos-cec-permissions.service
 systemctl --user restart cecd.service 2>/dev/null || true
+
+# Not a feature and not optional: without it every feature below sends CEC
+# from an address the adapter does not own, which no television acts on. It is
+# enabled for every install and run once here, so this install works now
+# rather than after the next reboot - which is also what writes
+# CEC_PHYSICAL_ADDRESS, the setting the installer never used to write and
+# without which waking the television never switches the input over.
+echo "Putting the CEC adapter on the bus"
+systemctl --user enable steamos-cec-register.service
+# A shorter wait than the unit's. The long one is for a session start, which
+# races the adapter's own enumeration; by the time somebody is running an
+# installer the device node is either there or it is not.
+"$HOME/.local/bin/steamos-cec-register" --wait 5 || true
 
 echo "Applying selected feature services"
 if [[ "$enable_steam_button" -eq 1 ]]; then
