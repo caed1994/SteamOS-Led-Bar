@@ -373,6 +373,70 @@ class BridgeTest(unittest.TestCase):
 
     @AS_ROOT
     @HAS_USER
+    def test_installing_looks_for_the_bluetooth_radio_too(self):
+        """Every install, not only the one that goes looking for it by hand.
+
+        The button on the CEC page is for a radio plugged in later. An
+        install that did not do it as well would leave every fresh machine
+        exactly where the one this was found on started: a controller that
+        cannot wake it, and a helper reporting "matched":0 with no reason.
+        """
+        with tempfile.TemporaryDirectory() as where:
+            usb = os.path.join(where, "usb", "1-12:1.0")
+            os.makedirs(usb)
+            for leaf, value in (("bInterfaceClass", "e0"),
+                                ("bInterfaceSubClass", "01"),
+                                ("bInterfaceProtocol", "01")):
+                with open(os.path.join(usb, leaf), "w") as handle:
+                    handle.write(value)
+            device = os.path.join(where, "usb", "1-12")
+            os.makedirs(device)
+            for leaf, value in (("idVendor", "0e8d"), ("idProduct", "0616")):
+                with open(os.path.join(device, leaf), "w") as handle:
+                    handle.write(value)
+            etc = os.path.join(where, "root", "etc")
+            os.makedirs(etc)
+            with open(os.path.join(etc, "steamos-cec-toolkit.conf"), "w") as f:
+                f.write('USB_WAKE_USB_IDS="8087:0032"\n')
+            with _fake_toolkit() as source:
+                done = run("install", source, SOMEBODY,
+                           env=dict(_no_pkexec(),
+                                    SYSFS_USB=os.path.join(where, "usb"),
+                                    ROOT=os.path.join(where, "root")))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("0e8d:0616", done.stdout)
+            with open(os.path.join(etc, "steamos-cec-toolkit.conf")) as handle:
+                self.assertIn("8087:0032 0e8d:0616", handle.read())
+
+    @AS_ROOT
+    @HAS_USER
+    def test_it_looks_after_the_toolkit_has_written_its_config(self):
+        """Order, not only presence.
+
+        The toolkit's own installer writes /etc/steamos-cec-toolkit.conf when
+        it is not already there. Looking for the radio before that would edit
+        a file about to be replaced, or none at all.
+        """
+        with open(SCRIPT) as handle:
+            text = handle.read()
+        ran = text.index('runuser -u "$TARGET"')
+        looked = text.rindex("add_bluetooth_wake_ids")
+        self.assertLess(ran, looked,
+                        "the radio is looked for before the toolkit installs")
+
+    @AS_ROOT
+    @HAS_USER
+    def test_a_radio_it_cannot_add_does_not_fail_the_install(self):
+        """Waking is one feature of nine. Losing it must not lose the rest."""
+        with _fake_toolkit() as source:
+            done = run("install", source, SOMEBODY,
+                       env=dict(_no_pkexec(), SYSFS_USB="/nowhere",
+                                ROOT="/nowhere"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("Installed.", done.stdout)
+
+    @AS_ROOT
+    @HAS_USER
     def test_the_installer_can_use_sudo_while_it_runs(self):
         # The whole point. Without the rule the installer's first `sudo
         # install` asks for a password at a terminal that is not there.
