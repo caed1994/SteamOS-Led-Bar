@@ -40,15 +40,18 @@ RULE="/etc/sudoers.d/zz-steamos-utility-center-cec-install"
 usage() {
     echo "usage: install-cec.sh install|remove <source-dir> [user]" >&2
     echo "       install-cec.sh resume-wake on|off" >&2
+    echo "       install-cec.sh wake-ids" >&2
     exit 2
 }
 
 [[ "$ACTION" == "install" || "$ACTION" == "remove" \
-        || "$ACTION" == "resume-wake" ]] || usage
+        || "$ACTION" == "resume-wake" || "$ACTION" == "wake-ids" ]] || usage
 if [[ "$ACTION" == "resume-wake" ]]; then
     # The second argument is on|off rather than a directory: this action
     # installs nothing and only switches a unit that is already there.
     [[ "$SOURCE" == "on" || "$SOURCE" == "off" ]] || usage
+elif [[ "$ACTION" == "wake-ids" ]]; then
+    :                       # takes no arguments; see add_bluetooth_wake_ids
 else
     [[ -n "$SOURCE" ]] || usage
 fi
@@ -63,6 +66,96 @@ fi
 # service table, so nothing it offers can switch it afterwards. One
 # systemctl, and none of the rest of this script applies.
 RESUME_WAKE_UNIT="steamos-cec-resume-wake.service"
+
+# --- letting a controller wake the machine -----------------------------------
+#
+# The toolkit switches USB wakeup on for the radio a controller talks to, and
+# finds that radio three ways: an exact vendor:product list, a regular
+# expression over the device's name, and the USB class for Bluetooth. On a
+# machine that is not a Steam Deck all three miss.
+#
+#   USB_WAKE_USB_IDS=8087:0032          an Intel chip - the Deck's
+#   USB_WAKE_MATCH=bluetooth|xbox|...   matched against "maker product"
+#   bDeviceClass == e0                  the Bluetooth device class
+#
+# Measured on an AM5 board with a MediaTek combo chip:
+#
+#   0e8d:0616 MediaTek Inc. Wireless_Device
+#   class=ef sub=02 proto=01
+#
+# Not the Intel id. A Bluetooth radio whose name does not contain the word
+# Bluetooth. And ef/02/01 is Interface Association: "I am several things, my
+# classes are in my interfaces" - which is what every wifi-and-bluetooth combo
+# chip says, so the class check cannot match one. The toolkit's own log said
+# "matched":0 and nothing explained why.
+#
+# This is that check done one level down, where the answer is. The ids it
+# finds are added to USB_WAKE_USB_IDS, which is the one route of the three
+# that is exact - so it does not matter what the radio calls itself.
+SYSFS_USB="${SYSFS_USB:-/sys/bus/usb/devices}"
+TOOLKIT_CONFIG="${ROOT:-}/etc/steamos-cec-toolkit.conf"
+
+# Class, subclass and protocol of a Bluetooth interface, as sysfs spells them.
+BLUETOOTH_INTERFACE="e0 01 01"
+
+bluetooth_usb_ids() {
+    local interface parent found=()
+    for interface in "$SYSFS_USB"/*:*/bInterfaceClass; do
+        [[ -r "$interface" ]] || continue
+        local dir="${interface%/bInterfaceClass}"
+        local class sub proto
+        class="$(cat "$dir/bInterfaceClass" 2>/dev/null || true)"
+        sub="$(cat "$dir/bInterfaceSubClass" 2>/dev/null || true)"
+        proto="$(cat "$dir/bInterfaceProtocol" 2>/dev/null || true)"
+        [[ "$class $sub $proto" == "$BLUETOOTH_INTERFACE" ]] || continue
+        # /sys/bus/usb/devices/1-12:1.0 belongs to .../1-12
+        parent="${dir%:*}"
+        local vendor product
+        vendor="$(cat "$parent/idVendor" 2>/dev/null || true)"
+        product="$(cat "$parent/idProduct" 2>/dev/null || true)"
+        [[ -n "$vendor" && -n "$product" ]] || continue
+        local id="$vendor:$product"
+        [[ " ${found[*]-} " == *" $id "* ]] || found+=("$id")
+    done
+    printf '%s\n' "${found[@]-}"
+}
+
+add_bluetooth_wake_ids() {
+    if [[ ! -f "$TOOLKIT_CONFIG" ]]; then
+        echo "No $TOOLKIT_CONFIG, so there is nothing to add the radio to." >&2
+        return 0
+    fi
+    local current wanted id added=()
+    current="$(sed -n 's/^USB_WAKE_USB_IDS=//p' "$TOOLKIT_CONFIG" \
+               | tail -n 1 | tr -d '"'"'"'"')"
+    wanted="$current"
+    while read -r id; do
+        [[ -n "$id" ]] || continue
+        [[ " $wanted " == *" $id "* ]] && continue
+        wanted="${wanted:+$wanted }$id"
+        added+=("$id")
+    done < <(bluetooth_usb_ids)
+
+    if [[ ${#added[@]} -eq 0 ]]; then
+        echo "Every Bluetooth radio here may already wake the machine."
+        return 0
+    fi
+    # Replaced whole rather than appended: the file may carry the key once,
+    # with any value, and a second line of the same key is a file that reads
+    # differently depending on which one is sourced last.
+    if grep -q '^USB_WAKE_USB_IDS=' "$TOOLKIT_CONFIG"; then
+        sed -i "s|^USB_WAKE_USB_IDS=.*|USB_WAKE_USB_IDS=\"$wanted\"|" \
+            "$TOOLKIT_CONFIG"
+    else
+        printf 'USB_WAKE_USB_IDS="%s"\n' "$wanted" >> "$TOOLKIT_CONFIG"
+    fi
+    echo "Added ${added[*]} to the radios allowed to wake this machine."
+}
+
+if [[ "$ACTION" == "wake-ids" ]]; then
+    add_bluetooth_wake_ids
+    exit 0
+fi
 # ROOT is empty on a machine and a directory in the tests, the same way
 # scripts/user-unit.sh uses it.
 if [[ "$ACTION" == "resume-wake" ]]; then
@@ -198,6 +291,10 @@ echo "Running the CEC toolkit's own $ACTION as $TARGET."
 runuser -u "$TARGET" -- env "${export_env[@]}" bash "$INSTALLER" "${flags[@]}"
 
 if [[ "$ACTION" == "install" ]]; then
+    # After the toolkit's own installer, which writes the config this edits -
+    # and only writes it when it is not already there, so an id added here
+    # survives being installed over the top.
+    add_bluetooth_wake_ids || true
     echo
     echo "Installed. Nothing is switched on yet - the panel's HDMI CEC page"
     echo "has a switch for each feature."

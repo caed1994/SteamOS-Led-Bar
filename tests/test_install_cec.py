@@ -112,6 +112,128 @@ class ArgumentTest(unittest.TestCase):
         self.assertEqual(run("install").returncode, 2)
 
 
+class BluetoothWakeIdTest(unittest.TestCase):
+    """Finding the radio a controller talks to, which the toolkit misses.
+
+    It looks for one three ways - an exact vendor:product list, a regex over
+    the device's name, and the Bluetooth USB class - and on anything but a
+    Steam Deck all three miss. Measured on an AM5 board:
+
+        0e8d:0616 MediaTek Inc. Wireless_Device
+        class=ef sub=02 proto=01
+
+    Not the Intel id the list carries. A Bluetooth radio whose name does not
+    contain the word Bluetooth. And ef/02/01 is Interface Association - "my
+    classes are in my interfaces" - which is what every wifi-and-bluetooth
+    combo chip says, so the class check cannot match one. The toolkit printed
+    "matched":0 and no reason.
+    """
+
+    def _machine(self, where, devices):
+        """A fake /sys/bus/usb/devices, from {id: [(class, sub, proto)]}."""
+        usb = os.path.join(where, "usb")
+        for index, (usb_id, interfaces) in enumerate(devices.items()):
+            name = "1-%d" % (index + 1)
+            vendor, product = usb_id.split(":")
+            os.makedirs(os.path.join(usb, name), exist_ok=True)
+            for leaf, value in (("idVendor", vendor), ("idProduct", product)):
+                with open(os.path.join(usb, name, leaf), "w") as handle:
+                    handle.write(value)
+            for number, (klass, sub, proto) in enumerate(interfaces):
+                at = os.path.join(usb, "%s:1.%d" % (name, number))
+                os.makedirs(at, exist_ok=True)
+                for leaf, value in (("bInterfaceClass", klass),
+                                    ("bInterfaceSubClass", sub),
+                                    ("bInterfaceProtocol", proto)):
+                    with open(os.path.join(at, leaf), "w") as handle:
+                        handle.write(value)
+        return usb
+
+    def _config(self, where, text):
+        at = os.path.join(where, "root", "etc")
+        os.makedirs(at, exist_ok=True)
+        with open(os.path.join(at, "steamos-cec-toolkit.conf"), "w") as handle:
+            handle.write(text)
+        return os.path.join(where, "root")
+
+    def _ids(self, root):
+        path = os.path.join(root, "etc", "steamos-cec-toolkit.conf")
+        with open(path) as handle:
+            for line in handle:
+                if line.startswith("USB_WAKE_USB_IDS="):
+                    return line.split("=", 1)[1].strip().strip('"')
+        return None
+
+    def _run(self, where, devices, config='USB_WAKE_USB_IDS="8087:0032"\n'):
+        usb = self._machine(where, devices)
+        root = self._config(where, config)
+        done = run("wake-ids", env=dict(os.environ, SYSFS_USB=usb, ROOT=root))
+        return done, root
+
+    BLUETOOTH = ("e0", "01", "01")
+    KEYBOARD = ("03", "01", "01")
+
+    @AS_ROOT
+    def test_a_combo_chip_is_found_by_its_interface(self):
+        """The whole point: the class it hides is one level down."""
+        with tempfile.TemporaryDirectory() as where:
+            done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(self._ids(root), "8087:0032 0e8d:0616")
+
+    @AS_ROOT
+    def test_what_is_already_there_is_kept(self):
+        with tempfile.TemporaryDirectory() as where:
+            _done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
+            self.assertIn("8087:0032", self._ids(root))
+
+    @AS_ROOT
+    def test_running_it_twice_adds_nothing_the_second_time(self):
+        with tempfile.TemporaryDirectory() as where:
+            _done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
+            once = self._ids(root)
+            usb = os.path.join(where, "usb")
+            again = run("wake-ids",
+                        env=dict(os.environ, SYSFS_USB=usb, ROOT=root))
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertEqual(self._ids(root), once)
+            self.assertIn("may already", again.stdout)
+
+    @AS_ROOT
+    def test_two_bluetooth_interfaces_on_one_chip_are_one_id(self):
+        """A radio usually has several. It is still one device to allow."""
+        with tempfile.TemporaryDirectory() as where:
+            _done, root = self._run(
+                where, {"0e8d:0616": [self.BLUETOOTH, self.BLUETOOTH]})
+            self.assertEqual(self._ids(root), "8087:0032 0e8d:0616")
+
+    @AS_ROOT
+    def test_nothing_else_on_the_bus_is_allowed_to_wake_anything(self):
+        """A keyboard that wakes the machine is a machine that wakes itself."""
+        with tempfile.TemporaryDirectory() as where:
+            _done, root = self._run(where, {"24ae:9db6": [self.KEYBOARD]})
+            self.assertEqual(self._ids(root), "8087:0032")
+
+    @AS_ROOT
+    def test_a_config_without_the_key_gets_one(self):
+        with tempfile.TemporaryDirectory() as where:
+            _done, root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]},
+                                    config="CEC_DEVICE=/dev/cec0\n")
+            self.assertEqual(self._ids(root), "0e8d:0616")
+
+    @AS_ROOT
+    def test_no_config_at_all_is_said_rather_than_crashed_over(self):
+        with tempfile.TemporaryDirectory() as where:
+            usb = self._machine(where, {"0e8d:0616": [self.BLUETOOTH]})
+            done = run("wake-ids", env=dict(os.environ, SYSFS_USB=usb,
+                                            ROOT=os.path.join(where, "none")))
+            self.assertEqual(done.returncode, 0)
+            self.assertIn("nothing to add", done.stderr)
+
+    def test_it_takes_no_arguments(self):
+        self.assertIn("wake-ids", run().stderr)
+
+
 class SourceTest(unittest.TestCase):
 
     @AS_ROOT

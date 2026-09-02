@@ -799,6 +799,25 @@ GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
 
 That is a "no" from the television, not a fault here.
 
+**The controller wake finds your Bluetooth radio, whatever it calls itself.**
+The toolkit looks for one three ways &mdash; an exact `vendor:product` list,
+a regular expression over the device's name, and the Bluetooth USB class
+&mdash; and on anything but a Steam Deck all three can miss. Measured on an
+AM5 board:
+
+```
+0e8d:0616 MediaTek Inc. Wireless_Device
+class=ef sub=02 proto=01
+```
+
+Not the Intel id the list carries; a Bluetooth radio whose name does not
+contain the word Bluetooth; and `ef/02/01` is Interface Association, which
+means "my classes are in my interfaces" &mdash; what every wifi-and-bluetooth
+combo chip says, so the class check cannot match one. `matched:0`, and no
+reason given. Installing HDMI CEC now looks one level down, at the
+interfaces, and adds what it finds to `USB_WAKE_USB_IDS`. Plug a radio in
+later and `scripts/install-cec.sh wake-ids` does the same on its own.
+
 **Waking the television does not hold up the session.** The toolkit's boot
 wake settles for eight seconds and then retries four times five seconds
 apart, because a set that has just been switched on is not ready at once.

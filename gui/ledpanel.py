@@ -1282,6 +1282,17 @@ def install_cec_command(source_dir, remove=False):
             cec_module.source_dir(source_dir)]
 
 
+def wake_ids_command(source_dir):
+    """Let every Bluetooth radio here wake the machine.
+
+    Run as part of installing HDMI CEC, and offered on its own for a radio
+    plugged in afterwards - see add_bluetooth_wake_ids in the script for what
+    the toolkit's own three ways of finding one miss.
+    """
+    return ["pkexec", os.path.join(source_dir, "scripts", "install-cec.sh"),
+            "wake-ids"]
+
+
 def cec_status(home=None, run=None):
     """Ask the installed toolkit about itself. None when it is not installed.
 
