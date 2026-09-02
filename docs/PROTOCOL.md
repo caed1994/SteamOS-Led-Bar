@@ -1,6 +1,6 @@
-# Wire protocol (host <-> ESP over USB serial)
+# Wire protocol (host to ESP over USB serial)
 
-Both directions use the same framing. All multi-byte fields are little-endian.
+Both directions use the same frame. All multi-byte fields are little-endian.
 
 ```
 +------+------+---------+------+----------+---------+-------+
@@ -10,92 +10,103 @@ Both directions use the same framing. All multi-byte fields are little-endian.
 ```
 
 * `version` is `1`.
-* `length` is the payload length in bytes, `0` for payload-less messages.
-* `crc16` is CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`) over
-  `version`, `type`, `length` and `payload` — the SOF bytes are excluded so a
-  receiver that resynchronises mid-stream cannot mistake noise for a frame.
-  Check value for `"123456789"` is `0x29B1`.
+* `length` is the length of the payload in bytes. It is `0` for a message with
+  no payload.
+* `crc16` is CRC-16/CCITT-FALSE (polynomial `0x1021`, initial value `0xFFFF`).
+  It covers `version`, `type`, `length` and `payload`. The two SOF bytes are
+  not in it. A receiver that synchronises again in the middle of the stream can
+  thus not read noise as a frame. The check value for `"123456789"` is
+  `0x29B1`.
 
-A receiver scans for `A5 5A`, validates version and length, then verifies the
-CRC. Frames that fail are dropped and the parser resynchronises on the next
-SOF. USB CDC already error-checks the link, so this is belt and braces for
-half-open ports and boards that print boot messages on the same UART.
+A receiver looks for `A5 5A`. It then validates the version and the length, and
+verifies the CRC. It discards a frame that fails and synchronises again at the
+next SOF.
 
-## Host -> ESP
+USB CDC verifies the link itself, so this check is additional protection. It is
+necessary for a half-open port, and for a board that prints its boot messages
+on the same UART.
+
+## Host to ESP
 
 | Type   | Name    | Payload                                    |
 | ------ | ------- | ------------------------------------------ |
-| `0x01` | HELLO   | empty; asks for INFO                       |
-| `0x10` | FRAME   | `count` (u16) + `count * 3` bytes RGB      |
-| `0x11` | FILL    | `count` (u16) + 3 bytes RGB for all LEDs   |
-| `0x20` | BLANK   | empty; clears the strip                    |
-| `0x21` | STANDBY | 3 bytes RGB + `period` (u16, ms)           |
+| `0x01` | HELLO   | empty. It asks for INFO                    |
+| `0x10` | FRAME   | `count` (u16) and `count * 3` bytes RGB    |
+| `0x11` | FILL    | `count` (u16) and 3 bytes RGB for each LED |
+| `0x20` | BLANK   | empty. It makes the strip dark             |
+| `0x21` | STANDBY | 3 bytes RGB and `period` (u16, ms)         |
 | `0x40` | PING    | empty                                      |
 
-`FRAME` carries finished pixels: the host renders every effect, applies
-brightness and gamma, and maps the 17 logical LEDs of the Steam Machine bar
-onto the physical strip. The firmware reallocates its pixel buffer whenever
-`count` changes, so the strip length is a host-side setting only, bounded by
-the firmware's `MAX_LEDS`.
+`FRAME` carries complete pixels. The host renders each effect, applies the
+brightness and the gamma, and maps the 17 logical LEDs of the Steam Machine bar
+onto the strip.
 
-Colour order is applied by the firmware (`COLOR_ORDER_*` build flag); the wire
-is always plain RGB.
+The firmware allocates its pixel buffer again when `count` changes. The strip
+length is thus a host setting only. The firmware's `MAX_LEDS` is its limit.
 
-`STANDBY` is the one message that asks the firmware to animate rather than to
-display: it breathes the given colour, one full breath per `period`, and it
-suspends the idle timeout below for as long as it lasts. It exists because a
-suspended machine has no host — the service is frozen, so nothing can be
-rendered — and the strip should still show that the machine is only asleep.
-The colour and the period travel in the message rather than living in the
-firmware, so changing how it looks does not mean reflashing.
+The firmware applies the colour order. The `COLOR_ORDER_*` build flag selects
+it. The wire always carries plain RGB.
 
-The host also uses it at startup, for the same reason in miniature: the
-kernel module comes up reporting "off" and only steps its sequence number
-when something writes, so between the service connecting and Steam setting
-the LEDs the honest frame is black - and sending it would kill the startup
-breath the ESP is already running. So the host asks for that breath to
-continue instead, in the firmware's own amber, until the first thing Steam
-writes takes the strip back.
+`STANDBY` is the one message that asks the firmware to animate and not to
+show a frame. The firmware breathes the given colour, one full breath in each
+`period`. The message also suspends the idle timeout below for its full length.
 
-Standby ends on the next `FRAME`, `FILL` or `BLANK`. A `PING` does not end it:
-that is the host checking the link, not driving the strip. A firmware that
-does not know the message ignores it, and the strip goes dark as it did
-before.
+The message exists because a machine in suspend has no host. The service is
+frozen and can render nothing, but the strip must still show that the machine
+is asleep. The colour and the period are in the message and not in the
+firmware, so a change to the appearance needs no new flash.
 
-## ESP -> Host
+The host also uses `STANDBY` at the start, for a similar reason. The kernel
+module comes up and reports "off". It increases its sequence number only when
+something writes.
+
+Between the connection of the service and the first write by Steam, the correct
+frame is thus black. To send it would stop the start-up breath that the ESP
+already runs. The host asks for that breath to continue instead, in the
+firmware's own amber colour, until the first write by Steam takes the strip.
+
+The next `FRAME`, `FILL` or `BLANK` ends the standby animation. A `PING` does
+not end it, because a ping is the host that verifies the link and not the host
+that drives the strip. A firmware that does not know the message ignores it,
+and the strip goes dark as before.
+
+## ESP to host
 
 | Type   | Name  | Payload                                                       |
 | ------ | ----- | ------------------------------------------------------------- |
 | `0x02` | INFO  | `protocol` (u8), `max_leds` (u16), `data_pin` (u8), name (ASCII) |
 | `0x30` | STATS | `frames` (u32), `crc_errors` (u16), `resyncs` (u16)           |
-| `0x31` | LOG   | ASCII text, logged by the service                             |
+| `0x31` | LOG   | ASCII text. The service writes it to the log                  |
 | `0x41` | PONG  | empty                                                         |
 
-`STATS` is sent every 5 seconds and shows up in the journal at debug level:
+The ESP sends `STATS` every 5 seconds. It appears in the journal at debug
+level:
 
-```
+```bash
 sudo systemctl stop steamos-utility-center
 sudo /var/lib/steamos-utility-center/steamos-utility-center -v
 ```
 
-Rising `crc_errors` or `resyncs` means the link is losing bytes — lower `BAUD`
-on both sides, or move the strip data line to GPIO2 so the ESP8266 clocks
-pixels over UART1 instead of bit-banging with interrupts disabled.
+If `crc_errors` or `resyncs` increases, the link loses bytes. Decrease `BAUD`
+on both sides. As an alternative, move the strip data line to GPIO2. The
+ESP8266 then clocks the pixels over UART1 and does not bit-bang them with the
+interrupts disabled.
 
-## Connection lifecycle
+## Connection sequence
 
-0. From power-up until the host says anything, the firmware breathes the strip
-   in dim amber. It is driven from the main loop rather than blocking in
-   `setup()`, so it can wait indefinitely and still answer the greeting the
-   moment it arrives - the host gives up on the handshake after about four
-   seconds, which a blocking animation would eat. The first valid message ends
-   it and blanks the strip.
-1. The host opens the port, drops DTR/RTS and waits ~1.8 s for the board to
-   boot (opening a tty resets most ESP dev boards).
-2. It sends `HELLO` up to five times and waits for `INFO`. Without a reply it
-   logs a warning and streams frames anyway.
-3. It streams `FRAME` at `FPS` while an effect animates, and at `IDLE_FPS` for
-   static scenes. The idle frames are the keepalive.
-4. If no frame arrives for `LINK_TIMEOUT_MS` (5 s), the firmware blanks the
-   strip, so a pulled cable or a stopped service does not leave it lit.
-5. On `SIGTERM` the service sends `BLANK` and closes the port.
+0. From the power-up until the host sends a message, the firmware breathes the
+   strip in dim amber. The main loop drives the animation. It does not block in
+   `setup()`, so it can wait for an unlimited time and still answer the
+   greeting immediately. The host stops the handshake after approximately four
+   seconds, and a blocking animation would use that time. The first valid
+   message ends the animation and makes the strip dark.
+1. The host opens the port, sets DTR and RTS low, and waits approximately 1.8 s
+   for the board to boot. To open a tty resets most ESP development boards.
+2. The host sends `HELLO` up to five times and waits for `INFO`. With no reply
+   it writes a warning to the log and sends frames anyway.
+3. The host sends `FRAME` at `FPS` while an effect animates, and at `IDLE_FPS`
+   for a static scene. The idle frames are the keepalive.
+4. If no frame arrives for `LINK_TIMEOUT_MS` (5 s), the firmware makes the
+   strip dark. A disconnected cable or a stopped service thus leaves no LEDs
+   lit.
+5. At `SIGTERM` the service sends `BLANK` and closes the port.

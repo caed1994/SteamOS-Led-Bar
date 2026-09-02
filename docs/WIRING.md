@@ -11,78 +11,80 @@
                            +-------------+             +----------------+
 ```
 
-* **330 Ω** in series with the data line damps reflections, and **1000 µF**
-  between 5 V and GND at the start of the strip absorbs inrush current. Both
-  are optional, and both save trouble.
-* **The ESP and the strip must share a ground**, even when the strip has its
-  own power supply.
+* A **330 Ω** resistor in the data line reduces the reflections. A **1000 µF**
+  capacitor between 5 V and GND at the start of the strip absorbs the inrush
+  current. Both parts are optional, and both prevent problems.
+* **The ESP and the strip must have a common ground.** This is also necessary
+  when the strip has its own power supply.
 
-Why GPIO2: the firmware clocks the WS2812 data out over **UART1** in hardware
-there, so the USB serial link (UART0) keeps running undisturbed.
+Use GPIO2 because the firmware clocks the WS2812 data out over **UART1** in
+hardware there. The USB serial link uses UART0 and thus continues without
+interruption.
 
-## Level shifting 3.3 V -> 5 V
+## Level shift from 3.3 V to 5 V
 
-The WS2812B datasheet wants roughly 0.7 × 5 V = 3.5 V for a logic high, while
-the ESP delivers 3.3 V. It usually works anyway; if the first LED flickers or
-shows wrong colours, either of these helps:
+The WS2812B datasheet gives approximately 0.7 x 5 V = 3.5 V for a logic high.
+The ESP gives 3.3 V. This is usually sufficient.
 
-* a **74AHCT125** level shifter (the cleanest fix), or
-* a **1N4148** in series with the 5 V feed of the first LED — that drops its
-  supply by about 0.7 V and with it the switching threshold.
+If the first LED flickers or shows the wrong colours, use one of these:
+
+* a **74AHCT125** level shifter, which is the best solution, or
+* a **1N4148** diode in the 5 V line of the first LED. The diode decreases its
+  supply by approximately 0.7 V, and the switching threshold with it.
 
 ## Power
 
-| LEDs | Full brightness white | Note |
-| ---- | --------------------- | ---- |
-| 17   | ~1.0 A                | marginal over USB |
-| 30   | ~1.8 A                | separate supply |
-| 60   | ~3.6 A                | separate supply |
+| LEDs | White at full brightness | Note |
+| ---- | ------------------------ | ---- |
+| 17   | approximately 1.0 A      | marginal over USB |
+| 30   | approximately 1.8 A      | a separate supply is necessary |
+| 60   | approximately 3.6 A      | a separate supply is necessary |
 
-USB typically provides 0.5 A (USB 2.0) to 0.9 A (USB 3.0). Rule of thumb:
-60 mA per LED at full-brightness white.
+USB gives 0.5 A (USB 2.0) to 0.9 A (USB 3.0). Calculate 60 mA for each LED at
+white and full brightness.
 
-Two ways to go:
+There are two solutions:
 
-1. **A separate 5 V supply** for the strip, with its ground tied to the ESP. Do
-   **not** connect that supply's 5 V rail to the ESP's 5 V pin while the ESP is
-   powered over USB.
-2. **Run it off the USB rail** and cap the brightness:
-   `MAX_BRIGHTNESS=80` in `/etc/steamos-utility-center.conf` (or
-   `-D MAX_BRIGHTNESS=80` in the firmware, which also caps directly driven
-   tests).
+1. Use **a separate 5 V supply** for the strip, and connect its ground to the
+   ESP. Do **not** connect the 5 V line of that supply to the 5 V pin of the
+   ESP while USB powers the ESP.
+2. Use **the USB line** and set a brightness limit. Write
+   `MAX_BRIGHTNESS=80` in `/etc/steamos-utility-center.conf`. As an
+   alternative, write `-D MAX_BRIGHTNESS=80` in the firmware, which also limits
+   the tests that drive the strip directly.
 
-## Keeping existing GPIO14 (D5) wiring
+## Existing GPIO14 (D5) wiring
 
-If you already wired things up following the original project's instructions,
-you can stay on D5:
+If your wiring follows the instructions of the original project, you can keep
+D5:
 
 ```bash
 ./flash-esp.sh esp8266_gpio14
 ```
 
-That build bit-bangs the data line, which briefly disables interrupts. The
-128 byte UART FIFO therefore caps the usable baud rate — the project-wide
-230400 sits safely below it.
+That build bit-bangs the data line, which disables the interrupts for a short
+time. The UART FIFO holds 128 bytes, and this limits the usable baud rate. The
+project uses 230400, which is safely below the limit.
 
-Practical limit for this build: around 120 LEDs. For longer strips, move the
-data line to GPIO2.
+The practical limit for this build is approximately 120 LEDs. For a longer
+strip, move the data line to GPIO2.
 
 ## ESP32
 
-Any free GPIO (the default in `platformio.ini` is GPIO16), because the data is
-clocked out by the RMT peripheral:
+Use any free GPIO. The default in `platformio.ini` is GPIO16. The RMT
+peripheral clocks the data out, so the pin is free:
 
 ```bash
 ./flash-esp.sh esp32dev
 ```
 
-Baud rate is 230400 as everywhere else — nothing to change in the config.
+The baud rate is 230400, as everywhere. Change nothing in the configuration.
 
 ## Colour order
 
-If the self test (`--self-test`) shows red as green, your strip's colour order
-does not match the firmware. Set the matching flag in `platformio.ini` and
-reflash:
+If the self test (`--self-test`) shows red as green, the colour order of your
+strip does not agree with the firmware. Set the correct flag in
+`platformio.ini` and flash the firmware again:
 
 ```
 -D COLOR_ORDER_RGB    ; WS2811 and many 12 V strips
@@ -90,4 +92,4 @@ reflash:
 -D COLOR_ORDER_RBG
 ```
 
-With no flag: GRB, the default for WS2812B.
+With no flag, the firmware uses GRB, which is the default for WS2812B.
