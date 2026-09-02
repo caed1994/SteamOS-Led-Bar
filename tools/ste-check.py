@@ -136,7 +136,13 @@ def prose_of_code(text):
                 out.append((number, rest.strip()))
             continue
         if stripped.startswith("#"):
-            said = stripped.lstrip("#").strip()
+            body = stripped[1:]
+            # A comment line that is indented against its own margin is a
+            # block: a log extract, a table, a command. docs/STYLE.md permits
+            # those and calls them data, so the sentence rules do not apply.
+            if body[:2] in ("  ", "\t "):
+                continue
+            said = body.strip()
             if said and not said.startswith(("!", "SPDX", "-*-")):
                 out.append((number, said))
     return out

@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Reading how hot the machine is, from the kernel's hwmon interface.
+"""The temperature of the machine, from the hwmon interface of the kernel.
 
-Every sensor shows up under /sys/class/hwmon as a chip with one or more
-inputs, in thousandths of a degree. The work is not reading one - it is
-picking the right one out of a dozen, most of which measure something nobody
-means by "how hot is it".
+Each sensor is under /sys/class/hwmon as a chip with one or more inputs. Each
+input gives thousandths of a degree.
+
+The difficult part is not the read. It is the selection of the correct sensor
+from approximately twelve sensors. Most of them measure something that a person
+does not mean by "how hot is the machine".
 """
 
 from __future__ import annotations
@@ -22,14 +24,18 @@ LOG = logging.getLogger(__name__)
 
 HWMON_ROOT = "/sys/class/hwmon"
 
-# Chips worth watching, best first. On a Steam Machine the APU is the answer:
-# k10temp is its CPU side, amdgpu its graphics side; coretemp is the Intel
-# equivalent, the last two turn up on handhelds and ARM boards. The SSD, the
-# wifi card and the battery are real temperatures, but not the one meant.
+# The chips to watch, the best first.
+#
+# On a Steam Machine the APU is the answer. k10temp is its CPU side and amdgpu
+# is its graphics side. coretemp is the Intel equivalent. The last two chips
+# are on handheld machines and ARM boards.
+#
+# The SSD, the wifi card and the battery give real temperatures, but not the
+# temperature that a person means.
 PREFERRED_CHIPS = ("k10temp", "amdgpu", "coretemp", "cpu_thermal", "acpitz")
 
-# Within a chip, the sensor that speaks for the whole package. Tctl is what AMD
-# drives its own fan curve from; edge is the die on amdgpu.
+# In a chip, the sensor for the full package. AMD drives its own fan curve
+# from Tctl. On amdgpu, edge is the die.
 PREFERRED_LABELS = ("tctl", "tdie", "package", "edge", "composite")
 
 
@@ -42,10 +48,10 @@ def _read_text(path):
 
 
 def read_celsius(path):
-    """One hwmon input, in degrees, or None if it will not read.
+    """Returns one hwmon input in degrees, or None if the read fails.
 
-    hwmon reports thousandths: a raw 52000 is 52 C, and unconverted it would
-    peg any gauge at maximum forever.
+    hwmon reports thousandths of a degree. A raw 52000 is 52 C. Without the
+    conversion, each gauge stays at its maximum.
     """
     text = _read_text(path)
     if not text:
@@ -56,36 +62,41 @@ def read_celsius(path):
         return None
 
 
-# What a sensor may publish next to its reading, best answer first. hwmon's
-# interface is optional throughout: a driver exposes what the hardware tells
-# it and nothing more, so any of these may be missing on any sensor.
+# What a sensor can publish beside its reading, the best answer first.
 #
-#   emergency - throw the switch now (amdgpu publishes it)
-#   crit      - the manufacturer's critical point
-#   max       - where the part expects to be throttled
+# Each part of the hwmon interface is optional. A driver publishes what the
+# hardware reports and nothing more, so a sensor can have none of these.
 #
-# Worth reading because "hot" is not one number: an APU sitting at 95 C is
-# doing what it was designed to do, while an NVMe drive is long past its own
-# limit there. The part knows its own numbers; we do not.
+#   emergency - stop the machine now (amdgpu publishes it)
+#   crit      - the critical point of the manufacturer
+#   max       - the point at which the part expects a throttle
+#
+# These limits are worth a read, because "hot" is not one number. An APU at
+# 95 C operates as its design intends. An NVMe drive at 95 C is far above its
+# own limit. The part knows its own numbers. This project does not.
 LIMIT_FILES = ("emergency", "crit", "max")
 
-# Set by the kernel, not by us: the driver's own opinion that a limit has been
-# passed. Where it exists it beats any threshold of ours.
+# The kernel sets these, and this project does not. Each one is the driver's
+# own statement that the part is above a limit. Where one exists, it has
+# priority over each threshold of ours.
 ALARM_FILES = ("crit_alarm", "emergency_alarm", "max_alarm")
 
 
-# Above this a "limit" is not one. NVMe stores its thresholds as 16 bit Kelvin
-# and spells "not implemented" as 0xFFFF, which the driver passes through
-# verbatim: 65535 K is 65261.85 C, and it turns up on real drives.
+# Above this value, a "limit" is not a limit. NVMe keeps its thresholds as 16
+# bit Kelvin and writes "not implemented" as 0xFFFF. The driver passes that
+# value through without a change. 65535 K is 65261.85 C, and real drives
+# report it.
 SANE_LIMIT = 200.0
 
 
 def read_limits(path):
-    """The limits a sensor publishes, in degrees, keyed as in LIMIT_FILES.
+    """Returns the limits of a sensor in degrees, keyed as in LIMIT_FILES.
 
-    Missing files are simply absent from the result - most sensors publish
-    some of these and none publish all. So are implausible ones, which are a
-    disabled threshold rather than a hot part.
+    A file that does not exist is not in the result. Most sensors publish some
+    of these limits and no sensor publishes all of them.
+
+    A value above LIMIT_CEILING is also not in the result. Such a value is a
+    disabled threshold and not a hot part.
     """
     limits = {}
     for name in LIMIT_FILES:
@@ -96,7 +107,7 @@ def read_limits(path):
 
 
 def read_alarms(path):
-    """Which of the sensor's own alarm flags are currently raised."""
+    """Returns the alarm flags of the sensor that are set now."""
     raised = []
     for name in ALARM_FILES:
         text = _read_text(path.replace("_input", "_" + name))
@@ -106,10 +117,10 @@ def read_alarms(path):
 
 
 def find_sensors(root=HWMON_ROOT):
-    """Every temperature input on the machine, as dicts.
+    """Returns each temperature input on the machine, as a dictionary.
 
-    Each has chip, label, path and rank - lower is a better answer to "how hot
-    is it".
+    Each dictionary has chip, label, path and rank. A lower rank is a better
+    answer to the question "how hot is the machine".
     """
     found = []
     for chip_dir in sorted(glob.glob(os.path.join(root, "hwmon*"))):
@@ -126,7 +137,7 @@ def find_sensors(root=HWMON_ROOT):
 
 
 def _rank(chip, label):
-    """How good an answer this sensor is; lower is better."""
+    """Returns the quality of this sensor as an answer. Lower is better."""
     lowered_chip = chip.lower()
     for position, name in enumerate(PREFERRED_CHIPS):
         if lowered_chip == name:
@@ -143,33 +154,37 @@ def _rank(chip, label):
     else:
         label_rank = len(PREFERRED_LABELS)
 
-    # The chip decides first, or a well-labelled SSD sensor would beat an
-    # unlabelled CPU one.
+    # The chip has priority. Without this, an SSD sensor with a good label
+    # would have priority over a CPU sensor with no label.
     return (chip_rank, label_rank)
 
 
 def pick_sensor(sensors):
-    """The best of them, or None when the machine reports no temperature."""
+    """Returns the best sensor, or None if the machine reports none."""
     if not sensors:
         return None
     return min(sensors, key=lambda sensor: sensor["rank"])
 
 
-# How long a reading is kept, and how hard readings are smoothed. A CPU sensor
-# is noisy in a way the eye picks up: Tctl jumps a degree or two second to
-# second while nothing is happening, which over the gauge's 45 degree span is
-# most of an LED - so the leading one would flicker on every reading. A few
-# seconds of averaging settles it without hiding a real warm-up.
+# The time that a reading is kept, and the strength of the average.
+#
+# A CPU sensor is irregular, and the eye sees it. Tctl moves one or two degrees
+# from second to second while the machine does nothing. Over the 45 degree
+# range of the gauge, that is most of one LED, and the first LED would thus
+# move at each reading.
+#
+# An average over some seconds stops the movement. It does not hide a real
+# increase in the temperature.
 READ_INTERVAL = 1.0
 SMOOTHING_SECONDS = 6.0
 
 
 class TemperatureSource:
-    """The current temperature, read no more often than it changes.
+    """The current temperature, read at the rate at which it changes.
 
-    The render loop runs at up to 60 frames a second while a CPU temperature
-    moves on the scale of seconds, so a reading is kept for `interval` and
-    handed out smoothed - see SMOOTHING_SECONDS.
+    The render loop runs at 60 frames each second. A CPU temperature changes
+    over seconds. This class thus keeps a reading for `interval` and returns an
+    average. See SMOOTHING_SECONDS.
     """
 
     def __init__(self, path="auto", interval=READ_INTERVAL,
@@ -185,7 +200,7 @@ class TemperatureSource:
         self._complained = False
 
     def resolve(self):
-        """Settle on a sensor, once. Returns the path, or None."""
+        """Selects a sensor one time. Returns the path, or None."""
         if self.path is not None:
             return self.path
         if self.wanted and self.wanted != "auto":
@@ -201,7 +216,7 @@ class TemperatureSource:
         return self.path
 
     def celsius(self, now=None):
-        """The smoothed temperature, or None if there is nothing to read."""
+        """Returns the average temperature, or None if it can read none."""
         now = time.monotonic() if now is None else now
         if self._taken is not None and now - self._taken < self.interval:
             return self._value
@@ -219,50 +234,58 @@ class TemperatureSource:
         return self._value
 
     def _smooth(self, sample, elapsed):
-        """Move the reported value part of the way towards a new sample."""
+        """Moves the reported value part of the distance to a new sample."""
         return sampling.smooth(self._value, sample, elapsed, self.smoothing)
 
 
-# -- watching every sensor for one that stays too hot ----------------------
+# -- the watch for a sensor that stays too hot -----------------------------
 #
-# A different question from the gauge's, and deliberately a separate object:
-# the gauge shows one sensor you chose, smoothed hard so the leading LED does
-# not flicker. This reads all of them, unsmoothed, and cares about how long
-# one has been high. Sharing a reader would have meant one of the two getting
-# data shaped for the other.
+# This is a different question from the question of the gauge, and it is thus a
+# separate class.
+#
+# The gauge shows one sensor that a person selected. It uses a strong average,
+# so that the first LED does not move.
+#
+# This class reads each sensor with no average. It measures the time that a
+# sensor stays high. One reader for both would give one of the two the data
+# for the other.
 
-# Warn this far below the part's own critical point, so there is time to
-# notice before the hardware acts on it.
+# The distance below the critical point of the part at which this warns. It
+# gives a person time to see the warning before the hardware acts.
 OVERHEAT_MARGIN = 5.0
-# How long a sensor has to stay there. A CPU touches its limit for a fraction
-# of a second whenever it boosts; a minute of it is a cooling problem.
+# The time that a sensor must stay there. A CPU reaches its limit for a small
+# part of a second at each boost. One minute at the limit is a cooling fault.
 OVERHEAT_DWELL = 60.0
-# How far it has to fall before that sensor may warn again, so one sitting
-# exactly on the threshold does not warn every time it wobbles.
+# The distance that the temperature must fall before that sensor can warn
+# again. A sensor exactly at the threshold thus does not warn at each small
+# movement.
 OVERHEAT_RELEASE = 5.0
-# And a floor between two warnings whatever tripped them. The bar cannot say
-# more than "something is too hot"; saying it every minute adds nothing.
+# The minimum time between two warnings, whatever caused them. The bar can say
+# only "something is too hot". To repeat that each minute adds nothing.
 OVERHEAT_QUIET = 300.0
-# All the sensors, this often. They move on the scale of seconds and the
-# dwell is a minute, so this is frequent enough to be exact and rare enough
-# to be free.
+# The read interval for each sensor. The sensors change over seconds and the
+# dwell is one minute. This interval is thus short enough to be exact and long
+# enough to cost nothing.
 OVERHEAT_INTERVAL = 5.0
 
-# Which published limit to measure against, best first. "max" is deliberately
-# not here: it means whatever a driver wants it to. A DDR5 module reports
-# max 55 with crit 85, an Ethernet controller reports max 120 and no crit -
-# thresholding on that would warn about a warm DIMM in a warm room.
+# The published limit to measure against, the best first.
+#
+# "max" is deliberately not here. Its meaning depends on the driver. A DDR5
+# module reports max 55 with crit 85. An Ethernet controller reports max 120
+# and no crit. A threshold on "max" would thus warn about a warm memory module
+# in a warm room.
 LIMIT_SOURCES = ("crit", "emergency")
 
 
 class OverheatWatch:
-    """Reports a sensor that has stayed close to its own limit for a while.
+    """Reports a sensor that stays near its own limit for one minute.
 
-    Every threshold comes from the part, not from a number written here: what
-    is hot depends entirely on what is being measured. An APU sitting at 95 C
-    is doing what it was designed to do; an NVMe drive at 95 C is past its
-    critical point. Sensors that publish no limit are not watched at all,
-    because guessing one for an unknown part is how false alarms are made.
+    Each threshold comes from the part and not from a number in this file. The
+    meaning of "hot" depends on the measured part. An APU at 95 C operates as
+    its design intends. An NVMe drive at 95 C is above its critical point.
+
+    This class does not watch a sensor that publishes no limit. A guess for an
+    unknown part makes false alarms.
     """
 
     def __init__(self, root=HWMON_ROOT, margin=OVERHEAT_MARGIN,
@@ -281,7 +304,7 @@ class OverheatWatch:
         self._quiet_until = 0.0
 
     def resolve(self):
-        """Settle on what to watch and at which temperature, once."""
+        """Selects what to watch and at which temperature, one time."""
         if self.watched is not None:
             return self.watched
 
@@ -310,10 +333,10 @@ class OverheatWatch:
         return self.watched
 
     def poll(self, now):
-        """A sentence describing what is too hot, or None.
+        """Returns a sentence about what is too hot, or None.
 
-        Cheap to call every frame: it reads nothing until `interval` has
-        passed, so the render loop can ask without thinking about it.
+        A call at each frame costs little. It reads nothing until `interval`
+        passes, so the render loop can call it at each frame.
         """
         if self._next_read is not None and now < self._next_read:
             return None
@@ -324,8 +347,8 @@ class OverheatWatch:
             path = sensor["path"]
             celsius = read_celsius(path)
             if celsius is None:
-                # A sensor that stopped answering has not been hot for a
-                # minute; it has been absent. Start it over if it returns.
+                # A sensor that stops to answer was not hot for one minute.
+                # It was absent. Start its timer again if it returns.
                 self._hot_since.pop(path, None)
                 continue
 

@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Minimal serial port support built on stdlib termios only.
+"""Serial port support, from the termios module in the standard library.
 
-SteamOS has a read-only rootfs, so pyserial would mean either
-`steamos-readonly disable` or a virtualenv that breaks on every OS update. All
-a USB CDC/UART device needs is a handful of termios and TIOCM ioctls, so those
-are done directly and the service stays dependency-free.
+SteamOS has a read-only root filesystem. To use pyserial thus needs either
+`steamos-readonly disable` or a virtualenv, and each OS update breaks the
+virtualenv.
+
+A USB CDC or UART device needs only some termios and TIOCM ioctls. This module
+calls them directly, and the service thus needs no other package.
 """
 
 from __future__ import annotations
@@ -34,8 +36,9 @@ BAUD_CONSTANTS = {
     if hasattr(termios, "B%d" % rate)
 }
 
-# USB-serial bridges commonly found on ESP8266/ESP32 dev boards, plus the
-# native USB CDC of the ESP32-S2/S3/C3 (Espressif VID 0x303a).
+# The USB-serial bridges on most ESP8266 and ESP32 development boards. The
+# list also has the native USB CDC of the ESP32-S2, S3 and C3, whose Espressif
+# vendor id is 0x303a.
 KNOWN_ADAPTERS = {
     (0x10C4, 0xEA60): "Silicon Labs CP210x",
     (0x10C4, 0xEA70): "Silicon Labs CP2105",
@@ -51,7 +54,7 @@ KNOWN_ADAPTERS = {
 
 
 class SerialError(OSError):
-    """Raised for port discovery and configuration failures."""
+    """A port search or a port configuration failed."""
 
 
 def _read_sysfs(path):
@@ -63,7 +66,7 @@ def _read_sysfs(path):
 
 
 def _usb_attributes(tty_name):
-    """Walk up the sysfs device chain of a tty until the USB device node."""
+    """Goes up the sysfs device chain of a tty to the USB device node."""
     node = "/sys/class/tty/%s/device" % tty_name
     if not os.path.exists(node):
         return {}
@@ -98,7 +101,7 @@ def _by_id_link(device):
 
 
 def list_ports():
-    """Enumerate candidate USB serial devices, most likely candidate first."""
+    """Returns the possible USB serial devices, the most probable first."""
     ports = []
     for device in sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")):
         info = _usb_attributes(os.path.basename(device))
@@ -115,13 +118,13 @@ def list_ports():
             "description": description or adapter or "unknown",
             "adapter": adapter,
         })
-    # Known ESP-style adapters win over random modems/printers on ttyACM*.
+    # A known ESP adapter has priority over a modem or a printer on ttyACM*.
     ports.sort(key=lambda port: (port["adapter"] is None, port["device"]))
     return ports
 
 
 def find_port(preferred=None):
-    """Resolve a device path, a by-id link or ``auto``/None to a port."""
+    """Returns a port from a device path, a by-id link, ``auto`` or None."""
     if preferred and preferred != "auto":
         if os.path.exists(preferred):
             return os.path.realpath(preferred)
@@ -143,7 +146,7 @@ def describe(device):
 
 
 class SerialPort:
-    """A raw 8N1 serial port with non-blocking reads and blocking writes."""
+    """A raw 8N1 serial port. Reads do not block. Writes block."""
 
     def __init__(self, device, baudrate):
         if baudrate not in BAUD_CONSTANTS:
@@ -157,15 +160,15 @@ class SerialPort:
         self._open()
 
     def _open(self):
-        # O_NONBLOCK during open avoids hanging on ports that assert no carrier.
+        # O_NONBLOCK at the open prevents a stop on a port with no carrier.
         self.fd = os.open(self.device, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         try:
             self._configure()
         except termios.error as exc:
-            # Anything can be opened, but only a tty can be configured as one.
-            # termios.error is not an OSError, so callers that handle a failed
-            # open would miss it and the service would die on a SERIAL_PORT
-            # that points at something else.
+            # The open succeeds for each file, but only a tty accepts this
+            # configuration. termios.error is not an OSError, so a caller that
+            # handles a failed open does not catch it. The service would then
+            # stop on a SERIAL_PORT that names another file.
             self.close()
             raise SerialError("%s is not a serial port: %s"
                               % (self.device, exc))
@@ -178,6 +181,7 @@ class SerialPort:
         iflag, oflag, cflag, lflag, _ispeed, _ospeed, cc = termios.tcgetattr(self.fd)
 
         # Raw mode: no translation, no echo, no flow control, no signals.
+        # Each of the four would change the bytes on the wire.
         iflag &= ~(
             termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP
             | termios.INLCR | termios.IGNCR | termios.ICRNL | termios.IXON
@@ -189,7 +193,8 @@ class SerialPort:
             | termios.ISIG | termios.IEXTEN
         )
         cflag &= ~(termios.CSIZE | termios.PARENB | termios.CSTOPB | termios.CRTSCTS)
-        # HUPCL would drop DTR on close and reset the ESP every time we restart.
+        # HUPCL sets DTR low at the close and thus resets the ESP at each
+        # restart of the service.
         cflag &= ~termios.HUPCL
         cflag |= termios.CS8 | termios.CREAD | termios.CLOCAL
 
@@ -204,12 +209,12 @@ class SerialPort:
         self.flush_input()
 
     def set_dtr_rts(self, state):
-        """Drive DTR/RTS. Both low keeps ESP boards out of a reset loop."""
+        """Sets DTR and RTS. Both low keeps an ESP board out of a reset."""
         request = TIOCMBIS if state else TIOCMBIC
         try:
             ioctl(self.fd, request, struct.pack("I", TIOCM_DTR | TIOCM_RTS))
         except OSError:
-            # Native USB CDC gadgets do not implement modem control lines.
+            # A native USB CDC device has no modem control lines.
             pass
 
     def flush_input(self):
@@ -219,7 +224,7 @@ class SerialPort:
             pass
 
     def write(self, data, timeout=2.0):
-        """Write everything or raise; USB CDC back-pressure is our flow control."""
+        """Writes each byte, or raises. USB CDC back-pressure is the control."""
         view = memoryview(data)
         while view:
             try:
@@ -235,7 +240,7 @@ class SerialPort:
                 raise
 
     def read(self, size=4096):
-        """Return whatever is buffered, or b'' when nothing is pending."""
+        """Returns the buffered bytes, or b'' when there are none."""
         try:
             return os.read(self.fd, size)
         except BlockingIOError:
