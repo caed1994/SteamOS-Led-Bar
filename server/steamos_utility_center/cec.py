@@ -4,36 +4,39 @@
 """Talking to the television over HDMI, through the CEC toolkit.
 
 Almost none of the CEC work is ours. It is the SteamOS CEC Toolkit, a fork of
-somebody else's project kept as a module of its own under cec-toolkit/ - see
-cec-toolkit/ORIGIN for where it came from and cec-toolkit/README.md for what
-was changed in it and why.
+another person's project. It is a module of its own under cec-toolkit/.
+cec-toolkit/ORIGIN records where it came from. cec-toolkit/README.md gives the
+changes and their reasons.
 
-This module is the seam between that toolkit and this panel, and it is thin on
-purpose. The toolkit already ships `steamos-cec-toolkitctl`, which reports
-everything about itself as one JSON document and turns each feature on and off
-one at a time. So there is nothing here that reads a device, runs systemctl or
-edits a config file: this builds the commands and reads the answers, and the
-toolkit stays the only thing that knows how CEC works.
+This module is the connection between that toolkit and this panel, and it is
+deliberately thin. The toolkit has `steamos-cec-toolkitctl`, which reports each
+of its own values as one JSON document and switches one feature at a time.
 
-Two consequences worth knowing before reading further.
+Nothing in this module reads a device, runs systemctl or edits a configuration
+file. It builds the commands and reads the answers. The toolkit stays the one
+program that knows how CEC operates.
 
-**Installing needs root; using it does not.** The toolkit's installer writes a
-sudoers file granting the desktop user NOPASSWD on exactly the helpers its own
-toggles need. After that one elevated install, every switch on the page is an
-ordinary command run as the user - no password, no polkit, no Apply button.
-That is why the CEC page saves as you click where the LED pages queue up
-behind Apply: the machine does not ask, so making the user ask would be this
-panel inventing a ceremony the system does not need.
+Two results are important.
 
-**Every answer comes from the machine.** The feature list here is a list of
-names and wording; whether a feature is on, installable, or possible at all is
-read from `toolkitctl status` at the moment it is asked. A page built from
-this cannot claim a state the toolkit does not report.
+**To install it needs root. To use it does not.** The toolkit's installer
+writes a sudoers file. That file gives the desktop user NOPASSWD on the helpers
+that its own switches need.
 
-Nothing in here runs anything. The commands are built and handed back for the
-panel's Runner to run, which is what keeps this testable on a machine with no
-television, no CEC adapter and no toolkit installed - which is every machine
-this was written on.
+After that one install with root, each switch on the page is an ordinary
+command that runs as the user. There is no password, no polkit and no Apply
+button. The CEC page thus saves at each click, where the LED pages wait for
+Apply. The machine does not ask, so a request from this panel would be a
+ceremony that the system does not need.
+
+**Each answer comes from the machine.** The feature list here is a list of
+names and words. Whether a feature is on, installable, or possible at all comes
+from `toolkitctl status` at the moment of the question. A page from this module
+thus cannot report a state that the toolkit does not report.
+
+Nothing in this module runs a command. It builds the commands and returns them
+to the panel's Runner. This module is thus testable on a machine with no
+television, no CEC adapter and no toolkit, which is each machine that it was
+written on.
 """
 
 from __future__ import annotations
@@ -42,41 +45,48 @@ import json
 import os
 import shutil
 
-# Where the toolkit's installer puts its control program. A user path, not a
-# system one: the toolkit installs per user, because half of what it manages
-# are user systemd units and a WirePlumber config in somebody's home.
+# Where the toolkit's installer puts its control program. This is a user path
+# and not a system path. The toolkit installs for one user, because half of
+# what it manages is user systemd units and a WirePlumber configuration in a
+# home directory.
 COMMAND = ".local/bin/steamos-cec-toolkitctl"
 
-# The toolkit's tree, relative to the repository root. Its installer is run
-# from inside it and reads its own siblings, so it cannot be copied out on its
-# own - see scripts/install-cec.sh.
+# The toolkit's directory, relative to the repository root. Its installer runs
+# from inside the directory and reads the files beside it. The installer thus
+# cannot be copied out alone. See scripts/install-cec.sh.
 SOURCE = "cec-toolkit"
 
-# How a feature is turned on, which is not the same for all of them. The three
-# kinds differ in what they touch, and the toolkit gives each its own
-# subcommand rather than one that guesses.
+# How to switch a feature on. The method is not the same for each feature. The
+# three kinds change different things, and the toolkit gives each kind its own
+# subcommand.
 USER_SERVICE = "user"           # a systemd user unit, enabled as the user
 SYSTEM_SERVICE = "system"       # a root unit, through a NOPASSWD helper
 EXTERNAL_VOLUME = "volume"      # WirePlumber config plus a service override
 RESUME_WAKE = "resume"          # a root unit toolkitctl cannot switch
 
-# The unit behind that last one. The toolkit installs it and enables it only
-# alongside the Steam button - see its install.sh - and its control program
-# has it in neither service table, so nothing it offers can switch it and
-# nothing it reports says whether it is on. Both are done here instead.
+# The unit for that last kind. The toolkit installs it, but enables it only
+# with the Steam button. See its install.sh.
+#
+# Its control program has the unit in neither service table. Nothing that the
+# program offers can switch the unit, and nothing that it reports gives the
+# state of the unit. This module does both instead.
 RESUME_WAKE_UNIT = "steamos-cec-resume-wake.service"
 RESUME_WAKE_REPORT = "resume_wake_enabled"
 
-# The eight things this page can switch, in the order they are shown.
+# The eight features that this page can switch, in the order of the display.
 #
-# Ordered by what somebody sets up first rather than by what the toolkit calls
-# them: the two that make the television follow the machine, then the two that
-# make the machine follow the television, then volume, then the three that are
-# repairs for particular hardware. The last three are last because they are
-# the ones nobody should turn on until something is wrong.
+# The order is the order in which a person sets them up. It is not the order of
+# the toolkit's own names.
 #
-# The name is the toolkit's own - it is passed straight to set-service - so
-# these are not ours to rename.
+# First are the two that make the television follow the machine. Then the two
+# that make the machine follow the television. Then the volume. Then the three
+# that are repairs for particular hardware.
+#
+# The last three are last because a person must switch them on only after a
+# fault.
+#
+# The name is the toolkit's own name. It goes directly to set-service, so this
+# project cannot rename it.
 FEATURES = (
     ("steam-button", USER_SERVICE,
      "Steam button wakes the television",
@@ -112,38 +122,40 @@ FEATURES = (
      "unless you have that fault."),
 )
 
-# The same, keyed, for everything that has a name and wants the rest.
+# The same table, keyed by name, for a caller that has a name only.
 BY_NAME = {name: (kind, label, said) for name, kind, label, said in FEATURES}
 
-# What has to be on the machine before any of this can work, and what to say
-# when it is not. The toolkit checks these too and fails clearly; they are
-# here so the panel can say so *before* somebody installs and wonders why
-# nothing happens.
+# What the machine must have before any of this can operate, and what to say
+# when it does not. The toolkit also checks these and reports a clear error.
+# They are here so that the panel can say so *before* the installation.
 #
-# dbus_next is not in this list even though three services import it: it is a
-# python module rather than a program, so it is looked for differently - see
-# missing().
+# dbus_next is not in this list, although three services import it. It is a
+# python module and not a program, so this module looks for it in a different
+# way. See missing().
 NEEDS = (
     ("cec-ctl", "v4l-utils, which is what actually speaks CEC"),
     ("varlinkctl", "part of systemd, used to reach PipeWire's volume control"),
     ("systemctl", "systemd itself"),
 )
 
-# The config values worth putting on a page. The file has about forty; these
-# are the ones whose wrong value stops CEC working at all, and the rest are
-# tuning for particular televisions and controllers that belongs in the file
-# with its comments around it.
-# (key, label, explanation, choices)
+# The configuration values that belong on a page, as
+# (key, label, explanation, choices).
 #
-# `choices` is (label, value) pairs for a setting that has a fixed set of
-# answers, and empty for one that is typed. The first pair is what the
-# toolkit does when the setting is not in the file at all, so a drop-down
-# opens on the behaviour somebody would get anyway rather than on a blank.
+# The file has approximately forty values. These are the values whose wrong
+# content stops CEC completely. The other values tune particular televisions
+# and controllers, and they belong in the file with their comments.
 #
-# The last two belong to a switch on the same page rather than to the adapter,
-# and say so: a feature whose behaviour is decided by a value in a file is a
-# feature half of which is not on the page, which is what sent somebody to the
-# config file with a text editor.
+# `choices` is a list of (label, value) pairs for a setting with a fixed set of
+# answers. It is empty for a setting that a person types.
+#
+# The first pair is what the toolkit does when the setting is not in the file.
+# A drop-down list thus opens on the behaviour that a person gets anyway, and
+# not on an empty entry.
+#
+# The last two values belong to a switch on the same page and not to the
+# adapter, and their text says so. A feature whose behaviour depends on a value
+# in a file is a feature with half of itself off the page. That is what sent a
+# person to the configuration file with a text editor.
 SHOWN = (
     ("CEC_DEVICE", "CEC adapter",
      "The adapter's device node, usually /dev/cec0.", ()),
@@ -166,20 +178,21 @@ SHOWN = (
 
 
 class CecError(Exception):
-    """The toolkit could not be asked, or did not answer in JSON."""
+    """The toolkit did not answer, or did not answer in JSON."""
 
 
 def command_path(home=None):
-    """Where the toolkit's control program is, installed or not."""
+    """Returns the path of the toolkit's control program, installed or not."""
     return os.path.join(home or os.path.expanduser("~"), COMMAND)
 
 
 def installed(home=None):
-    """Whether the toolkit has been installed for this user.
+    """Returns whether the toolkit is installed for this user.
 
-    The control program, not the config file: /etc/steamos-cec-toolkit.conf
-    survives an uninstall on an atomic-update system, so a page that keyed off
-    the config would offer to configure a toolkit that is no longer there.
+    It looks for the control program and not for the configuration file.
+    /etc/steamos-cec-toolkit.conf stays after an uninstall on a system with
+    atomic updates. A page that used the configuration file would thus offer
+    to configure a toolkit that is not there.
     """
     return os.access(command_path(home), os.X_OK)
 
@@ -193,13 +206,15 @@ def status_command(home=None):
 
 
 def read_status(text):
-    """Turn what `toolkitctl status` printed into a dictionary.
+    """Returns what `toolkitctl status` printed, as a dictionary.
 
-    Kept apart from running it so that everything downstream can be tested
-    against a recorded answer. The toolkit prints one JSON document and
-    nothing else, so anything unparseable means it did not get to run - a
-    missing python, a half-finished install - and that is worth the exception
-    rather than an empty status that reads as "nothing is on".
+    This function is separate from the run of the command, so that each
+    caller can be tested against a recorded answer.
+
+    The toolkit prints one JSON document and nothing else. Text that this
+    cannot parse thus means that the program did not run: python is missing,
+    or the installation is incomplete. That is worth the exception. An empty
+    status reads as "nothing is on", which is a different answer.
     """
     try:
         found = json.loads(text)
@@ -212,52 +227,52 @@ def read_status(text):
 
 
 def feature_on(status, name):
-    """Whether one feature is switched on, according to a status document.
+    """Returns whether one feature is on, from a status document.
 
-    Enabled rather than active, and the difference matters. boot-wake is a
-    oneshot that runs when Game Mode starts and then exits, so it is almost
-    never active and asking that would show it as off while it is working
-    perfectly. Enabled is the question the switch is asking.
+    It reads "enabled" and not "active", and the difference is important.
+    boot-wake is a oneshot. It runs at the start of Game Mode and then exits,
+    so it is almost never active. A question about "active" thus shows it as
+    off while it operates correctly. "Enabled" is the question of the switch.
     """
     kind = BY_NAME[name][0]
     if kind == EXTERNAL_VOLUME:
         return bool(status.get("external_volume", {}).get("enabled"))
     if kind == RESUME_WAKE:
-        # Not in the toolkit's status at all - put there by whoever read it,
-        # because systemd is the only one that knows. See resume_wake_command.
+        # This is not in the toolkit's status. The caller puts it there,
+        # because systemd alone knows it. See resume_wake_command.
         return bool(status.get(RESUME_WAKE_REPORT))
     where = "services" if kind == USER_SERVICE else "system_services"
     return bool(status.get(where, {}).get(name, {}).get("is_enabled"))
 
 
 def resume_wake_command():
-    """Ask systemd whether the resume-wake unit is enabled.
+    """Asks systemd whether the resume-wake unit is enabled.
 
-    The toolkit's own status reports only that the unit file is on disk,
-    which it is from the moment the toolkit is installed - so a switch drawn
-    from that would be on from the start and would never be off.
+    The toolkit's own status reports only that the unit file is on the disk.
+    The file is there from the moment of the installation. A switch from that
+    report would thus be on from the start and would never be off.
     """
     return ["systemctl", "is-enabled", RESUME_WAKE_UNIT]
 
 
 def resume_wake_enabled(answer):
-    """What that command said. Anything but "enabled" is off.
+    """Returns what that command said. Each answer except "enabled" is off.
 
-    `systemctl is-enabled` exits non-zero for a disabled unit, so a runner
-    that hands back nothing on a bad exit is answering "off" - which is the
-    same answer as a unit that is not there, and on this page those are the
-    same thing.
+    `systemctl is-enabled` exits non-zero for a disabled unit. A runner that
+    returns nothing after a non-zero exit thus answers "off". That is also
+    the answer for a unit that is not there, and on this page the two states
+    are the same.
     """
     return bool(answer) and answer.strip().startswith("enabled")
 
 
 def toggle_command(name, on, home=None, source_dir=None):
-    """The command that turns one feature on or off.
+    """Returns the command that switches one feature on or off.
 
-    `source_dir` is the clone, and only the resume-wake switch needs it: that
-    one is a root unit the toolkit's control program does not know, so it
-    goes through the same privileged helper of ours that installs the toolkit
-    rather than through toolkitctl.
+    `source_dir` is the clone. The resume-wake switch alone needs it. That
+    switch controls a root unit that the toolkit's control program does not
+    know, so it goes through the same privileged helper of ours that installs
+    the toolkit and not through toolkitctl.
     """
     kind = BY_NAME[name][0]
     state = "on" if on else "off"
@@ -271,18 +286,18 @@ def toggle_command(name, on, home=None, source_dir=None):
     return [command_path(home), verb, name, state]
 
 
-# What the page's buttons do, as (key, label, argv tail). Actions rather than
-# settings: each one happens once, now, and changes nothing that outlives it -
-# which is what makes them the way to find out whether any of this works
-# before turning a feature on and rebooting into it.
+# What the buttons of the page do, as (key, label, argv tail).
+#
+# These are actions and not settings. Each one occurs one time, now, and
+# changes nothing that stays. They are thus the way to find out whether any of
+# this operates, before a person switches a feature on and reboots.
 # What actually speaks CEC, for the one action below that does not go through
 # the toolkit at all.
 CEC_CTL = "cec-ctl"
 
-# Which adapter to speak to. Read from the toolkit's own status rather than
-# guessed - see config() - and falling back to what the toolkit itself falls
-# back to, so a machine with the setting missing is asked the same question
-# the toolkit would ask.
+# The adapter to speak to. It comes from the toolkit's own status and is not a
+# guess. See config(). The default is the toolkit's own default, so a machine
+# with no setting gets the same question that the toolkit would ask.
 DEVICE_SETTING = "CEC_DEVICE"
 DEFAULT_DEVICE = "/dev/cec0"
 
@@ -291,17 +306,19 @@ AUDIO_ADDRESS = "CEC_AUDIO_LOGICAL_ADDRESS"
 
 
 def configured_device(settings):
-    """Which adapter the toolkit is set to talk to."""
+    """Returns the adapter that the toolkit is configured to use."""
     return str(settings.get(DEVICE_SETTING, "")).strip() or DEFAULT_DEVICE
 
 # The one action here that is not a toolkit subcommand, because the question
 # is not about the toolkit.
 #
 # Volume over CEC is the System Audio Control feature, and it is written for
-# an amplifier. A television that does not implement it does not say so: it
-# accepts the volume key, acts on nothing, and answers nothing - so the switch
-# looks broken and everything in the log says the message was sent. That was
-# an evening's work to establish once.
+# an amplifier.
+#
+# A television that does not implement it does not say so. It accepts the
+# volume command, does nothing, and answers nothing. The switch thus looks
+# defective while each line in the log says that the message went out. To
+# establish this took one evening.
 #
 # Asked directly, the same television answers immediately. On the set this was
 # found on:
@@ -310,8 +327,8 @@ def configured_device(settings):
 #       Received from TV (0): FEATURE_ABORT reason: refused (0x04)
 #       Approximate response time: 26 ms
 #
-# Which is the difference between "will not" and "did not hear", and it is
-# worth a button.
+# That is the difference between "will not" and "did not receive". The
+# difference is worth a button.
 AUDIO_PROBE = "audio-probe"
 
 ACTIONS = (
@@ -322,8 +339,8 @@ ACTIONS = (
     (AUDIO_PROBE, "Ask about volume", None),
 )
 
-# The three discoveries, which write what they find into the config. Separate
-# from ACTIONS because these do leave something behind.
+# The three discovery commands. Each one writes what it finds into the
+# configuration. They are separate from ACTIONS because they leave a change.
 DISCOVERIES = (
     ("discover-cec", "Discover CEC devices",
      "Asks the bus what is on it and fills in the adapter and the addresses."),
@@ -335,11 +352,11 @@ DISCOVERIES = (
 
 
 def audio_probe_command(settings=None):
-    """Ask whichever device is meant to have the volume whether it does.
+    """Asks the device that must have the volume whether it does.
 
-    A refusal comes back as FEATURE_ABORT in a few milliseconds; a device
-    that does implement it reports its mode. Either is an answer, which is
-    more than sending a volume key gets you - see AUDIO_PROBE.
+    A refusal returns FEATURE_ABORT in some milliseconds. A device that
+    implements the feature reports its mode. Both are answers, and a volume
+    command gives neither. See AUDIO_PROBE.
     """
     settings = settings or {}
     target = str(settings.get(AUDIO_ADDRESS, "")).strip() or "0"
@@ -361,30 +378,32 @@ def action_command(key, home=None, settings=None):
 
 # -- which radios can wake this machine --------------------------------------
 #
-# The one thing on the CEC page read straight from a helper rather than out of
-# `toolkitctl status`, because the status does not carry it: it says whether
-# the usb-wake service is enabled, not which radios it found - and "enabled,
-# and still nothing wakes it" is exactly the state somebody is in when they
-# ask. The helper's own `status` lists what it matched and whether each is
-# allowed to wake the machine, which is the answer.
+# The one value on the CEC page that comes from a helper and not from
+# `toolkitctl status`. The status does not carry it. The status says whether
+# the usb-wake service is enabled, and not which radios it found.
 #
-# No password. The toolkit's installer writes a sudoers rule for exactly this
-# program, so this asks for nothing, the way every switch on the page does not.
+# "The switch is on and nothing wakes the machine" is the state of a person who
+# asks this question. The helper's own `status` lists what it matched and
+# whether each radio can wake the machine. That is the answer.
+#
+# No password is necessary. The toolkit's installer writes a sudoers rule for
+# this program, as it does for each switch on the page.
 USB_WAKE_HELPER = "/var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-control"
 
 
 def wake_radios_command():
-    """Ask the toolkit which radios it found and whether they may wake."""
+    """Returns the command that asks the toolkit which radios it found."""
     return ["sudo", "-n", USB_WAKE_HELPER, "status"]
 
 
 def wake_radios_said(text):
-    """What that answer means, in a sentence.
+    """Returns the meaning of that answer, in one sentence.
 
-    Three answers, told apart on purpose. They were not, once: finding nothing
-    and finding one that was already allowed printed the same line, so a
-    machine where this does not work at all read exactly like one where there
-    was nothing left to do - which is no way to answer "did it find mine?".
+    There are three answers, and this function separates them deliberately.
+    It did not do so before. To find nothing and to find a radio that is
+    already allowed printed the same line. A machine where this does not
+    operate thus read as a machine with nothing left to do. That is not an
+    answer to the question "did it find my radio?".
     """
     try:
         found = json.loads(text)
@@ -410,28 +429,28 @@ def wake_radios_said(text):
 
 
 def config(status):
-    """The toolkit's configuration, as it reported it. Empty when it did not."""
+    """Returns the toolkit's configuration, as it reported it. {} if none."""
     found = status.get("config")
     return dict(found) if isinstance(found, dict) else {}
 
 
 def set_config_command(values, home=None):
-    """The command that writes settings into the toolkit's own config file.
+    """Returns the command that writes settings into the toolkit's file.
 
-    The toolkit takes them as one JSON argument and writes a *user* config
-    that shadows /etc - which is why this needs no root either, and why a
-    setting made here survives the toolkit being reinstalled over the top.
+    The toolkit takes the settings as one JSON argument. It writes a *user*
+    configuration that has priority over /etc. This command thus needs no
+    root, and a setting from here stays after an installation over the top.
     """
     return [command_path(home), "set-config", json.dumps(values, sort_keys=True)]
 
 
 def device(status):
-    """What the status says about the adapter itself.
+    """Returns what the status says about the adapter itself.
 
-    Its own answer rather than one derived from the feature states: every
-    feature can be enabled and none of them can work if the adapter is not
-    there or is not writable, and that is the first thing to say on a page
-    where nothing is happening.
+    This is the status's own answer and not a value from the feature states.
+    Each feature can be enabled and none of them can operate when the adapter
+    is absent or is not writable. That is the first thing to report on a page
+    where nothing occurs.
     """
     found = status.get("cec_device")
     if not isinstance(found, dict):
@@ -441,13 +460,15 @@ def device(status):
 
 
 def usable(status):
-    """Whether CEC could work right now: an adapter that is there and writable.
+    """Returns whether CEC can operate now: the adapter is there and writable.
 
-    Readable *and* writable, because CEC is a conversation. An adapter that
-    can be read but not written is the shape a permissions problem takes after
-    a suspend or a SteamOS update, and the toolkit installs a helper and a
-    udev rule to repair exactly that - so this being false is a repairable
-    state and worth telling apart from having no adapter at all.
+    It must be readable *and* writable, because CEC is a conversation. An
+    adapter that this user can read and cannot write is the form that a
+    permissions fault takes after a suspend or a SteamOS update.
+
+    The toolkit installs a helper and a udev rule to repair that fault. A
+    False answer here is thus a repairable state, and it is worth a
+    difference from a machine with no adapter.
     """
     found = device(status)
     return bool(found.get("exists") and found.get("readable")
@@ -455,17 +476,18 @@ def usable(status):
 
 
 def missing(module_check=None, which=None):
-    """The programs and modules CEC needs that this machine does not have.
+    """Returns the programs and modules that CEC needs and this machine lacks.
 
-    Returned as (name, why) pairs, in the order of NEEDS with the python
-    module last. Both lookups are injectable so the answer can be tested on a
-    machine that has none of them, which is the machine this runs on.
+    The result is a list of (name, why) pairs, in the order of NEEDS with the
+    python module last. Both lookups are parameters, so a test can give an
+    answer on a machine that has none of them. That is the machine that this
+    runs on.
     """
     which = which or shutil.which
     absent = [(name, why) for name, why in NEEDS if not which(name)]
-    # Three of the services import it, and its absence is the one requirement
-    # the toolkit's installer warns about rather than refuses over - so it is
-    # a thing you can install into and only find out about from a log.
+    # Three of the services import it. It is the one requirement that the
+    # toolkit's installer reports as a warning and does not refuse. A person
+    # can thus complete an installation and find the fault only in a log.
     if not (module_check or _has_dbus_next)():
         absent.append(("python dbus_next",
                        "needed by the services that watch the CEC bus"))
