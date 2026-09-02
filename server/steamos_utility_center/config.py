@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Configuration loading: /etc/steamos-utility-center.conf plus CLI overrides.
+"""The configuration: /etc/steamos-utility-center.conf and the CLI options.
 
-Plain KEY=value lines, so shell scripts and systemd's EnvironmentFile can read
-the same file.
+The file has plain KEY=value lines. A shell script and the EnvironmentFile of
+systemd can thus read the same file.
 """
 
 from __future__ import annotations
@@ -22,13 +22,15 @@ LOG = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = "/etc/steamos-utility-center.conf"
 
-# Options that existed once and no longer do, with what became of them.
+# The options that existed before and do not exist now, with their result.
 #
-# An unknown key is fatal on purpose - LED_COUTN=60 would otherwise do nothing
-# and say nothing. But a key that *we* withdrew is not the reader's mistake,
-# and refusing to start over one turns a stale line into a service that will
-# not come up. So these are read, ignored, mentioned once, and dropped from
-# the file the next time the panel writes it.
+# An unknown key stops the service, and this is deliberate. Without that rule,
+# LED_COUTN=60 does nothing and says nothing.
+#
+# But a key that *this project* removed is not a mistake of the reader. To
+# refuse to start because of one makes an old line into a service that does
+# not start. This project thus reads these keys, ignores them, reports them
+# one time, and removes them at the next write by the panel.
 RETIRED = {
     "WARNING_COLOR": "a warning is always red now",
     "WARNING_STYLE": "a warning always uses the alternate shape now",
@@ -41,14 +43,15 @@ RETIRED = {
                     "nothing at all in Game Mode",
 }
 
-# Withdrawn options that still carry a setting worth keeping, and what to make
-# of it: {old: (new, {old value: new value})}.
+# The removed options that still carry a setting worth keeping, and how to
+# read it: {old: (new, {old value: new value})}.
 #
-# Being ignored is right for an option that stopped meaning anything, but
-# TEMPERATURE_GAUGE=1 means exactly one of the choices that replaced it. Just
-# dropping it would switch off a gauge somebody is looking at, with no error
-# and nothing to search for - so it is translated instead. An explicit new
-# setting always wins, whichever order the two appear in.
+# To ignore an option is correct when the option lost its meaning. But
+# TEMPERATURE_GAUGE=1 means exactly one of the values that replaced it. To
+# remove it would switch a gauge off while a person watches it, with no error
+# and with nothing to search for. This project thus translates it instead.
+#
+# A new setting in the file always has priority, in either order.
 MIGRATED = {
     "TEMPERATURE_GAUGE": ("RAINBOW_SHOWS", {True: "temperature",
                                             False: "rainbow"}),
@@ -168,16 +171,16 @@ def parse_file(path):
                 raise ConfigError("%s:%d: unknown option %r" % (path, lineno, key))
             values[key] = _coerce(key, _strip_quotes(value), DEFAULTS[key])
 
-    # Only where the file did not say it itself: a line naming the new option
-    # is the reader's actual intention, and outranks whatever the old one
-    # would have translated to regardless of which came first.
+    # Only where the file does not set it. A line with the new option is the
+    # intention of the reader. It thus has priority over the translation of the
+    # old option, in either order.
     for key, value in carried.items():
         values.setdefault(key, value)
     return values
 
 
 def _migrate(key, value):
-    """What a withdrawn option now sets, as {key: value}. Usually nothing."""
+    """Returns what a removed option sets, as {key: value}. Usually {}."""
     target = MIGRATED.get(key)
     if target is None:
         return {}
@@ -186,9 +189,9 @@ def _migrate(key, value):
     try:
         old = _coerce(key, value, template)
     except ConfigError:
-        # A setting we no longer accept, spelled wrongly. Refusing to start
-        # over a line we are only reading out of politeness would be worse
-        # than letting the new option's default stand.
+        # A setting that this project does not accept, with a spelling error.
+        # This project reads the line only for the reader. To refuse to start
+        # is worse than the default of the new option.
         LOG.warning("%s=%s could not be carried over to %s", key, value, new_key)
         return {}
     if old not in table:
@@ -197,18 +200,18 @@ def _migrate(key, value):
 
 
 def format_value(value):
-    """A value as the config file spells it: booleans as 1/0."""
+    """Returns a value in the form of the file: 1 or 0 for a boolean."""
     if isinstance(value, bool):
         return "1" if value else "0"
     return str(value)
 
 
 def update_text(text, values):
-    """Return `text` with these options set, leaving everything else alone.
+    """Returns `text` with these options set. It changes nothing else.
 
-    Rewriting from the parsed values would be shorter but would throw away
-    every comment, and this file is mostly comments. So existing lines are
-    edited in place and anything new is appended under a heading.
+    A write from the parsed values is shorter, but it removes each comment,
+    and most of this file is comments. This function thus edits the lines
+    that are there and adds a new option below a heading.
     """
     lines = text.splitlines(keepends=True)
     written = set()
@@ -220,14 +223,14 @@ def update_text(text, values):
             continue
         key = stripped.partition("=")[0].strip().upper()
         if key in RETIRED:
-            # Out with it, or every start logs the same complaint forever.
+            # Remove it. Without this, each start reports the same line.
             retired.append(index)
             continue
         if key not in values:
             continue
-        # Every occurrence, not only the first. A hand-edited file can name an
-        # option twice, and parse_file() takes the last one - so a duplicate
-        # left behind would quietly outrank the change and nothing would say so.
+        # Each occurrence, and not only the first. A file that a person edited
+        # can name an option two times, and parse_file() takes the last one. A
+        # duplicate that stays thus has priority, and nothing reports it.
         written.add(key)
         ending = "\n" if raw.endswith("\n") else ""
         lines[index] = "%s=%s%s" % (key, format_value(values[key]), ending)
@@ -246,7 +249,7 @@ def update_text(text, values):
 
 
 def load(path=DEFAULT_CONFIG_PATH, overrides=None):
-    """Defaults < config file < environment < CLI overrides."""
+    """The order of priority: defaults, file, environment, CLI options."""
     config = dict(DEFAULTS)
 
     if path and os.path.exists(path):
@@ -267,42 +270,50 @@ def load(path=DEFAULT_CONFIG_PATH, overrides=None):
 
 
 MAPPINGS = ("stretch", "repeat", "crop")
-# Taken from the modules that implement them, so the validator cannot drift.
+# These come from the modules that implement them. The validator thus cannot
+# become different from the implementation.
 NOTIFY_STYLES = notify.STYLES
 RAINBOW_CHOICES = render.RAINBOW_CHOICES
 DESKTOP_SCENES = desktop.SCENES
 
-# What a desktop scene's own speed may be. Bounded by what the delay field it
-# sets can carry: below the floor every multiplier lands on the module's
-# slowest step and the slider stops meaning anything, and the ceiling is where
-# the fastest step is reached. MIN_CYCLE_SECONDS in render.py stops even that
-# from becoming a strobe.
+# The permitted speed of a desktop scene. The limits are the limits of the
+# delay field that the speed sets.
+#
+# Below the low limit, each multiplier gives the slowest step of the module and
+# the control has no effect. The high limit is the fastest step.
+#
+# MIN_CYCLE_SECONDS in render.py stops even the fastest step from becoming a
+# strobe.
 DESKTOP_SPEED_FLOOR = 0.4
 DESKTOP_SPEED_CEILING = 4.0
-# One notification's own style may also say "whichever NOTIFY_STYLE says".
+# The style of one notification can also be "the style in NOTIFY_STYLE".
 PER_KIND_STYLES = NOTIFY_STYLES + (notify.STYLE_INHERIT,)
 
-# The named triggers the configuration can change, with the prefix their
-# options are spelled under. One table for the defaults, the validator and the
-# service, because a kind listed in one and missed in another is a setting that
-# quietly does nothing and says so nowhere.
+# The named triggers that the configuration can change, with the prefix of
+# their options.
 #
-# "warning" is deliberately absent: it is the one notification you must not
-# have to recognise, so it is always red and always the alarm shape - see
-# notify.FIXED_KINDS. NOTIFY_WARNING says whether it fires at all, nothing
-# more.
+# One table serves the defaults, the validator and the service. A kind in one
+# table and not in another is a setting that does nothing and reports nothing.
+#
+# "warning" is deliberately not here. It is the one notification that a person
+# must recognise with no learning, so it is always red and always the alarm
+# shape. See notify.FIXED_KINDS. NOTIFY_WARNING controls only whether it
+# flashes.
 CONFIGURABLE_KINDS = ((notify.KIND_ACHIEVEMENT, "ACHIEVEMENT"),
                       (notify.KIND_MESSAGE, "MESSAGE"),
                       (notify.KIND_FRIEND, "FRIEND"),
                       (notify.KIND_PHONE, "PHONE"))
 
-# Where the gauge's two marks may sit: below the first the bar is green, above
-# the second it is red. Wide, because people watch different sensors, but not
-# unbounded - outside this is a unit mix-up, not an intention.
+# The permitted positions of the two marks of the gauge. Below the first mark
+# the bar is green. Above the second mark it is red.
+#
+# The range is wide, because people watch different sensors. It is not
+# unlimited: a value outside it is a mistake in the unit and not an intention.
 TEMPERATURE_FLOOR = 0.0
 TEMPERATURE_CEILING = 150.0
-# And they need room between them: equal marks would divide by nothing, and a
-# bar that jumps green to red says less than one that walks there.
+# The two marks also need a distance between them. Equal marks make a division
+# by zero. A bar that changes from green to red in one step says less than a
+# bar that moves through yellow.
 TEMPERATURE_SPAN = 5.0
 
 
@@ -312,8 +323,8 @@ def validate(config):
     if config["MAPPING"] not in MAPPINGS:
         raise ConfigError("MAPPING must be one of: %s" % ", ".join(MAPPINGS))
     if config["BAUD"] not in BAUD_CONSTANTS:
-        # Linux can only set rates termios has a constant for; anything else
-        # fails at open() time, which looks like dead hardware.
+        # Linux sets only the rates that termios has a constant for. Each other
+        # rate fails at the open, and that looks like defective hardware.
         raise ConfigError(
             "BAUD=%s cannot be set on a Linux serial port. Supported rates: %s"
             % (config["BAUD"],
@@ -354,12 +365,14 @@ def validate(config):
     if not DESKTOP_SPEED_FLOOR <= config["DESKTOP_SPEED"] <= DESKTOP_SPEED_CEILING:
         raise ConfigError("DESKTOP_SPEED must be between %g and %g"
                           % (DESKTOP_SPEED_FLOOR, DESKTOP_SPEED_CEILING))
-    # Which chip each half of the load gauge stands for. Any colour at all,
-    # the same as every other colour setting - and deliberately not refused
-    # for being two shades of the same thing. What makes the gauge readable is
-    # telling the halves apart, but "too similar" is a judgement, not an
-    # arithmetic fact like the temperature marks below, and a validator that
-    # made it would be refusing somebody's taste.
+    # The chip that each half of the load gauge shows. Each setting accepts any
+    # colour, as each other colour setting does.
+    #
+    # This project deliberately does not refuse two shades of one colour. The
+    # gauge is readable when a person can see the difference between the halves.
+    # But "too similar" is a judgement and not an arithmetic fact, as the
+    # temperature marks below are. A validator that made that judgement would
+    # refuse the taste of a person.
     for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
         try:
             notify.parse_color(config[key])
