@@ -197,7 +197,10 @@ class BluetoothWakeIdTest(unittest.TestCase):
                         env=dict(os.environ, SYSFS_USB=usb, ROOT=root))
             self.assertEqual(again.returncode, 0, again.stderr)
             self.assertEqual(self._ids(root), once)
-            self.assertIn("may already", again.stdout)
+            self.assertIn("already allowed", again.stdout)
+            # And it names what it found, so "did it find mine?" has an
+            # answer even on the run where there was nothing left to do.
+            self.assertIn("0e8d:0616", again.stdout)
 
     @AS_ROOT
     def test_two_bluetooth_interfaces_on_one_chip_are_one_id(self):
@@ -213,6 +216,27 @@ class BluetoothWakeIdTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as where:
             _done, root = self._run(where, {"24ae:9db6": [self.KEYBOARD]})
             self.assertEqual(self._ids(root), "8087:0032")
+
+    @AS_ROOT
+    def test_finding_none_is_not_reported_as_nothing_left_to_do(self):
+        """The two were one sentence, and they are opposite answers.
+
+        A machine where this does not work at all read exactly like one where
+        every radio was already listed - which is no way to answer "did it
+        find mine?".
+        """
+        with tempfile.TemporaryDirectory() as where:
+            done, root = self._run(where, {})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("No Bluetooth radio", done.stdout)
+            self.assertNotIn("already allowed", done.stdout)
+            self.assertEqual(self._ids(root), "8087:0032")
+
+    @AS_ROOT
+    def test_it_names_what_it_found_whether_or_not_it_changed_anything(self):
+        with tempfile.TemporaryDirectory() as where:
+            done, _root = self._run(where, {"0e8d:0616": [self.BLUETOOTH]})
+            self.assertIn("Found 0e8d:0616", done.stdout)
 
     @AS_ROOT
     def test_a_config_without_the_key_gets_one(self):

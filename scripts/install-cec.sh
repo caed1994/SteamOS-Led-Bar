@@ -125,19 +125,31 @@ add_bluetooth_wake_ids() {
         echo "No $TOOLKIT_CONFIG, so there is nothing to add the radio to." >&2
         return 0
     fi
-    local current wanted id added=()
+    local current wanted id found=() added=()
     current="$(sed -n 's/^USB_WAKE_USB_IDS=//p' "$TOOLKIT_CONFIG" \
                | tail -n 1 | tr -d '"'"'"'"')"
     wanted="$current"
     while read -r id; do
         [[ -n "$id" ]] || continue
+        found+=("$id")
         [[ " $wanted " == *" $id "* ]] && continue
         wanted="${wanted:+$wanted }$id"
         added+=("$id")
     done < <(bluetooth_usb_ids)
 
+    # What was found is said either way, and the two answers are told apart.
+    # They were not: finding nothing printed the same line as finding one that
+    # was already listed, so a machine where this does not work at all read
+    # exactly like one where it had nothing left to do - which is no way to
+    # answer "did it find mine?".
+    if [[ ${#found[@]} -eq 0 ]]; then
+        echo "No Bluetooth radio on the USB bus, so there is nothing to" \
+             "allow. One built into the board and not wired through USB" \
+             "will not appear here."
+        return 0
+    fi
     if [[ ${#added[@]} -eq 0 ]]; then
-        echo "Every Bluetooth radio here may already wake the machine."
+        echo "Found ${found[*]}, already allowed to wake this machine."
         return 0
     fi
     # Replaced whole rather than appended: the file may carry the key once,
@@ -149,7 +161,8 @@ add_bluetooth_wake_ids() {
     else
         printf 'USB_WAKE_USB_IDS="%s"\n' "$wanted" >> "$TOOLKIT_CONFIG"
     fi
-    echo "Added ${added[*]} to the radios allowed to wake this machine."
+    echo "Found ${found[*]}. Added ${added[*]} to the radios allowed to" \
+         "wake this machine."
 }
 
 if [[ "$ACTION" == "wake-ids" ]]; then
