@@ -5186,6 +5186,14 @@ class Panel:
         ttk.Button(row, text="Remove HDMI CEC", style="Text.TButton",
                    command=self._remove_cec).pack(side="left",
                                                   padx=(ROW_GAP, 0))
+        # Where the radio question's answer lands. Built now and packed when
+        # there is something to say, because this window has no log pane: the
+        # Runner's output goes to stderr, where a terminal and the journal
+        # have it, and a sentence meant to be read has to be on the page or it
+        # is not feedback at all.
+        self.cec_radios = ttk.Label(inner, style="Muted.TLabel",
+                                    justify="left", wraplength=CARD_WRAP)
+        self._wrapped.append(self.cec_radios)
 
         self._build_cec_features(holder)
         self._build_cec_actions(holder)
@@ -5561,8 +5569,9 @@ class Panel:
         "Let a controller wake the machine" is on and it still does not is a
         state with nowhere to look: the toolkit switches wakeup on for the
         radios it matches and says so nowhere the page can read. This asks it,
-        and says the answer in a sentence rather than leaving the JSON to be
-        read - the raw answer is above it either way.
+        and puts the answer on the page as a sentence: there is no log pane in
+        this window, so the JSON the helper prints goes to stderr with every
+        other command's output and nobody reading the window would see it.
         """
         self.runner.start(
             ledpanel.wake_radios_command(),
@@ -5570,7 +5579,10 @@ class Panel:
                 "".join(self.runner.transcript)))
 
     def _say_wake_radios(self, said):
-        self.runner.sink("\n%s\n" % cec.wake_radios_said(said))
+        text = cec.wake_radios_said(said)
+        self.cec_radios.configure(text=text)
+        self.cec_radios.pack(anchor="w", pady=(ROW_GAP, 0))
+        self.runner.sink("\n%s\n" % text)
 
     def _remove_cec(self):
         if not self._ask("HDMI CEC",

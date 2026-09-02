@@ -404,7 +404,7 @@ def wake_radios_said(text):
         return "Found %s, allowed to wake this machine." % named
     if not waking:
         return ("Found %s. Nothing there may wake this machine yet - turn on "
-                "\u201cLet a controller wake the machine\u201d above." % named)
+                "\u201cLet a controller wake the machine\u201d below." % named)
     return ("Found %s, of which %d of %d may wake this machine."
             % (named, len(waking), len(radios)))
 

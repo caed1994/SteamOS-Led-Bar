@@ -3271,17 +3271,37 @@ class WakeRadioButtonTest(unittest.TestCase):
         self.assertEqual(started[0][:2], ["sudo", "-n"])
         self.assertNotIn("pkexec", started[0])
 
-    def test_it_says_the_answer_rather_than_leaving_the_json(self):
-        said = []
-        self.panel.runner.sink = lambda text, tag=None: said.append(text)
-        self.panel.runner.transcript = [
-            '{"helper":{"devices":[{"label":"MediaTek (0e8d:0616)",'
-            '"after":"enabled"}]}}']
+    def _answer(self, json_text):
+        self.panel.runner.sink = lambda text, tag=None: None
+        self.panel.runner.transcript = [json_text]
         self.panel.runner.start = lambda command, then=None: (
             then(0) if then else None, True)[1]
         self.panel._ask_wake_radios()
-        self.assertIn("0e8d:0616", "".join(said))
-        self.assertIn("wake this machine", "".join(said))
+        self.root.update_idletasks()
+        return str(self.panel.cec_radios.cget("text"))
+
+    def test_the_answer_lands_on_the_page(self):
+        """This window has no log pane.
+
+        The Runner's output goes to stderr, so a sentence written only there
+        is not feedback: it is a message to whoever happened to start the
+        panel from a terminal. That was shipped once and is what this checks.
+        """
+        said = self._answer(
+            '{"helper":{"devices":[{"label":"MediaTek (0e8d:0616)",'
+            '"after":"enabled"}]}}')
+        self.assertIn("0e8d:0616", said)
+        self.assertIn("wake this machine", said)
+        self.assertTrue(self.panel.cec_radios.winfo_ismapped())
+
+    def test_nothing_is_shown_before_it_is_asked(self):
+        self.assertFalse(self.panel.cec_radios.winfo_ismapped())
+
+    def test_a_helper_that_did_not_answer_is_said_too(self):
+        """The empty answer is the one somebody most needs a sentence for."""
+        said = self._answer("sudo: a password is required")
+        self.assertIn("did not answer", said)
+        self.assertTrue(self.panel.cec_radios.winfo_ismapped())
 
 
 class AdapterGoneNoticeTest(unittest.TestCase):
