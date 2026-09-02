@@ -63,8 +63,8 @@ def _crc16_table():
     return tuple(table)
 
 
-# A frame is checksummed per LED update, so this runs FPS times a second over
-# the whole payload - byte at a time rather than bit at a time.
+# Each LED update needs one checksum, so this runs FPS times each second over
+# the full payload. It works one byte at a time and not one bit at a time.
 _CRC16_TABLE = _crc16_table()
 
 
@@ -224,8 +224,8 @@ class EspLink:
             # Remember the miss so later reconnects do not repeat the scan.
             self._scanned.add(device)
 
-        # Nothing answered - the firmware may predate the handshake, so stream
-        # at the configured rate rather than give up.
+        # Nothing answered. The firmware can be older than the handshake, so
+        # send frames at the configured rate and do not stop.
         if preferred is not None:
             self._adopt(preferred, device, candidates[0], None)
             LOG.warning("no HELLO reply from %s; streaming at %d baud anyway",
@@ -351,7 +351,7 @@ class EspLink:
             return False
 
     def send_frame(self, pixels, led_count):
-        """pixels is led_count * 3 bytes of RGB."""
+        """pixels is led_count * 3 bytes of RGB data."""
         payload = led_count.to_bytes(2, "little") + pixels
         return self._send(build(MSG_FRAME, payload))
 
