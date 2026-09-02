@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Turns a shim snapshot into a frame of physical LED colours.
+"""Makes a frame of physical LED colours from a shim snapshot.
 
-The Steam Machine animates rainbow/breath/patrol on its own microcontroller, so
-the snapshot carries only the parameters. Those animations are reproduced here
-and streamed to the ESP as finished pixels, which keeps the firmware a dumb
-(and therefore reliable) pixel driver.
+The Steam Machine animates the rainbow, breath and patrol effects on its own
+microcontroller. The snapshot thus carries only the parameters.
+
+This module makes those animations and sends complete pixels to the ESP. The
+firmware stays a simple pixel driver, and it is thus reliable.
 """
 
 from __future__ import annotations
@@ -15,17 +16,21 @@ import math
 
 from . import shim
 
-# Cycle lengths at the module's default delay. `delay` is not a duration but a
-# slider from 0 to VALVE_DELAY_RANGE_MAX(20) starting at VALVE_DELAY_DEFAULT(8),
-# and it scales these linearly (0 fastest, 20 = 2.5x slower); SPEED scales them
-# further. tests/test_shim_abi.py keeps the two constants tied to the module.
+# The cycle lengths at the default delay of the module.
+#
+# `delay` is not a duration. It is a control from 0 to VALVE_DELAY_RANGE_MAX
+# (20), and it starts at VALVE_DELAY_DEFAULT (8). It scales these lengths
+# linearly: 0 is the fastest and 20 is 2.5 times slower. SPEED then scales them
+# again.
+#
+# tests/test_shim_abi.py keeps the two constants equal to the module's own.
 DELAY_DEFAULT = 8
 DELAY_MAX = 20
 RAINBOW_CYCLE = 3.5     # one full trip around the hue circle
 BREATH_CYCLE = 1.6      # one inhale plus exhale
 PATROL_CYCLE = 2.5      # sweep to the far end and back
 DEMO_CYCLE = 3.2        # breathing envelope over the rainbow
-# A small delay must not turn an effect into a strobe light.
+# A small delay must not make an effect into a strobe light.
 MIN_CYCLE_SECONDS = 0.8
 
 BREATH_FLOOR = 0.06
@@ -39,7 +44,7 @@ MAPPINGS = (MAPPING_STRETCH, MAPPING_REPEAT, MAPPING_CROP)
 
 
 def hsv_to_rgb(hue, saturation, value):
-    """hue/saturation/value in 0..1, returns floats in 0..255."""
+    """Takes hue, saturation and value from 0 to 1. Returns 0 to 255."""
     hue = hue % 1.0
     sector = int(hue * 6.0) % 6
     offset = hue * 6.0 - int(hue * 6.0)
@@ -54,11 +59,11 @@ def hsv_to_rgb(hue, saturation, value):
 
 
 def _cycle(snapshot, nominal, speed_scale):
-    """Seconds for one full cycle of an effect, honouring delay and SPEED.
+    """Returns the seconds of one cycle of an effect, with delay and SPEED.
 
-    delay 0 means "as fast as possible", not "unset": the module initialises it
-    to DELAY_DEFAULT, so a zero was written. MIN_CYCLE_SECONDS keeps it
-    watchable.
+    A delay of 0 means "as fast as possible" and not "not set". The module
+    sets it to DELAY_DEFAULT, so a zero is a value that something wrote.
+    MIN_CYCLE_SECONDS keeps the effect slow enough to watch.
     """
     delay = min(snapshot.delay, DELAY_MAX)
     seconds = nominal * (delay / float(DELAY_DEFAULT))
@@ -68,7 +73,7 @@ def _cycle(snapshot, nominal, speed_scale):
 
 
 def _static(snapshot):
-    """Per-pixel colours exactly as Steam wrote them, including per-LED level."""
+    """Returns the pixel colours as Steam wrote them, with the LED levels."""
     frame = []
     for red, green, blue, brightness in snapshot.pixels:
         level = brightness / 255.0
@@ -87,10 +92,11 @@ def _rainbow(snapshot, elapsed, options):
 
 
 def breath_envelope(phase, floor):
-    """A raised cosine over one cycle, lifted so it never reaches zero.
+    """Returns a raised cosine over one cycle. It never reaches zero.
 
-    Phase 0 is the dark end. Shared by the breath effect, the demo fade and the
-    notification bloom so "breathing" looks the same everywhere.
+    Phase 0 is the dark end. The breath effect, the demo fade and the
+    notification bloom all use this function, so a breath looks the same
+    everywhere.
     """
     swell = (1.0 - math.cos(2.0 * math.pi * phase)) * 0.5
     return floor + (1.0 - floor) * swell
@@ -108,18 +114,19 @@ def _patrol(snapshot, elapsed, options):
     span = shim.LOGICAL_LEDS - 1
     period = _cycle(snapshot, PATROL_CYCLE, options.speed_scale)
     base = (elapsed / period) % 1.0
-    # patrol_num is NOT a scanner count: these fields are undocumented and its
-    # neighbours look like live animation state, so it is most likely one dot's
-    # position - which is what the real bar shows. PATROL_DOTS decides instead.
+    # patrol_num is NOT the number of dots. These fields have no documentation,
+    # and the fields beside it look like live animation state. It is thus most
+    # probably the position of one dot, which is what the real bar shows.
+    # PATROL_DOTS gives the number instead.
     scanners = max(1, min(int(options.patrol_dots), 8))
     red, green, blue = snapshot.base_color()
 
-    # Offset each scanner in time, not in position: a wrapped position would
-    # teleport a scanner sitting on the far end back to LED 0 for one frame.
+    # Move each dot in time and not in position. A position that goes past the
+    # end returns to LED 0 for one frame, and the dot thus jumps.
     heads = []
     for scanner in range(scanners):
         phase = (base + scanner / float(scanners)) % 1.0
-        # Triangle wave: sweep to the far end and back again.
+        # A triangle wave: to the far end and back again.
         heads.append(phase * 2.0 * span if phase < 0.5
                      else (2.0 - phase * 2.0) * span)
 
@@ -146,10 +153,12 @@ def _demo(snapshot, elapsed, options):
     return [(r * level, g * level, b * level) for r, g, b in frame]
 
 
-# What the whole bar shows, cool to hot. Green, yellow, red is the sequence
-# everybody already reads as "getting worse", and mixing these three in RGB
-# walks the same path around the hue circle: between any two of them only one
-# channel moves, so no hue conversion is needed to get the same result.
+# What the full bar shows, from cool to hot.
+#
+# Green, yellow and red is the sequence that each person reads as "worse". A
+# mix of these three in RGB follows the same path around the hue circle:
+# between two of them only one channel moves. A hue conversion is thus not
+# necessary for the same result.
 TEMPERATURE_COOL = (0.0, 255.0, 0.0)
 TEMPERATURE_WARM = (255.0, 255.0, 0.0)
 TEMPERATURE_HOT = (255.0, 0.0, 0.0)
@@ -158,10 +167,10 @@ DEFAULT_TEMPERATURE_RANGE = (40.0, 80.0)
 
 
 def blend_stops(value, stops):
-    """Mix a colour out of ((mark, colour), ...), which must be in order.
+    """Mixes a colour from ((mark, colour), ...), which must be in order.
 
-    Below the first mark and above the last the end colours are held rather
-    than extrapolated: a scale that keeps going past its own ends is one that
+    Below the first mark and above the last mark, the end colours stay. This
+    function does not continue the scale past its own ends. Such a scale
     reports 300 C in ultraviolet.
     """
     if value <= stops[0][0]:
@@ -169,9 +178,9 @@ def blend_stops(value, stops):
     for (low_mark, low), (high_mark, high) in zip(stops, stops[1:]):
         if value <= high_mark:
             span = high_mark - low_mark
-            # Callers validate their marks, but this is also used directly -
-            # and dividing by nothing here would be a crash in the render
-            # loop rather than a message at startup.
+            # Each caller validates its marks, but a program can also call
+            # this function directly. A division by zero here is a stop in
+            # the render loop and not a message at the start.
             blend = 0.0 if span <= 0 else (value - low_mark) / span
             return tuple(low[channel] + (high[channel] - low[channel]) * blend
                          for channel in range(3))
@@ -179,11 +188,11 @@ def blend_stops(value, stops):
 
 
 def temperature_stops(low, high):
-    """(mark, colour) from the two marks: green at one end, red at the other.
+    """Returns (mark, colour) from the two marks: green low, red high.
 
-    Yellow sits halfway between rather than being a third setting. It is the
-    only placement that needs no explaining - and with the shipped 40 and 80
-    it lands on 60, which is where a machine under load actually sits.
+    Yellow is at the middle and is not a third setting. The middle is the one
+    position that needs no explanation. With the default 40 and 80 it is at
+    60, and that is the temperature of a machine under load.
     """
     return ((low, TEMPERATURE_COOL),
             ((low + high) / 2.0, TEMPERATURE_WARM),
@@ -192,21 +201,21 @@ def temperature_stops(low, high):
 
 def temperature_colour(celsius, low=DEFAULT_TEMPERATURE_RANGE[0],
                        high=DEFAULT_TEMPERATURE_RANGE[1]):
-    """The colour for a temperature: the stops, mixed."""
+    """Returns the colour for a temperature: a mix of the stops."""
     return blend_stops(celsius, temperature_stops(low, high))
 
 
 def _temperature(snapshot, elapsed, options):
-    """The whole bar in one colour, from green when cool to red when hot.
+    """Draws the full bar in one colour, from green when cool to red when hot.
 
-    Not a filling gauge: a bar that is part dark says two things at once, its
-    colour and its length, and only one of them was ever the answer. Lit end
-    to end, the colour is the whole message.
+    This is not a gauge that fills. A bar that is part dark says two things at
+    the same time, its colour and its length, and only one of them is the
+    answer. With each LED lit, the colour is the full message.
     """
     celsius = options.temperature.celsius()
     if celsius is None:
-        # Falling back to the rainbow beats a dark strip, which would look
-        # like the service had died. The log says what happened.
+        # The rainbow is better than a dark strip. A dark strip looks like a
+        # service that stopped. The log gives the reason.
         return _rainbow(snapshot, elapsed, options)
 
     low, high = options.temperature_range
@@ -215,45 +224,46 @@ def _temperature(snapshot, elapsed, options):
 
 # -- the load gauge --------------------------------------------------------
 #
-# Length, not colour, and for once that is the right way round: load has a
-# real zero and a real full, so how far the bar has come *is* the reading.
-# Temperature has neither, which is why that one uses colour instead.
+# This gauge uses length and not colour, and that is correct here. The load
+# has a real zero and a real maximum, so the length of the bar *is* the
+# reading. The temperature has neither, and that gauge thus uses colour.
 #
-# The colour says which chip, and both are settings - LOAD_CPU_COLOR and
-# LOAD_GPU_COLOR. These two are what they ship as: amber and blue sit about as
-# far apart as two colours on this strip can, which is what stops the gauge
-# reading as one bar that happens to be uneven rather than as two.
+# The colour says which chip. Both colours are settings: LOAD_CPU_COLOR and
+# LOAD_GPU_COLOR.
 #
-# Worth knowing when changing them, and the reason the panel says so under the
-# rows: what makes this gauge readable is the two halves being told apart at a
-# glance. Two colours near each other on the wheel still work as a gauge, they
-# just stop working as *two*.
+# The defaults are amber and blue. They are almost the maximum distance apart
+# on this strip. That distance is what stops the gauge from reading as one
+# irregular bar.
+#
+# This is important when a person changes them, and the panel says so below the
+# rows. The gauge is readable when a person sees the two halves as two. Two
+# colours near each other still operate as a gauge, but not as *two* bars.
 LOAD_CPU_COLOUR = (255.0, 110.0, 0.0)
 LOAD_GPU_COLOUR = (26.0, 159.0, 255.0)
 
 
 def _as_colour(value, fallback):
-    """Three floats in 0..255, or the shipped colour when there is nothing.
+    """Returns three floats from 0 to 255, or the default colour.
 
-    Takes what a caller has already parsed rather than parsing itself: the
-    spelling of a colour is notify.parse_color's business, and notify imports
-    from here, so reaching back the other way is a circle.
+    It takes a value that a caller parsed and does not parse one itself. The
+    form of a colour is the work of notify.parse_color. notify imports from
+    this module, so an import in the other direction is a circle.
     """
     if value is None:
         return fallback
     return tuple(max(0.0, min(float(channel), 255.0)) for channel in value)
 
-# The innermost LED of each half never goes fully dark, or an idle machine
-# looks like a strip somebody switched off.
+# The innermost LED of each half never goes fully dark. Without that, an
+# idle machine looks like a strip that a person switched off.
 LOAD_FLOOR = 0.12
 
 
 def load_levels(fraction, length):
-    """How brightly each of `length` LEDs is lit at this load, innermost first.
+    """Returns the brightness of each of `length` LEDs, the innermost first.
 
-    The bar is fractional: at a third of the way up a three LED half, the
-    second LED is half lit rather than the bar jumping a whole LED at a time.
-    On seventeen LEDs a whole-LED bar could only ever show eighths.
+    The bar uses fractions of an LED. At one third of a half of three LEDs,
+    the second LED is half lit. The bar thus does not step one full LED at a
+    time. On seventeen LEDs, a bar of full LEDs shows eighths only.
     """
     if length < 1:
         return []
@@ -266,25 +276,27 @@ def load_levels(fraction, length):
 
 
 def _load(snapshot, elapsed, options):
-    """Two bars growing out of the middle: one chip each way.
+    """Draws two bars from the centre, one chip in each direction.
 
-    Out of the centre rather than from one end, because the two readings are
-    peers - a bar for each, meeting in the middle, says that. Stacking them
-    end to end would put one of them on the far side of the strip, which is
-    where you look last.
+    The bars start at the centre and not at one end, because the two readings
+    are equal. One bar for each, and they meet at the centre.
 
-    Which chip is on which side is LOAD_SWAP. The reading and the colour move
-    together, so swapping puts the CPU's bar *and* its colour on the right -
-    a swap that moved only one of the two would be a gauge whose colours had
-    stopped saying which chip is which.
+    Two bars end to end put one of them at the far side of the strip, and that
+    is the last place that a person looks.
 
-    Only ever reached with a reading in hand: a gauge with nothing to read is
-    not this effect at all, and _substitute hands the slot back to the
-    rainbow before it gets here.
+    LOAD_SWAP selects which chip is on which side. The reading and the colour
+    move together. A swap thus puts the CPU bar *and* its colour on the right.
+    A swap of one of the two makes a gauge whose colours no longer say which
+    chip is which.
+
+    This function always has a reading. A gauge with nothing to read is not
+    this effect, and _substitute gives the slot back to the rainbow before
+    this function runs.
     """
     cpu, gpu = options.reading()
     # A machine whose driver publishes no GPU counter shows the CPU on both
-    # halves. One reading drawn symmetrically still reads as one reading.
+    # halves. One reading in two symmetrical halves still reads as one
+    # reading.
     if gpu is None:
         gpu = cpu
     elif cpu is None:
@@ -296,8 +308,8 @@ def _load(snapshot, elapsed, options):
     near, near_colour, far, far_colour = inner
 
     half = shim.LOGICAL_LEDS // 2
-    # The odd middle LED belongs to neither and stays dark, which is what
-    # makes the two sides read as two - the same trick the alarm shape uses.
+    # The centre LED belongs to neither half and stays dark. That is what
+    # makes the two sides read as two. The alarm shape uses the same method.
     gap = shim.LOGICAL_LEDS % 2
     frame = [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
     for index, level in enumerate(load_levels(near, half)):
@@ -311,9 +323,11 @@ def _load(snapshot, elapsed, options):
 
 # -- fire ------------------------------------------------------------------
 
-# Embers at the bottom through to the white-hot tips. Not a hue sweep: a fire
-# desaturates as it gets hotter rather than changing colour, which is why the
-# top of the scale is nearly white and a rainbow never looks like flame.
+# From the embers at the low end to the white tips at the high end.
+#
+# This is not a hue sweep. A fire loses saturation as it becomes hotter. It
+# does not change its hue. The high end of the scale is thus almost white, and
+# a rainbow never looks like a flame.
 FIRE_STOPS = ((0.00, (40.0, 0.0, 0.0)),
               (0.35, (170.0, 20.0, 0.0)),
               (0.65, (255.0, 90.0, 0.0)),
@@ -322,19 +336,21 @@ FIRE_STOPS = ((0.00, (40.0, 0.0, 0.0)),
 
 FIRE_CYCLE = 4.0        # one trip through the slowest of the waves
 
-# Three waves, deliberately not in any whole ratio to each other: their sum
-# never repeats, so the flicker has no beat you can catch. The pairs are
-# (how many humps across the strip, how fast that wave drifts).
+# Three waves, deliberately with no whole ratio between them. Their sum thus
+# never repeats, and the flicker has no rhythm that a person hears. Each pair
+# is (the number of humps on the strip, the speed of that wave).
 FIRE_WAVES = ((0.9, 1.00), (2.3, -1.71), (5.7, 2.53))
 
 
 def _fire(snapshot, elapsed, options):
-    """Flame, drawn as drifting heat rather than as flickering pixels.
+    """Draws a flame as heat that moves, and not as pixels that flicker.
 
-    Random per-LED brightness looks like a fault, not a fire. What reads as
-    flame is heat that moves along the strip, so this sums a few travelling
-    waves and colours the result - and being a function of time rather than a
-    random draw, it also survives a dropped frame without a visible jump.
+    A random brightness for each LED looks like a fault and not like a fire.
+    What a person reads as a flame is heat that moves along the strip.
+
+    This function thus adds some waves that move and gives the sum a colour.
+    It is a function of the time and not a random value, so a lost frame
+    causes no visible jump.
     """
     period = _cycle(snapshot, FIRE_CYCLE, options.speed_scale)
     phase = elapsed / period
@@ -346,8 +362,8 @@ def _fire(snapshot, elapsed, options):
         for humps, speed in FIRE_WAVES:
             heat += math.sin(2.0 * math.pi
                              * (index / span * humps + phase * speed))
-        # Three waves land in -3..3; centre it high so the strip is mostly
-        # burning and only occasionally dips to embers.
+        # The three waves give a sum from -3 to 3. The centre is high, so the
+        # strip mostly burns and goes to the embers only sometimes.
         heat = 0.58 + heat / 6.4
         frame.append(blend_stops(max(0.0, min(heat, 1.0)), FIRE_STOPS))
     return frame
@@ -355,28 +371,30 @@ def _fire(snapshot, elapsed, options):
 
 # -- aurora ----------------------------------------------------------------
 
-# The hue window the northern lights actually occupy: green through cyan into
-# violet, never the warm half of the circle. That restraint is the whole
-# effect - a rainbow already exists, and it is the one people turn off.
-# The two waves below sum to -2..2, so the hue lands within AURORA_SPREAD of
-# AURORA_HUE: 0.33 is pure green and 0.71 is violet-blue, and staying inside
-# that is what keeps it from wandering into the yellows and becoming a slow
+# The hue range of the real northern lights: from green through cyan to
+# violet. It never uses the warm half of the circle.
+#
+# That limit is the effect. A rainbow already exists, and it is the effect that
+# people switch off.
+#
+# The two waves below give a sum from -2 to 2. The hue thus stays within
+# AURORA_SPREAD of AURORA_HUE. 0.33 is pure green and 0.71 is violet-blue. That
+# range is what stops the effect from reaching the yellows and becoming a slow
 # rainbow.
 AURORA_HUE = 0.52
 AURORA_SPREAD = 0.19
 
 AURORA_CYCLE = 9.0          # slow: this is the calm one
 
-# Two waves for the hue and one for the brightness, all at different speeds,
-# so the colour bands and the bright bands drift apart instead of moving as
-# one lit block.
+# Two waves for the hue and one for the brightness, each at a different speed.
+# The colour bands and the bright bands thus move apart and not as one block.
 AURORA_HUE_WAVES = ((0.7, 1.0), (1.9, -0.43))
 AURORA_LEVEL_WAVE = (1.3, 0.61)
 AURORA_FLOOR = 0.35         # the curtain thins, it does not go out
 
 
 def _aurora(snapshot, elapsed, options):
-    """Slow curtains of green and violet - a rainbow that learned patience."""
+    """Draws slow green and violet curtains."""
     period = _cycle(snapshot, AURORA_CYCLE, options.speed_scale)
     phase = elapsed / period
     span = float(shim.LOGICAL_LEDS)
@@ -399,48 +417,58 @@ def _aurora(snapshot, elapsed, options):
     return frame
 
 
-# What the rainbow entry shows. Steam's LED menu cannot be extended - the
-# entries are built into the client - so anything new has to take over one it
-# already offers, and the rainbow is the one people are happy to give up.
-# Rather than spending that single slot on one feature, it holds whichever of
-# these is chosen; SHOWS_RAINBOW leaves Steam's own effect alone.
+# What the rainbow entry shows.
+#
+# SteamOS does not permit new entries in its LED menu: the entries are in the
+# client. A new effect must thus replace an entry that the menu has, and the
+# rainbow is the entry that people give up.
+#
+# That one slot does not belong to one feature. It holds the effect that a
+# person selects. SHOWS_RAINBOW leaves Steam's own effect there.
 SHOWS_RAINBOW = "rainbow"
 SHOWS_TEMPERATURE = "temperature"
 SHOWS_LOAD = "load"
 SHOWS_FIRE = "fire"
 SHOWS_AURORA = "aurora"
 
-# What a scene's brightness and speed can reach. Named because the two of
-# them are not the same kind of thing to every effect: to most, brightness is
-# how bright it looks, and to a gauge it is half of what it is saying.
+# What the brightness and the speed of a scene reach.
+#
+# This table has a name because the two values are not the same kind of thing
+# for each effect. For most effects, the brightness is how bright the effect
+# looks. For a gauge, the brightness is half of the reading.
 TAKES_BRIGHTNESS = "brightness"
 TAKES_SPEED = "speed"
 TAKES_BOTH = frozenset((TAKES_BRIGHTNESS, TAKES_SPEED))
 
-# The load gauge answers to neither. It fills each half of the bar to say how
-# busy that chip is, and the floor under the innermost LED is what says "idle"
-# rather than "off" - dimming that changes the reading rather than the look.
-# Its glide runs on the clock instead of on the delay field, for the same
-# reason: a gauge at half speed is a gauge showing where the load was.
+# The load gauge uses neither value. It fills each half of the bar to give the
+# load of that chip. The minimum brightness of the innermost LED is what says
+# "idle" and not "off". To make that dim changes the reading and not the
+# appearance.
 #
-# MAX_BRIGHTNESS still applies to it. That one is about how much current the
-# strip may draw, which is not a matter of taste.
+# Its movement uses the clock and not the delay field, for the same reason. A
+# gauge at half speed shows the load of the past.
+#
+# MAX_BRIGHTNESS still applies to it. That setting limits the current of the
+# strip, which is not a matter of taste.
 TAKES_NOTHING = frozenset()
 
-# The temperature gauge answers to brightness and not to speed. It is the whole
-# bar in one colour, redrawn when the sensor moves - there is no cycle for a
-# multiplier to scale, which is why is_animated calls it still. Dimming it is
-# a dimmer bar of the same colour, and the colour is the whole of the reading,
-# so unlike the load gauge that one does not change what it says.
+# The temperature gauge uses the brightness and not the speed. It is the full
+# bar in one colour, and it is redrawn when the sensor changes. There is no
+# cycle for a multiplier to scale, and is_animated thus calls it static.
 #
-# With no sensor it falls back to the rainbow, which does move. That is an
-# error path with a log line under it, not a speed setting.
+# A dim temperature gauge is a dim bar of the same colour. The colour is the
+# full reading, so this gauge does not change its meaning. The load gauge does.
+#
+# With no sensor, this gauge gives the slot to the rainbow, which does move.
+# That is an error path with a log line, and not a speed setting.
 TAKES_LIGHT = frozenset((TAKES_BRIGHTNESS,))
 
-# Which renderer each choice puts in the rainbow's place; the Renderer
-# attribute that has to be there for the choice to mean anything, for the two
-# that read hardware; and which of the bar's settings reach it. config
-# validates against this table, so a new entry is all a further effect needs.
+# For each value: the renderer that replaces the rainbow, the Renderer
+# attribute that must be present for the value to have a meaning, and which of
+# the settings of the bar reach it. The attribute applies to the two values
+# that read hardware.
+#
+# config validates against this table. A new effect thus needs one new entry.
 _SUBSTITUTES = {
     SHOWS_TEMPERATURE: (_temperature, "temperature", TAKES_LIGHT),
     SHOWS_LOAD: (_load, "load", TAKES_NOTHING),
@@ -451,12 +479,14 @@ RAINBOW_CHOICES = (SHOWS_RAINBOW,) + tuple(_SUBSTITUTES)
 
 
 def rainbow_takes(rainbow_shows):
-    """Which of the bar's settings reach whatever holds the rainbow slot.
+    """Returns which settings of the bar reach the effect in the slot.
 
-    Asked by anything that describes a setting to somebody - a report naming
-    a brightness that the thing on the bar ignores is how you come to move a
-    slider and see nothing happen. Steam's own rainbow takes both, which is
-    also the answer for a name this does not know.
+    Each program that describes a setting to a person asks this. A report that
+    names a brightness that the effect ignores is why a person moves a control
+    and sees no change.
+
+    Steam's own rainbow takes both settings, and that is also the answer for a
+    name that this function does not know.
     """
     return _SUBSTITUTES.get(rainbow_shows, (None, None, TAKES_BOTH))[2]
 
@@ -473,7 +503,7 @@ _EFFECTS = {
 
 
 class Renderer:
-    """Snapshot + elapsed time -> bytes ready for the wire."""
+    """Makes the bytes for the wire from a snapshot and the elapsed time."""
 
     def __init__(self, led_count, mapping=MAPPING_STRETCH, reverse=False,
                  max_brightness=255, min_brightness=0, gamma=1.0,
@@ -486,8 +516,8 @@ class Renderer:
         if mapping not in MAPPINGS:
             raise ValueError("unknown mapping %r" % mapping)
         if rainbow_shows is None:
-            # Handing over a sensor and nothing else has always meant "show
-            # the gauge", and that reading predates there being a choice.
+            # A caller that gives a sensor and nothing else means "show the
+            # gauge". That reading is older than the list of choices.
             rainbow_shows = (SHOWS_TEMPERATURE if temperature is not None
                              else SHOWS_LOAD if load is not None
                              else SHOWS_RAINBOW)
@@ -500,26 +530,27 @@ class Renderer:
         self.min_brightness = max(0, min(int(min_brightness), 255))
         self.speed_scale = speed_scale
         self.patrol_dots = max(1, min(int(patrol_dots), 8))
-        # Something with .celsius(), or None when nothing reads a sensor.
+        # An object with .celsius(), or None if nothing reads a sensor.
         self.temperature = temperature
         self.temperature_range = temperature_range
-        # Something with .fractions(), likewise.
+        # An object with .fractions(), or None for the same reason.
         self.load = load
-        # Which chip each half of the gauge stands for. Already parsed by
-        # whoever built this - see _as_colour.
+        # The chip that each half of the gauge shows. The caller parsed
+        # these values. See _as_colour.
         self.load_cpu_colour = _as_colour(load_cpu_colour, LOAD_CPU_COLOUR)
         self.load_gpu_colour = _as_colour(load_gpu_colour, LOAD_GPU_COLOUR)
-        # Which chip is on which side. Both the reading and the colour move.
+        # Which chip is on which side. The reading and the colour move
+        # together.
         self.load_swap = bool(load_swap)
         self.rainbow_shows = rainbow_shows
         self._gamma_table = self._build_gamma(gamma)
         self._stretch = {}
-        # This frame's load, taken once - see reading().
+        # The load of this frame, read one time. See reading().
         self._reading = None
 
     @staticmethod
     def _build_gamma(gamma):
-        """A 256 entry lookup; the identity table when gamma is off."""
+        """Returns a table of 256 entries. It is the identity table with no gamma."""
         if abs(gamma - 1.0) < 1e-6:
             return list(range(256))
         return [
@@ -528,7 +559,7 @@ class Renderer:
         ]
 
     def _stretch_weights(self, source):
-        """(low, high, blend) per physical LED - fixed for a given strip."""
+        """Returns (low, high, blend) for each LED. It is constant for one strip."""
         weights = self._stretch.get(source)
         if weights is None:
             span = source - 1
@@ -541,13 +572,15 @@ class Renderer:
         return weights
 
     def reading(self, fresh=False):
-        """This frame's load, taken once however often it is asked for.
+        """Returns the load of this frame. It reads it one time for each frame.
 
-        fractions() moves the glide on a little every time it is called, so
-        asking it twice for one frame would run the bar at twice the rate.
-        The frame takes the reading; everything that has to know what came
-        back - whether there is a gauge to draw at all, and which of the
-        bar's settings reach it - reads the same answer.
+        fractions() moves the value at each call. Two calls in one frame thus
+        move the bar at twice the correct rate.
+
+        The frame takes the reading. Each caller that needs the result reads
+        the same answer. Two callers need it: the code that decides whether
+        there is a gauge to draw, and the code that decides which settings of
+        the bar reach it.
         """
         if fresh:
             self._reading = (None if self.load is None
@@ -555,28 +588,35 @@ class Renderer:
         return self._reading
 
     def shown_by(self, shows):
-        """Which effect a `shows` argument asks for; the setting by default.
+        """Returns the effect that a `shows` argument asks for.
 
-        Every entry point takes `shows` so that one caller can say what a
-        frame is of without that being a property of the renderer. Game Mode
-        never does - what it draws is whatever the rainbow slot was set to,
-        which is the whole reason the slot exists. Desktop Mode does, because
-        there is no slot there to be limited by: the desktop picks its scene
-        outright, and passes it down a frame at a time.
+        With no argument, it returns the setting.
+
+        Each entry point takes `shows`, so that one caller can name the effect
+        of one frame. The effect is thus not a property of the renderer.
+
+        Game Mode never gives the argument. It draws the effect in the rainbow
+        slot, and that is the purpose of the slot.
+
+        Desktop Mode gives the argument. There is no slot on the desktop. The
+        desktop selects its scene and passes it down for each frame.
         """
         return self.rainbow_shows if shows is None else shows
 
     def _substitute(self, snapshot, shows=None):
-        """The renderer standing in for the rainbow here, or None.
+        """Returns the renderer that replaces the rainbow here, or None.
 
-        None also covers a choice whose hardware is missing, and a load gauge
-        that has nothing to read - the first few frames of a fresh start, or
-        a machine with no counters at all. A bar drawn from no reading would
-        be a reading of nothing, and Steam's own rainbow says "not this"
-        better than a dark strip does. Decided here rather than inside the
-        gauge so that everything else agrees about what is on the bar: a
-        rainbow standing in for the load answers to brightness and speed the
-        way a rainbow does, and it could not if the swap were hidden.
+        None also covers a value whose hardware is absent, and a load gauge
+        with nothing to read. The second case occurs in the first frames after
+        a start, and on a machine with no counters.
+
+        A bar from no reading is a reading of nothing. Steam's own rainbow says
+        "not this effect" better than a dark strip does.
+
+        The decision is here and not in the gauge, so that each other part
+        agrees about what is on the bar. A rainbow in place of the load takes
+        the brightness and the speed as a rainbow does, and it cannot do that
+        if this function hides the change.
         """
         if snapshot.effect != shim.EFFECT_RAINBOW:
             return None
@@ -589,17 +629,17 @@ class Renderer:
         return effect
 
     def is_animated(self, snapshot, shows=None):
-        """Whether this scene changes from frame to frame.
+        """Returns whether this scene changes from frame to frame.
 
-        The temperature gauge does not: it redraws when the sensor moves,
-        which is orders of magnitude slower than a frame, so driving it at the
-        full rate would send the same bytes sixty times a second. With nothing
-        to read it falls back to the rainbow, which does animate.
+        The temperature gauge does not change. It is redrawn when the sensor
+        changes, and that is much slower than a frame. At the full frame rate
+        it thus sends the same bytes sixty times each second. With nothing to
+        read it gives the slot to the rainbow, which does animate.
 
-        The load gauge is the other way round. Its value glides towards each
-        new reading instead of stepping onto it, so it has something new to
-        draw every frame - and at the idle rate that glide would be four jumps
-        a second, which is exactly what it exists to avoid.
+        The load gauge is the opposite. Its value moves towards each new
+        reading and does not step onto it. It thus has a new frame to draw each
+        time. At the idle rate, that movement becomes four steps each second,
+        and the movement exists to prevent exactly that.
         """
         effect = self._substitute(snapshot, shows)
         if effect is _temperature:
@@ -609,10 +649,10 @@ class Renderer:
         return snapshot.is_animated
 
     def render_logical(self, snapshot, elapsed, shows=None):
-        """The 17 logical LEDs of the Steam Machine bar, floats in 0..255."""
+        """Returns the 17 logical LEDs of the bar, as floats from 0 to 255."""
         if not snapshot.enabled or snapshot.effect == shim.EFFECT_OFF:
             return [(0.0, 0.0, 0.0)] * shim.LOGICAL_LEDS
-        # Before anything asks what is being drawn, and once for the frame.
+        # Before any caller asks what this draws, and one time for the frame.
         self.reading(fresh=True)
         effect = (self._substitute(snapshot, shows)
                   or _EFFECTS.get(snapshot.effect, _EFFECTS[shim.EFFECT_MANUAL]))
@@ -630,7 +670,8 @@ class Renderer:
         elif count == 1:
             frame = [logical[0]]
         else:
-            # Interpolate: a 60 LED strip gets a gradient, not 17 hard steps.
+            # Interpolate. A strip of 60 LEDs thus gets a gradient and not 17
+            # steps.
             frame = []
             for low, high, blend in self._stretch_weights(source):
                 first, second = logical[low], logical[high]
@@ -644,11 +685,11 @@ class Renderer:
         return frame
 
     def render(self, snapshot, elapsed, shows=None):
-        """Return the RGB byte payload for the physical strip.
+        """Returns the RGB byte payload for the physical strip.
 
-        The frame first, because what was drawn decides how bright it goes
-        out: a gauge whose brightness is its reading is not dimmed by the
-        setting that dims everything else - see rainbow_takes.
+        It renders the frame first, because the effect decides the brightness
+        of the output. A gauge whose brightness is its reading does not take
+        the setting that dims each other effect. See rainbow_takes.
         """
         frame = self._map_to_strip(
             self.render_logical(snapshot, elapsed, shows))
