@@ -5175,6 +5175,12 @@ class Panel:
         row.pack(anchor="w", pady=(GROUP_GAP, 0))
         ttk.Button(row, text="Check again", style="Tonal.TButton",
                    command=self._reread_cec).pack(side="left")
+        # Beside the adapter rather than under the switch it serves, because
+        # it is the one thing on this page that asks for a password, and the
+        # switches next door do not. See ledpanel.wake_ids_command.
+        ttk.Button(row, text="Find the Bluetooth radio", style="Text.TButton",
+                   command=self._find_wake_ids).pack(side="left",
+                                                     padx=(ROW_GAP, 0))
         ttk.Button(row, text="Remove HDMI CEC", style="Text.TButton",
                    command=self._remove_cec).pack(side="left",
                                                   padx=(ROW_GAP, 0))
@@ -5545,6 +5551,16 @@ class Panel:
                          confirm="Install"):
             return
         self.runner.start(ledpanel.install_cec_command(SOURCE_DIR),
+                          lambda _code: self._reread_cec())
+
+    def _find_wake_ids(self):
+        """Let every Bluetooth radio here wake the machine.
+
+        Run by the installer already; offered on its own for a radio plugged
+        in since - and for the machine this was found on, whose radio the
+        toolkit's own three ways of looking all missed.
+        """
+        self.runner.start(ledpanel.wake_ids_command(SOURCE_DIR),
                           lambda _code: self._reread_cec())
 
     def _remove_cec(self):

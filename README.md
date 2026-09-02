@@ -816,7 +816,8 @@ means "my classes are in my interfaces" &mdash; what every wifi-and-bluetooth
 combo chip says, so the class check cannot match one. `matched:0`, and no
 reason given. Installing HDMI CEC now looks one level down, at the
 interfaces, and adds what it finds to `USB_WAKE_USB_IDS`. Plug a radio in
-later and `scripts/install-cec.sh wake-ids` does the same on its own.
+later and **Find the Bluetooth radio** on the CEC page does the same on its
+own, as does `scripts/install-cec.sh wake-ids` from a terminal.
 
 **Waking the television does not hold up the session.** The toolkit's boot
 wake settles for eight seconds and then retries four times five seconds

@@ -3207,6 +3207,77 @@ class FoldTest(unittest.TestCase):
         self.assertEqual(everything(), before)
 
 
+class WakeIdButtonTest(unittest.TestCase):
+    """The button for the radio the toolkit cannot find by itself.
+
+    It shipped as a command with nothing calling it, which is half a fix: the
+    step runs when HDMI CEC is installed, and reinstalling the whole toolkit
+    to add one line to a config file is not a thing to ask of anybody.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        was = cec.installed
+        cec.installed = lambda home=None: True
+        self.addCleanup(lambda: setattr(cec, "installed", was))
+        self.panel_module.ledpanel.cec_status = (
+            lambda home=None, run=None: {
+                "cec_device": {"device": "/dev/cec0", "exists": True,
+                               "readable": True, "writable": True},
+                "services": {}, "system_services": {},
+                "external_volume": {"enabled": False},
+                "config": {"CEC_DEVICE": "/dev/cec0"}})
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+        self.panel._open_section("cec")
+        for _ in range(4):
+            self.root.update_idletasks()
+            self.root.update()
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _buttons(self):
+        found = []
+        def walk(widget):
+            for child in widget.winfo_children():
+                try:
+                    if child.winfo_ismapped():
+                        found.append(str(child.cget("text")))
+                except tk.TclError:
+                    pass
+                walk(child)
+        walk(self.root)
+        return found
+
+    def test_the_page_offers_it(self):
+        self.assertIn("Find the Bluetooth radio", self._buttons())
+
+    def test_it_runs_the_action_that_writes_the_ids(self):
+        started = []
+        self.panel.runner.start = lambda command, then=None: (
+            started.append(list(command)), True)[1]
+        self.panel._find_wake_ids()
+        self.assertEqual(started[0][-1], "wake-ids")
+        self.assertEqual(started[0][0], "pkexec")
+
+    def test_it_reads_the_machine_back_afterwards(self):
+        """It changes what the status reports, so the page has to catch up."""
+        read = []
+        self.panel._reread_cec = lambda then=None: read.append(1)
+        self.panel.runner.start = lambda command, then=None: (
+            then(0) if then else None, True)[1]
+        self.panel._find_wake_ids()
+        self.assertEqual(len(read), 1)
+
+
 class AdapterGoneNoticeTest(unittest.TestCase):
     """The warning on the page where the switches actually are."""
 
