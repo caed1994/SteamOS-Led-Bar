@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Rounded rectangles as pixels, for widgets that ttk draws with sharp corners.
+"""Makes rounded rectangles as pixels, for the widgets that ttk draws sharp.
 
-ttk has no corner radius, but a widget part can be an image, stretched with
-nine-slice scaling - so the corners are drawn here and handed over as pictures.
-Pure arithmetic, no tkinter: the shapes are worth testing, and a build machine
-has no display. Antialiasing blends against a known background, PhotoImage
-having no alpha to speak of.
+ttk has no corner radius. But a part of a widget can be an image, and ttk
+scales that image with nine-slice scaling. So this module draws the corners
+and gives them to ttk as pictures.
+
+This module is arithmetic only and does not use tkinter. A test of a shape
+has a value, and a build machine has no display. PhotoImage has almost no
+alpha channel, so the antialias step blends against a known background.
 """
 
 from __future__ import annotations
@@ -102,13 +104,13 @@ def coverage(x, y, width, height, radius):
 
 @functools.lru_cache(maxsize=64)
 def _coverage_grid(width, height, radii, border_width):
-    """Per pixel: how much of the shape covers it, and how much of the border.
+    """Returns the cover of the shape and of the border, for each pixel.
 
-    Keyed on the geometry alone, because the panel draws one shape in several
-    colours - a button in its normal, hover and pressed shades are three
-    pictures of the same rectangle - and measuring it is the expensive half.
-    The result is read, never written, so one grid can serve all of them.
-    """
+        The key is the geometry only. The panel draws one shape in more than one
+        colour. A button in its normal, hover and pressed shades gives three
+        pictures of the same rectangle. The measurement is the slow part of the
+        two. Nothing writes to the result, so one grid serves all three pictures.
+        """
     outer = _shape(width, height, radii)
     inner = (_shape(width - 2 * border_width, height - 2 * border_width,
                     tuple(max(0.0, value - border_width) for value in radii))
@@ -136,12 +138,13 @@ def _coverage_grid(width, height, radii, border_width):
 
 def rows(width, height, radius, fill, background, border=None, border_width=1,
          open_bottom=False):
-    """The pixels of one rounded rectangle, as rows of "#rrggbb".
+    """Returns the pixels of one rounded rectangle, as rows of "#rrggbb".
 
-    Anything outside the shape comes back as `background`, so the result drops
-    onto that colour seamlessly - the price of having no alpha, and why every
-    caller has to say what it is sitting on.
-    """
+        Each pixel outside the shape gets the value of `background`. The picture
+        then goes onto that colour with no visible edge. This is necessary because
+        there is no alpha channel. For the same reason, each caller must give the
+        colour below the picture.
+        """
     ring = bool(border) and border_width > 0
     grid = _coverage_grid(width, height, corner_radii(radius),
                           border_width if ring else 0)
@@ -180,15 +183,16 @@ def segment_coverage(x, y, start, end, thickness):
 
 
 def draw_check(picture, color, thickness=2.2, box=None):
-    """Put a tick into an existing picture, filling it or a part of it.
+    """Puts a tick into a picture, into all of it or into one part of it.
 
-    Drawn rather than taken from a font: at this size the wrong fallback font
-    is unreadable, and which one that is depends on the machine.
+        This module draws the tick and does not take it from a font. At this size
+        the incorrect fallback font is not readable, and the machine decides which
+        font that is.
 
-    `box` is (left, top, width, height) for a tick that belongs to something
-    smaller than the whole picture - the thumb of a switch, which is a circle
-    somewhere along a track and not the track itself.
-    """
+        `box` is (left, top, width, height). Use it for a tick that belongs to an
+        area smaller than the picture. The thumb of a switch is such an area: it
+        is a circle at a position along a track, and not the track.
+        """
     if box is None:
         box = (0, 0, len(picture[0]), len(picture))
     left, top, width, height = box
@@ -206,12 +210,13 @@ def draw_check(picture, color, thickness=2.2, box=None):
 
 
 def draw_chevron(picture, color, thickness=2.0, box=None, up=False):
-    """Two strokes meeting in a point: the mark on a drop-down.
+    """Draws two strokes that meet at a point: the mark of a drop-down.
 
-    Drawn rather than left to the widget set, because the two kinds of
-    drop-down here draw it differently - one a hairline, the other a triangle
-    half the height of the field - and a page carrying both wants one mark.
-    """
+        This module draws the mark and does not leave it to the widget set. The
+        two types of drop-down here draw it differently. One draws a thin line,
+        and the other draws a triangle with half the height of the field. A page
+        with both types must show one mark.
+        """
     if box is None:
         box = (0, 0, len(picture[0]), len(picture))
     left, top, width, height = box
@@ -254,12 +259,13 @@ def draw_disc(picture, centre_x, centre_y, radius, colour):
 
 
 def draw_ring(picture, centre_x, centre_y, radius, thickness, colour):
-    """An unfilled circle: a disc with a smaller one taken back out.
+    """Draws a circle with no fill: a disc with a smaller disc removed.
 
-    The hole is cut by remembering what was there and putting it back, so a
-    ring can be drawn over anything - which is what a radio button on a card
-    needs, the middle of it being the card and not a colour anyone knows here.
-    """
+        To cut the hole, this function keeps the pixels below the disc and writes
+        them back. A ring can therefore go over any picture. A radio button on a
+        card needs this, because the middle of the button is the card and not a
+        colour that this module knows.
+        """
     keep = [row[:] for row in picture]
     draw_disc(picture, centre_x, centre_y, radius, colour)
     height, width = len(picture), len(picture[0])
@@ -280,6 +286,6 @@ def as_put_string(picture):
 
 
 def pill(length, thickness, fill, background, border=None, border_width=1):
-    """A fully rounded bar - the radius is simply half the short side."""
+    """Returns a bar with full round ends. The radius is half the short side."""
     return rows(length, thickness, thickness / 2.0, fill, background,
                 border=border, border_width=border_width)

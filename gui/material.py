@@ -1,38 +1,41 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Material Design 3 colour roles, grown from one seed colour.
+"""Calculates the Material Design 3 colour roles from one seed colour.
 
-The idea Material 3 is built on is that a window should not be painted from a
-handful of picked colours but from *tones* of a few palettes: one accent, one
-near-grey that carries its hue, and one for errors. Every surface, every label
-and every outline is then a named role - `surface_container_high`,
-`on_surface_variant` - taken from a fixed rung of one of those ladders. Two
-things follow from that, and they are the whole reason for doing it. Contrast
-is a property of the rungs rather than of anyone's taste, so a label cannot
-quietly become unreadable in a dark scheme. And a raised surface is a lighter
-*tone* rather than a border or a shadow, which is what lets a window hold a
-dozen grouped controls without a dozen boxes drawn round them.
+Material 3 does not paint a window from a small set of selected colours. It
+paints the window from *tones* of a small number of palettes: one accent, one
+near-grey with the hue of the accent, and one for errors. Each surface, each
+label and each outline is then a role with a name. `surface_container_high`
+and `on_surface_variant` are two such roles. Each role takes one fixed step
+of one of those ladders.
 
-The seed is the desktop's own accent colour, so this is not a second theme
-fighting the first. Plasma says which colour the machine is set to and whether
-it is light or dark; the ladders are built from that. A KDE-blue desktop gets a
-blue-grey window, an orange one gets a warm-grey window, and neither has to be
-listed here.
+Two results follow, and they are the reason for the method. First, the steps
+give the contrast, and no person selects it. A label therefore cannot become
+unreadable in a dark scheme. Second, a raised surface is a lighter *tone* and
+not a border or a shadow. A window can then hold twelve groups of controls
+without twelve boxes around them.
 
-Tones are worked out in OKLab rather than in HSL. HSL lightness is not
-lightness - #0000ff and #ffff00 both sit at 50 - so an HSL ladder gives a blue
-scheme dark surfaces and a yellow one bright ones from the same rung number.
-OKLab's L is near enough to what an eye reports that one number means one
-brightness whatever the hue, which is the entire point of a tonal ladder.
+The seed is the accent colour of the desktop, so this is not a second theme
+against the first one. Plasma gives the colour of the machine and the light
+or dark condition. This module makes the ladders from those two values. A
+KDE-blue desktop gets a blue-grey window, and an orange desktop gets a
+warm-grey window. This module lists neither colour.
 
-Material's own spec works in HCT, which is CAM16 plus a tone axis. OKLab is
-close enough for a widget set, and it fits in a page of arithmetic with no
-dependency - which matters here, because SteamOS keeps nothing a package
-manager installs.
+This module calculates the tones in OKLab and not in HSL. HSL lightness is
+not lightness. #0000ff and #ffff00 both have the HSL lightness 50. From one
+step number, an HSL ladder therefore gives a blue scheme dark surfaces and a
+yellow scheme bright ones. The L of OKLab is near to the value that an eye
+reports. One number then means one brightness for each hue, which is the
+purpose of a tonal ladder.
 
-No tkinter: this is arithmetic on colours, worth testing on a machine with no
-display. The panel does the painting.
+The Material specification uses HCT, which is CAM16 with a tone axis. OKLab
+is near enough for a widget set. It also needs one page of arithmetic and no
+dependency. That is important here, because SteamOS removes each package
+that a package manager installs.
+
+This module does not use tkinter. It calculates colours, and a machine with
+no display can test it. The panel does the paint step.
 """
 
 from __future__ import annotations
@@ -113,13 +116,14 @@ def to_oklch(colour):
 
 
 def from_oklch(lightness, chroma, hue):
-    """A colour at this lightness and hue, as colourful as the screen allows.
+    """Returns a colour at this lightness and hue, with the maximum chroma.
 
-    Asking for more chroma than sRGB holds at a given lightness is normal -
-    there is no vivid near-white - so the excess is taken off rather than
-    letting the clamp in from_oklab drag the hue somewhere else. Sixteen halvings
-    put the edge well inside a rounding step of one channel.
-    """
+        A request for more chroma than sRGB holds at a lightness is normal,
+        because there is no strong near-white colour. So this function removes the
+        excess chroma. The clamp in from_oklab would move the hue instead.
+        Sixteen bisection steps put the edge inside one rounding step of one
+        channel.
+        """
     if not _in_gamut(lightness, chroma, hue):
         low, high = 0.0, chroma
         for _ in range(16):
@@ -134,11 +138,11 @@ def from_oklch(lightness, chroma, hue):
 
 
 def blend(background, foreground, amount):
-    """`amount` of one colour laid over another, both "#rrggbb".
+    """Puts `amount` of one colour over another colour, both "#rrggbb".
 
-    Plain sRGB compositing, because that is what a translucent layer on a
-    screen actually does - this is not a perceptual mix and should not be one.
-    """
+        This is plain sRGB compositing, because a translucent layer on a screen
+        does the same. It is not a perceptual mix, and it must not be one.
+        """
     if amount <= 0:
         return background
     if amount >= 1:
@@ -153,10 +157,10 @@ def blend(background, foreground, amount):
 # Material names its rungs 0..100, 0 being black and 100 white, so the numbers
 # below read the same as they do in the spec.
 
-# How colourful each ladder is. The accent keeps the desktop's own chroma
-# unless that is too faint to read as an accent at all; the two greys are
-# barely tinted, which is what makes a Material window look calm rather than
-# grey - it is not grey, it is three per cent of the accent.
+# The chroma of each ladder. The accent keeps the chroma of the desktop. If
+# that value is too low to read as an accent, the accent uses the floor. The
+# two greys have very little colour, and that is why a Material window looks
+# calm. The window is not grey. It holds three per cent of the accent.
 PRIMARY_CHROMA_FLOOR = 0.11
 SECONDARY_CHROMA = 0.05
 NEUTRAL_CHROMA = 0.012
@@ -164,19 +168,19 @@ NEUTRAL_VARIANT_CHROMA = 0.026
 
 
 def lightness_of(tone):
-    """Material's tone 0..100 as an OKLab lightness.
+    """Returns the Material tone 0 to 100 as an OKLab lightness.
 
-    Not tone/100. Material's tone is CIE L*, and OKLab's L is the cube root of
-    luminance - so tone 50 is OKLab 0.57, and taking the tone straight would
-    make every surface darker than the spec's, the dark scheme most of all:
-    tone 6 would come out as very nearly black instead of a dark grey with
-    something still visible in it.
+        The result is not tone/100. The Material tone is CIE L*, and the L of
+        OKLab is the cube root of the luminance. Tone 50 is therefore OKLab 0.57.
+        A direct use of the tone makes each surface darker than the specification
+        gives, and the dark scheme the most of all. Tone 6 then becomes almost
+        black, and not a dark grey with visible detail.
 
-    The two meet through luminance. L* to Y is the usual CIE pair, with the
-    linear segment at the bottom that keeps the curve from going vertical at
-    black, and for a neutral colour OKLab's L is exactly the cube root of Y -
-    so the conversion collapses to one line for most of the range.
-    """
+        The luminance connects the two scales. L* to Y is the standard CIE pair,
+        with the linear segment at the low end. That segment keeps the curve
+        flat at black. For a neutral colour, the L of OKLab is the cube root of
+        Y. So the conversion becomes one line for most of the range.
+        """
     if tone > 8:
         return (tone + 16.0) / 116.0
     return (tone / 903.3) ** (1 / 3.0)
@@ -191,8 +195,8 @@ class Ladder:
         self.chroma = own if chroma is None else chroma
         if floor is not None:
             self.chroma = max(self.chroma, floor)
-        # A seed with no hue at all - a pure grey accent - would otherwise take
-        # its hue from rounding noise in atan2.
+        # A seed with no hue is a pure grey accent. Without this step, such a
+                # seed takes its hue from the rounding error of atan2.
         if own < 0.002:
             self.chroma = min(self.chroma, own)
         self.lightness = lightness
@@ -248,8 +252,9 @@ ROLES = {
     "error_container": ("error", 90, 30),
     "on_error_container": ("error", 10, 90),
 
-    # Not Material's - it has no "everything is fine" colour, and a checklist
-    # of green ticks needs one that behaves like the others.
+    # This role is not in Material. Material has no colour for a good
+        # condition. A checklist of green ticks needs one role with the same
+        # behaviour as the other roles.
     "positive": ("positive", 40, 80),
     "positive_container": ("positive", 90, 30),
     "on_positive_container": ("positive", 10, 90),
@@ -282,13 +287,13 @@ SPACE = 4
 
 # -- how big a control is ---------------------------------------------------
 #
-# Not fixed. A switch that looks right against a ten point desktop font is
-# small against thirteen, and the three kinds of control in a settings row -
-# switch, slider, drop-down - have no reason to agree on a height unless they
-# are made to. Left to themselves they came out 32, 24 and 42 pixels, and a
-# column of rows alternating between those has no rhythm whatever the spacing
-# between them is. So all three are worked out from the font, and come out the
-# same height.
+# The sizes are not fixed. A switch with the correct size for a ten point
+# desktop font is too small for a thirteen point font. A settings row holds
+# three types of control: a switch, a slider and a drop-down. They agree on a
+# height only when the code makes them agree. Without this code they measured
+# 32, 24 and 42 pixels, and a column of such rows looks irregular at each
+# spacing. So this module calculates all three from the font, and all three
+# get the same height.
 
 # How much taller than its text a control is: Material's own field is the text
 # plus a comfortable thumb's worth above and below.
@@ -302,8 +307,8 @@ SWITCH_FLOOR = 30
 KNOB_FLOOR = 24
 RADIO_FLOOR = 22
 
-# A switch is wider than it is tall by about this much - Material's own is
-# 52 by 32.
+# A switch is wider than it is tall by approximately this factor. The
+# Material switch is 52 by 32.
 SWITCH_RATIO = 1.65
 # The thumb, as a fraction of the switch's height. It grows when the switch
 # goes on, so the state can be read from the shape and not only the colour.
@@ -312,16 +317,17 @@ THUMB_OFF = 0.25
 
 
 def control_sizes(linespace):
-    """Every control's pixels, for a desktop font this tall.
+    """Returns the pixel sizes of each control, for a font of this height.
 
-    `linespace` is what the font actually measures, which only tkinter can say
-    - so it is passed in and the arithmetic stays testable without a display.
-    """
+        `linespace` is the measured height of the font, and only tkinter can give
+        it. The caller passes it in. A machine with no display can then test the
+        arithmetic.
+        """
     control = max(CONTROL_FLOOR, linespace + CONTROL_PADDING)
-    # Exactly as tall as a drop-down, not a few pixels under it. Rows are a
-    # fixed pitch, so a control that falls short of it leaves more air around
-    # itself than its neighbours have - which is what made a switch sitting
-    # above a drop-down look wrongly spaced even though the rows were even.
+    # The same height as a drop-down, and not some pixels less. The rows
+        # have a fixed pitch. A control with less height therefore gets more
+        # space around it than its neighbours get. That made a switch above a
+        # drop-down look incorrectly spaced, although the rows were equal.
     switch = max(SWITCH_FLOOR, control)
     knob = max(KNOB_FLOOR, control - 12)
     # The groove is drawn inside an image as tall as the knob, so an odd
@@ -338,10 +344,10 @@ def control_sizes(linespace):
         "knob": knob,
         "track": track,
         "radio": max(RADIO_FLOOR, control - 12),
-        # What a drop-down needs above and below its text to stand as tall as
-        # the rest. Four off what the arithmetic says, because ttk adds a
-        # field border of its own - measured at eight pixels - that no style
-        # option reaches.
+        # The space that a drop-down needs above and below its text, to get
+                # the height of the other controls. This is four pixels less than
+                # the arithmetic gives, because ttk adds a field border of eight
+                # pixels. No style option changes that border.
         "field_padding": max(3, (control - linespace) // 2 - 4),
     }
 
@@ -366,12 +372,12 @@ def scheme(seed, dark=False, error=None, positive=None):
 
 
 def layer(roles, container, content, opacity):
-    """A state layer: `content` washed over `container` at this strength.
+    """Returns a state layer: `content` over `container` at this strength.
 
-    Both are role names rather than colours, because that is what makes the
-    states consistent - a button and a tab lit the same way are lit by the same
-    two roles, not by two hand-picked shades that drifted apart.
-    """
+        Both parameters are role names and not colours. That keeps the states
+        consistent. A button and a tab in the same state then use the same two
+        roles, and not two selected colours that become different with time.
+        """
     return blend(roles[container], roles[content], opacity)
 
 
@@ -386,12 +392,13 @@ def disabled_container(roles, on="on_surface", over="surface"):
 
 
 def contrast(first, second):
-    """WCAG contrast ratio between two "#rrggbb", 1 to 21.
+    """Returns the WCAG contrast ratio between two "#rrggbb", from 1 to 21.
 
-    Not used to pick anything - the spec's tone pairs do that - but it is how
-    the tests check that the pairs survived being rebuilt in OKLab rather than
-    HCT, which is the one place this could quietly go wrong.
-    """
+        This function selects no colour. The tone pairs of the specification do
+        that. The tests use this function to prove that the pairs keep their
+        contrast in OKLab. The change from HCT to OKLab is the one step that can
+        break them without a visible sign.
+        """
     def relative(colour):
         red, green, blue = (_to_linear(channel) for channel in _unpack(colour))
         return 0.2126 * red + 0.7152 * green + 0.0722 * blue

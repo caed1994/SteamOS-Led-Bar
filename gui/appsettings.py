@@ -1,19 +1,21 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""The panel's own preferences - about the window, not about the machine.
+"""Holds the preferences of the panel. They apply to the window only.
 
-A third kind of setting, and the smallest. The LED service's live in /etc and
-are validated by the service; the machine's live in the user's home and change
-how the computer runs; these change nothing but how this window looks, and
-nothing outside the window ever reads them.
+This is the third type of setting, and the smallest one. The settings of the
+LED service are in /etc, and the service validates them. The settings of the
+machine are in the home directory of the user, and they change how the
+computer runs. These settings change the look of this window only, and no
+program outside the window reads them.
 
-So they get a file of their own rather than a corner of somebody else's. It is
-the user's, needs no rights, and losing it costs a preference rather than a
-setting - which is why nothing here refuses to start over a file it cannot
-read.
+So they get a file of their own, and not a section in the file of another
+program. The file belongs to the user and needs no rights. A lost file costs
+a preference and not a setting. For that reason, this module always starts,
+also when it cannot read the file.
 
-No tkinter, the same as the rest of the gui modules that are not the window.
+This module does not use tkinter. The other gui modules that are not the
+window do the same.
 """
 
 from __future__ import annotations
@@ -23,10 +25,10 @@ import tempfile
 
 # How the window is coloured, independent of the desktop.
 #
-# Three, not two. Following the desktop is what this panel did until the look
-# was rebuilt around a dark window, and it is a perfectly good answer - it is
-# just no longer the only one. Keeping it means the setting adds a choice
-# rather than taking one away.
+# Three values, and not two. Before the new dark look, this panel always
+# followed the desktop. That is still a good answer, but it is not the only
+# answer now. The third value keeps that answer available. The setting then
+# adds a choice and does not remove one.
 THEME = "THEME"
 THEME_DARK = "dark"
 THEME_LIGHT = "light"
@@ -49,11 +51,11 @@ DEFAULTS = {
 CONFIG_DIR = ".config"
 CONFIG_FILE = "steamos-utility-center-panel.conf"
 
-# What this file was called when the project was the SteamOS LED bar. Read
-# when the current name is not there, so somebody's theme survives the rename
-# whether or not they ever run the installer again - the installer moves it
-# too, but the panel is the thing they open, and it can do this itself
-# without needing root.
+# The name of this file when the project was the SteamOS LED bar. Read it
+# when the current name is not on disk. The theme of the user then survives
+# the change of name, also when the user does not run the installer again.
+# The installer moves the file too. But the user opens the panel, and the
+# panel can do this without root rights.
 #
 # Read, not written: the next write lands under the current name, and the old
 # file is left alone. Deleting somebody's file to tidy up is not this window's
@@ -84,18 +86,19 @@ def _lines(where):
 
 
 def read(home=None):
-    """The preferences, defaults for anything missing or unreadable.
+    """Returns the preferences, with a default for each bad or absent value.
 
-    A file that has never been written is the ordinary state, and a file with
-    a value this version has never heard of is somebody's future or somebody's
-    typo - neither is a reason for the panel not to open, so both come back as
-    the default.
-    """
+        A file that no program wrote is the normal condition. A file with a value
+        that this version does not know is a value from a later version, or a
+        spelling error. Neither condition must stop the panel. So this function
+        returns the default in both conditions.
+        """
     values = dict(DEFAULTS)
     lines = _lines(path(home))
     if lines is None:
-        # Nothing under the current name. It may be a first start, or it may
-        # be somebody who had this before the rename - see OLD_CONFIG_FILE.
+        # There is no file with the current name. This can be a first
+                # start. It can also be a user who installed the panel before the
+                # change of name. See OLD_CONFIG_FILE.
         lines = _lines(os.path.join(home or os.path.expanduser("~"),
                                     CONFIG_DIR, OLD_CONFIG_FILE))
     if lines is None:

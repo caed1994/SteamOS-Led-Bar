@@ -1,22 +1,26 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""What our own effects look like, for the panel to draw before you commit.
+"""Shows the effects of this project, before the user applies a setting.
 
-Only the ones this project added: its four effects - the rainbow slot's
-tenant in Game Mode, a scene apiece on the desktop - and the six notification
-shapes. Steam's own effects are not here - you can
-already see those by picking them - and neither are the standby and startup
-breaths, which are states the machine puts itself into rather than settings.
+This module holds the effects that this project added, and no other effect:
 
-No tkinter in here on purpose, the same way ledpanel.py avoids it: this is the
-part that decides what the pixels are, and it should be testable on a machine
-with no display. The panel owns the canvas.
+- the four effects. In Game Mode one of them uses the rainbow slot, and on
+  the desktop each one has its own scene.
+- the six notification shapes.
 
-Frames come from render.py and notify.py, so the preview cannot drift from the
-strip - and because it reads the settings currently in the window rather than
-the ones on disk, it shows what Apply is about to do rather than what is
-already running.
+The effects of Steam are not here, because the user can select one and look
+at it. The standby breath and the startup breath are not here either. The
+machine enters those two states itself, and they are not settings.
+
+This module does not use tkinter, and ledpanel.py does the same. This module
+decides the value of each pixel, and a machine with no display must be able
+to test it. The panel holds the canvas.
+
+The frames come from render.py and notify.py, so the preview always agrees
+with the strip. This module also reads the settings in the window and not the
+settings on disk. It therefore shows the result of the next Apply, and not
+the effect that runs now.
 """
 
 from __future__ import annotations
@@ -43,11 +47,11 @@ LOAD_WALK = ((0.05, 0.02), (0.22, 0.10), (0.35, 0.62), (0.78, 0.96),
 
 
 class _Scripted:
-    """A sensor reading whatever the preview has walked to.
+    """Returns the value that the walk of the preview gives.
 
-    The real sources read hardware and smooth it; here the walk is the whole
-    point, so it is handed over undamped.
-    """
+        The real sources read the hardware and damp the value. Here the walk is
+        the purpose, so this class gives the value with no damping.
+        """
 
     def __init__(self):
         self.celsius_value = SWEEP_LOW
@@ -83,12 +87,12 @@ def _along(waypoints, fraction):
 
 
 class Preview:
-    """The pixels of one effect at one moment, from the real renderers.
+    """Gives the pixels of one effect at one moment, from the real renderers.
 
-    `settings` is whatever the panel has in its widgets right now, missing
-    keys falling back to the shipped defaults - so the temperature marks, the
-    notification colours and the flash duration all show up in the picture.
-    """
+        `settings` holds the values in the widgets of the panel now. An absent
+        key takes the default value of the release. The picture therefore shows
+        the temperature marks, the notification colours and the flash duration.
+        """
 
     def __init__(self, settings=None):
         self.settings = settings or {}
@@ -108,15 +112,15 @@ class Preview:
     # -- the four this project added ---------------------------------------
 
     def _renderer(self, shows):
-        """Built the way the service builds it, from the same settings.
+        """Builds the renderer as the service builds it, from the same settings.
 
-        The strip this draws is the physical one - your LED count, your
-        mapping, your brightness ceiling - and not the seventeen logical LEDs
-        Steam works in. Those seventeen are what the effects are composed on,
-        but they are not what is on your desk, and the setting that turns one
-        into the other is the mapping: the hardest thing on the Strip page to
-        picture, and the one thing a preview drawn at seventeen could never
-        show.
+                This draws the physical strip: the LED count, the mapping and the
+                brightness limit of the machine. It does not draw the seventeen
+                logical LEDs of Steam. The effects use those seventeen LEDs, but the
+                strip on the desk has a different number. The mapping setting
+                converts the one into the other. The mapping is the most difficult
+                setting on the Strip page to imagine, and a preview at seventeen LEDs
+                cannot show it.
 
         Kept until one of those settings moves, the way the overlay below is.
         A renderer builds a 256 entry gamma table and its own interpolation
@@ -224,11 +228,11 @@ SLOT_EFFECTS = (
     ("Aurora", render.SHOWS_AURORA, "Slow curtains, green to violet"),
     ("Temperature", render.SHOWS_TEMPERATURE,
      "Colour carries the reading, cool to hot"),
-    # Neither a colour nor a side named: both are settings now - the colours
-    # are LOAD_CPU_COLOR and LOAD_GPU_COLOR, the sides are LOAD_SWAP - and a
-    # blurb saying "amber on the left" under a bar somebody has just made
-    # green and swapped is the page contradicting itself. What is left is what
-    # the effect actually always does.
+    # This text names no colour and no side, because both are settings now.
+        # The colours are LOAD_CPU_COLOR and LOAD_GPU_COLOR, and the sides are
+        # LOAD_SWAP. A text that says "amber on the left" below a bar that the
+        # user made green, and then reversed, contradicts the page. So the text
+        # says only what the effect always does.
     ("Load", render.SHOWS_LOAD, "A bar for each chip, out of the middle"),
 )
 
@@ -273,13 +277,13 @@ def hex_colour(pixel):
 
 
 def toward(pixel, amount, backdrop=BACKDROP):
-    """`pixel` mixed this far towards it, as #rrggbb.
+    """Mixes `pixel` this far towards the backdrop, as #rrggbb.
 
-    A canvas has no alpha and no blur, so a glow is drawn as a solid colour
-    that has already been mixed with the background it sits on. That only
-    works because the background is one known flat colour, which is why the
-    stage does not follow the desktop theme.
-    """
+        A canvas has no alpha channel and no blur. So this module draws a glow as
+        a solid colour, and mixes that colour with the background first. This
+        method works only with one known flat background colour. That is the
+        reason the stage does not follow the desktop theme.
+        """
     base = [int(backdrop[index:index + 2], 16) for index in (1, 3, 5)]
     return "#%02x%02x%02x" % tuple(
         max(0, min(int(ground + (channel - ground) * amount), 255))

@@ -1,25 +1,27 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Settings the panel manages that are not the LED service's.
+"""Holds the settings that the panel controls and the LED service does not.
 
-The rest of this window edits one file, `/etc/steamos-utility-center.conf`, and
-every row on every page is a key in it. These are not: they are the machine's
-own settings, they live in the user's home, and no service of ours reads them.
+The other pages of this window write one file,
+`/etc/steamos-utility-center.conf`. Each row on each page is a key in that
+file. The settings here are different. They belong to the machine, they are
+in the home directory of the user, and no service of this project reads them.
 
-Kept apart from `steamos_utility_center.config` on purpose, rather than added to it. That
-file is the service's, it is validated by the service, and the service is
-restarted when it changes - a keyboard layout in it would be a setting the
-service would refuse to start over and a restart nobody needed.
+This module is separate from `steamos_utility_center.config` on purpose. That
+file belongs to the service, the service validates it, and a change to it
+restarts the service. A keyboard layout in that file gives two problems: the
+service refuses to start on a value it does not know, and the change causes a
+restart with no purpose.
 
-What makes these the easy half of a utility panel is that none of them need
-root. The panel runs as you, and so does everything here: no pkexec, no
-polkit, no helper script that has to be short enough to read. Anything that
-does need root belongs on the other side of `scripts/`, the way applying the
-service's config already does.
+These settings are the simple half of a utility panel, because none of them
+needs root. The panel runs as the user, and each step here does the same. It
+uses no pkexec, no polkit, and no helper script. A step that needs root
+belongs in `scripts/`, as the step that applies the configuration of the
+service does.
 
-No tkinter in here, the same way ledpanel.py and preview.py avoid it - what
-the settings *are* should be testable on a machine with no display.
+This module does not use tkinter, and ledpanel.py and preview.py do the same.
+A machine with no display must be able to test the values of the settings.
 """
 
 from __future__ import annotations
@@ -30,15 +32,14 @@ import tempfile
 
 # -- the keyboard layout ---------------------------------------------------
 #
-# Game Mode has no keyboard settings. gamescope builds its keymap through
-# libxkbcommon, which falls back to XKB_DEFAULT_LAYOUT when nothing else has
-# said otherwise - so setting that variable for the session is how a German
-# keyboard becomes German in Game Mode, the on-screen keyboard included.
+# Game Mode has no keyboard settings. gamescope makes its keymap with
+# libxkbcommon. If no other source gives a layout, libxkbcommon uses
+# XKB_DEFAULT_LAYOUT. So this variable makes a German keyboard German in Game
+# Mode, and also in the keyboard on the screen.
 #
-# Desktop Mode is a different matter and this does not govern it: Plasma sets
-# its own layout through kxkbrc and wins there. Said on the page, because a
-# setting that visibly does nothing on the desktop you are looking at is
-# otherwise a setting that looks broken.
+# This variable does not control Desktop Mode. Plasma sets its own layout with
+# kxkbrc, and Plasma wins there. The page says this. Without that text, a
+# setting with no visible result on the desktop looks like a fault.
 
 LAYOUT = "XKB_DEFAULT_LAYOUT"
 
@@ -64,10 +65,11 @@ FILES = {
     LAYOUT: KEYBOARD_FILE,
 }
 
-# The line above ours, and the whole of how a line of ours is told from a line
-# somebody else put in the same file. Removing a setting removes its mark too,
-# and nothing else in the file is touched - the same discipline the uninstaller
-# uses on the PATH line it once added to a shell profile.
+# The line above each line of this project. It is also the one method to tell
+# a line of this project from a line of another program in the same file. To
+# remove a setting, remove its mark also, and change no other line. The
+# uninstaller uses the same method on the PATH line that it added to a shell
+# profile.
 MARK = "# written by the SteamOS LED panel"
 
 
@@ -77,35 +79,39 @@ class SettingError(ValueError):
 
 # -- what the machine can offer --------------------------------------------
 
-# Where X keeps the list of layouts it knows, best first. Read rather than
-# listed so the descriptions are the system's own words, in the system's own
-# spelling - and so a layout this file has never heard of still gets a name.
+# The files where X keeps the list of layouts that it knows, best first. This
+# module reads them and does not hold its own list. The descriptions are then
+# the words of the system, in the spelling of the system. A layout that this
+# file does not know also gets a name.
 XKB_RULES = ("/usr/share/X11/xkb/rules/evdev.lst",
              "/usr/share/X11/xkb/rules/base.lst")
 
 # Which of them to actually put in the menu, and why it is not all of them.
 #
-# The rules file lists ninety-nine, and the panel's drop-down does not scroll:
-# it sizes itself to its entries and is then clamped to the screen. Measured on
-# a 1280x800 display - a Steam Machine's own - twenty-eight entries came to 926
-# pixels, so the last four were drawn past the bottom edge and could not be
-# clicked at all. A menu that cannot reach its own last entry is worse than a
-# short one.
+# The rules file lists ninety-nine layouts, and the drop-down of the panel
+# does not scroll. It takes the size of its entries, and the screen then
+# limits it. A measurement on a 1280x800 display, the display of a Steam
+# Machine, gave 926 pixels for twenty-eight entries. The last four entries
+# were below the edge of the screen, and a click could not reach them. A menu
+# that cannot show its last entry is worse than a short menu.
 #
-# So: nineteen, which measures about two thirds of that screen and leaves room
-# for a desktop whose font is larger than this one's. They are Europe-weighted,
-# which is a guess about who fits an LED strip to a Steam Machine rather than a
-# fact - and the reason the guess is survivable is that it is not a limit.
-# A layout written into the file by hand is not overwritten and not dropped:
-# the panel adds it to the menu as an entry of its own, the same way a colour
-# the palette does not have becomes one. See Panel._label_for.
+# So the list holds nineteen layouts. That is approximately two thirds of that
+# screen, and it leaves space for a desktop with a larger font. The list
+# holds more European layouts. That is a guess about the users who install an
+# LED strip on a Steam Machine, and not a fact.
+#
+# The guess is safe because the list is not a limit. This module keeps a
+# layout that a user wrote into the file manually. The panel adds it to the
+# menu as its own entry. A colour that the palette does not hold gets the same
+# treatment. See Panel._label_for.
 COMMON = ("de", "at", "ch", "us", "gb", "fr", "es", "it", "nl", "be",
           "se", "no", "dk", "fi", "pl", "cz", "hu", "pt", "tr")
 
-# Names for the few worth having if the rules file cannot be read at all -
-# a machine with no X packages installed, which a Wayland-only session can be.
-# Only the ones a name would otherwise be missing for; the rest fall back to
-# their code, which is still a working setting.
+# Names for the most important layouts, for a machine where this module
+# cannot read the rules file. A machine with no X packages is such a machine,
+# and a Wayland-only session can have no X packages. This list holds only the
+# layouts that get no name from another source. Each other layout uses its
+# code, which is also a correct setting.
 SHIPPED_NAMES = {
     "de": "German",
     "at": "German (Austria)",
@@ -121,11 +127,12 @@ SHIPPED_NAMES = {
 # the default and because it is what undoes everything below it.
 UNSET_LABEL = "Leave it to the system"
 
-# A layout name as libxkbcommon will take it: one code, or several separated
-# by commas for a keyboard that switches between them. Checked because this
-# is written into a file read at login by everything in the session - a value
-# with a newline or a quote in it is not a layout, it is a way to put another
-# line in that file.
+# A layout name in the form that libxkbcommon accepts: one code, or more than
+# one code with a comma between them for a keyboard that changes between
+# them. This module examines the value, because it writes the value into a
+# file that each program in the session reads at login. A value with a new
+# line or a quotation mark in it is not a layout. It is a method to add
+# another line to that file.
 _LAYOUT_RE = re.compile(r"^[a-z0-9_]+(,[a-z0-9_]+)*$")
 
 
@@ -147,12 +154,13 @@ def layout_names(paths=XKB_RULES):
 
 
 def _parse_rules(lines):
-    """The `! layout` section of an xkb rules list.
+    """Returns the `! layout` section of an xkb rules list.
 
-    The file is sections headed by `! name`, each entry a code and then its
-    description. Anything else in it - models, variants, options - is not
-    what this asks for and stops the walk.
-    """
+        The file holds sections, and a `! name` line starts each section. Each
+        entry is a code and then a description. The other sections hold models,
+        variants and options. This function does not read them, and the first of
+        them stops the loop.
+        """
     found, inside = {}, False
     for line in lines:
         if line.startswith("!"):
@@ -190,12 +198,12 @@ def layouts(names=None, extra=()):
 # -- reading and writing ---------------------------------------------------
 
 def directory(home=None):
-    """The environment.d directory of whoever is running the panel.
+    """Returns the environment.d directory of the user of the panel.
 
-    `home` is a parameter rather than read straight from the environment so a
-    test can hand over a directory it built itself - the same shape the
-    service's sensor and process readers take.
-    """
+        `home` is a parameter, and this function does not read the environment
+        directly. A test can then give a directory that it made itself. The
+        sensor readers and the process readers of the service have the same shape.
+        """
     return os.path.join(home or os.path.expanduser("~"), ENVIRONMENT_D)
 
 
@@ -225,12 +233,12 @@ def read(home=None):
 
 
 def _parse_environment(lines):
-    """A systemd environment.d file as {name: value}.
+    """Returns a systemd environment.d file as {name: value}.
 
-    Not a shell: these are NAME=VALUE lines, `#` starts a comment, and a value
-    may be quoted. The last mention of a name wins, which is what systemd's
-    own generator does with a file that says something twice.
-    """
+        This is not a shell file. It holds NAME=VALUE lines, `#` starts a comment,
+        and a value can have quotation marks. The last line for a name wins. The
+        generator of systemd does the same with a file that gives a name twice.
+        """
     found = {}
     for line in lines:
         line = line.strip()
@@ -260,10 +268,10 @@ def validate(values):
 def write(values, home=None):
     """Put these settings into the user's files. Returns what changed.
 
-    Only the lines that are ours. A file in environment.d is a place people
-    put other variables, and this one is numbered so low precisely so that it
-    can be shared - rewriting it wholesale would take somebody else's setting
-    away to change ours.
+    This function writes only the lines of this project. A user puts other
+        variables into a file in environment.d. This file has a very low number
+        for that reason: more than one program can use it. A rewrite of the
+        complete file removes the setting of another program.
 
     Setting one back to "leave it to the system" removes its line rather than
     writing an empty one: an empty XKB_DEFAULT_LAYOUT is a layout that is

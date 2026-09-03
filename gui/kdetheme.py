@@ -1,18 +1,20 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Read the colours and font KDE Plasma is using.
+"""Reads the colours and the font of KDE Plasma.
 
-tkinter has no idea a desktop theme exists, which is why an unstyled panel
-looks like a visitor from another decade. Plasma writes its active scheme into
-~/.config/kdeglobals as plain INI, so it can simply be read.
+tkinter knows nothing about a desktop theme. That is why a panel with no
+style looks very old. Plasma writes its active scheme into
+~/.config/kdeglobals as plain INI, so this module can read it.
 
-What the panel takes from here is small: the accent colour, whether the scheme
-is light or dark, the two status colours, and the font. material.py grows the
-rest of the window out of those - see the note there on why a Material palette
-is worked out from one seed rather than picked colour by colour.
+The panel takes only a few values from here: the accent colour, the light or
+dark condition of the scheme, the two status colours, and the font.
+material.py makes the other colours of the window from those values. The
+note in material.py gives the reason to calculate a Material palette from one
+seed colour.
 
-No tkinter in here: parsing a file is worth testing, painting widgets is not.
+This module does not use tkinter. A test of a parser has a value. A test of
+the paint step does not.
 """
 
 from __future__ import annotations
@@ -22,8 +24,9 @@ import os
 
 KDEGLOBALS = "~/.config/kdeglobals"
 
-# Breeze, the Plasma default, for when there is no kdeglobals to read - a
-# machine without KDE, or a fresh account that has never opened the settings.
+# Breeze is the default scheme of Plasma. Use it when there is no kdeglobals
+# file to read. A machine without KDE has no such file, and a new account
+# that did not open the settings has no such file.
 BREEZE_LIGHT = {
     "window": "#eff0f1", "window_text": "#232627",
     "view": "#fcfcfc", "view_text": "#232627",
