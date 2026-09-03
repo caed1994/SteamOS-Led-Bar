@@ -17,7 +17,8 @@ import sys
 import time
 
 from . import config as config_module
-from . import desktop, elf, load, notify, phone, render, serialport, shim
+from . import desktop, elf, load, mounts, notify, phone, render
+from . import serialport, shim
 from . import steamworks
 from . import temperature
 from .link import EspLink
@@ -1533,6 +1534,49 @@ def run_notify(config, kind):
     return 0
 
 
+def run_mounts():
+    """Reports the drives of the record, and whether each unit is on disk.
+
+    A drive with a record and no unit is the fault this page exists to
+    prevent: a SteamOS update that did not carry the unit across leaves the
+    drive configured and not mounted, and Steam then reports a library that is
+    not there.
+    """
+    entries = mounts.read()
+    if not entries:
+        print("no drives are configured. The System page of the panel adds "
+              "one.")
+        return 0
+    absent = {entry["where"] for entry in mounts.missing_units(entries)}
+    for entry in sorted(entries, key=lambda one: one["where"]):
+        print("%-24s %-6s %s" % (
+            entry["where"], entry["type"],
+            "NO UNIT - run the repair on the Status page"
+            if entry["where"] in absent
+            else mounts.unit_path(entry["where"])))
+    return 1 if absent else 0
+
+
+def run_write_mounts(record):
+    """Writes the mount units and the keep-list. This needs root.
+
+    scripts/apply-mounts.sh calls this. The unit text is built here, and not
+    in that script, so that one tested program writes it. The script does the
+    systemctl work, which a test cannot do.
+    """
+    entries = mounts.read(record)
+    try:
+        done = mounts.write_units(entries)
+    except (mounts.MountError, OSError) as exc:
+        print("the drives were not written: %s" % exc, file=sys.stderr)
+        return 1
+    for path in done["removed"]:
+        print("removed %s" % path)
+    for path in done["written"]:
+        print("wrote %s" % path)
+    return 0
+
+
 def run_list_ports():
     ports = serialport.list_ports()
     if not ports:
@@ -1749,6 +1793,14 @@ def build_parser():
                        help="with a game running, report every Steamworks "
                             "callback so the one carrying a friend message "
                             "can be identified")
+    modes.add_argument("--mounts", action="store_true",
+                       help="report the drives this project mounts, and "
+                            "whether each one has its unit on disk")
+    modes.add_argument("--write-mounts", metavar="RECORD", dest="write_mounts",
+                       help="write a mount unit for each drive in RECORD, and "
+                            "the keep-list that carries them across a SteamOS "
+                            "update. Needs root; scripts/apply-mounts.sh is "
+                            "what calls it")
     modes.add_argument("--simulate", metavar="EFFECT",
                        help="render one effect continuously (off, manual, normal, "
                             "rainbow, breath, patrol, factory, demo)")
@@ -1769,6 +1821,14 @@ def main(argv=None):
     if args.list_ports:
         configure_logging("warning")
         return run_list_ports()
+
+    if args.mounts:
+        configure_logging("warning")
+        return run_mounts()
+
+    if args.write_mounts:
+        configure_logging("warning")
+        return run_write_mounts(args.write_mounts)
 
     overrides = {
         "DEVICE": args.device,

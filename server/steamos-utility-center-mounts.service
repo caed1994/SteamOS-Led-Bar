@@ -1,0 +1,30 @@
+[Unit]
+# Writes the mount units of the System page again, at every boot.
+#
+# A SteamOS update rebuilds /etc from the new image.
+# /etc/atomic-update.conf.d/steamos-utility-center.conf asks SteamOS to carry
+# the units across, and that is the official way. It works only on an image
+# that honours the keep-list, and the CEC toolkit says the same of its own
+# file. This unit is the second answer: the record of what a person asked for
+# is in /var, which is its own partition, so it survives an update whatever
+# the image does with /etc.
+#
+# It runs the same program that the panel runs, and holds no logic of its own.
+# Two copies of the rules would be two answers to one question.
+#
+# Log: journalctl -u steamos-utility-center-mounts
+Description=Write the drive mount units of the SteamOS Utility Center
+Documentation=https://github.com/caed1994/SteamOS-Utility-Center
+# After the local filesystems, because it reads /var and writes /etc. Each
+# drive it writes is a second drive, and no part of the boot needs one.
+After=local-fs.target
+# Nothing to do on a machine where nobody added a drive.
+ConditionPathExists=/var/lib/steamos-utility-center/mounts.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=@INSTALL_DIR@/steamos-utility-center-mounts-apply /var/lib/steamos-utility-center/mounts.conf
+
+[Install]
+WantedBy=multi-user.target
