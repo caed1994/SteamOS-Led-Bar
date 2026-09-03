@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 import kdetheme  # noqa: E402
 import ledpanel  # noqa: E402
 import roundrect  # noqa: E402
-import syssettings  # noqa: E402
+from steamos_utility_center import syssettings  # noqa: E402
 import appsettings  # noqa: E402
 from steamos_utility_center import power  # noqa: E402
 from steamos_utility_center import config as config_module  # noqa: E402

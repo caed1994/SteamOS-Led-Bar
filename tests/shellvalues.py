@@ -13,10 +13,23 @@ one more program that can disagree with the script.
 """
 
 import os
+import re
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SHARED = os.path.join(HERE, "..", "scripts", "user-unit.sh")
+
+
+def shell_names(pattern, path=SHARED):
+    """Every variable in that script whose name ends with `pattern`.
+
+    A test that named each one by hand is a list that a new program is not in
+    until somebody remembers it. The bug that such a test is written for is
+    exactly that somebody did not.
+    """
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    return sorted(set(re.findall(r"^([A-Z0-9_]*%s)=" % pattern, text, re.M)))
 
 
 def shell_value(name, path=SHARED):

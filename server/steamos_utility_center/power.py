@@ -32,7 +32,9 @@ at its highest preference and the EPP file refuses each other value. This is
 the kernel's rule. See epp_applies.
 
 Nothing in this module writes. To apply a setting needs root, and that work is
-in steamos-utility-center-power. This module is the read half.
+in steamos-utility-center-power. This module is the read half. `text()` is the
+one function that looks like an exception and is not: it builds the text of the
+file for a caller that stages it, and it opens no file itself.
 """
 
 from __future__ import annotations
@@ -101,6 +103,45 @@ LABELS = {
     "balance_power": "Lean towards power saving",
     "power": "Power saving",
 }
+
+
+CONFIG_PATH = "/etc/steamos-utility-center-power.conf"
+
+
+def read(path=CONFIG_PATH):
+    """The settings file as {key: value}, with a default for what it omits.
+
+    A file that is not there is not an error. It is a machine on which nobody
+    set the CPU, and the defaults say exactly that.
+
+    The parser is small on purpose. This file is also an EnvironmentFile of a
+    systemd unit, so its shape is KEY=value and nothing more.
+    """
+    values = dict(DEFAULTS)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sign, value = line.partition("=")
+        if sign and name.strip() in values:
+            values[name.strip()] = value.strip().strip("\"'")
+    return values
+
+
+def text(values):
+    """Those settings as the text of the file, in a fixed order.
+
+    A fixed order, so that two writes of the same settings give the same file
+    and a difference in it is a difference of the settings.
+    """
+    lines = ["%s=%s" % (key, values.get(key, DEFAULTS[key]))
+             for key in sorted(DEFAULTS)]
+    return "\n".join(lines) + "\n"
 
 
 def _read(path):

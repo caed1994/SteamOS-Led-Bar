@@ -20,8 +20,10 @@ uses no pkexec, no polkit, and no helper script. A step that needs root
 belongs in `scripts/`, as the step that applies the configuration of the
 service does.
 
-This module does not use tkinter, and ledpanel.py and preview.py do the same.
-A machine with no display must be able to test the values of the settings.
+This module does not use tkinter. A machine with no display must be able to
+test the values of the settings. It is in this package and not beside the
+panel for the same reason: `steamos-utility-centerctl` reads and writes the
+keyboard layout also, and a program of the server must not import the window.
 """
 
 from __future__ import annotations

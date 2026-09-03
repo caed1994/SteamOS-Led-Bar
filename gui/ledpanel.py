@@ -1215,18 +1215,9 @@ def read_power_config(path=None):
     return values
 
 
-def power_config_text(values):
-    """Those settings as a file, keeping the shipped one's comments.
-
-    The same shape as the LED config's update_text: what is written back is
-    the file that was there with its values replaced, so the explanation of
-    what a governor is survives every Apply.
-    """
-    lines = []
-    for key in sorted(power_module.DEFAULTS):
-        lines.append("%s=%s" % (key, values.get(key,
-                                                power_module.DEFAULTS[key])))
-    return "\n".join(lines) + "\n"
+# The text of the CPU settings file. It is in the power module, because the
+# program that applies the file and steamos-utility-centerctl write it also.
+power_config_text = power_module.text
 
 
 def apply_power_command(source_dir, staged_path):

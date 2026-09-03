@@ -177,10 +177,17 @@ rm -rf "${INSTALL_DIR:?}/steamos_utility_center"
 cp -r "$SOURCE_DIR/server/steamos_utility_center" "$INSTALL_DIR/"
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-center" "$INSTALL_DIR/steamos-utility-center"
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-center-power" "$INSTALL_DIR/steamos-utility-center-power"
-# The applier of the drives, beside the programs it works with. The boot-time
-# repair unit runs it from here, and the panel runs it through pkexec, so it
-# must not live in the clone: a person who moves the clone would take it away
-# from the unit. See server/steamos-utility-center-mounts.service.
+install -m 0755 "$SOURCE_DIR/server/steamos-utility-centerctl" "$INSTALL_DIR/steamos-utility-centerctl"
+# The three appliers, beside the programs they work with. Each one must have a
+# path that does not move, for two reasons. The boot-time repair unit runs the
+# drives one from here, and a person who moved the clone would take it away
+# from that unit. And a sudoers rule names the program it permits: a rule for
+# a path inside a clone permits whatever a person puts there.
+# See server/steamos-utility-center-mounts.service and ctl.py.
+install -m 0755 "$SOURCE_DIR/scripts/apply-config.sh" \
+    "$INSTALL_DIR/steamos-utility-center-config-apply"
+install -m 0755 "$SOURCE_DIR/scripts/apply-power.sh" \
+    "$INSTALL_DIR/steamos-utility-center-power-apply"
 install -m 0755 "$SOURCE_DIR/scripts/apply-mounts.sh" \
     "$INSTALL_DIR/steamos-utility-center-mounts-apply"
 find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
@@ -230,6 +237,9 @@ fi
 
 ln -sfn "$INSTALL_DIR/steamos-utility-center-power" "$POWER_COMMAND_LINK" 2>/dev/null \
     || warn "could not write $POWER_COMMAND_LINK - run it by its full path"
+
+ln -sfn "$INSTALL_DIR/steamos-utility-centerctl" "$CTL_COMMAND_LINK" 2>/dev/null \
+    || warn "could not write $CTL_COMMAND_LINK - run it by its full path"
 
 if [[ -f "$CONFIG_PATH" ]]; then
     say "Keeping existing $CONFIG_PATH"

@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 INSTALLER = os.path.join(HERE, "..", "install.sh")
 
-from shellvalues import shell_value                   # noqa: E402
+from shellvalues import shell_names, shell_value      # noqa: E402
 
 
 def _function(name):
@@ -654,12 +654,13 @@ class InstallerShapeTest(unittest.TestCase):
         typed = set(re.findall(r"^\s*(?:sudo )?(steamos-utility-center[a-z-]*)\b",
                                readme, re.M))
         self.assertIn(name, typed, "the README names no such command")
-        # Each command that this project puts on the PATH, by constant. A
-        # second program came into the project, and the README gave it to the
-        # users before a link existed. That is the fault of this test, and the
-        # test found it at the second occurrence and not at the first.
+        # Each command that this project puts on the PATH, read out of the
+        # script rather than named here. A second program came into the
+        # project, and the README gave it to the users before a link existed.
+        # A list in this file is a list that the third program is not in, so
+        # this asks the script which links it makes.
         linked = {os.path.basename(shell_value(each))
-                  for each in ("COMMAND_LINK", "POWER_COMMAND_LINK")}
+                  for each in shell_names("COMMAND_LINK")}
         self.assertEqual(typed - linked - {"steamos-utility-center.conf"}, set(),
                          "the README names a command nothing installs")
 

@@ -141,6 +141,9 @@ COMMAND_LINK="$ROOT/usr/local/bin/$NAME"
 # README gives the command, and a command that a person cannot type is worse
 # than no command.
 POWER_COMMAND_LINK="$ROOT/usr/local/bin/$NAME-power"
+# The control surface that speaks JSON, for a caller that is not this panel: a
+# Decky plugin in Game Mode, or a script. See server/steamos_utility_center/ctl.py.
+CTL_COMMAND_LINK="$ROOT/usr/local/bin/${NAME}ctl"
 
 WATCHER_UNIT="$NAME-achievements.service"
 PHONE_UNIT="$NAME-phone.service"

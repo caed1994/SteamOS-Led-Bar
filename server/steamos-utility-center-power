@@ -12,9 +12,9 @@ written in and what a refusal means.
     steamos-utility-center-power --apply     write them, report what happened
     steamos-utility-center-power --report    say what the machine offers and holds
 
-Doing nothing is a valid outcome and the default one: with neither setting in
-the file this exits 0 having touched nothing, which is what an installation
-that nobody has configured should do to a machine.
+Doing nothing is a valid outcome and the default one. With neither setting in
+the file this exits 0 and touches nothing. That is what an installation that
+nobody set up must do to a machine.
 """
 
 from __future__ import annotations
@@ -27,25 +27,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from steamos_utility_center import power                              # noqa: E402
 
-CONFIG_PATH = "/etc/steamos-utility-center-power.conf"
-
-
-def load(path):
-    """The config file as {key: value}, defaults for anything missing."""
-    values = dict(power.DEFAULTS)
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            lines = handle.read().splitlines()
-    except OSError:
-        return values
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        name, sign, value = line.partition("=")
-        if sign and name.strip() in values:
-            values[name.strip()] = value.strip().strip("\"'")
-    return values
+# The file, and the reader for it, are in the module. This program and
+# steamos-utility-centerctl both read it, and one reader is one answer.
+CONFIG_PATH = power.CONFIG_PATH
+load = power.read
 
 
 def write_all(name, value, root=""):
@@ -69,12 +54,11 @@ def write_all(name, value, root=""):
 def apply_settings(values, root="", out=print):
     """Governor first, then EPP. Returns an exit status.
 
-    The order matters and is the whole reason this is one program. Under the
-    `performance` governor the kernel pins the preference and refuses the EPP
-    file, so a run that wrote EPP first would have it accepted and then
-    overridden - and a run that wrote it after would see a refusal that is not
-    a fault. Written in this order, and the refusal is expected rather than
-    reported as a failure.
+    The order is the whole reason this is one program. Under the `performance`
+    governor the kernel pins the preference and refuses the EPP file. A run
+    that wrote EPP first thus got it accepted and then overridden. A run that
+    wrote it after saw a refusal that is not a fault. In this order the
+    refusal is expected, and this program does not report it as a failure.
     """
     if not power.policies(root):
         out("no cpufreq on this machine - nothing to set")
@@ -98,13 +82,13 @@ def apply_settings(values, root="", out=print):
         else:
             out("governor: %s" % governor)
 
-    # Asked *after* the governor has been written, which is the whole reason
-    # the two are done here in this order. The kernel collapses the list of
-    # preferences while a pinning governor is running, so what is on offer is
-    # only knowable once the governor being applied is the one in force.
+    # Asked *after* the write of the governor, which is the whole reason the
+    # two are in this order here. The kernel collapses the list of preferences
+    # under a pinning governor. What it offers is thus knowable only when the
+    # governor of this run is the governor in force.
     #
     # The state of the machine, not of the file: a governor whose write failed
-    # leaves the old one running, and the preference has to be judged against
+    # leaves the old one in force, and the preference has to be judged against
     # that rather than against what was asked for.
     settled = dict(values)
     settled["CPU_GOVERNOR"] = (power.current(root).get("CPU_GOVERNOR", "")
@@ -119,11 +103,11 @@ def apply_settings(values, root="", out=print):
             out("EPP left alone: this machine has no preference to set")
     elif epp != power.UNSET:
         # No second validate here, and deliberately. The list of preferences
-        # the kernel reports widens again the moment the governor stops
-        # pinning it, and that widening is the kernel's to do - reading it
-        # back to check against would be this program racing the driver over
-        # a question the write itself answers. A value the file will not take
-        # is refused by the write, with the kernel's own reason.
+        # widens again the moment the governor stops to pin it, and that is
+        # the kernel's own work. To read it back and check against it is this
+        # program in a race with the driver, over a question that the write
+        # itself answers. The write refuses a value that the file does not
+        # take, and it gives the kernel's own reason.
         refused = write_all(power.EPP, epp, root)
         if refused:
             out("could not set the EPP: %s" % refused[0][1])
@@ -140,10 +124,10 @@ def report(root="", out=print):
     found = power.available(root)
     out("cpufreq policies: %d" % found["policies"])
     out("driver:           %s" % (found["driver"] or "none"))
-    # Only where there is one to say. On Intel the mode is in the driver's own
-    # name above - intel_pstate is active, intel_cpufreq is it in passive -
-    # so a line saying "not amd_pstate" would be telling an Intel machine
-    # what it is not and nothing about what it is.
+    # Only where there is one to say. On Intel the mode is in the name of the
+    # driver above: intel_pstate is active, and intel_cpufreq is the same
+    # driver in passive. A line that said "not amd_pstate" thus tells an Intel
+    # machine what it is not, and nothing about what it is.
     if found["mode"]:
         out("amd_pstate mode:  %s" % found["mode"])
     out("governors:        %s" % (" ".join(found["governors"]) or "none"))

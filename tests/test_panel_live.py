@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
 import appsettings                                          # noqa: E402
 import kdetheme                                             # noqa: E402
-import syssettings                                          # noqa: E402
+from steamos_utility_center import syssettings              # noqa: E402
 from steamos_utility_center import cec                                 # noqa: E402
 from steamos_utility_center import lact                                # noqa: E402
 from test_lact import (FakeDaemon, DEVICES, STATS, CLOCKS,  # noqa: E402

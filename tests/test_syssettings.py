@@ -15,9 +15,9 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "gui"))
+sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-import syssettings                                          # noqa: E402
+from steamos_utility_center import syssettings              # noqa: E402
 
 
 class HomeTest(unittest.TestCase):

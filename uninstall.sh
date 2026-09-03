@@ -265,6 +265,10 @@ if [[ -L "$POWER_COMMAND_LINK" \
       && "$(readlink "$POWER_COMMAND_LINK")" == "$INSTALL_DIR/$NAME-power" ]]; then
     rm -f "$POWER_COMMAND_LINK"
 fi
+if [[ -L "$CTL_COMMAND_LINK" \
+      && "$(readlink "$CTL_COMMAND_LINK")" == "$INSTALL_DIR/${NAME}ctl" ]]; then
+    rm -f "$CTL_COMMAND_LINK"
+fi
 
 rm -rf "${INSTALL_DIR:?}"
 

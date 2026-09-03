@@ -47,7 +47,6 @@ import roundrect                                            # noqa: E402
 import ledpanel                                             # noqa: E402
 import appsettings                                          # noqa: E402
 import preview as preview_module                            # noqa: E402
-import syssettings                                          # noqa: E402
 from steamos_utility_center import cec                                 # noqa: E402
 from steamos_utility_center import config as config_module             # noqa: E402
 from steamos_utility_center import lact                                # noqa: E402
@@ -56,6 +55,7 @@ from steamos_utility_center import notify                              # noqa: E
 from steamos_utility_center import power                               # noqa: E402
 from steamos_utility_center import render                              # noqa: E402
 from steamos_utility_center import shim                                # noqa: E402
+from steamos_utility_center import syssettings                         # noqa: E402
 from steamos_utility_center import __version__ as VERSION              # noqa: E402
 
 

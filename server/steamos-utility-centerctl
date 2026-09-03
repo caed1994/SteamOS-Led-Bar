@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 caed1994
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+"""The control surface of this project, for a caller that is not the panel.
+
+It prints one JSON object for each command and nothing else. See
+steamos_utility_center/ctl.py, which holds the commands and the reasons.
+
+    steamos-utility-centerctl status
+    steamos-utility-centerctl get strip
+    steamos-utility-centerctl set strip '{"NOTIFY": false}'
+    steamos-utility-centerctl action cec-wake
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from steamos_utility_center.ctl import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

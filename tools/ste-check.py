@@ -43,7 +43,9 @@ OURS_IN_OTHERS = ("cec-toolkit/README.md", "cec-toolkit/ORIGIN",
                   "cec-toolkit/bin/steamos-cec-register")
 
 SUFFIXES = (".py", ".sh", ".md")
-SCRIPTS = ("server/steamos-utility-center", "gui/steamos-utility-center-panel",
+SCRIPTS = ("server/steamos-utility-center", "server/steamos-utility-center-power",
+           "server/steamos-utility-centerctl",
+           "gui/steamos-utility-center-panel",
            "systemd-sleep/steamos-utility-center",
            "cec-toolkit/bin/steamos-cec-register")
 

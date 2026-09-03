@@ -22,10 +22,11 @@ Twenty effects on a simulated strip, each with an explanation.
 5. [The rainbow slot](#the-rainbow-slot)
 6. [Notifications](#notifications)
 7. [The control panel](#the-control-panel)
-8. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
-9. [Updates and removal](#updates-and-removal)
-10. [How it works](#how-it-works)
-11. [Credits and licence](#credits-and-licence)
+8. [The command that speaks JSON](#the-command-that-speaks-json)
+9. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
+10. [Updates and removal](#updates-and-removal)
+11. [How it works](#how-it-works)
+12. [Credits and licence](#credits-and-licence)
 
 ## Quick start
 
@@ -1061,6 +1062,64 @@ steamos-utility-center --mounts
 A drive that the record names and that has no unit reports `NO UNIT`. That is
 an update that did not honour the keep-list, and the repair unit writes the
 unit again at the next boot.
+
+## The command that speaks JSON
+
+The panel is a window on the desktop. `steamos-utility-centerctl` is the same
+settings for a caller that is not a window: a plugin in Game Mode, a script, or
+a second machine over SSH. It prints one JSON object for each command and
+nothing else.
+
+```bash
+steamos-utility-centerctl status
+steamos-utility-centerctl get strip
+steamos-utility-centerctl set strip '{"NOTIFY": false}'
+steamos-utility-centerctl action cec-wake
+steamos-utility-centerctl areas
+```
+
+There are five areas. Each one answers the same questions.
+
+| Area | What it holds | Needs root |
+| ---- | ------------- | ---------- |
+| `strip` | every setting of the LED service | yes |
+| `power` | the CPU governor and the EPP | yes |
+| `keyboard` | the Game Mode keyboard layout | no |
+| `drives` | the second drives and where they mount | yes |
+| `cec` | the settings of the HDMI CEC toolkit | no |
+
+`get` gives the settings of one area and the values that this machine offers
+for them, so that a front end holds no copy of a menu. `set` takes a JSON
+object of changes, keeps every other setting, and puts the change into effect.
+A key with a spelling error is refused: a file that holds one stops the service
+at its next start.
+
+`drives` is different in one way. A drive is a record and not a setting, so
+`set drives` takes the whole list:
+
+```bash
+steamos-utility-centerctl set drives '{"drives": []}'      # remove them all
+```
+
+**The status has two halves.** `status` reads files and starts no process,
+because a front end asks for it again and again while a person looks at a
+page. `status --full` adds the answers that need `systemctl`, `lsblk` and the
+CEC toolkit. Ask for that one time when a page opens.
+
+**Nothing asks for a password.** Game Mode runs no polkit agent and gives no
+terminal, so a question there has nobody to answer it. This command uses
+`sudo -n`, which either works or refuses immediately. The installer writes
+`/etc/sudoers.d/zz-steamos-utility-center` to permit the three programs that
+apply a change, each by its full path in `/var/lib/steamos-utility-center/`.
+`status` reports whether that file is there. Give `--may-prompt` where a person
+can answer a question, which is a desktop.
+
+Every answer holds `ok`, and the exit status agrees with it. A refusal is JSON
+also:
+
+```json
+{"error": "no such area: bar. There are: cec, drives, keyboard, power, strip", "ok": false}
+```
 
 ## Diagnostics and troubleshooting
 
