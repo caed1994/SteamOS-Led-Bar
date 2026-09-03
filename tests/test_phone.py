@@ -90,14 +90,14 @@ class ReadingTheBusTest(unittest.TestCase):
         return [one for one in seen if one is not None]
 
     def test_gdbus_own_chatter_is_not_a_notification(self):
-        # It opens with two lines about what it is monitoring, and a machine
-        # that flashed at those would flash once at every restart.
+        # It starts with two lines about its subject. A machine that flashes
+        # at those two lines flashes at each restart.
         self.assertEqual(len(self._sightings(POSTED_LINES)), 3)
 
     def test_a_notification_going_away_is_not_a_new_one(self):
-        # notificationRemoved arrives for every notification that is dismissed,
-        # so reading it as an arrival would flash twice for one message - the
-        # second time when you picked the phone up.
+        # notificationRemoved arrives for each notification that a user
+        # removes. A read of it as an arrival flashes twice for one message.
+        # The second flash comes when the user takes the phone.
         seen = self._sightings(KDECONNECT_LINES)
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0].app, "com.whatsapp")
@@ -119,12 +119,12 @@ class ReadingTheBusTest(unittest.TestCase):
     def test_this_machine_s_own_notifications_are_not_the_phone_s(self):
         """The withdrawn fallback, kept as an assertion.
 
-        There used to be a second source that read the desktop's own
-        notification bus, for a machine where KDE Connect answered nothing.
-        It carries everything, so a chat app on the Steam Machine itself
-        flashed exactly like a message from the phone - and in Game Mode,
-        where there is no notification daemon at all, it carried nothing.
-        Only KDE Connect's own signals are read now.
+        There was a second source before. It read the notification bus of the
+        desktop, for a machine where KDE Connect gave no answer. That bus carries
+        each notification, so a chat program on the Steam Machine flashed the same
+        as a message from the phone. In Game Mode it carried nothing, because
+        there is no notification daemon there. This module now reads the signals
+        of KDE Connect only.
         """
         line = ("/org/freedesktop/Notifications: "
                 "org.freedesktop.Notifications.Notify ('Discord', uint32 0, "
@@ -134,11 +134,11 @@ class ReadingTheBusTest(unittest.TestCase):
     def test_a_notification_being_updated_is_a_new_message(self):
         """Reported, and the last of this bug's three layers.
 
-        Android does not post a second notification for the second message of
-        a conversation - it updates the first. Listening only for "posted"
-        meant one flash per conversation and nothing again until it was
-        cleared off the machine, at which point the next message counted as
-        new. The dry run showed one line where six messages had been sent.
+        Android does not post a second notification for the second message of a
+        conversation. It updates the first notification. A listener for "posted"
+        alone therefore gives one flash for each conversation. It gives no more
+        flashes until a user clears the notification, and the next message then
+        counts as new. The dry run showed one line for six sent messages.
         """
         updated = COUNTED_LINE.replace("notificationPosted",
                                        "notificationUpdated")
@@ -156,11 +156,10 @@ class ReadingTheBusTest(unittest.TestCase):
     def test_a_notification_saying_it_is_ready_is_that_notification(self):
         """Recorded from a Steam Deck, and the plainest of the three shapes.
 
-        The signal arrives on the notification's own object -
-        ".../notifications/6" - so there is no id to read and nothing to
-        remember: what it is about is where it came from. This is the one
-        that carries the second message of a conversation, which is why six
-        messages had been coming out as one line.
+        The signal comes from the object of the notification, which is
+        ".../notifications/6". So there is no id to read and no value to keep. The
+        path gives the subject. This signal carries the second message of a
+        conversation, and that is the reason six messages gave one line.
         """
         seen = phone.read_line(READY_LINE)
         self.assertIsNotNone(seen)
@@ -261,12 +260,12 @@ class KdeConnectTest(unittest.TestCase):
     """Finding it, starting it, and asking it what it is paired with."""
 
     def test_the_phones_it_knows_are_read_out_of_the_reply(self):
-        """Which tells "not running" from "running and nobody is talking".
+        """Separates "not running" from "running, and no phone is connected".
 
-        Both look the same from here otherwise - a bar that never flashes -
-        and they need opposite things done about them. Reported from a real
-        machine: the bridge said it was watching, and the phone said it had
-        no connection to the PC.
+        The two conditions otherwise look the same here: a bar with no flash.
+        They also need two opposite corrections. A real machine gave this
+        report: the bridge said that it watched the bus, and the phone said
+        that it had no connection to the PC.
         """
         # Two shapes, because KDE Connect versions differ on which they send.
         self.assertEqual(phone.device_names("(['Pixel 7'],)"), ["Pixel 7"])
@@ -280,8 +279,9 @@ class KdeConnectTest(unittest.TestCase):
             self.assertEqual(phone.device_names(empty), [], empty)
 
     def test_the_daemon_is_looked_for_where_daemons_are_kept(self):
-        # Not on the PATH on most distributions - it is a daemon nobody is
-        # meant to type - so the usual libexec places are tried by hand.
+        # It is not on the PATH of most distributions, because a user does not
+        # start this daemon. So this code looks in the normal libexec
+        # directories.
         for place in phone.KDECONNECTD_PLACES:
             self.assertTrue(place.startswith("/"), place)
             self.assertTrue(place.endswith("kdeconnectd"), place)
@@ -308,11 +308,11 @@ class KdeConnectTest(unittest.TestCase):
     def test_it_is_started_without_a_display(self):
         """Because Qt will not start one at all without a plugin it can use.
 
-        Measured on a Steam Deck: started from a service it inherited
-        "wayland", found no compositor, and dumped core before it had done
-        anything - "Failed to create wl_display". It has nothing to draw; the
-        network and the bus are what is wanted from it, and neither needs a
-        screen.
+        A measurement on a Steam Deck gave this: a start from a service took
+        "wayland" from the environment, found no compositor, and gave a core dump
+        with the message "Failed to create wl_display". It did no work first. It
+        draws nothing. This project needs its network and its bus, and neither
+        needs a screen.
         """
         started = {}
 
@@ -346,16 +346,16 @@ class KdeConnectTest(unittest.TestCase):
         self.assertTrue(started["start_new_session"])
 
     def test_nothing_is_started_when_the_caller_says_not_to(self):
-        # --print must not have side effects on the machine it is reporting
-        # about, and neither must a test.
+        # --print must change nothing on the machine that it reports about, and
+        # a test must do the same.
         with unittest.mock.patch.object(phone, "_ask", return_value=""):
             with unittest.mock.patch.object(phone, "start_kdeconnectd") as never:
                 self.assertIsNone(phone.wake_kdeconnect(revive=False))
         never.assert_not_called()
 
     def test_a_revived_daemon_is_asked_again_rather_than_assumed(self):
-        # Starting it is not the same as it answering, and the answer is what
-        # the caller wanted - "which phones", not "did something happen".
+        # A start is not an answer, and the caller needs the answer. The
+        # question is "which phones" and not "did a start occur".
         replies = ["", "({'d33f': 'Pixel 9 Pro'},)"]
         with unittest.mock.patch.object(
                 phone, "_ask",
@@ -367,8 +367,8 @@ class KdeConnectTest(unittest.TestCase):
         self.assertEqual(replies, [], "it did not ask a second time")
 
     def test_a_bus_that_never_answers_is_given_up_on(self):
-        # Without a limit this waits forever, and whoever asked waits with it -
-        # the control panel asks this while it is drawing its window.
+        # Without a limit this waits without an end, and the caller waits with
+        # it. The control panel asks this during the draw step of its window.
         asked = {}
 
         def remember(command, **kwargs):
@@ -380,9 +380,9 @@ class KdeConnectTest(unittest.TestCase):
         self.assertEqual(asked["timeout"], 0.5)
 
     def test_waking_it_asks_something_that_changes_nothing(self):
-        # Any call starts an activatable service, so the cheapest harmless
-        # one is the right one - this must never be a call that does
-        # something to somebody's phone.
+        # Each call starts an activatable service, so the correct call is the
+        # fastest call with no result. This must never be a call that changes
+        # the phone of a user.
         command = phone.wake_command()
         self.assertIn(phone.KDECONNECT_SERVICE, command)
         self.assertTrue(any(part.endswith("deviceNames") for part in command),
@@ -482,12 +482,12 @@ class TriggerTest(unittest.TestCase):
                          "double_flash:#25d366")
 
     def test_a_burst_from_one_person_is_one_flash(self):
-        """What the repeat gap is for, keyed on who is talking.
+        """The purpose of the repeat gap. Its key is the person.
 
-        Keyed on the message instead, every message was its own conversation
-        and a burst of twenty flashed twenty times - which is the opposite
-        mistake to the one before it, where everything the phone sent was the
-        word "phone" and the whole of it was one conversation.
+        With the message as the key, each message was its own conversation, and
+        a group of twenty messages gave twenty flashes. The earlier fault was
+        the opposite: each notification from the phone had the word "phone", and
+        the complete set was one conversation.
         """
         said = [phone.trigger_for(
             phone.Sighting("WhatsApp", "Anna", body), ())
@@ -506,9 +506,9 @@ class TriggerTest(unittest.TestCase):
         self.assertEqual(len({anna, bob, signal}), 3)
 
     def test_two_apps_seconds_apart_do_not_collide_either(self):
-        # The same bug, and the one nobody would have noticed as a bug: a
-        # WhatsApp message and a Signal one inside the same few seconds were
-        # one flash, because both were the word "phone".
+        # The same fault, in a form that no user reports as a fault. A
+        # WhatsApp message and a Signal message in the same seconds gave one
+        # flash, because both had the word "phone".
         first = phone.trigger_for(phone.Sighting("WhatsApp", "Anna", "hi"), ())
         second = phone.trigger_for(phone.Sighting("Signal", "Bob", "hi"), ())
         self.assertNotEqual(first, second)
@@ -546,8 +546,8 @@ class TriggerTest(unittest.TestCase):
 
         self.assertEqual(shown, [True] + [False] * 9 + [True, True, True])
 
-        # And the other way round: one notification posted three times over
-        # is one flash, which is the behaviour this must not have broken.
+        # And in the other direction: one notification with three posts is one
+        # flash. This change must keep that behaviour.
         overlay = notify.NotificationOverlay(duration=3.5, led_count=17,
                                              repeat_gap=10)
         same = phone.Sighting("Kalender", "Zahnarzt", "9:00")
@@ -599,8 +599,8 @@ class BridgeTest(unittest.TestCase):
             bridge.run(POSTED_LINES)
         self.assertEqual(bridge.seen, 3)
         self.assertEqual(bridge.flashed, 0)
-        # And it says so, once per notification: silence here would look
-        # exactly like a phone that had stopped sending anything.
+        # It reports that, one time for each notification. No message here
+        # looks the same as a phone that sends nothing.
         self.assertEqual(len(caught.output), 3)
 
     def test_the_dry_run_reports_everything_and_writes_nothing(self):
@@ -672,9 +672,10 @@ class BridgeTest(unittest.TestCase):
         self.addCleanup(stream.close)
         self.addCleanup(os.close, write_fd)
 
-        # The line first, then nothing - so the read succeeds once and then
-        # times out, which is the silence being tested. Ended by the tick
-        # itself rather than by closing the pipe, so it cannot hang.
+        # The line first, and then no data. The read therefore succeeds one
+        # time and then reaches its timeout, and that is the subject of the
+        # test. The tick ends the read, and not a close of the pipe, so the
+        # test cannot wait without an end.
         ticks = []
 
         def tick():
@@ -721,8 +722,8 @@ class BridgeTest(unittest.TestCase):
                            "rarer of the two")
 
     def test_a_monitor_that_ends_ends_the_watch(self):
-        # The bus going away with the session, which is the other thing that
-        # can happen while nothing is being said.
+        # The bus goes away with the session, and that is the second event
+        # that can occur during a quiet time.
         import os
 
         read_fd, write_fd = os.pipe()
@@ -733,16 +734,17 @@ class BridgeTest(unittest.TestCase):
         self.assertIs(bridge.watch(stream, every=0.01), bridge)
 
     def test_the_interval_is_read_when_it_is_used(self):
-        # It was a default argument, which binds once at import - so a test
-        # could not shorten it, and neither could anything else.
+        # It was a default argument, and Python binds such an argument one
+        # time at the import step. So no test could make it shorter, and no
+        # other code could change it.
         self.assertGreater(phone.TICK_SECONDS, 0)
 
     def _conversation(self, bodies):
         """Six messages in one conversation, the way a phone really sends it.
 
-        The first is posted; each one after it arrives as "ready" on a
-        notification object of its own. Recorded rather than invented - this
-        is the shape that had six messages coming out as one line.
+        The first message is a post. Each message after it arrives as "ready" on
+        a notification object of its own. This is a recording from a real phone
+        and not an invention. This form gave one line for six messages.
         """
         saying = {}
         sent = []
@@ -762,30 +764,30 @@ class BridgeTest(unittest.TestCase):
     def test_every_message_of_a_conversation_is_its_own_flash(self):
         """The last layer of the reported bug, and the measured shape of it.
 
-        Six messages came out as one line in the dry run, three times over,
-        because the signal that carries the second one was being passed over.
+        The dry run gave one line for six messages, three times. The module did
+        not read the signal that carries the second message.
         """
         bridge, sent = self._conversation(
             ["rjxhenfbg", "zweite", "dritte", "vierte", "fuenfte", "sechste"])
         self.assertEqual(bridge.flashed, 6)
-        # All six reach the pipe. They carry the same tag because they are
-        # one conversation, and what to do about that is the service's
-        # business - see the repeat gap. The bug was that five of them never
-        # got this far at all.
+        # The six messages reach the pipe. They carry the same tag, because
+        # they are one conversation. The service decides the action for that.
+        # See the repeat gap. The fault was that five of them never reached
+        # this point.
         self.assertEqual(len(set(sent)), 1, sent)
 
     def test_the_same_notification_saying_the_same_thing_is_not(self):
-        # A notification is announced again when its neighbours change. The
-        # service would drop it as a repeat anyway, but a dry run printing a
-        # line for it would be describing an event that did not happen.
+        # KDE Connect announces a notification again after a change to another
+        # notification. The service removes it as a repeat. But a dry run with
+        # a line for it describes an event that did not occur.
         bridge, sent = self._conversation(["one"])
         for _ in range(4):
             bridge.line(READY_LINE.replace("/6:", "/0:"))
         self.assertEqual(bridge.flashed, 1, sent)
 
     def test_only_so_many_notifications_are_kept_to_re_read(self):
-        # A phone left alone for a day should not leave a list of everything
-        # it ever sent, and only the recent ones can still say anything new.
+        # A phone with no use for a day must not give a list of each sent
+        # message. Only the recent messages carry new information.
         bridge, _sent = self._conversation(
             ["message %d" % index
              for index in range(phone.RECENT_NOTIFICATIONS * 2)])
@@ -796,10 +798,10 @@ class BridgeTest(unittest.TestCase):
     def test_the_dry_run_names_a_signal_it_did_not_act_on(self):
         """Because the names differ between KDE Connect versions.
 
-        A bridge that quietly ignores the one carrying the messages looks
-        exactly like a phone that has stopped sending them - which is how
-        this bug read for two rounds. Saying what was passed over turns the
-        next report into an answer.
+        A bridge that ignores the signal with the messages, and gives no
+        message, looks the same as a phone that sends nothing. This fault had
+        that form for two rounds. A message about the ignored signal makes the
+        next report an answer.
         """
         odd = COUNTED_LINE.replace("notificationPosted", "notificationTicker")
         told = []
@@ -841,12 +843,12 @@ class BridgeTest(unittest.TestCase):
 class BacklogTest(unittest.TestCase):
     """The pile a phone hands over the moment it connects.
 
-    Reported from a real machine: the bar runs its startup animation, settles
-    into the desktop effect, and then flashes once for every notification
-    already sitting on the phone. Nothing was wrong with any of them - they
-    were all genuinely new to this process, which had just started - and the
-    service's repeat gap cannot help, because it is keyed on the conversation
-    and six messages from six people are six conversations.
+    A real machine gave this report: the bar runs its startup animation, moves
+    to the desktop effect, and then flashes one time for each notification on
+    the phone. Each notification was correct, and each one was new to this
+    process, because the process started at that moment. The repeat gap of the
+    service does not help here. Its key is the conversation, and six messages
+    from six people are six conversations.
     """
 
     def setUp(self):
@@ -877,9 +879,9 @@ class BacklogTest(unittest.TestCase):
         self.assertEqual(bridge.flashed, 2)
 
     def test_a_pile_that_was_held_is_not_read_as_news_afterwards(self):
-        # It was seen and remembered, only not flashed - so the "refreshed"
-        # that follows any change on the phone does not walk the same pile
-        # back through and light the bar for it a moment later.
+        # The bridge read it and kept it, and it did not flash. So the
+        # "refreshed" signal after each change on the phone does not send the
+        # same set again and light the bar a moment later.
         bridge = self._pile(self._bridge(), 6)
         self.now += phone.BACKLOG_SETTLE + 1
         self._pile(bridge, 6)
@@ -901,8 +903,8 @@ class BacklogTest(unittest.TestCase):
         self.assertEqual(bridge.flashed, 6)
 
     def test_the_phone_rejoining_the_network_later_is_caught_too(self):
-        # A suspend, or walking out of range and back: the bridge has been up
-        # for hours, so there is no settling time left to catch this.
+        # A suspend, or a walk out of range and back. The bridge runs for
+        # hours at that point, so its start time cannot catch this.
         bridge = self._pile(self._bridge(settle=0.0), 6)
         self.assertEqual(bridge.flashed, phone.BACKLOG_FLOOD, self.sent)
 
@@ -913,8 +915,8 @@ class BacklogTest(unittest.TestCase):
         self.assertEqual(bridge.flashed, phone.BACKLOG_FLOOD + 1, self.sent)
 
     def test_the_dry_run_still_shows_everything_the_bus_said(self):
-        # It flashes nothing anyway, and it is started by hand - its first
-        # line is the message you have just sent yourself to test it.
+        # It flashes nothing, and a user starts it manually. Its first line is
+        # the test message of that user.
         told = []
         bridge = phone.Bridge((), send=None, clock=lambda: self.now,
                               settle=phone.BACKLOG_SETTLE,
@@ -932,10 +934,11 @@ class BacklogTest(unittest.TestCase):
 class ObstacleTest(unittest.TestCase):
     """Why the bar stayed dark although every line looked right.
 
-    Reported from a real machine: --print read the notifications perfectly,
-    named the app, named the trigger - and nothing lit, because the feature
-    was still switched off. The dry run has to read the bus whether or not it
-    is on, or you could never look before committing; so it says instead.
+    A real machine gave this report: --print read the notifications correctly
+    and gave the app and the trigger. The bar showed nothing, because the
+    function was off. The dry run must read the bus for each state of that
+    switch. Without that, a user cannot look before the change. So the dry run
+    reports the state.
     """
 
     def test_nothing_in_the_way_is_nothing_to_say(self):
@@ -995,14 +998,14 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(len(set(colours)), len(colours))
 
     def test_the_withdrawn_source_setting_does_not_stop_the_service(self):
-        """Because it is sitting in every config file already installed.
+        """This key is in each configuration file of an earlier release.
 
-        PHONE_SOURCE chose between KDE Connect and the desktop's own
-        notification bus, and there is only the one source now. An unknown
-        key is fatal on purpose - LED_COUTN=60 must not be ignored - but a
-        key *we* withdrew is not the reader's mistake, and a service that
-        refused to start over one would be this change breaking every machine
-        that had the feature working.
+        PHONE_SOURCE selected KDE Connect or the notification bus of the
+        desktop, and there is one source now. An unknown key stops the service
+        on purpose, because the service must not ignore LED_COUTN=60. But a key
+        that this project withdrew is not an error of the user. A service that
+        refuses to start for such a key breaks each machine with a working
+        feature.
         """
         self.assertIn("PHONE_SOURCE", config_module.RETIRED)
         self.assertNotIn("PHONE_SOURCE", config_module.DEFAULTS)
@@ -1093,8 +1096,9 @@ class EndToEndTest(unittest.TestCase):
         self.assertGreater(green, blue)
 
     def test_a_listed_app_s_shape_reaches_the_strip(self):
-        # Two shapes differ at some point in the flash or one of them is not
-        # being applied - which is the failure this whole path exists to avoid.
+        # Two shapes are different at one moment of the flash. Two equal
+        # frames therefore mean that one shape does not apply, and this code
+        # exists to prevent that fault.
         rules = phone.parse_rules("WhatsApp:#25d366:comet")
         trigger = phone.trigger_for(phone.Sighting("WhatsApp", "", ""), rules)
         self.assertTrue(trigger.startswith("comet:"))
@@ -1128,8 +1132,11 @@ class UnitFileTest(unittest.TestCase):
             self.assertRegex(self.text, r"SuccessExitStatus=.*\b%d\b" % code)
 
     def _directives(self):
-        """The lines that are settings, so a comment saying "PartOf=" is not
-        mistaken for one - which the unit's does, explaining why it has none."""
+        """Returns the setting lines only.
+
+                A comment with the text "PartOf=" is then not a setting. The comment
+                of this unit holds that text, and it gives the reason for no PartOf=.
+                """
         return [line.strip() for line in self.text.splitlines()
                 if line.strip() and not line.strip().startswith("#")]
 

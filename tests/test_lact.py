@@ -3,14 +3,14 @@
 
 """Talking to LACT, tested against a socket rather than a mock.
 
-No machine here runs lactd, and it is not needed: the protocol is one JSON
-line in and one out over a unix socket, which a test can be on the other end
-of. So the client is exercised for real - it connects, sends, reads a reply
-that arrives in pieces, and handles a daemon that hangs up, refuses, or
-answers rubbish.
+No machine here runs lactd, and no test needs it. The protocol is one JSON
+line in and one JSON line out over a unix socket, and a test can be the other
+end of that socket. So these tests use the real client. It connects, it
+sends, it reads a reply in more than one part, and it handles a daemon that
+closes the socket, refuses a command, or gives a bad answer.
 
-Mocking the socket would have tested that the code calls the functions it
-calls. What is interesting here is the other end.
+A mock of the socket proves that the code calls its own functions. The other
+end is the interesting part.
 """
 
 import json
@@ -31,9 +31,9 @@ from steamos_utility_center import lact                                 # noqa: 
 class FakeDaemon:
     """A unix socket that answers like lactd does.
 
-    `answers` maps a command name to what its data should be; anything else
-    gets an error response, which is what the real daemon does with a command
-    it does not know.
+    `answers` maps a command name to its data. Each other command gets an
+    error response, and the real daemon does the same with an unknown
+    command.
     """
 
     def __init__(self, answers=None, hang=False, split=False, refuse=False):
@@ -137,10 +137,10 @@ CONFIG = {"fan_control_enabled": False,
           "clocks_configuration": {}}
 
 
-# The same three documents off a newer card - an RX 9070 XT, recorded from
-# its own daemon. Kept beside the older one rather than replacing it: the two
-# shapes are both live, one on the Steam Deck's own iGPU and one on a card
-# somebody put in a Steam Machine, and every rule here has to hold for both.
+# The same three documents from a newer card. This is an RX 9070 XT, from
+# its own daemon. These documents stay beside the older ones and do not
+# replace them. Both forms are current: one on the iGPU of the Steam Deck,
+# and one on a card in a Steam Machine. Each rule here must hold for both.
 NEW_DEVICES = [{"id": "1002:7550-148C:2435-0000:03:00.0",
                 "name": "AMD Radeon RX 9070 XT"}]
 
@@ -164,10 +164,10 @@ NEW_CLOCKS = {
             "voltage_offset": {"min": -200, "max": 0}}}}},
 }
 
-# And a third, from an RX 6400 - RDNA2, and the reason the voltage offset had
-# to stop depending on a range. Its od_range is nothing but nulls: it publishes
-# no window for anything, while reporting the offset it is set to and taking a
-# new one. A knob gated on having a range is a knob this card never gets.
+# And a third card, an RX 6400 with RDNA2. It is the reason the voltage
+# offset no longer needs a range. Its od_range holds only nulls, so it gives
+# no window for a value. It still reports its own offset and accepts a new
+# one. A control that needs a range is a control that this card never gets.
 BARE_CLOCKS = {
     "table": {"type": "amd", "value": {"kind": "rdna", "data": {
         "current_sclk_range": {"min": None, "max": None},
@@ -257,10 +257,11 @@ class DaemonTest(unittest.TestCase):
         started = time.monotonic()
         with self.assertRaises(lact.LactError) as caught:
             lact.talk("list_devices", daemon.path, timeout=0.3)
-        # The seconds, not just "did not answer" - which is also how the
-        # not-JSON error begins, so the loose version of this passed with the
-        # timeout taken out entirely: the socket blocked until the daemon hung
-        # up, and an empty answer raised the other error.
+        # The message must give the seconds and not only "did not answer". The
+        # error for a bad JSON answer starts with the same words. So an earlier
+        # version of this test passed with no timeout at all: the socket waited
+        # until the daemon closed it, and the empty answer raised the other
+        # error.
         self.assertIn("within 0.3 seconds", str(caught.exception))
         self.assertLess(time.monotonic() - started, 2.0,
                         "it waited for the daemon rather than timing out")
@@ -271,9 +272,9 @@ class DaemonTest(unittest.TestCase):
         self.assertIn("/nonexistent/lactd.sock", str(caught.exception))
 
     def test_available_is_a_file_test_and_not_a_connection(self):
-        # Asked on every visit to the page, so it has to be cheap - and a
-        # socket file outlives a daemon that was killed, which is why ping
-        # exists and this is not the whole answer.
+        # Each visit to the page asks this, so it must be fast. A socket file
+        # also stays after a stopped daemon. For that reason ping exists, and
+        # this function is not the complete answer.
         daemon = self._daemon(answers={"ping": None})
         self.assertTrue(lact.available(daemon.path))
         self.assertFalse(lact.available("/nonexistent/lactd.sock"))
@@ -283,8 +284,8 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(lact.set_gpu_config("gpu-1", {}, daemon.path), 9)
 
     def test_an_answer_with_no_number_falls_back_rather_than_crashing(self):
-        # Guessed low on purpose: too high leaves the window claiming a
-        # setting is pending after the daemon has already put it back.
+        # This value is low on purpose. A high value makes the window report a
+        # pending setting after the daemon reversed it.
         daemon = self._daemon(answers={"set_gpu_config": None})
         self.assertEqual(lact.set_gpu_config("gpu-1", {}, daemon.path),
                          lact.CONFIRM_SECONDS)
@@ -300,15 +301,15 @@ class DaemonTest(unittest.TestCase):
 class SocketPathTest(unittest.TestCase):
     """Where it looks, and when it decides.
 
-    Every function here takes `path=None` and falls back to SOCKET_PATH at
-    call time rather than naming the constant in its signature. A default in a
-    signature is bound once, when the module is imported - so with
-    `path=SOCKET_PATH` the constant could not be changed afterwards by
-    anything, and the change was accepted and ignored rather than refused.
+    Each function here takes `path=None` and uses SOCKET_PATH at the call. No
+    signature names the constant. Python binds a default in a signature one
+    time, at the import step. With `path=SOCKET_PATH`, no code can change the
+    constant later. Such a change is accepted and has no result, and it gives no
+    error.
 
-    That is not only a test's problem. It cost a stack dump to find, because
-    the panel's error path opens a modal dialog: the suite hung instead of
-    failing.
+    That is not a problem of the tests alone. A stack dump found it, because the
+    error path of the panel opens a modal dialog. The suite then waited and did
+    not fail.
     """
 
     def test_setting_the_constant_moves_where_it_looks(self):
@@ -330,8 +331,8 @@ class SocketPathTest(unittest.TestCase):
         self.assertEqual(lact.devices(daemon.path), DEVICES)
 
     def test_every_entry_point_honours_it(self):
-        # One left with a frozen default would be one call in the page that
-        # quietly talks to the wrong socket - or to none.
+        # A function with a fixed default is one call in the page to the
+        # incorrect socket, or to no socket, with no message.
         import inspect
         for name in ("available", "talk", "devices", "first_device", "stats",
                      "clocks_info", "gpu_config", "set_gpu_config", "confirm",
@@ -379,9 +380,9 @@ class ProfileTest(unittest.TestCase):
     def test_a_bare_list_from_an_older_daemon_is_read_too(self):
         """Two shapes across versions, and neither is assumed.
 
-        This is somebody else's daemon on somebody else's machine, updated on
-        its own schedule - so the older shape is not a thing to drop support
-        for on the day it stops being current.
+        This daemon belongs to another project, on the machine of a user, and
+        it updates on its own schedule. So this panel must keep the older form
+        after that form is no longer current.
         """
         daemon = self._daemon(["quiet", "loud"])
         self.assertEqual(lact.profiles(daemon.path), (["quiet", "loud"], ""))
@@ -401,9 +402,10 @@ class RangeTest(unittest.TestCase):
     def test_the_ranges_are_found_wherever_the_table_puts_them(self):
         """The table is a tagged union, one shape per vendor and generation.
 
-        Tracking every one would be tracking somebody else's schema version by
-        version, and being wrong means a slider that writes a clock the card
-        refuses. So the ranges are looked for rather than read from a path.
+        A list of each form is a copy of the schema of another project, for each
+        version. An incorrect entry gives a slider that writes a clock that the
+        card refuses. So this code searches for the ranges and does not read them
+        from a fixed path.
         """
         found = lact.ranges(CLOCKS)
         self.assertEqual(found["sclk"], (200, 1600))
@@ -416,8 +418,8 @@ class RangeTest(unittest.TestCase):
         self.assertEqual(found["sclk"], (300, 2000))
 
     def test_a_card_with_no_table_offers_nothing_rather_than_zero(self):
-        # Which is most integrated graphics. A range of (0, 0) would be a
-        # slider with no travel where there should be no slider.
+        # Most integrated graphics has no such range. A range of (0, 0) gives
+        # a slider with no movement, and the page must show no slider.
         self.assertEqual(lact.ranges({}), {})
         self.assertEqual(lact.ranges({"table": None}), {})
 
@@ -428,8 +430,9 @@ class RangeTest(unittest.TestCase):
             self.assertNotIn("sclk", found, bad)
 
     def test_a_document_that_loops_does_not_hang_the_window(self):
-        # The daemon's, not ours, and a window drawing a slider should not be
-        # the thing that discovers a malformed one the hard way.
+        # The document belongs to the daemon and not to this project. A window
+        # that draws a slider must not be the first program to find a bad
+        # document.
         looping = {"table": {}}
         looping["table"]["self"] = looping
         lact.ranges(looping)
@@ -461,11 +464,10 @@ class OfferedTest(unittest.TestCase):
     def test_a_card_is_offered_what_it_reports_and_not_the_whole_table(self):
         """No card has every knob, and two of them are alternatives.
 
-        This one reports an absolute core-clock range and an absolute voltage
-        range, which is the older AMD shape - so it gets a maximum GPU clock
-        and the offset window either side of nothing, and no GPU clock
-        offset, which is the thing newer cards report *instead* of that
-        maximum.
+        This card reports an absolute core-clock range and an absolute voltage
+        range, which is the older AMD form. So it gets a maximum GPU clock and
+        the offset window around zero. It gets no GPU clock offset, and a newer
+        card reports that offset *in place of* the maximum.
         """
         found = lact.offered(CONFIG, CLOCKS, STATS)
         self.assertEqual([knob["key"] for knob in found],
@@ -473,11 +475,11 @@ class OfferedTest(unittest.TestCase):
                           "max_memory_clock", "min_memory_clock"])
 
     def test_a_card_with_no_clocks_table_offers_only_the_power_limit(self):
-        """Which is most integrated graphics, and the Steam Machine may be one.
+        """Most integrated graphics, and a Steam Machine can have one.
 
-        Drawing the clock sliders anyway would be offering settings that write
-        nowhere and report success - the same rule the governor page follows:
-        the machine is asked, not remembered.
+        A page with the clock sliders offers settings that write nothing and
+        report a success. The governor page follows the same rule: it asks the
+        machine and does not use a stored list.
         """
         found = lact.offered(CONFIG, {}, STATS)
         self.assertEqual([knob["key"] for knob in found], [lact.POWER_CAP])
@@ -495,10 +497,10 @@ class OfferedTest(unittest.TestCase):
     def test_a_knob_nobody_has_set_has_no_value_but_still_has_a_start(self):
         """Two questions, and the page needs both separately.
 
-        `value` is "LACT has been told this"; `start` is where the slider
-        goes when it has not been. Zero is a setting and "not set" is the
-        card's own default, so on a voltage offset the two must not look the
-        same - and a slider has to sit somewhere either way.
+        `value` is the value that LACT holds. `start` is the position of the
+        slider with no such value. Zero is a setting, and "not set" is the
+        default of the card. On a voltage offset the two must look different,
+        and the slider needs a position in both conditions.
         """
         found = {knob["key"]: knob for knob in
                  lact.offered({}, CLOCKS, STATS)}
@@ -538,9 +540,9 @@ class FanTest(unittest.TestCase):
     def test_switching_it_on_keeps_everything_else(self):
         """set_gpu_config replaces the document rather than patching it.
 
-        So anything dropped on the way through is a setting silently turned
-        off on somebody's card - which is why every caller reads the current
-        config and hands it back changed.
+        A value that this code loses is a setting that stops on the card of a
+        user, with no message. For that reason each caller reads the current
+        configuration and returns it with the change in it.
         """
         made = lact.with_fan(CONFIG, enabled=True)
         self.assertTrue(made["fan_control_enabled"])
@@ -648,10 +650,10 @@ class FirmwareFanTest(unittest.TestCase):
     def test_a_range_of_the_wrong_shape_falls_back_like_a_missing_one(self):
         """Rather than dropping the control.
 
-        The value is real either way - only the range is not what was
-        expected - and 0 up to where it is now is both upstream's own fallback
-        and a range somebody can use. Refusing would hide a setting the card
-        genuinely has because of a field this panel misread.
+        The value is correct in both conditions, and only the range is
+        different. A range from 0 to the current value is the fallback of the
+        source project, and a user can use it. A refusal hides a setting that
+        the card has, because this panel read one field incorrectly.
         """
         found = lact.firmware({"fan": {"pmfw_info": {
             "acoustic_limit": {"current": 50, "allowed_range": "nonsense"}}}})
@@ -660,9 +662,9 @@ class FirmwareFanTest(unittest.TestCase):
     def test_it_is_reported_whether_or_not_lact_drives_the_fan(self):
         """These are the firmware's settings, not LACT's control loop.
 
-        They apply while the card is looking after its own fan, which is the
-        state most people leave it in - so gating them on fan control being
-        switched on would hide them from exactly the people they are for.
+        They apply while the card drives its own fan, and most users keep that
+        state. A rule that needs fan control on therefore hides them from the
+        users who need them.
         """
         self.assertTrue(lact.firmware(RDNA3_FAN))
 
@@ -679,10 +681,10 @@ class FirmwareFanTest(unittest.TestCase):
                          "two settings write to the same key")
 
     def test_every_setting_we_name_is_one_a_card_actually_reports(self):
-        # LACT is not vendored, so there is no schema here to read the names
-        # off. What can be checked is that the recorded shape of a real card's
-        # answer covers every one of them - a name invented here would show up
-        # as a control that never appears on any hardware.
+        # This repository has no copy of LACT, so it holds no schema with these
+        # names. This test proves that the recorded answer of a real card holds
+        # each of them. A name from this file appears as a control that no
+        # hardware ever shows.
         for key, _writes, _label, _unit in lact.FIRMWARE:
             self.assertIn(key, RDNA3_FAN["fan"]["pmfw_info"], key)
 
@@ -775,14 +777,16 @@ class KnobWritingTest(unittest.TestCase):
 class NewerCardTest(unittest.TestCase):
     """A card reporting the newer shape, recorded off a real one.
 
-    An RX 9070 XT as its daemon answered. Four things about it are not what
-    the older shape does, and this panel got all four wrong: there is no
-    absolute core-clock range at all, only an offset; the voltage offset has
-    a window of its own rather than the one every older card takes; the
-    clocks sit at the top of the config document instead of in a block; and
-    the memory clock is shown at twice what the table holds. Two sliders were
-    drawn where there should have been five, and the VRAM one read 1500 while
-    LACT read 2518 for the same card at the same moment.
+    This is an RX 9070 XT, as its daemon answered. Four properties are
+    different from the older form, and this panel read all four incorrectly:
+
+    - there is no absolute core-clock range, and there is an offset only
+    - the voltage offset has its own window, and not the window of an older card
+    - the clocks are at the top of the configuration document and not in a block
+    - the memory clock is two times the value in the table
+
+    The page drew two sliders, and it needed five. The VRAM slider showed 1500,
+    and LACT showed 2518 for the same card at the same time.
     """
 
     CLOCKS = NEW_CLOCKS
@@ -808,28 +812,28 @@ class NewerCardTest(unittest.TestCase):
     def test_the_memory_clock_is_shown_the_way_the_other_window_shows_it(self):
         """The numbers standing in LACT beside this card, for the same card.
 
-        Somebody with both windows open is looking at one machine, and a
-        panel that halves the number is a panel they have to translate.
+        A user with both windows open reads one machine. A panel that divides
+        the number by two needs a conversion from that user.
         """
         found = self.knobs()
         self.assertEqual(found["max_memory_clock"]["start"], 2518)
         self.assertEqual(found["min_memory_clock"]["start"], 194)
 
     def test_a_maximum_starts_where_the_card_runs_not_where_it_would_go(self):
-        """The one that was visible: 1500 against LACT's 2518.
+        """The visible fault: 1500 in this panel against 2518 in LACT.
 
-        od_range says this card would accept 1500; current_mclk_range says it
-        is set to 1259. Starting at the first drew an untouched card as one
-        clocked a fifth higher than it runs - and it is the ceiling, so the
-        slider sat at the far end looking like a maximum somebody had chosen.
+        od_range says that this card accepts 1500. current_mclk_range says that
+        it runs at 1259. A start at the first value drew a card with no change
+        as a card at one fifth above its rate. That value is also the maximum,
+        so the slider stood at the end and looked like a selected maximum.
         """
         found = self.knobs()["max_memory_clock"]
         self.assertEqual(found["start"], 1259 * 2)
         self.assertEqual(found["max"], 1500 * 2)
 
     def test_the_voltage_window_is_the_one_this_card_gave(self):
-        # Not the +-250 the older shape gets: this card takes -200 to 0, and
-        # offering more is offering a voltage it will refuse.
+        # Not the window of -250 to 250 of the older form. This card accepts
+        # -200 to 0, and a wider window offers a voltage that it refuses.
         found = self.knobs()["voltage_offset"]
         self.assertEqual((found["min"], found["max"]), (-200, 0))
         self.assertEqual(found["start"], -20)
@@ -843,10 +847,10 @@ class NewerCardTest(unittest.TestCase):
     def test_what_is_written_is_what_lact_writes(self):
         """The three settings made in LACT's window, read back off the daemon.
 
-        This is the whole point of the exercise: the panel that writes
-        anything else is one whose sliders move, whose apply reports success,
-        and whose card does not change - clocks_configuration is not in this
-        document, and a key nothing reads is taken without complaint.
+        This is the purpose of the test. A panel that writes another document
+        has sliders that move and an Apply that reports a success, and the card
+        does not change. clocks_configuration is not in this document, and the
+        daemon accepts a key that nothing reads.
         """
         made = lact.with_knob(self.CONFIG, "gpu_clock_offset", 15)
         made = lact.with_knob(made, "max_memory_clock", 2400, 2)
@@ -867,8 +871,8 @@ class NewerCardTest(unittest.TestCase):
                          self.CONFIG["fan_control_settings"])
 
     def test_clearing_the_offset_takes_its_table_with_it(self):
-        # Rather than an empty table, which is a card told to hold no offsets
-        # rather than one nobody has given any.
+        # And not an empty table. An empty table is a card with an instruction
+        # to hold no offset. This is a card with no instruction.
         made = lact.with_knob(dict(self.CONFIG, gpu_clock_offsets={"0": 15}),
                               "gpu_clock_offset", None)
         self.assertNotIn("gpu_clock_offsets", made)
@@ -877,10 +881,10 @@ class NewerCardTest(unittest.TestCase):
 class CardWithNoRangesTest(unittest.TestCase):
     """A card that publishes no window for anything.
 
-    RDNA2 answers with an od_range of nulls. It still reports the voltage
-    offset it is set to, LACT still has one written for it, and it still takes
-    a new one - so "no range" is not the same question as "no such knob", and
-    treating them the same hid the one setting this card actually has.
+    RDNA2 answers with an od_range of nulls. It still reports its own voltage
+    offset, LACT still holds one for it, and it still accepts a new one. So "no
+    range" is a different question from "no such control". One answer for both
+    hid the one setting that this card has.
     """
 
     def knobs(self, config=None):
