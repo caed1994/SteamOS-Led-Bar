@@ -129,7 +129,8 @@ class ReadingTest(unittest.TestCase):
         self.assertIsNone(temperature.read_celsius(path))
 
     def test_a_sensor_that_disappears_stops_reporting(self):
-        # Sensors do come and go - an eGPU unplugged, a driver unloaded.
+        # A sensor can appear and disappear. A removed eGPU and an unloaded
+        # driver both do that.
         directory = self.hwmon.chip("k10temp", [("Tctl", 52000)])
         path = os.path.join(directory, "temp1_input")
         source = temperature.TemperatureSource(interval=0, root=self.root)
@@ -141,10 +142,10 @@ class ReadingTest(unittest.TestCase):
 class PublishedLimitsTest(unittest.TestCase):
     """What a sensor says about itself.
 
-    "Hot" is not one number across a machine: an APU at 95 C is doing what it
-    was designed to do, an NVMe drive at 95 C is long past its critical point.
-    The parts publish their own limits, so a threshold does not have to be
-    guessed - where they publish anything, which is not everywhere.
+    "Hot" is not one number for a complete machine. An APU at 95 C is in its
+    normal range. An NVMe drive at 95 C is far above its critical point. Each
+    part gives its own limits, so this code does not have to guess a threshold.
+    But not each part gives a limit.
     """
 
     def setUp(self):
@@ -167,8 +168,8 @@ class PublishedLimitsTest(unittest.TestCase):
         self.assertEqual(temperature.read_limits(self._input(directory)), {})
 
     def test_only_the_files_that_exist_come_back(self):
-        # hwmon is optional throughout - a driver exposes what the hardware
-        # tells it, so a missing file is the normal case, not a fault.
+        # Each hwmon file is optional. A driver gives the values that the
+        # hardware gives it, so an absent file is normal and not a fault.
         directory = self.hwmon.chip("nvme", [("Composite", 41000)],
                                     limits={1: {"crit": 84850}})
         self.assertEqual(temperature.read_limits(self._input(directory)),
@@ -190,8 +191,8 @@ class PublishedLimitsTest(unittest.TestCase):
         self.assertEqual(temperature.read_limits(self._input(directory)), {})
 
     def test_a_raised_alarm_is_reported(self):
-        # The kernel's own opinion that a limit has been passed, which beats
-        # any threshold we would pick.
+        # The kernel reports here that the value is above a limit. That report
+        # is better than a threshold from this project.
         directory = self.hwmon.chip("amdgpu", [("edge", 97000)],
                                     alarms={1: {"crit_alarm": 1}})
         self.assertEqual(temperature.read_alarms(self._input(directory)),
@@ -258,8 +259,9 @@ class OverheatWatchTest(unittest.TestCase):
         self.assertEqual(thresholds, [79.85, 105.0])
 
     def test_a_sensor_with_no_limit_is_not_watched(self):
-        # k10temp publishes nothing on a real machine, and an APU at its
-        # limit is working as designed - so guessing one would warn all day.
+        # k10temp gives no limit on a real machine, and an APU at its limit is
+        # in its normal range. A guess here therefore gives a warning each
+        # hour of each day.
         self.hwmon.chip("k10temp", [("Tctl", 95000)])
         self.assertEqual(self._watch().resolve(), [])
 
@@ -346,7 +348,7 @@ class OverheatWatchTest(unittest.TestCase):
         self._set(directory, 106000)
         watch.poll(0.0)
         self.assertIsNotNone(watch.poll(61.0))
-        self._set(directory, 99000)             # below 105 - 5
+        self._set(directory, 99000)             # below 105 less 5
         watch.poll(100.0)
         self._set(directory, 106000)
         watch.poll(120.0)
@@ -438,8 +440,8 @@ class CachingTest(unittest.TestCase):
     def test_the_sensor_is_only_resolved_once(self):
         self.source.celsius(now=100.0)
         first = self.source.path
-        # Even if the tree changes underneath, the choice stands - swapping
-        # sensor halfway through would make the bar jump for no visible reason.
+        # The choice stays, also after a change of the tree. A change of the
+        # sensor during a run makes the bar jump with no visible reason.
         FakeHwmon(self.root).chip("amdgpu", [("edge", 90000)])
         self.source.celsius(now=200.0)
         self.assertEqual(self.source.path, first)
@@ -453,9 +455,9 @@ class CachingTest(unittest.TestCase):
 class SmoothingTest(unittest.TestCase):
     """A CPU sensor is noisy enough to make the leading LED flicker.
 
-    Tctl moves a degree or two between one second and the next on an idle
-    machine, which over the gauge's span is most of an LED - so what the
-    gauge is handed is an average, not the latest sample.
+    Tctl changes by one or two degrees from one second to the next on an idle
+    machine. Over the range of the gauge that is almost one LED. So the gauge
+    gets an average and not the last sample.
     """
 
     def setUp(self):
@@ -547,9 +549,9 @@ LAST = shim.LOGICAL_LEDS - 1        # the end the gauge fills from
 class GaugeTest(unittest.TestCase):
     """What the bar shows: the whole strip in one colour, green to red.
 
-    Not a filling gauge any more. A bar that is part dark says two things at
-    once - its colour and its length - and only one of them was ever the
-    answer to "how hot is it".
+    This is no longer a gauge that fills. A bar with a dark part gives two
+    values at the same time: its colour and its length. Only the colour
+    answers the question "how hot is it".
     """
 
     def setUp(self):
@@ -631,7 +633,7 @@ class GaugeTest(unittest.TestCase):
     # -- and everything around it -----------------------------------------
 
     def test_no_sensor_falls_back_to_the_rainbow(self):
-        # A dark strip would look like the service had died.
+        # A dark strip looks like a service that stopped.
         self.source.value = None
         frame = self.renderer.render_logical(self.snapshot, 0.0)
         self.assertEqual(frame,
@@ -687,9 +689,10 @@ class GaugeTest(unittest.TestCase):
 class GaugeFrameRateTest(unittest.TestCase):
     """The gauge redraws when the sensor moves, not sixty times a second.
 
-    Steam calls the rainbow animated, and the gauge sits in its slot - so the
-    main loop drove it at the full frame rate while the sensor answered once a
-    second. Every frame in between was the same bytes, rendered and sent again.
+    Steam gives the rainbow the animated state, and the gauge uses the rainbow
+    slot. So the main loop ran it at the full frame rate, and the sensor
+    answered one time each second. Each frame between two samples held the same
+    bytes, and the loop rendered it and sent it again.
     """
 
     def setUp(self):

@@ -3,14 +3,14 @@
 
 """Every part of the toolbox, described the same way.
 
-The status page used to be the LED checklist and nothing else, on a page
-headed "this installation" - while the toolbox had grown to install four
-things. The other three said their piece on their own settings pages, in
-their own shapes, and nowhere together.
+The status page held the LED checklist only, below the heading "this
+installation". At that time the toolbox installed four parts. The other three
+parts reported on their own settings pages, in their own forms, and never
+together.
 
-What is checked here is that shape: three states rather than two, "not
-installed" telling itself apart from "broken", and a summary that counts
-across all of them instead of over one.
+This file checks that form: three states and not two, a clear difference
+between "not installed" and "broken", and a summary that counts each part and
+not one part.
 """
 
 import os
@@ -139,9 +139,9 @@ class PowerPartTest(unittest.TestCase):
     def test_a_governor_that_did_not_take_is_the_interesting_case(self):
         """Written to the file and not running is invisible everywhere else.
 
-        The settings page shows what you chose; the machine may be doing
-        something else because the unit did not run or the driver refused.
-        Nothing else in this window would ever say so.
+        The settings page shows the selected value. The machine can run a
+        different value, because the unit did not start or the driver refused
+        it. No other part of this window reports that difference.
         """
         part = ledpanel.power_part(
             {"CPU_GOVERNOR": "performance"},
@@ -220,8 +220,8 @@ class GpuPartTest(unittest.TestCase):
         self.assertIn("refused", part.verdict)
 
     def test_a_daemon_with_no_card_is_a_fault_too(self):
-        # It is running and has nothing to manage, which is worth saying:
-        # silence would look like the block failing to draw.
+        # The daemon runs and has no card. The block must report that. With no
+        # text, the block looks like a draw fault.
         part = ledpanel.gpu_part(self._state(gpu="", name=""))
         self.assertFalse(part.ok)
         self.assertIn("no graphics card", part.verdict)
@@ -232,10 +232,10 @@ class GpuPartTest(unittest.TestCase):
         self.assertIn("VanGogh", part.verdict)
 
     def test_the_detail_says_what_can_actually_be_set(self):
-        """Which on an integrated card may be one thing or nothing.
+        """Reports the settings, and an integrated card offers one or none.
 
-        The status page is where somebody looks when the block upstairs has
-        fewer sliders than they expected.
+        A user reads the status page when the block above has fewer sliders
+        than the user expects.
         """
         part = ledpanel.gpu_part(self._state())
         self.assertIn("Power limit", " ".join(part.detail))
@@ -263,9 +263,9 @@ class LayoutPartTest(unittest.TestCase):
     def test_it_is_never_a_fault(self):
         """There is nothing here that can break.
 
-        A line is in a file or it is not, so this reports set or unset and
-        never counts against the window's summary - a keyboard layout is a
-        preference, and a preference cannot be broken.
+        A line is in a file or it is not in a file. So this reports set or
+        unset, and it never counts against the summary of the window. A
+        keyboard layout is a preference, and a preference cannot break.
         """
         for layout in ("", "de", "fr"):
             self.assertNotEqual(ledpanel.layout_part(layout).ok, False)
@@ -275,9 +275,9 @@ class LayoutPartTest(unittest.TestCase):
         self.assertTrue(part.verdict.startswith("German."), part.verdict)
 
     def test_it_says_when_it_takes_effect(self):
-        # The thing everybody gets wrong about this setting - and it is in the
-        # line now rather than behind a fold, because one sentence is not
-        # worth a Details button somebody has to find and click.
+        # The one fact that a user needs about this setting. It is in the line
+        # and not behind a fold. One sentence does not need a Details button
+        # that the user must find and click.
         part = ledpanel.layout_part("de")
         self.assertIn("login", part.verdict.lower())
         self.assertEqual(part.detail, [])

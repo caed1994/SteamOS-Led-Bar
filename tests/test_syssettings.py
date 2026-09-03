@@ -3,10 +3,10 @@
 
 """The machine's own settings, which are not the LED service's.
 
-Every test here works in a home directory of its own. Nothing in this file may
-touch the real one: the whole point of the module is that it edits a file
-somebody else's settings also live in, and a test that got that wrong would be
-a test that deleted them.
+Each test here works in a home directory of its own. No test in this file
+must touch the real home directory. The module edits a file that also holds
+the settings of other programs. A test with the real path deletes those
+settings.
 """
 
 import os
@@ -120,11 +120,11 @@ class WriteTest(HomeTest):
         self.assertEqual(syssettings.read(self.home)[syssettings.LAYOUT], "fr")
 
     def test_going_back_to_the_system_default_leaves_nothing_behind(self):
-        """Not an empty value - no value, and no file either.
+        """Writes no value and no file. It does not write an empty value.
 
-        XKB_DEFAULT_LAYOUT= is a layout that is empty, which libxkbcommon
-        treats as a layout rather than as silence. Choosing "leave it to the
-        system" has to leave the machine as it was before any of this.
+        XKB_DEFAULT_LAYOUT= is an empty layout, and libxkbcommon reads that as
+        a layout and not as no value. The entry "leave it to the system" must
+        leave the machine in its first condition.
         """
         syssettings.write({syssettings.LAYOUT: "de"}, self.home)
         syssettings.write({syssettings.LAYOUT: syssettings.UNSET}, self.home)
@@ -185,11 +185,11 @@ class OtherPeoplesLinesTest(HomeTest):
     def test_a_login_never_reads_half_a_file(self):
         """Replaced in one step, so the file is never briefly truncated.
 
-        It is read at login by the user manager, and rewriting it in place
-        would have a window in which it is empty. Checked by what is left
-        beside it: a temporary file that was moved into place is gone, and one
-        that was written in place would leave no temporary at all - so this
-        also fails if the atomic write is dropped for a plain open().
+        The user manager reads it at login, and a write in place gives a short
+        time where the file is empty. This test reads the other files in the
+        directory. A temporary file that a move put into place is gone. A
+        write in place leaves no temporary file. So this test also fails after
+        a change from the atomic write to a plain open().
         """
         self._write_file(self.STRANGER)
         before = set(os.listdir(os.path.dirname(self.path)))
@@ -213,10 +213,10 @@ class ValidateTest(unittest.TestCase):
     def test_a_second_line_cannot_be_smuggled_in(self):
         """The one that matters.
 
-        The value is written into a file read by the session's environment
-        generator. A newline in it would not be a bad layout, it would be a
-        second variable - set by us, on somebody's behalf, without either of
-        us having said so.
+        This code writes the value into a file, and the environment generator
+        of the session reads that file. A new line in the value is not a bad
+        layout. It is a second variable. This project then sets a variable for
+        the user, and neither of the two asked for it.
         """
         with self.assertRaises(syssettings.SettingError):
             syssettings.validate({syssettings.LAYOUT: "de\nPATH=/tmp/evil"})
@@ -284,15 +284,17 @@ class LayoutMenuTest(unittest.TestCase):
         self.assertEqual(len(values), len(set(values)), "duplicated an entry")
 
     def test_it_stays_short_enough_to_fit_on_a_steam_machine(self):
-        """Measured, not guessed - and the reason this list is not all 99.
+        """Proves the limit by measurement. The list holds fewer than 99.
 
-        The panel's drop-down does not scroll: it sizes itself to its entries
-        and is clamped to the screen, so entries past the bottom edge cannot
-        be clicked. At the theme's own row height twenty-eight entries came to
-        926 pixels on a 1280x800 display, which is a Steam Machine's.
+        The drop-down of the panel does not scroll. It takes the size of its
+        entries, and the screen then limits it. A click cannot reach an entry
+        below the bottom edge. At the row height of the theme, twenty-eight
+        entries measured 926 pixels on a 1280x800 display. A Steam Machine has
+        that display.
 
-        Twenty is the ceiling this keeps to, which measured 662 - two thirds
-        of that screen, leaving room for a desktop with a larger font.
+        The limit here is twenty entries, which measured 662 pixels. That is
+        two thirds of that screen, and it leaves space for a desktop with a
+        larger font.
         """
         self.assertLessEqual(len(syssettings.layouts()), 20)
 

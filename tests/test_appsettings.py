@@ -58,11 +58,10 @@ class ReadWriteTest(HomeTest):
     def test_settings_from_before_the_rename_are_still_read(self):
         """The panel's preferences moved with the project's name.
 
-        The installer moves the file, but the panel is the thing somebody
-        opens - and they may open it without ever running the installer
-        again. Without this their theme, and anything else in there, would
-        come back as the default with no sign that a file had been passed
-        over.
+        The installer moves the file. But the user opens the panel, and the
+        user can open it without a second run of the installer. Without this
+        code, the theme of the user and each other value come back as the
+        default, and no message reports the file that the panel did not read.
         """
         os.makedirs(os.path.join(self.home, appsettings.CONFIG_DIR))
         with open(os.path.join(self.home, appsettings.CONFIG_DIR,
@@ -73,9 +72,9 @@ class ReadWriteTest(HomeTest):
                          appsettings.THEME_LIGHT)
 
     def test_the_current_name_wins_over_the_old_one(self):
-        # Both present is a machine that has been migrated and then opened an
-        # older panel, or one that migrated by hand. The current file is the
-        # one being written, so it is the one that stands.
+        # Two files come from a machine that migrated and then opened an older
+        # panel. A manual migration also gives two files. The panel writes the
+        # current file, so the current file wins.
         os.makedirs(os.path.join(self.home, appsettings.CONFIG_DIR))
         with open(os.path.join(self.home, appsettings.CONFIG_DIR,
                                appsettings.OLD_CONFIG_FILE), "w") as handle:
@@ -94,8 +93,8 @@ class ReadWriteTest(HomeTest):
     def test_a_value_this_version_has_never_heard_of_is_not_a_crash(self):
         """Somebody's future, or somebody's typo.
 
-        Neither is a reason for the panel not to open, so both come back as
-        the default - a preference is not worth refusing to start over.
+        Neither condition must stop the panel, so both give the default. The
+        panel must not refuse to start because of a preference.
         """
         os.makedirs(os.path.dirname(appsettings.path(self.home)))
         with open(appsettings.path(self.home), "w") as handle:

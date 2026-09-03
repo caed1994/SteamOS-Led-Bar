@@ -3,10 +3,9 @@
 
 """The panel's preview tab, minus the canvas.
 
-The point of the tab is that what you see is what the strip will do, so the
-thing worth testing is that the frames really come from render.py and
-notify.py and really carry the settings in the window - not that a rectangle
-ended up the right shade of orange.
+The tab must show the behaviour of the strip. So the tests here prove that
+the frames come from render.py and notify.py, and that they carry the
+settings in the window. They do not prove the shade of a rectangle.
 """
 
 import os
@@ -115,8 +114,9 @@ class FrameTest(unittest.TestCase):
                    self.preview.shape_frame("bloom", "#1a9fff", tick / 10.0))
                for tick in range(int((duration + preview.FLASH_PAUSE) * 10) * 2)]
 
-        # Lit, then dark, then lit again. Not "dark at the end" - the sampling
-        # window ends inside the second pause, which is the effect working.
+        # Lit, then dark, then lit again. The test does not check for "dark at
+        # the end". The sample window ends in the second pause, and that is the
+        # correct behaviour of the effect.
         first_dark = next(index for index, level in enumerate(lit)
                           if level == 0 and index > 5)
         self.assertLess(first_dark, len(lit) - 1, "the flash never ends")
@@ -134,9 +134,9 @@ class FrameTest(unittest.TestCase):
 class PhysicalStripTest(unittest.TestCase):
     """It draws the strip you have, not the seventeen Steam works in.
 
-    The seventeen logical LEDs are what the effects are composed on, but they
-    are not what is on the desk - and the setting that turns one into the
-    other is the mapping, the hardest thing on the Strip page to picture.
+    The effects use the seventeen logical LEDs, and the strip on the desk has
+    a different number. The mapping setting converts the one into the other,
+    and it is the most difficult setting on the Strip page to imagine.
     """
 
     def _frame(self, **settings):
@@ -160,9 +160,9 @@ class PhysicalStripTest(unittest.TestCase):
         self.assertNotEqual(stretched[40], (0, 0, 0))
 
     def test_the_brightness_ceiling_reaches_both_halves(self):
-        # Both, now that both go through the service's own path - the flashes
-        # honoured it and the effects did not, which was the one setting the
-        # preview could not be trusted on.
+        # Both, because both now use the code of the service. Before, the
+        # flashes used this setting and the effects did not. That was the one
+        # setting where the preview was incorrect.
         for frame in (lambda cap: self._frame(MAX_BRIGHTNESS=cap),
                       lambda cap: preview.Preview(
                           {"MAX_BRIGHTNESS": cap}).shape_frame(
@@ -196,8 +196,8 @@ class SettingsTest(unittest.TestCase):
     def test_the_flash_duration_changes_the_pacing(self):
         short = preview.Preview({"NOTIFY_DURATION": 1.0})
         long = preview.Preview({"NOTIFY_DURATION": 10.0})
-        # Two seconds in, the short one has finished and looped; the long one
-        # is still in the middle of its first flash.
+        # After two seconds the short flash is complete and starts again. The
+        # long flash is in the middle of its first pass.
         self.assertNotEqual(short.shape_frame("bloom", "#1a9fff", 2.0),
                             long.shape_frame("bloom", "#1a9fff", 2.0))
 
@@ -248,9 +248,10 @@ class CanvasColourTest(unittest.TestCase):
 class RendererReuseTest(unittest.TestCase):
     """The preview asks for a frame 25 times a second, on a live window.
 
-    A renderer builds a 256 entry gamma table and its own interpolation
-    weights. Built per frame, at GAMMA=2.2 that was most of the frame it was
-    built for - so it is kept until a setting it was built from moves.
+    A renderer builds a gamma table of 256 entries and its own interpolation
+    weights. One build for each frame, at GAMMA=2.2, took most of the time of
+    that frame. So the code keeps the renderer until one of its settings
+    changes.
     """
 
     def test_a_still_window_builds_one_renderer(self):
@@ -298,9 +299,9 @@ class RendererReuseTest(unittest.TestCase):
 class LoadPreviewTest(unittest.TestCase):
     """What the Preview tab draws for the load gauge, in the colours set.
 
-    The tab is where the two menus are judged - a colour picked on the Strip
-    page and previewed in the shipped one would be a preview of somebody
-    else's setting.
+    A user reads the two menus on this tab. A colour from the Strip page,
+    with a preview in the default colour, is a preview of a different
+    setting.
     """
 
     HALF = 17 // 2
@@ -331,14 +332,15 @@ class LoadPreviewTest(unittest.TestCase):
     def test_the_blurb_names_nothing_that_is_a_setting(self):
         """Caught on a screenshot, and then again by this test.
 
-        It read "CPU left in amber, GPU right in blue" while the bar it sat
-        under was green and violet - the colours having become settings. Then
-        the sides became one too, and "left" was as wrong as "amber" had been.
+        The text said "CPU left in amber, GPU right in blue", and the bar below
+        it was green and violet. The colours were settings at that time. The
+        sides then also became a setting, and "left" was as incorrect as
+        "amber".
 
-        So it says the part of the effect that is not anybody's to change: a
-        bar per chip, growing out of the middle. Held against the two menus
-        rather than against a list of words here, or the sentence and the
-        settings drift apart again.
+        So the text now gives the part of the effect that no setting changes: one
+        bar for each chip, from the middle outwards. This test compares the text
+        with the two menus, and not with a list of words in this file. A list
+        here becomes different from the settings again.
         """
         blurb = next(text for _label, name, text in preview.SLOT_EFFECTS
                      if name == render.SHOWS_LOAD).lower()
@@ -348,9 +350,8 @@ class LoadPreviewTest(unittest.TestCase):
             self.assertNotIn(side, blurb, blurb)
 
     def test_swapping_the_sides_shows_in_the_preview(self):
-        # The tab is where the switch is judged: one that changed the strip
-        # and not the picture would be a switch you cannot see the effect of
-        # until you have applied it.
+        # A user reads the switch on this tab. A switch that changes the strip
+        # and not the picture gives no visible result before the Apply step.
         plain = self._sides()
         swapped = self._sides(LOAD_SWAP=True)
         self.assertEqual(swapped, plain[::-1])

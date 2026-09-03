@@ -90,9 +90,10 @@ class SchemeTest(unittest.TestCase):
                                  "%s from %s" % (name, seed))
 
     def test_text_can_be_read_on_what_it_is_written_on(self):
-        # 4.5:1 is what WCAG asks of body text. This is the whole reason the
-        # tones are taken from the spec's table rather than chosen: it holds
-        # for any accent the desktop might be set to, without anyone looking.
+        # WCAG asks for 4.5:1 for body text. That is the reason the tones come
+        # from the table of the specification and not from a selection. The
+        # ratio then holds for each accent colour of the desktop, and no person
+        # must check it.
         pairs = (("on_surface", "surface"),
                  ("on_surface_variant", "surface"),
                  ("on_surface", "surface_container_high"),
@@ -110,8 +111,8 @@ class SchemeTest(unittest.TestCase):
                     % (text, ground, "dark" if dark else "light", seed))
 
     def test_an_outline_can_be_seen_against_its_surface(self):
-        # 3:1, which is what the guidelines ask of a control's own edge - it
-        # has to be found, not read.
+        # 3:1, which is the value that the guidelines give for the edge of a
+        # control. A user must find the edge and does not read it.
         for seed, dark, roles in self._schemes():
             self.assertGreaterEqual(
                 material.contrast(roles["outline"], roles["surface"]), 3.0,
@@ -143,14 +144,15 @@ class SchemeTest(unittest.TestCase):
         warm = material.scheme("#f67400")["surface"]
         cool = material.scheme("#3daee9")["surface"]
         self.assertNotEqual(warm, cool)
-        # But only a few per cent - a tinted surface is not a coloured one.
+        # But only some per cent. A surface with a tint is not a coloured
+        # surface.
         self.assertLess(material.to_oklch(warm)[1], 0.03)
 
     def test_a_grey_accent_does_not_pick_up_a_hue_from_nowhere(self):
-        # atan2 on a colour with no chroma returns whatever rounding left
-        # behind, and a grey desktop must not come out faintly green. Error and
-        # positive are seeded separately and stay red and green, which is the
-        # point of them - a warning is not a matter of taste.
+        # atan2 on a colour with no chroma returns the rounding error, and a
+        # grey desktop must not become green. The error role and the positive
+        # role have their own seed colours and stay red and green. That is
+        # their purpose, because a warning must always look the same.
         roles = material.scheme("#808080")
         for name, colour in roles.items():
             if name.split("_")[-1] in ("error", "positive") \
@@ -179,12 +181,12 @@ class SchemeTest(unittest.TestCase):
 class ControlSizeTest(unittest.TestCase):
     """How big a control is, for a desktop set to any font.
 
-    This runs on a machine people also use handheld, with a trackpad rather
-    than a mouse on a desk. Desktop guidelines put the smallest sensible target
-    at around twenty pixels; ttk's own defaults are well under that, which is
-    what made the first version fiddly. A fixed size is not enough either - one
-    that suits a ten point font is small against thirteen - so the sizes are
-    worked out, and it is the arithmetic that has to hold up.
+    A user also holds this machine in the hand and uses a trackpad, and not a
+    mouse on a desk. Desktop guidelines give approximately twenty pixels for the
+    smallest target. The defaults of ttk are much smaller, and that made the
+    first version difficult to use. A fixed size is also not sufficient. A size
+    for a ten point font is too small for a thirteen point font. So this code
+    calculates the sizes, and the arithmetic must be correct.
     """
 
     MINIMUM = 20
@@ -213,8 +215,8 @@ class ControlSizeTest(unittest.TestCase):
         # The state has to be readable without relying on colour alone.
         for linespace, sizes in self._sizes():
             self.assertGreater(sizes["thumb_on"], sizes["thumb_off"], linespace)
-            # And it still has to fit inside the track it slides along - these
-            # are radii, so twice one of them is the thumb.
+            # The thumb must also fit into its track. These values are radii, so
+            # two times one of them is the thumb.
             self.assertLess(sizes["thumb_on"] * 2, sizes["switch_height"],
                             linespace)
 
@@ -284,8 +286,8 @@ class StateLayerTest(unittest.TestCase):
         self.assertLess(material.contrast(faded, self.roles["surface"]),
                         material.contrast(self.roles["on_surface"],
                                           self.roles["surface"]))
-        # Still visible, though: a disabled control that has vanished is worse
-        # than one that was never greyed out.
+        # But it stays visible. A disabled control that a user cannot see is
+        # worse than a control with no grey state.
         self.assertNotEqual(faded, self.roles["surface"])
 
     def test_blending_ends_where_it_should(self):
