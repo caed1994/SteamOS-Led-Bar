@@ -4143,6 +4143,14 @@ class DrivesPageTest(unittest.TestCase):
             self.root.destroy()
             self.root = None
 
+    def _every_widget(self, widget=None, found=None):
+        found = [] if found is None else found
+        widget = self.root if widget is None else widget
+        found.append(widget)
+        for child in widget.winfo_children():
+            self._every_widget(child, found)
+        return found
+
     def _staged(self):
         """The record that the page handed to the applier, read back."""
         self.assertTrue(self.ran, "no command reached the applier")
@@ -4262,3 +4270,18 @@ class DrivesPageTest(unittest.TestCase):
         self.panel._drives = [entry]
         self.panel.remove_drive(entry)
         self.assertEqual(self._staged(), [])
+
+    def test_the_explanation_is_on_the_page(self):
+        """A label that nothing packs exists and is never drawn.
+
+        _note builds the label and the caller places it, and the first version
+        of this page forgot the second half. The window opened, every test
+        passed, and the paragraph that says why this is not /etc/fstab was
+        simply not there. Nothing but a look at the window found it.
+        """
+        found = [widget for widget in self._every_widget()
+                 if isinstance(widget, ttk.Label)
+                 and str(widget.cget("text")).startswith("A second drive")]
+        self.assertTrue(found, "the drives card has no explanation")
+        self.assertTrue(found[0].winfo_ismapped(),
+                        "the explanation was built and never placed")

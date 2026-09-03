@@ -5966,7 +5966,8 @@ class Panel:
             box,
             "A second drive for a Steam library. SteamOS rebuilds /etc at "
             "every update, so a line in /etc/fstab does not survive one. This "
-            "writes a mount unit instead, and asks SteamOS to keep it.")
+            "writes a mount unit instead, and asks SteamOS to keep it."
+            ).pack(anchor="w", pady=(0, ROW_GAP))
 
         self.drives_box = ttk.Frame(box, style="OnCard.TFrame")
         self.drives_box.pack(fill="x", pady=(GROUP_GAP, 0))
