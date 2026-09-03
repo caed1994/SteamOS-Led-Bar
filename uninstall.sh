@@ -15,34 +15,40 @@ RELEASE="$(uname -r)"
 MODULE_PATH="/usr/lib/modules/$RELEASE/updates/${MODULE_NAME}.ko"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Every path this removes, named once and shared with install.sh: the two used
-# to hold their own copies, and an uninstaller looking for a name the
-# installer had stopped writing leaves a service nothing can take away.
+# Each path that this removes. The names are here one time, and install.sh
+# uses the same names.
+#
+# The two scripts had their own copies. An uninstaller that looked for a name
+# that the installer no longer wrote thus left a service that nothing
+# removes.
 # shellcheck source=scripts/user-unit.sh
 source "$SOURCE_DIR/scripts/user-unit.sh"
 
-# Somebody typing "uninstall" wants it gone. The two things worth a second
-# thought - the settings and the kernel module - are still one flag away, but
-# the flag is now the one that keeps them rather than the one that removes
-# them: a default that leaves half the machine behind is a default that has to
-# be undone by everybody who did not read this.
+# A person who types "uninstall" wants each part removed.
+#
+# Two parts are worth a second thought: the settings and the kernel module.
+# Each of them is still one option away. That option now keeps them, and before
+# it removed them.
+#
+# A default that leaves one half of the installation is a default that each
+# person who did not read this must undo.
 KEEP_CONF=0
 KEEP_MODULE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --keep-conf) KEEP_CONF=1; shift ;;
         --keep-module) KEEP_MODULE=1; shift ;;
-        # What these used to ask for is what happens anyway now. Taken rather
-        # than refused, because they are in the README of every clone made
-        # before this changed, and in the fingers of anyone who has run it.
+        # These two options now ask for the default behaviour. This script
+        # accepts them and does not refuse them. They are in the README of each
+        # clone from before this change, and people type them from memory.
         --purge|--remove-module) shift ;;
         -h|--help) sed -n '5,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
-# The body below asks what is being removed rather than what is being kept,
-# which is the way round it reads best where the removing happens.
+# The code below asks what it removes and not what it keeps. That is the
+# clearer question at the place where the removal occurs.
 PURGE=$(( 1 - KEEP_CONF ))
 REMOVE_MODULE=$(( 1 - KEEP_MODULE ))
 
@@ -50,12 +56,17 @@ REMOVE_MODULE=$(( 1 - KEEP_MODULE ))
 
 # --- the read-only rootfs ---------------------------------------------------
 #
-# Before the first thing is removed, not before the kernel module. The suspend
-# hook lives under /usr/lib/systemd, and `rm -f` on a locked rootfs does not
-# quietly do nothing - it fails with "Read-only file system", which under
-# set -e ended the uninstall three steps in: the udev rule gone, the service
-# files, the command link and the configuration all still there, and nothing
-# said about it. Shared with install.sh so the two cannot drift again.
+# This is before the first removal and not before the kernel module.
+#
+# The suspend hook is under /usr/lib/systemd. `rm -f` on a locked root
+# filesystem does not return with no message. It fails with "Read-only file
+# system".
+#
+# Under set -e, that failure ended the uninstall after three steps. The udev
+# rule was gone. The service files, the command link and the configuration were
+# all still there, and nothing reported that.
+#
+# install.sh uses the same function, so the two cannot become different.
 unlock_rootfs || true
 
 # --- the units that run in the desktop session ------------------------------
@@ -64,9 +75,9 @@ remove_user_units() {
     watcher_user_dirs || return 0
 
     local unit removed=0
-    # Every unit this project ever installs, not only the ones it installs
-    # today: walking the list is what stops an older install's file from being
-    # left behind in somebody's ~/.config with nothing to remove it.
+    # Each unit that this project installs, and not the current units only.
+    # This list is what stops a file from an older installation from staying
+    # in a ~/.config directory with nothing to remove it.
     for unit in "${WATCHER_UNITS[@]}"; do
         [[ -f "$WATCHER_DIR/$unit" ]] || continue
         user_systemctl stop "$unit" || true
@@ -74,9 +85,9 @@ remove_user_units() {
         removed=1
     done
 
-    # And the ones older releases installed and this one does not - see
-    # RETIRED_USER_UNITS in scripts/user-unit.sh. Left behind, they would go on
-    # running at every login with nothing here to remove them.
+    # And the units that older releases installed and this one does not. See
+    # RETIRED_USER_UNITS in scripts/user-unit.sh. Without this, they continue
+    # to run at each login and nothing here removes them.
     if remove_retired_user_files; then
         removed=1
     fi
@@ -90,8 +101,8 @@ remove_user_units
 
 # --- what the installer put in that user's home -----------------------------
 #
-# Not under any root path, so none of the rm -f lines below reach it - and all
-# of it was written by this project rather than by whoever is uninstalling.
+# This is not under a root path, so no rm -f line below reaches it. This
+# project wrote each of these files, and the person who uninstalls did not.
 
 remove_menu_entry() {
     watcher_user_dirs || return 0
@@ -103,9 +114,9 @@ remove_menu_entry() {
         removed=1
     fi
 
-    # Every size rather than the one this clone's icon happens to be: the
-    # installer files it under the width it reads out of the PNG, so an older
-    # install may well have left one somewhere else.
+    # Each size, and not the size of the icon of this clone. The installer
+    # stores the icon under the width that it reads from the PNG, so an older
+    # installation can have left one in another directory.
     local icon
     for icon in "$WATCHER_HOME"/$PANEL_ICON_GLOB; do
         [[ -f "$icon" ]] || continue
@@ -115,16 +126,19 @@ remove_menu_entry() {
 
     [[ $removed -eq 1 ]] || return 0
     echo "Removed the control panel's menu entry and icon for $WATCHER_USER."
-    # Or the menu goes on offering it, and launching something that is no
-    # longer there, until the cache is rebuilt by itself.
+    # Without this, the menu continues to offer the entry and to start a
+    # program that is not there, until the cache is built again.
     refresh_desktop_caches "$applications"
 }
 
-# The two lines the installer appends to the user's .bashrc so "pio" is a
-# command they can type. PlatformIO itself stays: it is somebody else's
-# program, it may well be used for other things, and it is a few hundred
-# megabytes nobody should have to fetch again. The lines naming this installer
-# are ours to take back, and the summary says how to put them back by hand.
+# The two lines that the installer adds to the .bashrc of the user, so that
+# "pio" is a command that the person can type.
+#
+# PlatformIO stays. It is another person's program, the person can use it for
+# other work, and it is some hundred megabytes to download again.
+#
+# The two lines name this installer, so this script removes them. The summary
+# gives the commands to add them again.
 remove_platformio_path() {
     watcher_user_dirs || return 0
 
@@ -132,10 +146,12 @@ remove_platformio_path() {
     [[ -f "$profile" ]] || return 0
     grep -qF "$PLATFORMIO_PATH_MARK" "$profile" 2>/dev/null || return 0
 
-    # By exact match, and as the user: anything looser would edit a line
-    # somebody put there themselves, and rewriting it as root would leave
-    # their own .bashrc owned by root. Written back through the same inode,
-    # so its ownership and mode are whatever they already were.
+    # This matches the exact line, and it runs as the user. A wider match
+    # edits a line that the person wrote. A write as root gives the .bashrc
+    # of that person to root.
+    #
+    # It writes through the same inode, so the owner and the mode do not
+    # change.
     if runuser -u "$WATCHER_USER" -- bash -c '
             profile="$1"; scratch="$profile.steamos-utility-center.$$"
             grep -vxF "$2" "$profile" | grep -vxF "$3" | grep -vxF "$4" \
@@ -153,13 +169,14 @@ remove_platformio_path() {
 
 # --- the HDMI CEC toolkit ---------------------------------------------------
 #
-# Installed from vendor/ by this panel's own page, so it is this script's to
-# take away again: its units, helpers, udev rule and sudoers file are all
-# things somebody got by pressing a button here, and none of them were touched
-# by this uninstaller before.
+# The page of this panel installs the toolkit from cec-toolkit/, so this
+# script removes it.
 #
-# Driven through the same script the page uses, because the toolkit's own
-# uninstaller refuses to run as root and has to be handed the desktop user.
+# Its units, its helpers, its udev rule and its sudoers file each arrived
+# through a button here, and this uninstaller did not remove them before.
+#
+# This uses the same script that the page uses. The uninstaller of the toolkit
+# refuses to run as root, and it thus needs the desktop user.
 remove_cec_toolkit() {
     watcher_user_dirs || return 0
     local control="$WATCHER_HOME/.local/bin/steamos-cec-toolkitctl"
@@ -177,29 +194,35 @@ remove_menu_entry
 remove_platformio_path
 remove_cec_toolkit
 
-# Stopping the service blanks the strip before the process exits.
+# A stop of the service makes the strip dark before the process exits.
 systemctl disable --now "$NAME.service" 2>/dev/null || true
 rm -f "$UNIT_PATH"
 
-# The CPU settings. Disabling stops it being reapplied at the next boot; what
-# is set right now is left as it is, because putting the governor back would
-# mean knowing what it was before this was ever installed, and nothing here
-# recorded that. It is a setting, not a change to be undone.
+# The CPU settings. This disables the unit, so nothing applies them at the next
+# boot.
+#
+# The current settings stay. To put the governor back needs the value from
+# before the installation, and nothing recorded that value. It is a setting and
+# not a change to reverse.
 systemctl disable "$NAME-power.service" 2>/dev/null || true
 rm -f "$POWER_UNIT_PATH"
 
-# And anything left from before the rename. Somebody uninstalling may never
-# have run the new installer at all - they clone, pull, and run this - so the
-# names it is asked to remove are the old ones. Walking the same list the
-# migration walks is what keeps this from being the one script that does not
-# know about them.
+# And each file from before the rename.
+#
+# A person who uninstalls can have run the new installer never: they clone,
+# pull, and run this script. The names to remove are thus the old names.
+#
+# This walks the same list that the migration walks. Without that, this is the
+# one script with no knowledge of those names.
 remove_old_install "$PURGE"
 systemctl daemon-reload
 
-# Lingering, which the installer turns on so the desktop user's services
-# survive Game Mode. Turned off again here: it was this project that switched
-# it on, and reporting it as "left in place" left every machine that ever had
-# this installed with a switch nobody asked for and nobody would find.
+# The linger setting. The installer switches it on, so that the services of the
+# desktop user continue in Game Mode.
+#
+# This switches it off again. This project switched it on. A report of "left in
+# place" gives each machine with this installation a switch that nobody asked
+# for and nobody finds.
 if [[ -n "${WATCHER_USER:-}" ]] && linger_is_on "$WATCHER_USER"; then
     loginctl disable-linger "$WATCHER_USER" >/dev/null 2>&1 || true
     echo "Turned lingering back off for $WATCHER_USER."
@@ -209,9 +232,9 @@ rm -f "$UDEV_PATH"
 rm -f "$SLEEP_HOOK_PATH"
 udevadm control --reload >/dev/null 2>&1 || true
 
-# Only if it is still ours. Somebody who put their own steamos-utility-center
-# there is entitled to keep it, and a link pointing somewhere else is not
-# something this script installed.
+# Only when the link is still ours. A person who put their own
+# steamos-utility-center there keeps it. A link to another program is not a
+# link that this script installed.
 if [[ -L "$COMMAND_LINK" \
       && "$(readlink "$COMMAND_LINK")" == "$INSTALL_DIR/$NAME" ]]; then
     rm -f "$COMMAND_LINK"
@@ -225,8 +248,8 @@ rm -rf "${INSTALL_DIR:?}"
 
 if [[ $PURGE -eq 1 ]]; then
     rm -f "$CONFIG_PATH" "$POWER_CONFIG_PATH"
-    # The panel's own settings, which live in the desktop user's home rather
-    # than in /etc and were the one file this script never mentioned.
+    # The settings of the panel. They are in the home directory of the desktop
+    # user and not in /etc, and this script did not report that file before.
     [[ -n "${WATCHER_HOME:-}" ]] \
         && rm -f "$WATCHER_HOME/.config/$PANEL_CONFIG"
 fi
@@ -234,8 +257,8 @@ echo "Removed."
 
 # --- kernel module ---------------------------------------------------------
 #
-# The rootfs was unlocked at the top of this run and stays that way until the
-# exit trap puts it back - see unlock_rootfs.
+# This run unlocked the root filesystem at its start. It stays unlocked until
+# the exit trap locks it again. See unlock_rootfs.
 
 if [[ $REMOVE_MODULE -eq 1 ]]; then
     if lsmod | grep -q "^${MODULE_NAME//-/_}"; then
@@ -243,9 +266,9 @@ if [[ $REMOVE_MODULE -eq 1 ]]; then
             || modprobe -r "$MODULE_NAME" 2>/dev/null || true
         echo "Module unloaded."
     fi
-    # Every kernel that has a copy, not only the one running: a SteamOS
-    # update leaves the previous kernel's modules in place, so the shim built
-    # for it would otherwise stay on the machine for ever.
+    # Each kernel with a copy, and not the running kernel only. A SteamOS
+    # update keeps the modules of the previous kernel. Without this, the shim
+    # for that kernel stays on the machine.
     remove_stale_shims
     rm -f "$MODULES_LOAD"
     depmod "$RELEASE" || true
@@ -254,9 +277,11 @@ fi
 
 # --- what is still here, and why -------------------------------------------
 #
-# Said rather than left to be discovered. Everything above is this project's
-# own; everything below is either somebody else's, or yours, or a switch that
-# other things may be hanging off - so it is reported instead of removed.
+# This reports these items and does not leave them for a person to find.
+#
+# Each item above belongs to this project. Each item below belongs to another
+# person, or to the person at the machine, or is a switch that other programs
+# can use. This script thus reports each of them and removes none of them.
 
 echo
 echo "Left in place:"

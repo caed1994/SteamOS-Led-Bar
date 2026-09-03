@@ -9,26 +9,33 @@
 #
 # Run through pkexec by the control panel, so this runs as root.
 #
-# The awkward part, and why this script exists at all: the toolkit's own
-# installer refuses to run as root and shells out to `sudo` about forty times.
-# That is the right shape for somebody at a terminal and the wrong one for a
-# window with nowhere to type a password. Rather than rewrite the installer -
-# it is a module of its own, installable from a terminal by anybody who has
-# not got this panel - this drops back to the desktop user and gives that user
-# a sudo rule for the duration.
+# This is the difficult part, and it is the reason for this script.
 #
-# **The rule is not a security boundary and is not pretending to be one.** It
-# lists the seven programs the installer calls, but `sudo install` and `sudo
-# rm` are root by any other name, so narrowing it buys documentation rather
-# than containment. What contains it is time: it is written after polkit has
-# already authorised this script as root, and removed before the script ends,
-# on every path out including a signal. Whoever triggered this had root for
-# the moment already - the rule hands over nothing extra, it only hands it
-# over in the shape the toolkit's installer expects to find it.
+# The installer of the toolkit refuses to run as root, and it calls `sudo`
+# approximately forty times. That is correct for a person at a terminal. It is
+# wrong for a window with no place to type a password.
 #
-# A copy left behind by a kill -9 is the one case the trap cannot cover, so
-# every run clears a stale one first and the panel's Status & Repair page
-# reports one it finds.
+# This script does not rewrite that installer. The toolkit is a module of its
+# own, and a person with no panel installs it from a terminal.
+#
+# This script thus changes to the desktop user and gives that user a sudo rule
+# for the time of the installation.
+#
+# **The rule is not a security boundary.** It names the seven programs that the
+# installer calls. But `sudo install` and `sudo rm` are root with another name,
+# so a shorter list is documentation and not containment.
+#
+# Time is the containment. This script writes the rule after polkit gives it
+# root, and removes the rule before the script ends. It removes the rule on
+# each path out, and a signal is one of them.
+#
+# The person who started this already had root for that moment. The rule thus
+# gives nothing more. It gives the same rights in the form that the installer
+# of the toolkit expects.
+#
+# A `kill -9` leaves a copy of the rule, and the trap cannot cover that case.
+# Each run thus removes an old copy first, and the Status and Repair page of
+# the panel reports a copy that it finds.
 
 set -euo pipefail
 
@@ -59,10 +66,12 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
-# The resume-wake unit, which the toolkit installs and then enables only
-# alongside the Steam button - and its control program has it in neither
-# service table, so nothing it offers can switch it afterwards. One
-# systemctl, and none of the rest of this script applies.
+# The resume-wake unit. The toolkit installs it and enables it with the Steam
+# button only.
+#
+# Its control program has the unit in neither service table, so nothing that
+# the program offers can switch it. This action is one systemctl command, and
+# the other parts of this script do not apply to it.
 RESUME_WAKE_UNIT="steamos-cec-resume-wake.service"
 
 # ROOT is empty on a machine and a directory in the tests, the same way
@@ -87,11 +96,14 @@ if [[ ! -f "$INSTALLER" ]]; then
     exit 1
 fi
 
-# Who to install for. PKEXEC_UID is set by pkexec to the uid that asked, which
-# is the desktop user this panel is running as - and it is the honest answer
-# where an argument is one the caller chose. The argument is accepted so this
-# can be run by hand and tested; it is only consulted when there is no
-# PKEXEC_UID to prefer.
+# The user to install for.
+#
+# pkexec sets PKEXEC_UID to the uid that asked. That uid is the desktop user
+# that runs this panel, and it is the correct answer. An argument is a value
+# that the caller selected.
+#
+# This script accepts the argument, so that a person can run it by hand and a
+# test can drive it. It reads the argument only when there is no PKEXEC_UID.
 if [[ -n "${PKEXEC_UID:-}" ]]; then
     TARGET="$(getent passwd "$PKEXEC_UID" | cut -d: -f1 || true)"
 elif [[ -n "$WANTED_USER" ]]; then
@@ -105,9 +117,9 @@ if [[ -z "$TARGET" ]]; then
     exit 1
 fi
 if [[ "$TARGET" == "root" ]]; then
-    # Half of what the toolkit installs is user systemd units and a
-    # WirePlumber config in somebody's home. Installed into root's home they
-    # would be in a session that never runs a television.
+    # One half of the toolkit is user systemd units and a WirePlumber
+    # configuration in a home directory. In the home directory of root, they
+    # are in a session that never controls a television.
     echo "the CEC toolkit installs into a desktop session, and root is not one." >&2
     exit 1
 fi
@@ -130,24 +142,32 @@ drop_the_rule() {
     rm -f "$RULE"
 }
 
-# Armed before anything writes the rule, and covering the ways out that are
-# not a clean return. A copy left by a previous run that was killed outright
-# is dealt with by the same trap rather than by a separate sweep here: the
-# file is replaced, not appended to, so this run's own exit takes both away.
+# This trap is set before the write of the rule, and it covers each exit that
+# is not a normal return.
+#
+# The same trap also removes a copy from a previous run that a signal stopped.
+# This script replaces the file and does not add to it, so the exit of this run
+# removes both copies.
 trap drop_the_rule EXIT INT TERM
 
-# Written to a temporary file and checked before it is put in place. A
-# malformed file in /etc/sudoers.d takes *sudo itself* down, not just this
-# rule - which on a machine whose only other way in is this panel is a bad
-# afternoon. visudo -c is the check sudo would do, done while it still costs
+# This writes the rule to a temporary file and checks it before it puts it in
+# place.
+#
+# A malformed file in /etc/sudoers.d stops *sudo itself* and not this rule
+# alone. On a machine whose one other route in is this panel, that is a serious
+# fault.
+#
+# visudo -c is the check that sudo makes. This runs it while it costs
 # nothing.
 #
-# The five programs are the ones the toolkit's installers actually call under
-# sudo, and a test derives that list from the tree rather than trusting this
-# comment. Three other sudo calls in there are not listed and do not need to
-# be: two are the toolkit's own root helpers, which its *permanent* sudoers
-# file already covers by the time they run, and the third is behind a --verify
-# flag this script does not pass.
+# The five programs are the programs that the installers of the toolkit call
+# under sudo. A test reads that list from the tree and does not use this
+# comment.
+#
+# Three other sudo calls in the toolkit are not in the list, and they need no
+# entry. Two of them are the root helpers of the toolkit, and its *permanent*
+# sudoers file covers them at the time of the call. The third is behind a
+# --verify flag that this script does not give.
 staged="$(mktemp)"
 {
     echo "# Written by the SteamOS Utility Center while installing the CEC"
@@ -168,10 +188,12 @@ fi
 install -m 0440 -o root -g root "$staged" "$RULE"
 rm -f "$staged"
 
-# What the installer needs to find, and nothing it does not. systemctl --user
-# talks to a per-user bus, so without these two the user half of the install
-# fails while the root half succeeds - which is the worst of the outcomes,
-# because it looks installed.
+# What the installer needs, and nothing more.
+#
+# systemctl --user speaks to a bus of one user. Without these two variables,
+# the user half of the installation thus fails and the root half succeeds.
+#
+# That is the worst result, because the installation looks complete.
 export_env=(
     "HOME=$TARGET_HOME"
     "USER=$TARGET"
@@ -188,11 +210,14 @@ fi
 
 flags=()
 if [[ "$ACTION" == "install" ]]; then
-    # Files for everything, switched on for nothing. The panel's page is eight
-    # switches, and a feature that arrived already on is one nobody chose -
-    # the volume integration is the only one the toolkit's installer turns on
-    # by default, and set-external-volume writes its own files, so turning it
-    # on later from the page is a complete path rather than a half one.
+    # This installs the files of each feature and switches none of them on.
+    #
+    # The page of the panel is eight switches, and a feature that is on at the
+    # start is a feature that nobody selected.
+    #
+    # The volume integration is the one feature that the installer of the
+    # toolkit switches on. set-external-volume writes its own files, so a
+    # switch on the page later is a complete path.
     flags=(--no-external-volume)
 fi
 
