@@ -3,9 +3,9 @@
 
 """Tests for the control panel's logic, which is kept out of the widgets.
 
-There is no display here and there will not be one on a build machine, so
-everything worth testing - what counts as broken, and what fixes it - lives in
-ledpanel.py with no tkinter in sight.
+There is no display here, and a build machine has none. So the parts with a
+value for a test are in ledpanel.py, and that module does not use tkinter.
+Those parts decide what is broken and what repairs it.
 """
 
 import ast
@@ -100,10 +100,10 @@ class HealthyInstallationTest(unittest.TestCase):
 class LeftoverCecRuleTest(unittest.TestCase):
     """A grant that outlived the install it was for.
 
-    scripts/install-cec.sh lends the desktop user a sudo rule for the length
-    of a CEC install and takes it away in a trap. The one exit that trap
-    cannot see is the signal that does not run traps, and what is left then is
-    a file granting five programs as root that nothing is using.
+    scripts/install-cec.sh gives the desktop user a sudo rule for the time of a
+    CEC install, and a trap removes it. The one exit that the trap cannot see is
+    a signal that does not run traps. The file then stays, and it gives five
+    programs as root to a user who needs none of them.
     """
 
     def _checks(self, present):
@@ -113,9 +113,9 @@ class LeftoverCecRuleTest(unittest.TestCase):
         return ledpanel.run_checks(probe=probe)
 
     def test_a_machine_without_one_is_not_told_about_it(self):
-        # Listed unconditionally this would be a green line about HDMI CEC on
-        # every machine that has never installed it - a checklist reporting on
-        # something that is not part of the installation it is checking.
+        # A line that is always in the list gives a green line about HDMI CEC
+        # on each machine without HDMI CEC. The checklist then reports on a
+        # part that is not in the installation that it examines.
         names = [check.name for check in self._checks(present=False)]
         self.assertEqual([n for n in names if "CEC" in n], [])
 
@@ -149,10 +149,10 @@ class LeftoverCecRuleTest(unittest.TestCase):
 class AfterASteamUpdateTest(unittest.TestCase):
     """The case this panel exists for.
 
-    A SteamOS update brings a new kernel. The module was built for the old
-    one, so it is simply not there any more and the LED device disappears with
-    it - while everything else looks perfectly healthy, which is what makes it
-    puzzling from the outside.
+    A SteamOS update gives a new kernel. The build of the module used the old
+    kernel, so the new kernel has no module and the LED device goes away with
+    it. Each other part looks correct, and that makes the fault difficult to
+    find.
     """
 
     def setUp(self):
@@ -184,10 +184,10 @@ class AfterASteamUpdateTest(unittest.TestCase):
 class LingeringTest(unittest.TestCase):
     """The one that explains the others going quiet rather than failing.
 
-    Measured on a Steam Deck: in Game Mode the phone bridge was not running
-    at all, and so never reported anything wrong. systemd stops a user's
-    services when their last session ends, and switching to Game Mode ends
-    one - so both watchers, written to survive that switch, were not there to.
+    A measurement on a Steam Deck gave this: in Game Mode the phone bridge did
+    not run, so it reported no fault. systemd stops the services of a user at
+    the end of the last session, and a change to Game Mode ends a session. Both
+    watchers must stay alive across that change, and they did not run.
     """
 
     def test_it_is_reported_when_the_services_would_not_survive(self):
@@ -237,9 +237,9 @@ class LingeringTest(unittest.TestCase):
 class PhoneNotificationsTest(unittest.TestCase):
     """Whether the phone flashes would work, which is two questions.
 
-    The bridge has to be running, and KDE Connect has to know a phone. Both
-    look the same from the sofa - a bar that never flashes for a message -
-    and neither showed up here at all before.
+    The bridge must run, and KDE Connect must know a phone. The two faults look
+    the same to a user: a bar with no flash for a message. This page reported
+    neither of the two before.
     """
 
     ON = {"NOTIFY": True, "NOTIFY_PHONE": True}
@@ -300,11 +300,11 @@ class PhoneNotificationsTest(unittest.TestCase):
         self.assertFalse(broken.repairable)
 
     def test_asking_starts_nothing_and_does_not_hang_the_window(self):
-        """The panel asks this while it is drawing itself.
+        """The panel asks this during the draw step of its window.
 
-        Two things follow: it must not revive KDE Connect as a side effect of
-        being looked at, and it must give up quickly enough that a machine
-        where the bus hangs still gets a window.
+        Two rules follow. The call must not start KDE Connect, because a read
+        must change nothing. It must also stop quickly, so a machine with a
+        slow bus still gets a window.
         """
         asked = {}
 
@@ -372,10 +372,10 @@ class CommandTest(unittest.TestCase):
     def test_the_phone_bridge_is_restarted_with_it(self):
         """Reported: switching the phone flashes off and back on did nothing.
 
-        Apply restarted the achievement watcher and not the bridge, so the
-        bridge kept running on a setting that said off - and once it had
-        exited on that setting, nothing here started it again. Both units
-        read the file the panel just wrote; both have to be told.
+        Apply restarted the achievement watcher and not the bridge. The bridge
+        therefore continued with a setting of off. After it exited on that
+        setting, no code here started it again. Both units read the file that
+        the panel wrote, so the panel must restart both.
         """
         self.assertIn(ledpanel.PHONE_BRIDGE, ledpanel.restart_watchers_command())
 
@@ -460,9 +460,9 @@ class DesktopEntryTest(unittest.TestCase):
                     self.assertIn("s|%s|" % token, installer, token)
 
     def test_the_window_and_the_entry_agree_on_the_wm_class(self):
-        # This pair is what ties the running window to the menu entry. Get it
-        # wrong and the desktop names the window after the interpreter that
-        # happens to run it - "python3" in the task bar, with a stock icon.
+        # This pair connects the running window to the menu entry. With an
+        # incorrect value, the desktop gives the window the name of its
+        # interpreter: "python3" in the task bar, with a stock icon.
         panel = os.path.join(HERE, "..", "gui", "steamos-utility-center-panel")
         with open(panel) as handle:
             tree = ast.parse(handle.read())
@@ -517,9 +517,9 @@ class NotificationColourTest(unittest.TestCase):
     def test_every_default_is_one_of_them(self):
         """Or the menu opens on an entry it had to invent for itself.
 
-        A value the list does not hold is still shown - that is how a colour
-        put in the file by hand survives being looked at - but it is shown
-        under its own hex, and a fresh install should not be greeted by one.
+        The menu also shows a value that the list does not hold, and that keeps
+        a colour from a manual edit of the file. But the menu shows it as its
+        hex value, and a new install must not open on a hex value.
         """
         offered = {value.lower() for _label, value in self.colours}
         for _kind, prefix in config_module.CONFIGURABLE_KINDS:
@@ -548,7 +548,7 @@ class NotificationColourTest(unittest.TestCase):
 
 
 class LoadColourMenuTest(unittest.TestCase):
-    """What the two halves of the load gauge may be set to in the panel."""
+    """The colours that the panel offers for the two halves of the load gauge."""
 
     def setUp(self):
         self.colours = ledpanel.load_colours()
@@ -563,10 +563,10 @@ class LoadColourMenuTest(unittest.TestCase):
     def test_both_shipped_colours_are_offered(self):
         """Or the menu opens on six hex digits for a setting nobody chose.
 
-        Neither is on the notification wheel: they were picked to sit about as
-        far apart as two colours on a strip can, which is what makes the two
-        halves read as two - so they have to be offered here as well, or
-        putting back what you started with means typing.
+        Neither colour is on the notification wheel. They have almost the
+        maximum distance that two colours on a strip can have, and that distance
+        separates the two halves. So this menu must also offer them. Without
+        them, a user who wants the first setting again must type it.
         """
         offered = {value.lower() for _label, value in self.colours}
         for key in ("LOAD_CPU_COLOR", "LOAD_GPU_COLOR"):
@@ -597,8 +597,9 @@ class LoadColourMenuTest(unittest.TestCase):
                                  value.lower(), label)
 
     def test_the_two_start_out_telling_the_halves_apart(self):
-        # A gauge whose sides are one colour has stopped saying which chip is
-        # which. Not refused - it is somebody's bar - but not shipped either.
+        # A gauge with one colour on both sides no longer names the chips. The
+        # service accepts it, because the bar belongs to the user. But this
+        # project does not use it as a default.
         self.assertNotEqual(config_module.DEFAULTS["LOAD_CPU_COLOR"].lower(),
                             config_module.DEFAULTS["LOAD_GPU_COLOR"].lower())
 
@@ -635,8 +636,8 @@ class FlashPaletteTest(unittest.TestCase):
         self.assertEqual(offered[:len(known)], known)
 
     def test_it_offers_more_than_a_notification_can_be_set_to(self):
-        # A different question from the settings menu: here you are trying a
-        # colour out, so an odd one is the point rather than a distraction.
+        # This is a different question from the settings menu. Here the user
+        # tries a colour, so an unusual colour is the purpose.
         self.assertGreater(len(self.palette),
                            len(ledpanel.NOTIFICATION_COLOURS))
 
@@ -648,9 +649,9 @@ class FlashPaletteTest(unittest.TestCase):
 class UpdateVerdictTest(unittest.TestCase):
     """What a --check run said, read back out of what it printed.
 
-    The wording is the script's, so these are the script's own sentences
-    rather than invented ones - a rewording there that this did not follow
-    would show up here as an "unknown" where an answer was expected.
+    The script writes this text, so these are the sentences of the script and
+    not sentences from this file. A change of the text in the script, with no
+    change here, gives an "unknown" result where a test expects an answer.
     """
 
     def test_nothing_waiting_is_up_to_date(self):
@@ -762,11 +763,10 @@ class PageSummaryTest(unittest.TestCase):
         HDMI CEC Mods
         Everything is in order.
 
-    directly above a card saying "Not installed yet". Both sentences were
-    true - the summary is counted across every part, and a part that is
-    simply absent is not a fault, because a machine that never wanted CEC is
-    not a broken machine. But printed under that heading it answers a
-    question nobody asked.
+    directly above a card with the text "Not installed yet". Both sentences
+    were correct. The summary counts each part, and an absent part is not a
+    fault, because a machine without CEC is not a broken machine. But below
+    that heading the sentence answers a question that no user asked.
     """
 
     def _parts(self, installed=False):
@@ -821,8 +821,8 @@ class InstalledCommitTest(unittest.TestCase):
     def test_not_knowing_is_not_evidence(self):
         """An install from before the stamp existed leaves none.
 
-        Answering "out of date" to that would be inventing a fault, and this
-        is read by a status light that has no business guessing.
+        An answer of "out of date" reports a fault that does not exist. A
+        status light reads this result, and a status light must not guess.
         """
         self.assertEqual(
             ledpanel.install_is_behind(".", installed="", head="bbbb"), "")
@@ -830,11 +830,11 @@ class InstalledCommitTest(unittest.TestCase):
             ledpanel.install_is_behind(".", installed="aaaa", head=""), "")
 
     def test_both_commits_are_shown_even_when_they_agree(self):
-        """The question this block is asked is which code is running.
+        """The question for this block is which code runs now.
 
-        A version number does not answer it: it changes when somebody
-        remembers to change it, and never between two commits on the same
-        afternoon. So the commit is in the line, and both are in the fold.
+        A version number does not answer that question. It changes when a person
+        changes it, and it never changes between two commits on the same day. So
+        the line holds the commit, and the fold holds both values.
         """
         part = ledpanel.panel_part("1.0.0", installed="abc1234def567",
                                    head="abc1234def567")
@@ -854,9 +854,10 @@ class InstalledCommitTest(unittest.TestCase):
         self.assertEqual(part.detail, [])
 
     def test_the_keyboard_layout_says_its_one_sentence_in_the_line(self):
-        """One sentence behind a Details button is a worse deal than a
-        slightly longer line - reported as a fold that was not worth opening.
-        """
+        """One sentence behind a Details button is worse than a longer line.
+
+                A user reported that fold as one that is not worth a click.
+                """
         part = ledpanel.layout_part("de", {"de": "German (de)"})
         self.assertEqual(part.detail, [])
         self.assertIn("Game Mode", part.verdict)
@@ -869,10 +870,10 @@ class InstalledCommitTest(unittest.TestCase):
         self.assertIn("aaaaaaa", ledpanel.parts_summary([part]))
 
     def test_it_wins_over_there_being_an_update_to_fetch(self):
-        """Both are true at once, and only one of them is actionable here.
+        """Both are true at the same time, and the user can act on one of them.
 
-        "An update is available" after you have already fetched it is the
-        sentence that made this invisible in the first place.
+        The sentence "An update is available" after a fetch is the text that hid
+        this condition.
         """
         part = ledpanel.panel_part("1.0", ledpanel.UPDATE_AVAILABLE,
                                    "3 commits waiting", behind="behind now")
@@ -941,9 +942,9 @@ class ProfileListingTest(unittest.TestCase):
 class DialogTest(unittest.TestCase):
     """Nothing in the window is drawn by the platform any more.
 
-    Tk draws its own message boxes and its own colour chooser, and next to a
-    Material window they are a visitor from another decade - the chooser worst
-    of all, being the one a project about colour puts up to ask for a colour.
+    Tk draws its own message boxes and its own colour chooser, and beside a
+    Material window they look very old. The chooser is the worst of the two,
+    because this project is about colour and that window asks for a colour.
     """
 
     def setUp(self):
@@ -1043,10 +1044,10 @@ class SettingsProfileTest(unittest.TestCase):
             ledpanel.read_profile(self.path)
 
     def test_an_old_profile_with_a_withdrawn_option_still_loads(self):
-        # Profiles outlive settings: one saved before an option was withdrawn
-        # should not have to be edited by hand. Whatever is in RETIRED today
-        # stands in for that here, so this keeps testing the mechanism rather
-        # than one particular name.
+        # A profile stays longer than a setting. A profile from before a
+        # withdrawn option must not need a manual edit. The current content of
+        # RETIRED gives the value here, so this test examines the method and
+        # not one name.
         retired = sorted(config_module.RETIRED)[0]
         with open(self.path, "w") as handle:
             handle.write("LED_COUNT=17\n%s=whatever\n" % retired)
@@ -1131,8 +1132,11 @@ class MenuTranslationTest(unittest.TestCase):
 
 
 class SensorMenuTest(unittest.TestCase):
-    """The sensor setting is a path into /sys, which is no way to ask someone
-    a question - so the menu is built out of what the machine reports."""
+    """The menu of the sensor setting comes from the machine.
+
+        The value is a path into /sys, and the panel must not show such a path
+        to a user.
+        """
 
     def _sensor(self, chip, label, path=None, rank=(0, 0)):
         return {"chip": chip, "label": label, "rank": rank,
@@ -1177,7 +1181,7 @@ class SensorMenuTest(unittest.TestCase):
         self.assertEqual(label, "k10temp temp1")
 
     def test_a_configured_sensor_that_is_gone_is_kept_visible(self):
-        # Dropping it would look like the setting had changed by itself.
+        # Without the entry, the setting looks different for no reason.
         choices = ledpanel.sensor_choices([], None, current="/sys/unplugged")
         self.assertIn("/sys/unplugged", [value for _label, value in choices])
         self.assertIn("not found", choices[-1][0])
@@ -1190,9 +1194,9 @@ class SensorMenuTest(unittest.TestCase):
                          ["auto", "/sys/a"])
 
     def test_the_labels_are_distinct(self):
-        # They are what the menu is keyed on, so two identical ones would make
-        # a choice unreachable - and without a reading to tell them apart,
-        # two inputs on one chip collide that much more easily.
+        # The menu uses them as its key, so two equal labels make one entry
+        # unreachable. Without a value in the label, two inputs on one chip
+        # also give the same label more easily.
         sensors = [self._sensor("k10temp", "", "/sys/hwmon0/temp1_input"),
                    self._sensor("k10temp", "", "/sys/hwmon0/temp2_input")]
         labels = [label for label, _value in
@@ -1230,15 +1234,14 @@ class PanelSettingsTest(unittest.TestCase):
     def _tables(self):
         """The settings table of each tab, as AST nodes.
 
-        Found through SETTINGS_TABS rather than listed here. A page added to
-        the panel and not to a list in this file would be a page none of the
-        checks below ever looked at - which is not a failure anybody would
-        notice, the suite going green either way.
+        This reads SETTINGS_TABS and holds no list of its own. A new page in the
+        panel, with no entry in a list in this file, is a page that no check below
+        reads. No person sees that fault, because the suite passes in both cases.
 
-        Both places settings live, since the window grew a second level:
-        SETTINGS_TABS is the LED strip's own pages and SECTION_SETTINGS is the
-        sections that are a single page of settings. A row on either is a row
-        Apply collects, so a row on either has to be checked.
+        The settings are in two places now, because the window has two levels.
+        SETTINGS_TABS holds the pages of the LED strip. SECTION_SETTINGS holds the
+        sections with one page of settings. Apply collects a row of each of the
+        two, so this must check a row of each of the two.
         """
         assigned = self._assignments()
         tabs = assigned.get("SETTINGS_TABS")
@@ -1266,11 +1269,11 @@ class PanelSettingsTest(unittest.TestCase):
     def _settings(self):
         """Every key the panel offers, on whichever tab.
 
-        A "flash" row carries three of them: the switch is what the row is
-        named after, and the colour and shape sit beside it under keys built
-        from the prefix in the row. They are settings like any other - Apply
-        collects them, DEPENDS_ON greys them - so a helper that only counted
-        the switch would quietly stop checking two thirds of that page.
+        A "flash" row carries three keys. The row has the name of its switch, and
+        the colour and the shape are beside it. Their keys come from the prefix in
+        the row. They are normal settings: Apply collects them, and DEPENDS_ON
+        disables them. A function that counts the switch only therefore stops the
+        check of two thirds of that page.
         """
         keys = []
         for row in self._rows():
@@ -1300,24 +1303,24 @@ class PanelSettingsTest(unittest.TestCase):
         return titles
 
     def test_the_tabs_are_in_the_order_they_are_worked_through(self):
-        # What you set, then what you rarely set, then what those settings
-        # look like, then what you do - which is also the order of how often
-        # they are opened. These are the LED strip's own pages: the keyboard
-        # layout and Status & repair used to be among them and are sections of
-        # their own now, which is the whole point of there being two levels.
-        # What is left is exactly the pages that are about the bar.
+        # The normal settings, then the rare settings, then the look of those
+        # settings, and then the actions. That is also the order of how often a
+        # user opens them. These are the pages of the LED strip. The keyboard
+        # layout and Status & repair were pages here before, and they are now
+        # sections of their own. That change is the reason for the two levels.
+        # The pages here are the pages about the bar.
         self.assertEqual([title.strip() for title in self._tab_titles()],
                          ["Strip", "Desktop mode", "Notifications", "Advanced",
                           "Preview", "Test"])
 
     def test_the_sections_are_in_the_order_the_sidebar_lists_them(self):
-        """The outer level: what kind of thing you are configuring.
+        """The outer level: the type of the settings.
 
-        The bar first because it is what the program is for and what is opened
-        every time; the two unbuilt ones next; the keyboard layout last of the
-        four because it is set once and never again. About is not in the run -
-        it is not a thing you configure - and sits at the foot of the sidebar,
-        which is why it is a name of its own rather than a fifth entry.
+        The bar comes first, because it is the subject of the program and a user
+        opens it each time. The two sections with no page come next. The keyboard
+        layout is the last of the four, because a user sets it one time. About is
+        not in this list, because it holds no settings. It is at the foot of the
+        sidebar, and for that reason it has its own name and is not a fifth entry.
         """
         assigned = self._assignments()
         sections = ast.literal_eval(assigned["SECTIONS"])
@@ -1367,15 +1370,16 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_scene_lists_agree_with_the_service(self):
         """The three lists of scenes on the Desktop page, against desktop.py.
 
-        They are written out in the panel because the tests read that table
-        literally, so they are three chances to disagree with the module that
-        decides what a scene actually does - and disagreeing is invisible: the
-        page greys a slider the bar answers to, or offers one it ignores, and
-        the suite is green either way. This is the one place the two meet.
+        The panel holds these lists, because the tests read that table directly.
+        So there are three places that can become different from the module that
+        decides the behaviour of a scene. Such a difference is not visible: the
+        page disables a slider that the bar uses, or it offers a slider that the
+        bar ignores, and the suite passes in both cases. This test is the one place
+        where the two meet.
 
-        Which is also why the service's own are derived from render.py rather
-        than listed: an effect added there arrives here without anybody having
-        written its name down three times.
+        For the same reason the lists of the service come from render.py and are
+        not written out. A new effect there arrives here, and no person writes its
+        name three times.
         """
         assigned = self._assignments()
         for name, theirs in (
@@ -1400,13 +1404,13 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_preference_hangs_off_the_governors_that_allow_it(self):
         """The page rule and the applier rule have to be the same rule.
 
-        power.epp_in_play decides whether the preference is written; this
-        table decides whether the row is on the page. They disagreeing is
-        either a setting nobody can reach or - worse - one still in force
-        with nothing on screen that shows it.
+        power.epp_in_play decides the write of the preference, and this table
+        decides the row on the page. A difference between the two gives a setting
+        that no user can reach. It can also give a setting that stays active with
+        nothing on the screen that shows it.
 
-        Checked here rather than live because the machine running the suite
-        has no cpufreq, so no governor can be picked on it at all.
+        This test does not use a live window, because the machine of the suite has
+        no cpufreq. No governor is selectable there.
         """
         rule = ast.literal_eval(self._assignments()["EPP_IN_PLAY"])
         self.assertEqual(rule[0], "CPU_GOVERNOR")
@@ -1414,9 +1418,10 @@ class PanelSettingsTest(unittest.TestCase):
         # Never without a governor of ours, and never under the pinning one.
         self.assertNotIn("", allowed, "a preference behind no governor")
         self.assertNotIn(power.PINNED_GOVERNOR, allowed)
-        # The two conditions this table can express. The third - whether the
-        # machine has a preference file at all - is not a value of any menu,
-        # and is answered by not building the row; see the live tests.
+        # The two conditions that this table can give. The third condition is
+        # the question whether the machine has a preference file. That
+        # condition is not a value of a menu. The panel answers it with no row.
+        # See the live tests.
         for governor in allowed:
             self.assertNotEqual(governor, "")
             self.assertTrue(
@@ -1424,17 +1429,18 @@ class PanelSettingsTest(unittest.TestCase):
                 "%s is on the page but the applier would skip it" % governor)
 
     def test_the_preference_menu_offers_no_way_to_leave_it_alone(self):
-        # It is only ever written alongside a governor, so "leave the file
-        # alone" is not a thing it can mean - the governor is where that is
-        # said. The governor's own menu keeps the entry.
+        # The panel writes it with a governor only, so "leave the file alone"
+        # has no meaning for it. The governor gives that answer. The menu of
+        # the governor keeps the entry.
         self.assertEqual(ledpanel.power_choices(("a", "b"), unset=False)[0][1],
                          "a")
         self.assertEqual(ledpanel.power_choices(("a", "b"))[0][1], "")
 
     def test_what_a_switch_governs_is_a_real_setting(self):
-        # The greying-out map names keys on both sides; a typo in either would
-        # quietly leave a row enabled forever - and in the entries that want a
-        # particular value, a typo in the value would grey one out forever.
+        # The map for the disabled rows holds keys on both sides. A spelling
+        # error in one of them leaves a row enabled, with no message. In an
+        # entry with a value, a spelling error in that value disables a row
+        # for each condition.
         panel = self._panel()
         constants, depends = {}, None
         for node in panel.body:
@@ -1461,18 +1467,18 @@ class PanelSettingsTest(unittest.TestCase):
                     entry = ast.literal_eval(need)
                 switch, wanted = (entry if isinstance(entry, tuple)
                                   else (entry, None))
-                # An entry may watch several settings, any one of which being
-                # set to the value will do - so every one of them has to be a
-                # setting, and to be one that can hold it.
+                # An entry can watch more than one setting, and one of them with
+                # that value is sufficient. So each of them must be a setting,
+                # and each of them must accept that value.
                 switches = switch if isinstance(switch, tuple) else (switch,)
                 for switch in switches:
                     self.assertIn(switch, shown, switch)
                 if wanted is None:
                     continue
-                # A value the service would refuse is one this row can never
-                # be ungreyed by, however carefully it is spelled here. An
-                # entry may name several, any one of which will do, and every
-                # one of them has to be a value the setting can hold.
+                # A value that the service refuses never enables this row, also
+                # with a correct spelling here. An entry can name more than one
+                # value, and one of them is sufficient. Each of them must be a
+                # value that the setting accepts.
                 for switch in switches:
                     for value in (wanted if isinstance(wanted, tuple)
                                   else (wanted,)):
@@ -1520,9 +1526,9 @@ class PanelSettingsTest(unittest.TestCase):
     def test_no_setting_of_the_coupled_pair_is_refused(self):
         """The two temperature marks are the one pair of sliders that interact.
 
-        validate() wants a span between them, and two independent knobs cannot
-        express that - so the ranges are kept apart instead. If they ever
-        overlap, Apply starts refusing settings the panel itself offered.
+        validate() needs a distance between them, and two independent sliders
+        cannot give that. So the two ranges do not overlap. With an overlap,
+        Apply refuses settings that the panel offered.
         """
         marks = {}
         for entry in self._rows():
@@ -1565,10 +1571,10 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_system_page_names_the_settings_syssettings_owns(self):
         """The System page is written out; this is what pins it to the module.
 
-        Both ways round. A key on the page that syssettings does not own would
-        be read from the LED service's config and written back to it - the one
-        thing the split exists to prevent - and a setting syssettings owns
-        that no page offers is one nobody can reach.
+        This checks both directions. A key on the page that syssettings does not
+        own comes from the configuration of the LED service and goes back to it.
+        The split of the two files exists to prevent that. A setting of
+        syssettings with no row on a page is a setting that no user can reach.
         """
         panel = self._panel()
         table = self._assignments(panel).get("SYSTEM")
@@ -1579,10 +1585,10 @@ class PanelSettingsTest(unittest.TestCase):
         self.assertIn(syssettings.LAYOUT, keys)
 
     def test_the_install_time_ones_are_left_out(self):
-        # Serial port, baud rate, device path and library paths are decisions
-        # made once, at install time. A slider is the wrong shape for them,
-        # and getting one wrong takes the bar down rather than changing how it
-        # looks - which is what everything in this panel should do.
+        # The serial port, the baud rate, the device path and the library paths
+        # are decisions of the install step. A slider is the incorrect control
+        # for them. An incorrect value also stops the bar and does not change
+        # its look. Each control in this panel must change the look only.
         shown = self._settings()
         for key in ("SERIAL_PORT", "BAUD", "DEVICE", "STEAM_LIBRARY",
                     "STEAM_ROUTE"):
@@ -1591,14 +1597,16 @@ class PanelSettingsTest(unittest.TestCase):
     def test_the_two_written_by_hand_are_left_out(self):
         """Absent on purpose, both of them, and for the same reason.
 
-        PHONE_APPS gives one app a look of its own, which is a list you add
-        rows to - a control this window does not have. PHONE_APPS_ONLY
-        silences every app that list does not name, so on its own, with no
-        list written, it switches the phone off by another name: a label that
-        could not explain itself without describing a file you had to edit
-        elsewhere. Every phone notification looks the same from the window,
-        and both of these stay settings of the file, where the comments have
-        room to say what they do.
+        PHONE_APPS gives one app its own look. It is a list, and a user adds rows
+        to it. This window has no such control.
+
+        PHONE_APPS_ONLY stops each app that the list does not name. Alone, with no
+        list, it therefore turns the phone notifications off under another name.
+        Its label cannot explain that without a description of a file that the user
+        must edit.
+
+        Each phone notification has the same look in this window. Both settings
+        stay in the file, where the comments have the space to describe them.
         """
         shown = self._settings()
         for key in ("PHONE_APPS", "PHONE_APPS_ONLY"):
@@ -1606,9 +1614,10 @@ class PanelSettingsTest(unittest.TestCase):
             self.assertNotIn(key, shown, key)
 
     def test_the_panel_never_writes_a_value_the_service_would_reject(self):
-        # The sliders repeat the bounds validate() enforces. If the two ever
-        # disagree, the panel offers a value that kills the service on
-        # restart - so check the ends of every numeric range against it.
+        # The sliders repeat the limits of validate(). A difference between the
+        # two lets the panel offer a value that stops the service at the next
+        # restart. So this test compares the limits of each numeric range with
+        # the validator.
         for entry in self._rows():
             key, _label, kind = (entry.elts[0].value, entry.elts[1].value,
                                  entry.elts[2].value)
@@ -1618,9 +1627,10 @@ class PanelSettingsTest(unittest.TestCase):
             for edge in (low, high):
                 candidate = dict(config_module.DEFAULTS)
                 candidate[key] = int(edge) if kind == "int" else float(edge)
-                # The two frame rates are coupled, and the panel resolves
-                # that itself by moving the idle rate - so mirror that rule
-                # here instead of pretending the ends are independent.
+                # The two frame rates depend on each other, and the panel
+                # corrects that with a change to the idle rate. So this test
+                # uses the same rule and does not treat the limits as
+                # independent.
                 if key == "IDLE_FPS":
                     candidate["FPS"] = max(candidate["FPS"], candidate[key])
                 if key == "FPS":
@@ -1718,9 +1728,9 @@ ForegroundNormal=252,252,252
         self.assertEqual(kdetheme.parse_color("1,2,3,255"), "#010203")
 
     def test_the_seed_and_the_brightness_are_what_the_panel_takes(self):
-        # Everything the window is painted with now comes from these three,
-        # material.py deriving the rest - so it is these that have to survive
-        # a scheme the file only half describes.
+        # Each colour of the window comes from these three values, and
+        # material.py calculates the other colours. So these three must be
+        # correct for a file with an incomplete scheme.
         for palette in (kdetheme.BREEZE_LIGHT,
                         kdetheme.read(self._write(self.BREEZE_DARK))):
             for key in ("selection", "negative", "positive"):
@@ -1940,9 +1950,9 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
         self.assertEqual(picture[13][23], self.FILL, "and bottom right")
 
     def test_an_open_bottom_has_no_line_across_it(self):
-        # This was the visible bug: a border along the bottom of every tab
-        # reads as one stripe struck through the whole row - and nine-slice
-        # scaling repeats those rows, so it is drawn again and again.
+        # This was the visible fault: a border at the bottom of each tab reads
+        # as one line through the complete row. Nine-slice scaling also repeats
+        # those rows, so Tk draws the line many times.
         picture = roundrect.rows(24, 14, (6, 6, 0, 0), self.FILL, self.BACK,
                                  border=self.EDGE, border_width=1,
                                  open_bottom=True)
@@ -1951,7 +1961,7 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
         self.assertIn(self.EDGE, picture[7], "the sides keep their border")
 
     def test_without_that_the_bottom_line_is_there(self):
-        # The opposite case, so the flag is shown to be doing the work.
+        # The opposite case, so this test proves that the flag does the work.
         picture = roundrect.rows(24, 14, (6, 6, 0, 0), self.FILL, self.BACK,
                                  border=self.EDGE, border_width=1)
         self.assertIn(self.EDGE, picture[-1])
@@ -1974,8 +1984,8 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
                             "the tick ran outside the box at (%d,%d)" % (x, y))
 
     def test_a_tick_looks_like_a_tick(self):
-        # Two strokes meeting low and left: the lowest ink should sit left of
-        # centre, and the highest to the right of it.
+        # Two strokes meet at the low left. The lowest ink must therefore be
+        # left of the centre, and the highest ink right of it.
         picture = roundrect.rows(20, 20, 5, self.BACK, self.BACK)
         roundrect.draw_check(picture, self.FILL)
         ink = [(x, y) for y, row in enumerate(picture)
@@ -2016,12 +2026,12 @@ class TabAndCheckboxShapeTest(unittest.TestCase):
 class OwnDropDownTest(unittest.TestCase):
     """Every drop-down in the window is one this project draws.
 
-    A ttk.Combobox drops a Tk listbox, and that listbox is three problems at
-    once: it holds text and nothing else, so a list of colours cannot show the
-    colours; it cannot be made to look like the rest of the window - its text
-    is drawn as a *selection*, which is how "stretch" and "bloom" came out
-    pale grey on pale grey; and Tk posts it under a grab it does not let go
-    of, so it went on floating over whatever was raised over the panel.
+    A ttk.Combobox opens a Tk listbox, and that listbox gives three problems.
+    First, it holds text only, so a list of colours cannot show the colours.
+    Second, it cannot take the look of the other controls. Tk draws its text as
+    a *selection*, and "stretch" and "bloom" therefore came out pale grey on
+    pale grey. Third, Tk posts it under a grab and does not release it, so it
+    stayed above each window over the panel.
 
     The settings pages moved to a field of our own; the branch and firmware
     fields on Status & repair were left behind and still had all three. So
@@ -2082,10 +2092,10 @@ class TouchTargetTest(unittest.TestCase):
 class GameModeTest(unittest.TestCase):
     """Privileged actions cannot work in Game Mode, and must say so.
 
-    pkexec needs a polkit agent to ask for a password with. Game Mode runs
-    none, and pkexec's fallback wants a controlling terminal, which a program
-    Steam launched does not have - so it exits 127 complaining about /dev/tty,
-    which explains nothing at all to whoever pressed the button.
+    pkexec needs a polkit agent for the password question. Game Mode runs no
+    such agent. The fallback of pkexec needs a controlling terminal, and a
+    program that Steam starts has no terminal. pkexec then exits with 127 and
+    an error about /dev/tty, and that message explains nothing to the user.
     """
 
     def test_gamescope_is_recognised(self):
@@ -2112,8 +2122,8 @@ class GameModeTest(unittest.TestCase):
 
     def test_a_serial_port_is_not_a_missing_authentication_agent(self):
         # "/dev/tty" was one of the signs, and a firmware flash prints
-        # /dev/ttyUSB0 - so a flash that worked perfectly came with advice
-        # about Game Mode underneath it. Verbatim from the machine.
+        # /dev/ttyUSB0. A correct flash therefore showed advice about Game
+        # Mode below it. This text comes from a real machine.
         output = ("Looking for upload port...\nAuto-detected: /dev/ttyUSB0\n"
                   "Uploading .pio/build/esp8266_gpio14/firmware.bin\n"
                   "Hash of data verified.")
