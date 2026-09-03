@@ -5619,8 +5619,16 @@ class Panel:
         name, wanted = left[0]
         self._write("%s %s...\n" % ("Turning on" if wanted else "Turning off",
                                     cec.BY_NAME[name][1]))
-        started = self.runner.start(
-            cec.toggle_command(name, wanted, source_dir=SOURCE_DIR),
+        # The wake after a resume is a unit of root and goes through a
+        # program that the sudoers rule permits. Where there is no rule, the
+        # same switch runs through pkexec and asks. Each other switch here is
+        # a unit of the user, or a helper that the toolkit's own rule permits,
+        # and for those two commands are the same one.
+        first = cec.toggle_command(name, wanted, source_dir=SOURCE_DIR)
+        asking = cec.toggle_command(name, wanted, source_dir=SOURCE_DIR,
+                                    ask=True)
+        started = self._run_privileged(
+            first, None if first == asking else asking,
             lambda _code, rest=left[1:]: self._run_cec_toggles(rest))
         if not started:
             # The Runner refused it, because another command runs. This

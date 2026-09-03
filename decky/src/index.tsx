@@ -70,10 +70,6 @@ const doAction = callable<[string], Answer>("do_action");
 // process, so this costs a game nothing.
 const POLL_MS = 5000;
 
-// The one switch that this page cannot operate. It controls a unit of root,
-// and Game Mode has nobody to answer a password.
-const BY_HAND = ["resume-wake"];
-
 // The scenes of the strip, in words. The command answers with the names that
 // the configuration file uses.
 const SCENE_WORDS: Record<string, string> = {
@@ -322,13 +318,9 @@ function Content() {
               <PanelSectionRow key={feature.name}>
                 <ToggleField
                   label={feature.label}
-                  description={
-                    BY_HAND.includes(feature.name)
-                      ? "This one is set in the panel: it controls a unit of root, and Game Mode has nobody to ask for a password."
-                      : feature.explains
-                  }
+                  description={feature.explains}
                   checked={Boolean(switches[feature.name])}
-                  disabled={busy || BY_HAND.includes(feature.name)}
+                  disabled={busy}
                   onChange={(on: boolean) => write("cec", { [feature.name]: on })}
                 />
               </PanelSectionRow>

@@ -162,15 +162,20 @@ class PageTest(unittest.TestCase):
         """A layout is set one time, and that belongs in the panel."""
         self.assertNotIn("keyboard", self._areas())
 
-    def test_the_switch_that_needs_a_password_is_off_the_page(self):
-        """resume-wake controls a unit of root. Game Mode cannot ask.
+    def test_every_switch_of_the_toolkit_can_be_moved_here(self):
+        """There was one that could not, and it needed a program of its own.
 
-        The page shows it and refuses to move it, rather than leaving it out:
-        a switch that is simply absent reads as a switch that was lost.
+        resume-wake is a unit of root. Every switch of that kind in the
+        toolkit has a small program behind it and a line in a sudoers file
+        that permits it, and this one had neither: it went through the
+        installer under pkexec, which asks. So it was the one switch on this
+        page that a person could look at and not move.
+
+        It has its own program now. This holds the page to that: a switch that
+        the page draws and refuses to move is a switch that reads as broken.
         """
-        for name in ctl.BY_HAND:
-            self.assertIn(name, self.text, name)
-        self.assertIn("BY_HAND", self.text)
+        self.assertNotIn("BY_HAND", self.text)
+        self.assertNotIn("set in the panel", self.text)
 
     def test_each_setting_it_writes_is_one_the_command_accepts(self):
         """A key with a spelling error is a refusal that a person cannot fix."""
@@ -182,8 +187,6 @@ class PageTest(unittest.TestCase):
     def test_the_switches_come_from_the_command_and_not_from_a_list_here(self):
         """A switch that the toolkit gains must appear with no work here."""
         for name in cec.BY_NAME:
-            if name in ctl.BY_HAND:
-                continue
             self.assertNotIn('"%s"' % name, self.text, name)
 
     def test_the_polled_half_is_the_cheap_one(self):

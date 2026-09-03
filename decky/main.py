@@ -88,7 +88,7 @@ class Plugin:
         """The half that needs systemctl, lsblk and the toolkit.
 
         A page asks for this one time when it opens, and again after a change
-        that could have moved one of the answers.
+        that moves one of its answers.
         """
         return await self._ctl("status", "--full")
 

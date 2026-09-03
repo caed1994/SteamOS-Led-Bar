@@ -1154,7 +1154,7 @@ it.
 
 The rule is as small as a rule can be. There is **no wildcard in it**: each
 line names one program by its full path in `/var/lib/steamos-utility-center/`,
-and the one file that program is permitted to read.
+and the one argument that program is permitted to take.
 
 ```
 deck ALL=(root) NOPASSWD: /var/lib/steamos-utility-center/steamos-utility-center-config-apply /var/lib/steamos-utility-center/staged/strip.conf
@@ -1166,7 +1166,24 @@ name that nobody knows in advance needs a `*` in the rule, and a rule with a
 belongs to you, and its parent belongs to root, so nobody can put a symlink in
 the place of it.
 
-Each of the three programs makes two more checks before it reads the file. It
+The switch that wakes the television after a resume is the fourth program. It
+takes one of two words, so it gets two lines rather than a wildcard:
+
+```
+deck ALL=(root) NOPASSWD: /var/lib/steamos-utility-center/steamos-utility-center-resume-wake on
+deck ALL=(root) NOPASSWD: /var/lib/steamos-utility-center/steamos-utility-center-resume-wake off
+```
+
+That switch controls a unit of root, and it needed a password before. Every
+switch of that kind in the HDMI CEC toolkit has a small program behind it and a
+line that permits it, and this one had neither: it is not upstream's switch,
+and it went through the installer of the toolkit under `pkexec`. It was thus
+the one switch on that page that Game Mode could show and not move. A rule for
+that installer is not the answer, because the same script installs and removes
+the whole toolkit. A rule names a program, so the program has to be small. See
+`scripts/resume-wake.sh`.
+
+Each of the three appliers makes two more checks before it reads the file. It
 refuses a symlink, because `install` as root would follow one and copy, for
 example, `/etc/shadow` into a file that everybody can read. And it refuses a
 file that belongs to another user. A call with no user at all is the boot-time
@@ -1221,11 +1238,13 @@ Decky starts it as you. The three programs that need rights are reached the
 same way the panel reaches them, through the
 [sudoers rule](#why-it-needs-no-password).
 
-Two things are in the panel and not here, and both on purpose. **Take
-ownership** walks a whole drive as root. **Wake the television on resume**
-controls a unit of root that the toolkit's own control program does not know.
-Game Mode has nobody to answer a password for either, so the page shows the
-second one and refuses to move it.
+One thing is in the panel and not here, on purpose. **Take ownership** walks a
+whole drive as root, and Game Mode has nobody to answer for that.
+
+Every switch of the HDMI CEC toolkit can be moved from here. **Wake the
+television on resume** could not at first: it controls a unit of root and went
+through the installer of the toolkit under `pkexec`. It has a program of its
+own now, with two lines in the rule that permit it.
 
 To build the page again after a change to it:
 

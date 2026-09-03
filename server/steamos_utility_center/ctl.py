@@ -67,6 +67,10 @@ INSTALL_DIR = "/var/lib/steamos-utility-center"
 APPLY_CONFIG = os.path.join(INSTALL_DIR, "steamos-utility-center-config-apply")
 APPLY_POWER = os.path.join(INSTALL_DIR, "steamos-utility-center-power-apply")
 APPLY_MOUNTS = os.path.join(INSTALL_DIR, "steamos-utility-center-mounts-apply")
+# The switch that wakes the television after a resume. It is a unit of root,
+# so it needs a program of its own with a rule of its own. See
+# scripts/resume-wake.sh, which says why it is not scripts/install-cec.sh.
+RESUME_WAKE = os.path.join(INSTALL_DIR, "steamos-utility-center-resume-wake")
 
 # Which applier belongs to which area. The panel reads this to build the same
 # command that this file runs, so the two never name different programs.
@@ -320,16 +324,6 @@ def cec_offers():
             "actions": [name for name, _label, _tail in cec.ACTIONS]}
 
 
-# The one CEC switch that this command cannot operate.
-#
-# It controls a root unit that the toolkit's own control program does not
-# know, so the panel switches it through a helper of ours under pkexec. Game
-# Mode has nobody to answer a password, and a rule for that helper would
-# permit far more than one switch: the helper installs and removes the whole
-# toolkit.
-BY_HAND = ("resume-wake",)
-
-
 def cec_write(updates, may_prompt=False, run=None, home=None):
     """Switches a feature of the toolkit, or writes a setting of it.
 
@@ -347,11 +341,13 @@ def cec_write(updates, may_prompt=False, run=None, home=None):
         if key not in cec.BY_NAME:
             settings[key] = value
             continue
-        if key in BY_HAND:
-            raise CtlError(
-                "%s is switched in the panel and not here. It controls a unit "
-                "of root, and Game Mode has nobody to ask for a password."
-                % key)
+        if cec.BY_NAME[key][0] == cec.RESUME_WAKE:
+            # A unit of root, so this one goes through a program of ours that
+            # the sudoers rule permits. Every other switch is a unit of the
+            # user, or a helper that the toolkit's own rule permits.
+            said.append(privileged([RESUME_WAKE, "on" if value else "off"],
+                                    may_prompt, run))
+            continue
         code, answer = run(cec.toggle_command(key, bool(value), home))
         if code != 0:
             raise CtlError(answer.strip() or "the toolkit refused %s" % key)
@@ -511,15 +507,21 @@ def sudoers_text(user):
         "# the parent of that directory belongs to root, so nobody can put a",
         "# symlink in the place of it. The programs refuse a symlink also.",
         "#",
-        "# The chown of Take ownership is deliberately not here. It",
-        "# walks a whole drive as root, and it is a rare and deliberate act.",
-        "# It stays in the panel, where a person answers for it.",
+        "# The chown of Take ownership is deliberately not here. It walks a",
+        "# whole drive as root, and it is a rare and deliberate act. It stays",
+        "# in the panel, where a person answers for it.",
         "",
     ]
     for applier, area in ((APPLY_CONFIG, "strip"), (APPLY_POWER, "power"),
                           (APPLY_MOUNTS, "drives")):
         lines.append("%s ALL=(root) NOPASSWD: %s %s"
                      % (user, applier, STAGED[area]))
+    # The switch for the wake after a resume. Two lines rather than one with a
+    # `*`: the argument is one of two words, so both words fit in the rule and
+    # nothing else does.
+    for state in ("on", "off"):
+        lines.append("%s ALL=(root) NOPASSWD: %s %s"
+                     % (user, RESUME_WAKE, state))
     return "\n".join(lines) + "\n"
 
 

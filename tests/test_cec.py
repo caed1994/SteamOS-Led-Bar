@@ -85,13 +85,42 @@ class FeatureTableTest(unittest.TestCase):
                             "systemd", "system", cec.RESUME_WAKE_UNIT)
         self.assertTrue(os.path.exists(unit), unit)
 
-    def test_switching_it_goes_through_our_helper_not_the_toolkit(self):
-        # toolkitctl cannot change it, and it is a root unit. So this is the
-        # one function with a pkexec command from this project.
+    def test_switching_it_goes_through_our_own_program(self):
+        """toolkitctl cannot change it, because it is a unit of root.
+
+        It has a program of its own for that, and the sudoers rule of this
+        project permits that program with the two words it takes. It thus
+        needs no password, as every other switch on that page does not.
+        """
+        was = os.path.exists
+        cec.os.path.exists = lambda path: path == cec.RESUME_WAKE_HELPER \
+            or was(path)
+        self.addCleanup(setattr, cec.os.path, "exists", was)
+        command = cec.toggle_command("resume-wake", True, source_dir="/clone")
+        self.assertEqual(command, ["sudo", "-n", cec.RESUME_WAKE_HELPER, "on"])
+        self.assertEqual(
+            cec.toggle_command("resume-wake", False, source_dir="/clone")[-1],
+            "off")
+
+    def test_an_installation_with_no_such_program_asks_instead(self):
+        """A clone with nothing installed, or one from before that program.
+
+        The installer of the toolkit is the old way, and it asks. That is
+        worse than not asking and better than a switch that does nothing.
+        """
         command = cec.toggle_command("resume-wake", True, source_dir="/clone")
         self.assertEqual(command[0], "pkexec")
         self.assertTrue(command[1].endswith("scripts/install-cec.sh"))
         self.assertEqual(command[2:], ["resume-wake", "on"])
+
+    def test_asking_can_be_asked_for(self):
+        was = os.path.exists
+        cec.os.path.exists = lambda path: path == cec.RESUME_WAKE_HELPER \
+            or was(path)
+        self.addCleanup(setattr, cec.os.path, "exists", was)
+        self.assertEqual(
+            cec.toggle_command("resume-wake", True, source_dir="/clone",
+                               ask=True)[0], "pkexec")
 
     def test_what_systemd_says_decides_whether_it_is_on(self):
         self.assertTrue(cec.resume_wake_enabled("enabled\n"))

@@ -266,20 +266,36 @@ def resume_wake_enabled(answer):
     return bool(answer) and answer.strip().startswith("enabled")
 
 
-def toggle_command(name, on, home=None, source_dir=None):
+# The program that switches the wake after a resume, and where it is.
+#
+# That switch is a unit of root, so it needs a program with root behind it.
+# Every switch of this kind in the toolkit has one, and a line in a sudoers
+# file that permits it. This switch is not upstream's, so it had neither: it
+# went through scripts/install-cec.sh under pkexec, which asks for a password
+# and thus works on a desktop and nowhere else.
+#
+# It has its own program now, and this project's own sudoers rule permits it
+# with the two words it takes. See scripts/resume-wake.sh and ctl.sudoers_text.
+RESUME_WAKE_HELPER = ("/var/lib/steamos-utility-center/"
+                      "steamos-utility-center-resume-wake")
+
+
+def toggle_command(name, on, home=None, source_dir=None, ask=False):
     """Returns the command that switches one feature on or off.
 
-    `source_dir` is the clone. The resume-wake switch alone needs it. That
-    switch controls a root unit that the toolkit's control program does not
-    know, so it goes through the same privileged helper of ours that installs
-    the toolkit and not through toolkitctl.
+    `source_dir` is the clone, and only the fallback of the resume-wake switch
+    uses it. `ask` is that fallback: it gives the command that asks for a
+    password, for an installation that has no sudoers rule.
     """
     kind = BY_NAME[name][0]
     state = "on" if on else "off"
     if kind == RESUME_WAKE:
-        return ["pkexec",
-                os.path.join(source_dir or "", "scripts", "install-cec.sh"),
-                "resume-wake", state]
+        if ask or not os.path.exists(RESUME_WAKE_HELPER):
+            return ["pkexec",
+                    os.path.join(source_dir or "", "scripts",
+                                 "install-cec.sh"),
+                    "resume-wake", state]
+        return ["sudo", "-n", RESUME_WAKE_HELPER, state]
     if kind == EXTERNAL_VOLUME:
         return [command_path(home), "set-external-volume", state]
     verb = "set-service" if kind == USER_SERVICE else "set-system-service"

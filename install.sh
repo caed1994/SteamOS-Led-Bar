@@ -194,6 +194,11 @@ install -m 0755 "$SOURCE_DIR/scripts/apply-power.sh" \
     "$INSTALL_DIR/steamos-utility-center-power-apply"
 install -m 0755 "$SOURCE_DIR/scripts/apply-mounts.sh" \
     "$INSTALL_DIR/steamos-utility-center-mounts-apply"
+# The switch for the wake after a resume, for the same reason: a sudoers rule
+# names a program, and this one is small enough to name. See
+# scripts/resume-wake.sh.
+install -m 0755 "$SOURCE_DIR/scripts/resume-wake.sh" \
+    "$INSTALL_DIR/steamos-utility-center-resume-wake"
 find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
 
 # The commit of those files, so that the panel can report a clone that moved

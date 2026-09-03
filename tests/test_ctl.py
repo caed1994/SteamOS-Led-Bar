@@ -409,15 +409,34 @@ class SudoersTest(unittest.TestCase):
             if line.startswith("deck"):
                 self.assertNotIn("*", line, line)
 
-    def test_each_line_names_one_program_and_one_file(self):
-        rules = [line for line in ctl.sudoers_text("deck").splitlines()
-                 if line.startswith("deck")]
-        self.assertEqual(len(rules), 3)
+    def _rules(self):
+        return [line for line in ctl.sudoers_text("deck").splitlines()
+                if line.startswith("deck")]
+
+    def test_each_line_names_one_program_and_one_argument(self):
+        """Three appliers, and the switch that takes one of two words."""
+        rules = self._rules()
+        self.assertEqual(len(rules), 5)
         for line in rules:
             after = line.split("NOPASSWD:")[1].split()
             self.assertEqual(len(after), 2, line)
             self.assertTrue(after[0].startswith(ctl.INSTALL_DIR), line)
-            self.assertTrue(after[1].startswith(ctl.STAGED_DIR), line)
+
+    def test_the_appliers_are_permitted_one_staged_file_each(self):
+        for line in self._rules():
+            program, argument = line.split("NOPASSWD:")[1].split()
+            if program in ctl.APPLIER.values():
+                self.assertTrue(argument.startswith(ctl.STAGED_DIR), line)
+
+    def test_the_switch_is_permitted_its_two_words_and_nothing_else(self):
+        """Two lines rather than one with a `*` in it.
+
+        The argument is one of two words. Both words thus fit in the rule, and
+        a wildcard would permit every other word with them.
+        """
+        words = sorted(line.split()[-1] for line in self._rules()
+                       if ctl.RESUME_WAKE in line)
+        self.assertEqual(words, ["off", "on"])
 
     def test_it_permits_exactly_the_files_the_command_stages(self):
         """A rule for a file the command never writes is a rule with no use."""
