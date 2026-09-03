@@ -3,12 +3,12 @@
 
 """The installer's prerequisite hunting, without installing anything.
 
-A first install on a fresh SteamOS stalls before the module is ever compiled:
-the rootfs is read-only, pacman's keyring has never been initialised, and the
-headers are named after the exact kernel rather than after "linux". The last
-of those is the one you cannot guess, so it is worked out from the running
-kernel - and that arithmetic is what is checked here. Everything that would
-touch the system is left to the machine it runs on.
+A first install on a new SteamOS stops before the build of the module. The
+rootfs is read-only, the keyring of pacman is empty, and the headers carry
+the name of the exact kernel and not the name "linux". A user cannot guess
+that last name, so the installer calculates it from the running kernel.
+These tests examine that calculation. Each step that changes the system runs
+on the machine of the user only.
 """
 
 import glob
@@ -29,11 +29,11 @@ from shellvalues import shell_value                   # noqa: E402
 def _function(name):
     """One shell function lifted out, by source, wherever it lives.
 
-    Sourcing the whole installer is not an option: it installs things. Lifting
-    the function keeps the test honest - it runs the same text that ships. Both
-    files are searched because a function shared with the uninstaller moves
-    into scripts/user-unit.sh, and a test that only knew one of the two would
-    fail on the move rather than on the behaviour.
+    A source of the complete installer is not possible, because it installs
+    programs. This method takes the text of the function from the file, so the
+    test runs the same text as the machine. It searches both files, because a
+    function that the uninstaller also uses moves into scripts/user-unit.sh. A
+    test with one file fails at that move and not at a change of behaviour.
     """
     for path in (INSTALLER, os.path.join(HERE, "..", "scripts",
                                          "user-unit.sh"),
@@ -57,10 +57,11 @@ def _run(functions, call, roots=("/usr/lib/modules", "/lib/modules")):
 
 
 class KernelHeadersPackageTest(unittest.TestCase):
-    """Which headers package matches the kernel that is running.
+    """The headers package for the kernel of this machine.
 
-    Getting this wrong is not a failed install but a worse one: headers for a
-    kernel you are not running build a module whose vermagic will not load.
+    An incorrect name here does not give a failed install. It gives a worse
+    result: headers of another kernel build a module with a vermagic that the
+    kernel refuses.
     """
 
     FUNCTIONS = ("kernel_headers_package",)
@@ -131,15 +132,14 @@ USER_UNIT = os.path.join(HERE, "..", "scripts", "user-unit.sh")
 
 
 class InvokingUserTest(unittest.TestCase):
-    """Which desktop user a root script is working on behalf of.
+    """The desktop user of a root script.
 
-    Reported from a Steam Machine: after updating from the control panel,
-    "Services survive Game Mode" was the one thing broken. The installer does
-    turn lingering on - but only after working out who to turn it on for, and
-    that answer came from SUDO_USER alone. The panel runs the installer with
-    pkexec, which sets PKEXEC_UID and no SUDO_USER, so the whole step decided
-    there was nobody to install for: no lingering, no menu entry, and any new
-    user unit never installed either.
+    A Steam Machine gave this report: after an update from the control panel,
+    "Services survive Game Mode" was the one broken item. The installer turns
+    lingering on, but first it must find the user. That answer came from
+    SUDO_USER only. The panel starts the installer with pkexec, and pkexec sets
+    PKEXEC_UID and no SUDO_USER. The complete step therefore found no user: no
+    lingering, no menu entry, and no new user unit.
     """
 
     def _sourced(self, call, **environment):
@@ -269,11 +269,11 @@ SLEEP_HOOK = os.path.join(HERE, "..", "systemd-sleep", "steamos-utility-center")
 class RootfsTest(unittest.TestCase):
     """Unlocking SteamOS's read-only root, and putting it back.
 
-    Against the shared file rather than against either script, because being
-    shared is the fix: the installer had this and the uninstaller had a later
-    copy of its own that only covered the kernel module - so removing the
-    suspend hook, three steps earlier, failed on a read-only /usr and took the
-    whole uninstall with it.
+    These tests read the shared file and not one of the two scripts, because
+    the shared file is the correction. The installer had this code, and the
+    uninstaller had a later copy of its own for the kernel module only. The
+    removal of the suspend hook, three steps earlier, therefore failed on a
+    read-only /usr and stopped the complete uninstall.
     """
 
     def _with_readonly(self, call, state="enabled"):
@@ -314,8 +314,8 @@ class RootfsTest(unittest.TestCase):
         self.assertIn("relock=1", done.stdout)
 
     def test_one_somebody_else_unlocked_is_left_as_they_left_it(self):
-        # Running steamos-readonly disable yourself and then this should not
-        # end with the rootfs locked again behind you.
+        # A user can run steamos-readonly disable first. This code must then
+        # not lock the rootfs again at the end.
         done, did = self._with_readonly(
             'unlock_rootfs; echo "relock=$ROOTFS_RELOCK"', state="disabled")
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -347,11 +347,11 @@ class RootfsTest(unittest.TestCase):
 class UninstallHomeTest(unittest.TestCase):
     """What the installer wrote into the desktop user's home, taken back.
 
-    None of it is under a root path, so none of the uninstaller's rm -f lines
-    reached it: the menu entry stayed in the launcher pointing at a project
-    that was no longer installed, its icon stayed in the icon theme, and the
-    PATH line the installer had appended stayed in .bashrc under a comment
-    naming an installer that was gone.
+    None of these files is under a root path, so no rm -f line of the
+    uninstaller reached them. The menu entry stayed in the launcher, for a
+    project that was no longer on the machine. Its icon stayed in the icon
+    theme. The PATH line from the installer stayed in .bashrc, below a comment
+    with the name of an installer that was gone.
     """
 
     OWN_BASHRC = "# mine\nalias ll='ls -l'\nexport EDITOR=vim\n"
@@ -430,8 +430,8 @@ class UninstallHomeTest(unittest.TestCase):
         self.assertFalse(os.path.exists(icons[0]), "icon still in the theme")
 
     def test_an_icon_left_at_another_size_goes_too(self):
-        # It is filed under the width read out of the PNG, so an older install
-        # may have put one somewhere this one would never look.
+        # The width from the PNG gives the directory, so an older install can
+        # have put a file in a directory that this code does not read.
         room, home, _entry, icons, _profile = self._home(sizes=(128, 512))
         self._call("remove_menu_entry", room, home)
         for icon in icons:
@@ -447,14 +447,13 @@ class UninstallHomeTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "")
 
     def test_the_path_line_goes_and_nothing_else_does(self):
-        """Under either comment - the one written now, and the one before it.
+        """Under both comments: the current one, and the one before it.
 
-        These two lines are deleted from somebody's .bashrc by exact match,
-        which is what makes it safe to touch a file that is theirs. It also
-        means the wording is an interface: the rename changed the comment, and
-        without keeping the old spelling every .bashrc an older install wrote
-        would carry a line naming an installer that no longer exists, with
-        nothing left that would take it back out.
+        The uninstaller deletes these two lines from the .bashrc of a user by an
+        exact match, and that makes a change to their file safe. The text is
+        therefore an interface. The new name changed the comment. Without the old
+        spelling, each .bashrc from an older install keeps a line with the name of
+        an installer that no longer exists, and no code removes it.
         """
         line = shell_value("PLATFORMIO_PATH_LINE")
         for note in (shell_value("PLATFORMIO_PATH_NOTE"),
@@ -480,8 +479,8 @@ class UninstallHomeTest(unittest.TestCase):
     def test_a_line_somebody_wrote_themselves_is_not_ours_to_delete(self):
         """Only the two exact lines, and only under that comment.
 
-        Somebody who put PlatformIO on their own PATH before ever meeting this
-        project should still have it afterwards.
+        A user who added PlatformIO to their own PATH before this project must
+        keep that line.
         """
         theirs = 'export PATH="$HOME/.platformio/penv/bin:/opt/bin:$PATH"'
         room, home, _entry, _icons, profile = self._home(
@@ -498,11 +497,11 @@ class UninstallHomeTest(unittest.TestCase):
     def test_what_the_installer_writes_is_what_this_takes_back(self):
         """The two halves against each other, which is the only real proof.
 
-        Both are held to the constants in the shared file, but a test that
-        only checked that would pass on two functions that agreed about a
-        string and disagreed about anything else - a trailing space, a
-        different comment. So the writer runs, then the remover, and what is
-        left has to be exactly what was there before.
+        Both use the constants of the shared file. But a test of that alone
+        passes for two functions that agree about one string and are different
+        in each other property, such as a space at the end or another comment.
+        So this test runs the writer, then the remover, and the file must be
+        exactly the first file.
         """
         room, home, _entry, _icons, profile = self._home(bashrc=self.OWN_BASHRC)
         # WATCHER_HOME is what add_platformio_to_path writes against; the
@@ -553,9 +552,9 @@ class SleepHookTest(unittest.TestCase):
     def test_it_writes_into_the_pipe_the_configuration_names(self):
         """NOTIFY_FIFO is a setting, and this used to know only the default.
 
-        A machine that had moved the pipe got a hook writing where nothing was
-        reading: the strip went dark on suspend instead of breathing, with
-        nothing anywhere connecting the two.
+        On a machine with another path for the pipe, the hook wrote to a path
+        with no reader. The strip then went dark at a suspend and did not
+        breathe, and no message connected the two.
         """
         _room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
         self.assertEqual(self._read(pipe, "pre", config), "standby\n")
@@ -577,28 +576,28 @@ class SleepHookTest(unittest.TestCase):
         hook = open(SLEEP_HOOK).read()
         self.assertIn('DEFAULT_FIFO="/run/steamos-utility-center/notify"', hook)
         _room, _pipe, config = self._setup("LED_COUNT=17\n")
-        # Nothing at the default path on a build machine, so it is the quiet
-        # exit below rather than a write - which is the point.
+        # A build machine has no file at the default path, so the hook takes
+        # the exit below and writes nothing. That is the subject of this test.
         self.assertEqual(self._run("pre", config).returncode, 0)
 
     def test_a_pipe_nobody_is_reading_does_not_hang_the_suspend(self):
         """systemd waits here before it suspends.
 
-        A FIFO opened for writing alone blocks until somebody opens the other
-        end, so a pipe left behind by a service that died stopped the machine
-        going to sleep at all - and the `|| exit 0` could not help, because
-        nothing failed, it simply never returned.
+        An open of a FIFO for a write waits until a program opens the other end.
+        A pipe from a service that stopped therefore stopped each suspend of the
+        machine. The `|| exit 0` does not help there, because nothing failed. The
+        call did not return.
         """
         _room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
-        # Named through the environment as well as the file, so this reaches
-        # the write however the path is worked out - it is the open that is
-        # being tested, not the lookup above it.
+        # The environment and the file both give the path, so this test
+        # reaches the write for each lookup method. The subject of the test is
+        # the open call and not the lookup above it.
         done = self._run("post", config, timeout=10,      # raises if it hangs
                          STEAMOS_LED_NOTIFY_FIFO=pipe)
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_no_pipe_at_all_is_a_quiet_success(self):
-        # The service may be stopped, or notifications switched off.
+        # The service can be stopped, or the notifications can be off.
         _room, _pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n",
                                            make_pipe=False)
         done = self._run("pre", config)
@@ -648,31 +647,31 @@ class InstallerShapeTest(unittest.TestCase):
 
         with open(os.path.join(HERE, "..", "README.md")) as handle:
             readme = handle.read()
-        # This project's own commands only - the page is full of git, pacman
-        # and systemctl, and none of those are ours to install. An allow-list
-        # of other people's tools would need extending every time one is
-        # mentioned, which is a test that eventually gets edited rather than
-        # read.
+        # The commands of this project only. The page also holds git, pacman
+        # and systemctl, and this project installs none of those. A list of the
+        # tools of other projects needs a new entry at each new mention. A
+        # person then edits that test and does not read it.
         typed = set(re.findall(r"^\s*(?:sudo )?(steamos-utility-center[a-z-]*)\b",
                                readme, re.M))
         self.assertIn(name, typed, "the README names no such command")
-        # Every command this project puts on the PATH, by constant. A second
-        # program was added and the README told people to run it before it was
-        # linked anywhere - which is exactly the fault this test is about,
-        # caught the second time round rather than the first.
+        # Each command that this project puts on the PATH, by constant. A
+        # second program came into the project, and the README gave it to the
+        # users before a link existed. That is the fault of this test, and the
+        # test found it at the second occurrence and not at the first.
         linked = {os.path.basename(shell_value(each))
                   for each in ("COMMAND_LINK", "POWER_COMMAND_LINK")}
         self.assertEqual(typed - linked - {"steamos-utility-center.conf"}, set(),
                          "the README names a command nothing installs")
 
     def test_the_user_units_are_installed_before_anything_that_can_fail(self):
-        """Order, not presence - and this one was reported, not imagined.
+        """The order, and not the presence. A user reported this fault.
 
-        They used to be installed at the very end, after pacman, the kernel
-        module and the firmware flash. Under set -e any of those ends the run,
-        and then the units are simply not there: "Unit steamos-utility-center-phone.
-        service not found", on a machine where everything else had worked.
-        They depend on none of it, so they go on disk first.
+        The installer wrote them at the end before, after pacman, the kernel
+        module and the firmware flash. Under set -e each of those steps can end
+        the run, and the units are then absent. A machine gave "Unit
+        steamos-utility-center-phone.service not found", and each other step
+        worked there. The units need none of those steps, so they go to disk
+        first.
         """
         installed = self.text.index("\ninstall_user_units || true")
         for marker, what in (("pacman -S --needed", "installing packages"),
@@ -723,18 +722,17 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertIn("kernel_headers_package", self.text)
 
     def test_the_keyring_is_prepared_before_pacman_is_used(self):
-        # A SteamOS that has never installed a package fails every -S on
-        # signatures, which reads like the package is missing.
+        # A SteamOS with no earlier package install fails each -S on the
+        # signature, and that message reads as an absent package.
         self.assertIn("pacman-key --init", self.text)
         self.assertIn("pacman-key --populate", self.text)
 
     def test_the_rootfs_is_unlocked_before_anything_is_written(self):
-        """Order, not presence - that is what went wrong.
+        """The order, and not the presence. The order was the fault.
 
-        Unlocking around each write in turn left the suspend hook being
-        installed into /usr/lib while the rootfs had been locked again, and
-        set -e turns that into an aborted install. It is unlocked once, before
-        the first question is even asked.
+        An unlock around each write left the rootfs locked again at the write of
+        the suspend hook into /usr/lib. Under set -e that ends the install. The
+        script now unlocks the rootfs one time, before the first question.
         """
         unlock = self.text.index("\nunlock_rootfs || true")
         for path, what in (('SLEEP_HOOK_PATH"', "the suspend hook"),
@@ -770,15 +768,14 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertIn('rm -f "$WATCHER_HOME/.config/$PANEL_CONFIG"', text)
 
     def test_the_uninstaller_unlocks_before_it_removes_anything(self):
-        """Order, and this one was measured rather than imagined.
+        """The order, and a measurement gave this result.
 
-        The suspend hook lives under /usr/lib/systemd, and `rm -f` on a locked
-        rootfs does not quietly do nothing - it fails with "Read-only file
-        system", which under set -e ended the uninstall three steps in: udev
-        rule gone, and the service files, the command link and the
-        configuration all still there with nothing said about it. The
-        uninstaller had an unlock of its own, but only in front of the kernel
-        module, forty lines further down.
+        The suspend hook is under /usr/lib/systemd. `rm -f` on a locked rootfs
+        does not return with a success. It fails with "Read-only file system",
+        and under set -e that ended the uninstall after three steps. The udev
+        rule was gone, and the service files, the command link and the
+        configuration were still on disk, with no message. The uninstaller had
+        its own unlock, but only before the kernel module, forty lines below.
         """
         with open(UNINSTALLER) as handle:
             text = handle.read()
@@ -792,7 +789,7 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertNotIn("ROOTFS_WAS_READONLY", text)
 
     def test_both_scripts_unlock_it_the_same_way(self):
-        # Which is the whole point of the shared file - see RootfsTest.
+        # That is the purpose of the shared file. See RootfsTest.
         with open(USER_UNIT) as handle:
             shared = handle.read()
         self.assertIn("ROOTFS_RELOCK=1", shared)
@@ -810,9 +807,9 @@ class InstallerShapeTest(unittest.TestCase):
     def test_platformio_is_offered_whatever_the_firmware_answer_was(self):
         """It used to be reached only from inside the flashing step.
 
-        The firmware question defaults to "no", so pressing Enter through the
-        installer meant PlatformIO was never mentioned - and the first time you
-        did want to flash, it was a download away.
+        The firmware question has the default "no". A user who presses Enter
+        through the installer therefore never reads about PlatformIO. At the
+        first flash, that user must download it first.
         """
         offer = self.text.index("\nensure_platformio || true")
         guard = self.text.index('[[ -n "$FLASH_ENV" ]] || return 0')
@@ -836,9 +833,9 @@ class InstallerShapeTest(unittest.TestCase):
     def test_the_two_scripts_spell_that_line_the_same_way(self):
         """Written by one and deleted by the other, both by exact match.
 
-        A line appended in one spelling and looked for in another is a line
-        nobody removes - and this one names the installer that put it there,
-        so it would sit in somebody's .bashrc pointing at a project that is
+        One spelling in the write step and another spelling in the search step
+        leaves the line on disk. This line also names the installer that wrote
+        it, so it stays in the .bashrc of the user and names a project that is
         no longer on the machine.
         """
         with open(USER_UNIT) as handle:
@@ -867,11 +864,11 @@ class InstallerShapeTest(unittest.TestCase):
     def test_every_path_the_installer_writes_is_one_the_uninstaller_knows(self):
         """Which is the whole question: does it all come back off again.
 
-        By constant rather than by literal, because both scripts already name
-        them the same way, and a path added to one and missed in the other is
-        exactly the kind of leftover nobody notices - the menu entry sat in
-        somebody's launcher that way, pointing at a project that was no longer
-        installed.
+        This uses the constants and not the text, because both scripts already
+        use the same constants. A path in one script, and not in the other, is a
+        file that stays on the machine and that no user finds. The menu entry
+        stayed in the launcher of a user in that way, for a project that was no
+        longer on the machine.
         """
         with open(UNINSTALLER) as handle:
             uninstaller = handle.read()
@@ -889,17 +886,17 @@ class InstallerShapeTest(unittest.TestCase):
     def test_the_cpu_applier_is_installed_and_removed(self):
         """The second program this project installs, and its unit.
 
-        The path check above only sees things named by a constant, and the
-        applier is copied by its literal name alongside the service - so it
-        would go uncovered, and an installed program nobody removes is the
-        leftover that check exists to prevent.
+        The path check above reads the constants only. The installer copies the
+        applier by its own name, beside the service. So no check reads it. An
+        installed program that no script removes is the file that the check must
+        find.
         """
         with open(UNINSTALLER) as handle:
             uninstaller = handle.read()
         self.assertIn("server/steamos-utility-center-power", self.text)
         self.assertIn("steamos-utility-center-power.service", self.text)
-        # Removed with the rest of INSTALL_DIR, which the uninstaller wipes
-        # whole - so what has to be named there is the unit outside it.
+        # The uninstaller removes the complete INSTALL_DIR, and this file goes
+        # with it. So the list must name the unit outside that directory.
         self.assertIn("POWER_UNIT_PATH", uninstaller)
         self.assertIn('systemctl disable "$NAME-power.service"',
                       uninstaller)
@@ -918,8 +915,8 @@ class InstallerShapeTest(unittest.TestCase):
             self.assertIn('systemctl enable "$SERVICE"', handle.read())
 
     def test_the_things_that_live_in_a_home_are_taken_back(self):
-        # Under no root path, so none of the rm -f lines reach them - see
-        # UninstallHomeTest for what these actually do.
+        # These are under no root path, so no rm -f line reaches them. See
+        # UninstallHomeTest for their behaviour.
         with open(UNINSTALLER) as handle:
             text = handle.read()
         for call in ("remove_menu_entry", "remove_platformio_path"):
@@ -929,9 +926,9 @@ class InstallerShapeTest(unittest.TestCase):
     def test_what_it_leaves_behind_it_says_so(self):
         """A thing left on purpose and a thing forgotten look identical.
 
-        So the ones that are somebody else's - the config, the module, the
-        clone, lingering, PlatformIO itself - are reported at the end rather
-        than left to be found.
+        So the script reports the files of the user at the end, and it does not
+        leave them for the user to find. Those files are the configuration, the
+        module, the clone, the lingering switch and PlatformIO.
         """
         with open(UNINSTALLER) as handle:
             text = handle.read()
@@ -1000,9 +997,9 @@ class RetiredUserFilesTest(unittest.TestCase):
     def test_it_does_not_take_a_directory_that_is_not_empty(self):
         """The drop-in directory belongs to somebody else's unit.
 
-        They may have overrides of their own in it, so it goes only when it is
-        empty - which is what rmdir does on its own, and why the failure is
-        swallowed rather than reported.
+        That unit can have its own drop-in files there, so this removes the
+        directory only when it is empty. rmdir does exactly that, and for that
+        reason the script does not report its failure.
         """
         self.assertIn('rmdir "$WATCHER_DIR/$(dirname "$dropin")" '
                       '2>/dev/null || true', self.shared)
@@ -1023,11 +1020,11 @@ class RetiredUserFilesTest(unittest.TestCase):
 class InstalledStampTest(unittest.TestCase):
     """The installer records what it installed, and update.sh says it must run.
 
-    Two halves of the same mistake. Pulling changes the clone; installing
-    changes what runs. The window showed only the first, and update.sh stopped
-    without a word about the second - so a machine that had fetched a fix sat
-    there running the copy from before it, while everybody read its logs and
-    wondered why the fix had not worked.
+    These are two halves of one fault. A pull changes the clone, and an
+    install changes the running code. The window showed the first half only,
+    and update.sh stopped with no message about the second half. A machine with
+    a new correction in its clone therefore ran the old copy, and each user
+    read its log and asked why the correction had no result.
     """
 
     def setUp(self):
@@ -1049,9 +1046,9 @@ class InstalledStampTest(unittest.TestCase):
     def test_it_reads_the_clone_as_a_directory_git_will_talk_about(self):
         """This runs as root over somebody else's clone.
 
-        Without safe.directory git refuses to answer, and every install would
-        then quietly leave no stamp - which reads as "not recorded" forever
-        and puts the whole comparison back to being useless.
+        Without safe.directory, git gives no answer. Each install then writes no
+        record, and no message reports that. The panel reads "not recorded" for
+        each install, and the comparison has no value.
         """
         self.assertIn("safe.directory=$SOURCE_DIR", self.installer)
 
@@ -1081,11 +1078,11 @@ class PanelIconTest(unittest.TestCase):
     """The name the installer files the icon under, and the one the
     uninstaller globs for.
 
-    Found during the rename: the installer wrote steamos-utility-center-panel.png
-    and the glob looked for steamos-utility-center.png, so the icon would have
-    been installed and never removed. Both now read PANEL_ICON out of
-    scripts/user-unit.sh, and this is what says they still do - a pair of
-    names that have to match by hand is a pair that drifts.
+    The change of the name gave this fault: the installer wrote
+    steamos-utility-center-panel.png, and the glob searched for
+    steamos-utility-center.png. The uninstaller therefore never removed the
+    icon. Both now read PANEL_ICON from scripts/user-unit.sh, and this test
+    proves that. Two names that a person must keep equal become different.
     """
 
     def test_the_installer_files_it_where_the_uninstaller_looks(self):
@@ -1098,13 +1095,12 @@ class PanelIconTest(unittest.TestCase):
                       "the installer names the icon itself again")
 
     def test_the_migration_moves_the_panels_settings_where_it_reads_them(self):
-        """Two files, two languages, one name - and nothing enforced it.
+        """Two files in two languages hold one name, and no test compared them.
 
-        The migration moves ~/.config/steamos-led-panel.conf to a name it
-        spells in shell; the panel reads a name it spells in Python. They were
-        briefly different, and the whole of the symptom would have been
-        somebody's theme back to dark after an update, with the file sitting
-        one name away.
+        The migration moves ~/.config/steamos-led-panel.conf to a name in the
+        shell file. The panel reads a name in the Python file. The two names were
+        different for a short time. The symptom is a theme back at dark after an
+        update, and the file one name away.
         """
         sys.path.insert(0, os.path.join(HERE, "..", "gui"))
         import appsettings
@@ -1128,11 +1124,11 @@ class PanelIconTest(unittest.TestCase):
 class UninstallDefaultsTest(unittest.TestCase):
     """Uninstall means uninstall.
 
-    It used to keep the settings and the kernel module unless asked twice, so
-    the common case - somebody who wants this off their machine - was the one
-    that needed two flags nobody knew about, and the run ended with a list of
-    what it had decided to leave. The flags are still there; they are the ones
-    that keep now.
+    The script kept the settings and the kernel module before, and a user
+    needed two flags for a complete removal. The normal case is a user who wants
+    this project off the machine, and that case needed two flags that no user
+    knew. The run also ended with a list of the files that it kept. The flags
+    are still there, and they now keep those files.
 
     Run with --help after the flag under test: the arguments are read before
     anything is done, so this exercises the parsing without uninstalling
@@ -1169,9 +1165,9 @@ class UninstallDefaultsTest(unittest.TestCase):
     def test_removing_is_what_happens_without_a_flag(self):
         """The inversion itself, read off the script.
 
-        Both switches are derived from the keeping flag, so the body goes on
-        asking what is being removed - and neither can be left at a default
-        that keeps something.
+        Both switches come from the keep flag, so the body of the script still
+        asks about the removal. Neither switch can keep its default and keep a
+        file.
         """
         with open(UNINSTALLER) as handle:
             text = handle.read()
@@ -1239,9 +1235,8 @@ class StaleShimTest(unittest.TestCase):
     def test_the_running_kernel_keeps_its_own(self):
         """The one case that must not go wrong.
 
-        Called after a build, with the kernel just built for - so the copy
-        that was made a moment ago has to survive and every other one has to
-        go.
+        The installer calls this after a build, with the kernel of that build.
+        The new copy must stay, and each other copy must go.
         """
         room, root = self._root()
         done, _said = self._run('remove_stale_shims "%s"' % self.KERNELS[1],
@@ -1250,7 +1245,7 @@ class StaleShimTest(unittest.TestCase):
         self.assertEqual(self._left(root), [self.KERNELS[1]])
 
     def test_naming_no_kernel_takes_all_of_them(self):
-        # Which is the uninstaller: nothing is being kept.
+        # That is the uninstaller, and it keeps nothing.
         room, root = self._root()
         done, _said = self._run("remove_stale_shims", root, room)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -1274,18 +1269,20 @@ class StaleShimTest(unittest.TestCase):
 class MigrationTest(unittest.TestCase):
     """The install that is already on the machine under its old name.
 
-    The project was renamed from "SteamOS LED bar" to the SteamOS Utility
-    Centre, and with it every unit, config and command it installs. Renaming
-    them in the tree is the easy half; the half that breaks somebody's machine
-    is that nothing about installing under new names removes what is already
-    there under the old ones. An update without this leaves the old
-    steamos-led-serial.service enabled and running beside the new unit - two
-    processes on one serial port - and leaves the settings in the old config
-    file, which nothing reads any more, so every one of them silently goes
-    back to its default.
+    This project changed its name from "SteamOS LED bar" to the SteamOS
+    Utility Centre, and each unit, configuration file and command changed with
+    it. A change of the names in the tree is the simple half. The second half
+    breaks the machine of a user: an install under the new names removes no file
+    under the old names.
 
-    Run against a directory built here rather than against /etc, which is what
-    ROOT in scripts/user-unit.sh is for.
+    An update without this step leaves the old steamos-led-serial.service
+    enabled and running beside the new unit. Two processes then hold one serial
+    port. It also leaves the settings in the old configuration file, and no
+    program reads that file. Each setting therefore returns to its default with
+    no message.
+
+    These tests use a directory of their own and not /etc. ROOT in
+    scripts/user-unit.sh exists for that.
     """
 
     OLD_CONFIG = ("LED_COUNT=17\nSERIAL_PORT=/dev/steamos-led-esp\n"
@@ -1421,7 +1418,7 @@ class MigrationTest(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(where, gone)), gone)
 
     def test_the_drop_in_directory_goes_only_when_it_is_empty(self):
-        """It belongs to somebody else's unit, and they may have overrides."""
+        """It belongs to another unit, and that unit can have drop-in files."""
         room, root, where = self._root(old=False)
         directory = ".config/systemd/user/steamos-cec-boot-wake.service.d"
         self._put(where, directory + "/10-steamos-utility-center.conf", "x\n")
@@ -1441,11 +1438,11 @@ class MigrationTest(unittest.TestCase):
     def test_the_old_service_is_stopped_before_its_file_is_taken_away(self):
         """The one ordering that matters on a running machine.
 
-        A unit file that is merely deleted leaves the service running - it is
-        already loaded - and it goes on holding the serial port. The new one
-        then starts, finds the port busy, and reports a bar that is not
-        plugged in. Removing the file also leaves the enable symlink behind,
-        so systemd keeps trying to start something that is gone.
+        A delete of a unit file alone leaves the service running, because
+        systemd already loaded it. That service keeps the serial port. The new
+        service then starts, finds the port in use, and reports a bar with no
+        connection. A delete also leaves the enable symlink, so systemd tries
+        to start a unit that is gone.
         """
         root, _home, _done, calls = self._migrate()
         self.assertIn("systemctl stop steamos-led-serial.service", calls)
@@ -1462,10 +1459,11 @@ class MigrationTest(unittest.TestCase):
     def test_the_settings_are_carried_across_rather_than_lost(self):
         """The quiet half, and the one nobody would notice until later.
 
-        Without this the new install writes a fresh config full of defaults,
-        the old file sits unread beside it, and every setting somebody ever
-        changed is back where it started - LED count, serial port, effects,
-        the lot. Nothing fails; the strip just does something else.
+        Without this step, the new install writes a configuration file with the
+        defaults. The old file stays beside it, and no program reads it. Each
+        setting of the user therefore returns to its default: the LED count, the
+        serial port, the effects, and each other value. No step fails, and the
+        strip shows a different effect.
         """
         root, _home, _done, _calls = self._migrate()
         new = os.path.join(root, "etc/steamos-utility-center.conf")
@@ -1473,8 +1471,9 @@ class MigrationTest(unittest.TestCase):
         with open(new) as handle:
             said = handle.read()
         self.assertIn("LED_COUNT=17", said)
-        # The board it is plugged into, which is not renamed - see the note
-        # in user-unit.sh. A migration that rewrote this would unplug the bar.
+        # The board of the connection, and its name does not change. See the
+        # note in user-unit.sh. A migration that changes this value removes the
+        # connection to the bar.
         self.assertIn("SERIAL_PORT=/dev/steamos-led-esp", said)
         self.assertFalse(
             os.path.exists(os.path.join(root, "etc/steamos-led-serial.conf")))
@@ -1484,11 +1483,10 @@ class MigrationTest(unittest.TestCase):
     def test_the_notification_pipe_is_pointed_at_the_new_directory(self):
         """NOTIFY_FIFO is a live setting naming a directory the unit creates.
 
-        RuntimeDirectory= in the unit is what makes /run/<name> exist, so
-        renaming the unit renames that directory. A config carried over
-        verbatim would point the pipe at /run/steamos-led-serial, which
-        nothing creates any more - and notifications would simply stop
-        arriving, with nothing in any log to say why.
+        RuntimeDirectory= in the unit makes /run/<name>, so a new unit name gives
+        a new directory. A configuration file with the old value points the pipe
+        at /run/steamos-led-serial, and no program makes that directory now. The
+        notifications then stop, and no log gives the reason.
         """
         root, _home, _done, _calls = self._migrate()
         with open(os.path.join(root, "etc/steamos-utility-center.conf")) as f:
@@ -1519,12 +1517,12 @@ class MigrationTest(unittest.TestCase):
     def test_the_file_that_loads_the_kernel_module_is_left_alone(self):
         """/etc/modules-load.d/steamos-led-bar.conf is not ours to take.
 
-        It carries an old-looking name and is written by the vendored
-        leds-valve-shim installer, under that name, today - see
-        leds-valve-shim/PROVENANCE.md, which is why that script is kept
-        unmodified. Sweeping it up with the rest of the steamos-led-* names
-        would stop the module loading at the next boot, which is the strip
-        going dark a reboot after an update, with nothing to connect the two.
+        The name looks like an old name of this project. But the leds-valve-shim
+        installer in this repository writes it under that name today. See
+        leds-valve-shim/PROVENANCE.md, which gives the reason this project keeps
+        that script unchanged. A removal of the file with the other steamos-led-*
+        names stops the module at the next boot. The strip then goes dark one
+        restart after an update, and no message connects the two.
         """
         root, _home, _done, _calls = self._migrate()
         self.assertTrue(
@@ -1574,9 +1572,10 @@ class MigrationTest(unittest.TestCase):
     def test_running_it_twice_is_the_same_as_running_it_once(self):
         """An install that fails halfway is one somebody runs again.
 
-        The second run meets a machine that is already half migrated, and it
-        must not undo the first - in particular it must not move the config
-        it already moved, or overwrite the new one with a stale copy.
+        The second run finds a machine with a partial migration, and it must
+        not reverse the first run. In particular it must not move the
+        configuration file again, and it must not write an old copy over the
+        new file.
         """
         room, root, home = self._root()
         first, _calls = self._run("migrate_old_install", root, home, room)
@@ -1589,11 +1588,11 @@ class MigrationTest(unittest.TestCase):
             self.assertIn("LED_COUNT=17", f.read())
 
     def test_a_new_config_beside_an_old_one_wins(self):
-        """Both present is a machine somebody has already migrated by hand.
+        """Two files come from a machine with a manual migration.
 
-        The new file is the one being read, so it is the one that stands. The
-        old one is left where it is rather than deleted: it is still somebody's
-        settings, and this is not the script that gets to throw them away.
+        The panel reads the new file, so the new file wins. The script keeps the
+        old file and does not delete it. That file still holds the settings of a
+        user, and this script must not remove them.
         """
         room, root, home = self._root()
         self._put(root, "etc/steamos-utility-center.conf", "LED_COUNT=99\n")
@@ -1608,10 +1607,11 @@ class MigrationTest(unittest.TestCase):
     def test_the_uninstaller_keeps_nothing_and_purges_on_request(self):
         """Its half of the same list: remove, do not carry across.
 
-        Somebody uninstalling may never have run the new installer - they
-        pull, they uninstall, and every name on the machine is an old one. So
-        the uninstaller walks this list too, or it is the one script that does
-        not know the old names exist.
+        A user can run the uninstaller with no earlier run of the new
+        installer. That user pulls the new version and then removes the
+        project, and each name on the machine is an old name. So the
+        uninstaller also reads this list. Without it, the uninstaller is the one
+        script with no knowledge of the old names.
         """
         room, root, home = self._root()
         done, calls = self._run("remove_old_install 0", root, home, room)
@@ -1640,11 +1640,10 @@ class MigrationTest(unittest.TestCase):
         """
         with open(INSTALLER) as handle:
             text = handle.read()
-        # The call, on a line of its own - not the name, which also appears in
-        # the comment above it explaining why the call is there. Matching the
-        # name found the comment, which sits earlier in the file than the
-        # first install step whether the call is there at all or not: deleting
-        # the call outright still passed.
+        # The call, on a line of its own. This does not match the name, because
+        # the comment above the call also holds it. A match on the name found
+        # that comment. The comment is above the first install step for each
+        # state of the call, so a delete of the call passed this test.
         called = re.search(r"^migrate_old_install$", text, re.M)
         self.assertIsNotNone(called, "the installer never migrates")
         self.assertLess(called.start(),
