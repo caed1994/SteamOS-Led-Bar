@@ -207,12 +207,13 @@ NOTIFICATIONS = [
     ]),
     ("From your phone", [
         # One row, on purpose. Each notification from the phone flashes in the
-        # same way, and that is the complete setting. PHONE_APPS gives one
-        # app its own look, and PHONE_APPS_ONLY stops each other app. But
-        # both settings are lists that the user writes manually. A switch
-        # here works only after an edit of that file, and its label cannot
-        # explain that. So they stay settings of the file. There the
-        # comments have the space to describe them.
+        # same way, and that is the complete setting. PHONE_APPS gives one app
+        # its own look, and PHONE_APPS_ONLY stops each other app. But both
+        # settings are lists that the user writes manually. A switch here works
+        # only after an edit of that file, and its label cannot explain that.
+        #
+        # So they stay settings of the file. There the comments have the space
+        # to describe them.
         ("NOTIFY_PHONE", "Phone notifications", "flash", "PHONE",
          None, None),
     ]),
@@ -289,10 +290,6 @@ SETTINGS_TABS = (
     ("Advanced", ADVANCED),
 )
 
-# Sections whose whole body is one table of settings, rather than a list of
-# pages. Kept as a table for the same reason SETTINGS_TABS is one: between
-# them these two are every settings row in the window, and the tests walk
-# both. A section missing from here is one Apply would never collect.
 # The balance of the CPU between speed and power. Both rows have the type
 # "power". The panel makes their menus from the values that this machine
 # reports, and not from a list in this file. power.py gives the reason a list
@@ -324,6 +321,10 @@ APP_NOTE = (
     "stage stays dark whichever you pick: it is a strip of light in a dim "
     "room, and drawn against a pale window it would be a washed-out one.")
 
+# Sections where the complete body is one table of settings, and not a list
+# of pages. This is a table for the same reason as SETTINGS_TABS. Together
+# the two hold each settings row in the window, and the tests read both. Apply
+# does not collect a section that is absent from here.
 SECTION_SETTINGS = {
     "keyboard": (SYSTEM, SYSTEM_NOTE),
     "power": (POWER, POWER_NOTE),
@@ -352,30 +353,31 @@ APP_KEYS = frozenset(appsettings.DEFAULTS)
 
 # -- the window's top level -------------------------------------------------
 #
-# What kind of thing you are configuring, which is a different question from
-# which page of it you are on. The bar had one list of pages until it stopped
-# being only a bar: a keyboard layout and a CPU governor are not settings of
-# the LED strip, and a single list with all of them on it would say they were.
+# The type of the settings, which is a different question from the page. The
+# window had one list of pages while it controlled the bar only. A keyboard
+# layout and a CPU governor are not settings of the LED strip, and one list
+# with each of them on it reports that they are.
 #
-# So two levels. This is the outer one - the list down the left edge, one
-# entry per section - and the LED strip's own seven pages are the inner one,
-# which is unchanged and now lives inside a single section.
+# So there are two levels. This is the outer level: the list at the left edge,
+# with one entry for each section. The seven pages of the LED strip are the
+# inner level. They did not change, and they are now in one section.
 #
-# (key, title, subtitle, icon). The key is what the code refers to a section
-# by; the title and subtitle are what the entry says; the icon is drawn by
-# SidebarEntry, which is where the names are answered.
+# Each entry is (key, title, subtitle, icon). The code uses the key to name a
+# section. The entry shows the title and the subtitle. SidebarEntry draws the
+# icon, and that class holds the names.
 SECTIONS = (
     ("strip", "LED Strip", "Configure the lighting", "strip"),
     ("power", "CPU & GPU power", "Governor, EPP and the card", "bolt"),
     ("cec", "HDMI CEC Mods", "Control and tweaks", "screen"),
     ("keyboard", "Keyboard Layout", "Layout for the session", "keys"),
-    # Not a page of the LED strip's, which is where it used to be. What it
-    # reports is the *installation* - the kernel module, the units, the udev
-    # rule, whether anything survives Game Mode - and what it offers is
-    # reinstalling and updating, which bring the whole clone up to date rather
-    # than the lighting half of it. Two of its three blocks were already about
-    # more than the bar before there was a second thing in this window, and
-    # every section added from here brings checks of its own to the same list.
+    # This is not a page of the LED strip, and it was a page of the strip
+    # before. It reports on the *installation*: the kernel module, the
+    # units, the udev rule, and the services that stay alive across Game
+    # Mode. It offers a new install and an update, and both bring the
+    # complete clone to the current version. Two of its three blocks
+    # already reported on more than the bar before this window held a
+    # second subject. Each section from now adds its own checks to the
+    # same list.
     ("status", "Status", "How every part is doing", "wrench"),
     # Last of the run, and the only one that is about this window rather than
     # about the machine. Above About, which is not a thing you configure.
@@ -417,71 +419,74 @@ ABOUT_LINES = (
      "says, and the FastLED and KDE Connect projects this leans on."),
 )
 
-# Sections that are named in the sidebar and not built yet. Empty now that
-# HDMI CEC is built - kept because the next one will want it, and because
-# _build_soon and the branch that reaches it are the pattern for adding a
-# section before it does anything.
+# Sections with a name in the sidebar and no page yet. This is empty, because
+# the HDMI CEC page is complete. It stays here for the next such section.
+# _build_soon and the branch that calls it are also the method to add a
+# section before it does its work.
 SOON = {}
 
-# Settings that only mean something while something else says so, and what
-# happens to them while it does not. Two answers, because there are two kinds
-# of dependency here and they are not the same question.
+# Settings with a meaning only under another setting, and their behaviour
+# without it. There are two answers, because there are two types of
+# dependency here, and they are two different questions.
 #
-# A row waiting on a *switch* is greyed and stays where it is. The setting
-# belongs to the feature that switch turns on, so greying it says "turn that
-# on to use this" while leaving you able to see that it exists and where it
-# lives - which is how you find out the feature has it at all.
+# A row that depends on a *switch* becomes grey and keeps its position. The
+# setting belongs to the function that the switch turns on. The grey row
+# therefore says "turn that function on to use this". The user can still see
+# the row and its position, and that is the method to learn that the function
+# has this setting.
 #
-# A row waiting on a *choice* is taken away. It does not belong to a feature
-# you have switched off; it belongs to one of several things the same slot can
-# hold, and the others' settings are not yours to be looking at. Three greyed
-# temperature marks under a load gauge are three rows about an effect that is
-# not on the bar - and unlike a switch, the choice that brings them back is
-# the row directly above them, so nothing is hidden from anybody who goes
-# looking. See _hides.
+# A row that depends on a *choice* goes away. It does not belong to a function
+# that the user turned off. It belongs to one of the effects that one slot can
+# hold, and the settings of the other effects are not relevant. Three grey
+# temperature marks below a load gauge are three rows about an effect that is
+# not on the bar. A switch is different: the choice that brings the rows back
+# is the row directly above them, so the rows are not hidden from a user who
+# looks for them. See _hides.
 #
-# An entry is either a key, which has to be switched on, or (key, value),
-# which has to be set to exactly that - the temperature settings mean nothing
-# unless something is showing the temperature in particular.
-# An entry's value may also be several, meaning any one of them will do - a
-# desktop scene has a colour to set under three of the nine, and spelling that
-# as three separate rules is not something DEPENDS_ON can say. The scenes are
-# written out rather than taken from the service because this table is read
-# literally by the tests; a value that is not a scene is caught there.
+# An entry is a key, which must be on, or (key, value), which must have
+# exactly that value. The temperature settings have a meaning only when an
+# effect shows the temperature.
 #
-# And an entry's *key* may be several, meaning any one of them being set to it
-# will do. There are two places to ask for the temperature gauge - the rainbow
-# slot in Game Mode, the scene in Desktop Mode - and its marks are in play if
-# either does. One rule per place would be two rules that had to be met at
-# once, which is the opposite of what is meant; hiding the marks under only
-# the first would be hiding the setting a desktop scene was reading from.
+# The value of an entry can also be more than one value, and then any one of
+# them is sufficient. A desktop scene has a colour under three of the nine
+# scenes, and DEPENDS_ON cannot give that as three separate rules. The scenes
+# are written here and are not taken from the service, because the tests read
+# this table directly. Those tests find a value that is not a scene.
+#
+# The *key* of an entry can also be more than one key, and then any one of
+# them with that value is sufficient. Two settings can select the temperature
+# gauge: the rainbow slot in Game Mode, and the scene in Desktop Mode. Its
+# marks apply when one of the two selects it. One rule for each setting gives
+# two rules that must both be true, which is the opposite meaning. One rule
+# for the first setting only hides the marks that a desktop scene reads.
 TEMPERATURE_SHOWN = (("RAINBOW_SHOWS", "DESKTOP_SCENE"), "temperature")
 LOAD_SHOWN = (("RAINBOW_SHOWS", "DESKTOP_SCENE"), "load")
 SCENE_HAS_COLOUR = ("DESKTOP_SCENE", ("color", "breath", "patrol"))
 SCENE_IS_LIT = ("DESKTOP_SCENE", ("color", "breath", "patrol", "rainbow",
                                   "fire", "aurora", "temperature"))
-# Not the temperature gauge, which is one colour standing still: it redraws
-# when the sensor moves and there is no cycle for the slider to scale. Not the
-# load gauge either, whose brightness is half of what it is saying.
+# This does not include the temperature gauge, which is one colour with no
+# movement. It draws again when the sensor value changes, and there is no
+# cycle for the slider to scale. It does not include the load gauge either.
+# The brightness of that gauge is one half of its report.
 SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow", "fire",
                                  "aurora"))
-# The energy preference is only in play under a governor that lets the
-# firmware range. Under `performance` the kernel pins it and refuses the file,
-# so the menu is taken away rather than offered and then ignored - the value
-# is written out as a *choice* rule, which is what gets a row hidden.
+# The energy preference applies only under a governor that gives the firmware
+# a range. Under `performance` the kernel fixes the value and refuses the
+# file. So the panel removes the menu, and it does not show a menu with no
+# result. This is a *choice* rule, and a choice rule hides a row.
 #
-# "Leave it to SteamOS" is not among them either, and that is the other half
-# of the rule: without a governor of ours this project is not managing how the
-# CPU runs, and a preference set behind a governor nobody chose is a setting
-# whose effect depends on whatever SteamOS happens to default to. Both halves
-# are in power.epp_in_play, which is what the applier obeys - so the row being
-# hidden and the value not being written are the same decision.
+# "Leave it to SteamOS" is also not in the list, and that is the second half
+# of the rule. Without a governor from this project, this project does not
+# control the CPU. A preference under a governor that no user selected has an
+# effect that depends on the default of SteamOS. power.epp_in_play holds both
+# halves, and the applier follows that function. The hidden row and the value
+# that the panel does not write are therefore one decision.
 #
-# Every governor that does let it through, listed rather than negated, because
-# DEPENDS_ON can say "is one of these" and cannot say "is not this". The two
-# amd-pstate offers in active mode plus the classic ones a passive machine
-# has: a governor missing from here hides a row that should be shown, which is
-# the safe way round of getting it wrong.
+# The list holds each governor that gives the firmware a range, because
+# DEPENDS_ON can say "is one of these" and cannot say "is not this". The list
+# holds the two governors of amd-pstate in active mode, and the classic
+# governors of a passive machine. A governor that is absent here hides a row
+# that the panel must show, and that is the safe direction of an error.
 EPP_IN_PLAY = ("CPU_GOVERNOR", ("powersave", "ondemand", "schedutil",
                                 "conservative", "userspace"))
 DEPENDS_ON = {
@@ -518,38 +523,42 @@ DEPENDS_ON = {
 # and the .desktop file names the same string in StartupWMClass.
 WM_CLASS = "steamos-utility-center-panel"
 
-# PhotoImage objects live only while something references them, and a widget
-# element does not count - so they are parked here for the window's life.
+# A PhotoImage object exists only while a program holds a reference to it, and
+# a widget element is not such a reference. So this list holds them for the
+# life of the window.
 _IMAGES = []
 
 # -- how the window is dressed ---------------------------------------------
 #
-# Material Design 3, grown from the desktop's own accent colour. material.py
-# turns that one colour into tonal ladders and named roles; this is the half
-# that needs tkinter - roles into ttk styles, and the shapes ttk cannot draw.
+# Material Design 3, calculated from the accent colour of the desktop.
+# material.py converts that one colour into tonal ladders and roles with
+# names. This is the half that needs tkinter: it converts the roles into ttk
+# styles, and it draws the shapes that ttk cannot draw.
 #
-# Two Material ideas do most of the visible work. A raised surface is a
-# lighter *tone* rather than a border or a shadow, so a window can hold a
-# dozen grouped controls without a dozen boxes drawn round them. And hover,
-# press and disabled are one mechanism - a wash of the content colour over the
-# container - instead of a shade picked per widget, so everything lights up by
-# the same amount.
+# Two ideas of Material do most of the visible work. First, a raised surface
+# is a lighter *tone* and not a border or a shadow. A window can then hold
+# twelve groups of controls without twelve boxes around them. Second, hover,
+# press and disabled use one mechanism: a layer of the content colour over the
+# container. A colour for each widget is not necessary, and each control then
+# changes by the same amount.
 
-# Material's shape scale, at the sizes this window uses it. A radius is a
-# statement about size: a pill for a button, a soft corner for a panel, barely
-# a corner for a field you type in.
+# The shape scale of Material, at the sizes of this window. A radius gives the
+# size of an element: a full round end for a button, a soft corner for a
+# panel, and a very small corner for a text field.
 BUTTON_HEIGHT = 36
 CARD_RADIUS = material.SHAPE_MEDIUM
 
-# The sidebar down the left edge. Wide enough for the longest subtitle at the
-# desktop's own font size, and tall enough for two lines with air round them -
-# both measured against the entries rather than guessed, see the tests.
+# The sidebar at the left edge. It is wide enough for the longest subtitle at
+# the font size of the desktop. It is tall enough for two lines with space
+# around them. The tests measure both values against the entries.
 SIDEBAR_WIDTH = 268
-# What the rail may grow to when the desktop's font needs more, and the room
-# left after the longest name in it. The two lines in an entry are canvas
-# text, which neither wraps nor shortens: it is cut off at the edge of the
-# canvas, so a rail that is too narrow takes the ends off every subtitle at
-# once - see Panel._sidebar_width.
+# The maximum width of the rail, for a desktop with a larger font. It also
+# gives the space after the longest name.
+#
+# The two lines in an entry are canvas text. Canvas text does not wrap and
+# does not become shorter. The canvas cuts it at the edge. A rail that is too
+# narrow therefore removes the end of each subtitle. See
+# Panel._sidebar_width.
 SIDEBAR_WIDTH_MAX = 420
 SIDEBAR_TEXT_PAD = 20
 SIDEBAR_ENTRY_HEIGHT = 60
@@ -560,72 +569,80 @@ SIDEBAR_TEXT_X = 56
 # The dots at the foot of the window: the LED bar, and HDMI CEC.
 STATUS_DOT = 5
 
-# How long after the window opens before HDMI CEC is asked about itself. The
-# foot of the window shows it from every page, so it cannot wait for somebody
-# to open that section - but steamos-cec-toolkitctl runs a handful of
-# systemctl calls, and doing that on the construction path would slow every
-# startup on the machines that have it. Long enough to be drawn first.
+# The time after the window opens, before the panel asks HDMI CEC about its
+# condition. The foot of the window shows that condition on each page, so the
+# panel cannot wait for the user to open that section. But
+# steamos-cec-toolkitctl runs some systemctl calls, and a call on the build
+# path makes each start slower on a machine with the toolkit. This time is
+# long enough for the window to draw itself first.
 CEC_FIRST_LOOK = 200
 
-# What the foot of the window says when a command fails. One fixed sentence
-# rather than the command's own last line, and the reason is that half a
-# sentence is worse than none: the line shares a bar with two indicators and
-# the version, so a real error had to be cut to fit - and what got cut was the
-# end, which is the part that says what went wrong. A pointer that is always
-# whole beats a reason that is sometimes truncated.
+# The text at the foot of the window after a command fails. This is one fixed
+# sentence and not the last line of the command. Half a sentence is worse
+# than no sentence. The line shares a bar with two indicators and the version,
+# so the bar cut a real error to the available width. The cut removed the end
+# of the line, and the end gives the fault. A short text that is always
+# complete is better than a reason that the bar sometimes cuts.
 #
-# The reason itself is not lost. It goes to stderr like everything else the
-# window's commands print, which is what this sentence is pointing at.
+# The reason is not lost. It goes to stderr, as each other message from the
+# commands of the window does. This sentence tells the user to read it there.
 PROBLEM_TEXT = ("A command failed. Start the panel from a terminal to see "
                 "why.")
 
-# The scrollbar, which is drawn here rather than left to clam: an arrow
-# button with a bevelled edge on top of a boxed trough, with grip lines down
-# the middle of the thumb. What replaces it is a pill in the margin - no
-# arrows, no trough anyone can see, the same shape language as everything
-# else. SCROLL_WIDTH is the whole margin the bar occupies and SCROLL_THUMB
-# the pill inside it, so the pill has air on both sides instead of running
-# along the window's edge.
+# The scrollbar. This file draws it, and clam does not. The clam scrollbar has
+# an arrow button with a bevelled edge, a trough with a box around it, and
+# grip lines in the middle of the thumb. This scrollbar is a bar with full
+# round ends in the margin. It has no arrow and no visible trough, and it uses
+# the shapes of the other controls.
+#
+# SCROLL_WIDTH is the complete margin of the scrollbar, and SCROLL_THUMB is
+# the bar in it. The bar then has space on both sides and does not touch the
+# edge of the window.
 SCROLL_WIDTH = 12
 SCROLL_THUMB = 6
 
-# What a vertical scrollbar takes off the side of a page. A little over
-# SCROLL_WIDTH on purpose: being generous here costs a slightly narrower
-# paragraph and being short costs a sentence with its last word cut off. See
-# Panel._rewrap, and the live test that measures the built bar against it.
+# The width that a vertical scrollbar takes from the side of a page. This is a
+# little more than SCROLL_WIDTH, on purpose. A larger value makes a paragraph
+# a little narrower. A smaller value cuts the last word of a sentence. See
+# Panel._rewrap, and the live test that measures the scrollbar against it.
 SCROLLBAR_ROOM = 16
 
-# How wide a page's content is allowed to get, whatever the monitor is. These
-# pages are a column of label-and-control, and a column read past about this
-# width stops being one: the label is at one end of the eye's travel and the
-# thing it names at the other. On a 2560 monitor the slack goes to the margin.
+# The maximum width of the content of a page, for each monitor. These pages
+# are a column of labels and controls. Above this width the column is no
+# longer a column: the label is at one end of the movement of the eye, and its
+# control is at the other end. On a 2560 monitor the margin takes the extra
+# width.
 CONTENT_MAX = 1040
 
-# What the window opens at, and the smallest it may be dragged to.
-#
-# Sized for the monitors this is actually used on now - 1920x1080 and
-# 2560x1440 - rather than for the 1280x800 of the machine itself, which is
-# where Game Mode runs and where this window is not the thing on screen.
-# The width is the sidebar, the inner list, a full content column and the
-# margins between them; anything narrower and the two lists crowd the settings
-# they are there to reach.
-# How wide a paragraph inside a card may run. The card is CONTENT_MAX at its
-# widest and has padding on both sides, so a paragraph that wrapped at
-# CONTENT_MAX would have its last words drawn past the card's own edge.
-# In material.SPACE rather than in GROUP_GAP, which is four of these and is
-# defined further down this file - a constant cannot use one declared after it.
+# The maximum width of a paragraph in a card. The card has the width
+# CONTENT_MAX at its widest, and it has padding on both sides. A paragraph
+# that wraps at CONTENT_MAX puts its last words past the edge of the card.
+# This uses material.SPACE and not GROUP_GAP. GROUP_GAP is four of these, and
+# this file declares it below. A constant cannot use a later constant.
 CARD_WRAP = CONTENT_MAX - 24 * material.SPACE
 
+# The size of the window at the start, and its minimum size. A user cannot
+# drag it below the minimum.
+#
+# These sizes are for the monitors that users have now: 1920x1080 and
+# 2560x1440. They are not for the 1280x800 display of the machine. Game Mode
+# runs on that display, and this window is not the program on the screen
+# there.
+#
+# The width holds the sidebar, the inner list, a complete content column, and
+# the margins between them. At a smaller width the two lists take space from
+# the settings that they open.
 START_WIDTH = 1400
 START_HEIGHT = 900
 MIN_WIDTH = 1120
 MIN_HEIGHT = 680
 FIELD_RADIUS = material.SHAPE_EXTRA_SMALL
 
-# The pages are picked from a list down the left rather than a row of tabs
-# along the top, which is what Material suggests once there are more
-# destinations than a row wants to carry - and six is over that line. The
-# height of one entry, which is also the diameter of the pill behind it.
+# The user selects a page from a list at the left, and not from a row of tabs
+# at the top. Material gives that arrangement for a window with more
+# destinations than a row can hold, and six destinations is more than that
+# number. This value is the height of one entry. It is also the diameter of
+# the round shape behind the entry.
 RAIL_HEIGHT = 40
 
 # How wide a switch and a radio's ring stand from the label beside them. Drawn
@@ -634,21 +651,22 @@ RAIL_HEIGHT = 40
 RADIO_GAP = 8
 ARROW_SIZE = 18             # the drop-down arrow, which clam draws tiny
 
-# One width for every drop-down on a settings page, so a column of them has an
-# edge rather than a ragged one. The sensor menu is the exception it has to be:
-# its entries are paths into /sys, and cutting one off defeats the point of
-# being able to see which sensor was picked.
+# One width for each drop-down on a settings page. A column of drop-downs then
+# has a straight edge. The sensor menu is the one exception, and it must be
+# one. Its entries are paths into /sys. A cut path removes the information
+# that the user needs: the name of the selected sensor.
 MENU_WIDTH = 18
 SENSOR_WIDTH = 30
-# The columns of a settings grid: name, the control, and - for a notification -
-# the colour and shape beside it. The last one holds the slack, so the three
-# control columns stand together rather than being spread across the window.
+# The columns of a settings grid: the name, the control, and for a
+# notification the colour and the shape beside it. The last column holds the
+# extra width. The three control columns then stay together, and the window
+# does not spread them.
 CONTROL_COLUMN = 1
 COLOUR_COLUMN = 2
 SHAPE_COLUMN = 3
-# A control standing on its own spans all three, so it neither widens the
-# switch column - which would push the colours away from the switches they
-# belong to - nor has to fit inside it.
+# A control with no colour and no shape uses all three columns. It then
+# does not make the switch column wider, which moves the colours away from
+# their switches. It also does not have to fit into that column.
 CONTROL_SPAN = 3
 # What separates a switch from the colour that belongs to it. On the colour
 # column rather than on the switch, so the tabs that have no such column are
@@ -669,12 +687,13 @@ SWATCH_GAP = 7              # drawn beside it, where the name goes
 _COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
 DETAILS_GAP = 10            # under the checklist, and part of what it costs
 
-# What to leave for the titlebar and whatever panel the desktop has, when
-# deciding how tall the window may open.
+# The space to leave for the titlebar and for the panel of the desktop. The
+# maximum height of the window uses this value.
 SCREEN_ALLOWANCE = 120
 
-# How wide a message in a dialog is allowed to run before it wraps. Wide
-# enough for a path, narrow enough that a sentence is not one line.
+# The maximum width of a message in a dialog before it wraps. It is wide
+# enough for a path, and narrow enough to put a sentence on more than one
+# line.
 DIALOG_WRAP = 460
 
 
@@ -699,35 +718,37 @@ GROUP_GAP = 6 * material.SPACE
 ROW_GAP = 2 * material.SPACE
 INDENT_STEP = 5 * material.SPACE
 
-# What one settings row keeps above and below its control, and the extra a row
-# gets when it starts a new block - the switch that a stepped-in pair hangs
-# off. With every control the same height, that extra is the only thing saying
-# where one block ends and the next begins.
-# Six a side, so twelve between one control and the next - Material's own
-# spacing for a list of them. Four left two filled shapes forty pixels tall
-# looking glued together, which is what a switch above a drop-down was.
+# The space that one settings row keeps above and below its control. The
+# second value is the extra space of a row that starts a block. That row is
+# the switch above an indented pair. Each control has the same height, so that
+# extra space is the one sign of the end of one block and the start of the
+# next block.
+#
+# The value is six on each side, so there are twelve pixels between two
+# controls. That is the spacing of Material for a list of controls. With four
+# pixels, two filled shapes of forty pixels looked like one shape. A switch
+# above a drop-down had that fault.
 ROW_PAD = 6
 BLOCK_GAP = 4 * material.SPACE
 
-# The type scale, as offsets from whatever size the desktop is set to. Material
-# has fifteen sizes; a window this size needs four, and the weights matter more
-# than the sizes do.
+# The type scale, as offsets from the font size of the desktop. Material gives
+# fifteen sizes. A window of this size needs four of them, and the weights are
+# more important than the sizes.
 TYPE_HEADLINE = 6
 TYPE_SECTION = 0
 TYPE_SUPPORT = -1
 
 # The window is dark whatever the desktop is, and only the *accent* follows.
 #
-# Not a preference, and the two halves of that are deliberate. This is a panel
-# for a machine that spends its life on a television in a dark room, and the
-# one thing every screenshot of it is judged against is the bar it is
-# configuring - a strip of light. A light window round a preview of lit LEDs
-# is the preview washed out.
+# This is not a preference, and both halves of that decision are on purpose.
+# This panel controls a machine on a television in a dark room. The bar is the
+# subject of the panel, and a bar is a strip of light. A light window around a
+# preview of lit LEDs makes the preview weak.
 #
-# The accent still comes from Plasma, because that part of following the
-# desktop is the part that says whose machine this is - see kdetheme. What is
-# given up is the light/dark half of it, which is why this is one name in one
-# place rather than a condition spread through the styles.
+# The accent still comes from Plasma. That part of the desktop theme gives the
+# window the identity of the machine. See kdetheme. The window gives up the
+# light and dark half of the theme only. For that reason this is one name in
+# one place, and not a condition in each style.
 DARK = True
 
 
@@ -771,18 +792,19 @@ def dress(style, roles, sizes):
     stands on its own so one refusal does not take the rest with it.
     """
     surface = roles["surface"]
-    # The ground a card's own corners are drawn against - see apply_theme.
+    # The colour below the corners of a card. See apply_theme.
     page = roles["_page"]
-    # style name -> the colour that style's picture has baked into its own
-    # corners. A nine-slice keeps its corners whatever it is stretched over,
-    # so a widget wearing one has to stand on a parent of exactly this colour
-    # or the corners show as a box. Recorded here rather than reasoned about
-    # later: the mistake is invisible in the source and obvious on screen, and
-    # it has been made four times. See the live test that walks it.
+    # A map from a style name to the colour in the corners of the picture of
+    # that style. A nine-slice image keeps its corners at each size, so a
+    # widget with such an image must stand on a parent of exactly this
+    # colour. On another colour the corners show a box. This map records the
+    # colour, and no later step calculates it. The error is not visible in
+    # the source and is very visible on the screen, and it occurred four
+    # times. See the live test that reads this map.
     grounds = roles["_grounds"] = {}
 
     def wash(container, content, amount):
-        """A state layer: the content colour laid over its container."""
+        """Returns a state layer: the content colour over its container."""
         return material.blend(roles[container], roles[content], amount)
 
     def attempt(what, build):
@@ -792,16 +814,15 @@ def dress(style, roles, sizes):
             print("could not draw %s: %s" % (what, exc), file=sys.stderr)
 
     def rail():
-        """The list down the left that picks a page.
+        """Draws the list at the left, where the user selects a page.
 
-        Which one is open is said by a filled pill behind its name - the same
-        tone a raised container would take, in the shape a button would take.
+        A filled shape with round ends behind a name marks the open page. It
+        has the tone of a raised container and the shape of a button.
 
-        Every picture here is drawn against the *card* the list stands on
-        rather than against the page. A nine-slice image carries its own
-        corners, and a corner painted against the wrong ground is a pale notch
-        at each end of every entry - which is what the list looked like the
-        moment it was given a card to sit on.
+        Each picture here stands on the *card* below the list, and not on the
+        page. A nine-slice image carries its own corners. A corner over the
+        wrong colour gives a pale notch at each end of each entry. The list
+        had that fault after the card came below it.
         """
         radius = RAIL_HEIGHT // 2
         ground = surface
@@ -820,18 +841,19 @@ def dress(style, roles, sizes):
         style.layout("Rail.TRadiobutton", [
             ("Material.Rail", {"sticky": "nsew", "children": [
                 ("Radiobutton.label", {"side": "left", "sticky": "w"})]})])
-        # An empty layout is what takes the notebook's own tab row out: the
-        # pages stay, the events stay, only the row nobody is using goes.
+        # An empty layout removes the tab row of the notebook. The pages stay
+        # and the events stay. Only the unused row goes away.
         style.layout("TNotebook.Tab", [])
 
     def panels():
-        """The one raised surface in the window: a tone up from the page.
+        """Draws the one raised surface of the window, one tone above the page.
 
-        Its colour is set with the rest of them in apply_theme, and its
-        corners are four small pictures pinned to it by Panel._card - not a
-        nine-slice image like everything else here. A nine-slice is stretched
-        to the widget's size on every redraw, and a card is the largest thing
-        in the window: one card a thousand pixels tall cost most of a single
+                apply_theme sets its colour with the other colours. Panel._card puts
+                four small pictures at its corners. It does not use a nine-slice
+                image, and each other element here uses one. Tk scales a nine-slice
+                image to the size of the widget at each redraw, and a card is the
+                largest element in the window. One card of a thousand pixels cost most
+                of one
         wheel notch by itself, which is the stutter people reported. These
         never change size, so nothing is scaled and the same page moved in
         3.6 ms rather than 149.
@@ -966,11 +988,12 @@ def dress(style, roles, sizes):
         def family(element, layout, ground, hovered):
             """One radio, drawn against one ground.
 
-            Two of them, because a radio paints its own: the indicator is a
-            picture with its ground baked in and the label carries a
-            -background. Made for a card and packed onto a page, it leaves a
-            block of the card's colour behind every name - which is what stood
-            behind the effect names on the preview page.
+There are two, because a radio button paints its own background.
+            The indicator is a picture with the colour below it in the
+            picture, and the label carries a -background. A radio button for
+            a card, packed onto a page, leaves a block of the colour of the
+            card behind each name. The effect names on the preview page had
+            that fault.
             """
             style.element_create(
                 element, "image",
@@ -1013,11 +1036,11 @@ def dress(style, roles, sizes):
             return _photo(roundrect.pill(diameter, diameter, colour, surface,
                                          border_width=0))
 
-        # The two names end in "trough" and "slider" because ttk::scale finds
-        # them by that suffix: it is what tells the widget which element to
-        # move as the value changes. Named anything else the scale still draws,
-        # and the knob sits at the left whatever the setting is - which is a
-        # slider that lies about every value on the tab.
+        # The two names end in "trough" and "slider", because ttk::scale finds
+        # them by that suffix. The suffix tells the widget which element to
+        # move with the value. With another name the scale still draws, and
+        # the knob stays at the left for each value. Each slider on the tab
+        # then gives an incorrect value.
         style.element_create("Material.trough", "image", _photo(rows),
                              border=(int(radius), 0, int(radius), 0),
                              sticky="ew", padding=0)
@@ -1033,9 +1056,9 @@ def dress(style, roles, sizes):
                 ("Material.slider", {"side": "left", "sticky": ""})]})])
 
     def arrows():
-        # One mark for every drop-down, drawn rather than left to clam - whose
-        # own is a filled triangle half the height of the field, from the same
-        # decade as its 3D edges.
+        # One mark for each drop-down. This file draws it, and clam does not.
+        # The clam mark is a filled triangle with half the height of the
+        # field, and it is as old as the 3D edges of clam.
         def picture(colour):
             rows = [[surface] * ARROW_SIZE for _ in range(ARROW_SIZE)]
             roundrect.draw_chevron(rows, colour, thickness=1.9)
@@ -1066,9 +1089,9 @@ def dress(style, roles, sizes):
             ("Material.Field", {"sticky": "nsew", "children": [
                 ("Entry.padding", {"sticky": "nsew", "children": [
                     ("Entry.textarea", {"sticky": "nsew"})]})]})])
-        # The same field around the button a drop-down is: it opens a list of
-        # our own drawing rather than a tk.Menu - see Popup - so what is
-        # wanted here is a field with a label and an arrow in it.
+        # The same field around the button of a drop-down. The button opens a
+        # list that this file draws, and not a tk.Menu. See Popup. So the
+        # button needs a field with a label and an arrow in it.
         style.layout("Field.TButton", [
             ("Material.Field", {"sticky": "nsew", "children": [
                 ("Material.Arrow", {"side": "right", "sticky": ""}),
@@ -1080,13 +1103,13 @@ def dress(style, roles, sizes):
     def scrollbars():
         """A pill in the page's margin, with nothing else to it.
 
-        clam's scrollbar is the one widget in this window that still looks
-        like 2004: a bevelled arrow button on top, a sunken box for a trough,
-        and three grip lines down the thumb. None of that is kept. The trough
-        is painted the page's own colour so it disappears, the arrows are left
-        out of the layout entirely - a wheel and a drag are how anyone moves a
-        page, and two 12-pixel buttons are not - and the thumb is the same
-        rounded bar as everything else here.
+        The scrollbar of clam is the one widget in this window with a very old
+                look: a bevelled arrow button at the top, a sunken box for the trough,
+                and three grip lines on the thumb. This code keeps none of that. The
+                trough takes the colour of the page, so it is not visible. The layout
+                holds no arrow, because a user moves a page with the wheel or with a
+                drag, and not with two buttons of 12 pixels. The thumb is the same
+                round bar as the other elements here.
 
         Both pictures are drawn against the page, which is what the bar always
         stands on: it is packed into a page's holder, beside the canvas.
@@ -1110,13 +1133,13 @@ def dress(style, roles, sizes):
             _photo([[page] * SCROLL_WIDTH]), sticky="ns", border=0, padding=0)
         style.element_create(
             "Material.Scroll.thumb", "image", bar(roles["outline_variant"]),
-            # hover, not active: ttk's scrollbar bindings set no state at all
-            # on the part under the pointer - there is nothing in
-            # scrollbar.tcl that does - so an "active" picture here would
-            # simply never be drawn. What the widget does get is the plain
-            # hover every ttk widget gets on <Enter>, which brightens the
-            # whole bar rather than the thumb alone, and is what is wanted:
-            # a thin bar is easier to find when it answers the pointer.
+            # This is hover and not active. The scrollbar bindings of ttk set no
+            # state on the part below the pointer, and no code in
+            # scrollbar.tcl does that. So Tk never draws an "active"
+            # picture here. The widget gets the plain hover state that each
+            # ttk widget gets on <Enter>. That state brightens the complete
+            # bar and not the thumb alone, which is correct here. A thin bar
+            # is easier to find when it answers the pointer.
             ("hover", bar(roles["outline"])),
             border=(0, int(radius) + 1, 0, int(radius) + 1),
             sticky="nsew", padding=0)
@@ -1140,9 +1163,10 @@ def dress(style, roles, sizes):
     attempt("the scrollbars", scrollbars)
 
 
-# One ttk theme per dressing, counted rather than named after the look: the
-# same look can be applied twice in a session - dark, light, dark - and the
-# second pass needs a namespace the first one is not still holding.
+# One ttk theme for each style pass. The name is a count and not the name of
+# the look. A session can apply the same look twice, for example dark, light
+# and then dark. The second pass then needs a namespace that the first pass
+# does not hold.
 _THEMES_MADE = itertools.count()
 _THEME_NAME = [None]
 
@@ -1175,11 +1199,12 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     built-in theme that honours colour options rather than drawing fixed
     bitmaps. Returns the roles, for the parts ttk cannot reach.
 
-    Called again whenever the look changes, which is why each call works in a
-    ttk theme of its own. Element names are per theme and cannot be redefined
-    within one: a second pass over the same theme raises "Duplicate element"
-    for every picture in dress() - and dress swallows what it cannot draw, so
-    the window would have kept its old colours and said nothing.
+    The caller calls this function again at each change of the look. For that
+    reason each call works in a ttk theme of its own. An element name belongs
+    to one theme, and a second definition in that theme is not possible. A
+    second pass over the same theme raises "Duplicate element" for each
+    picture in dress(). dress() does not report a picture that it cannot
+    draw, so the window keeps its old colours and gives no message.
     """
     desktop = kdetheme.read()
     roles = material.scheme(desktop["selection"],
@@ -1189,11 +1214,12 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     surface = roles["surface"]
     on_surface = roles["on_surface"]
     variant = roles["on_surface_variant"]
-    # The desk the cards lie on. Every widget in this window keeps `surface`
-    # as its ground - which is what keeps the pictures ttk draws correct,
-    # since each of them has its background baked into its own corners - and
-    # the *page* behind them is the tone that differs. The other way round
-    # would mean a second copy of every style and a second set of pictures.
+    # The surface below the cards. Each widget in this window keeps
+    # `surface` as its background. That keeps the pictures of ttk correct,
+    # because each picture holds its background in its own corners. The
+    # *page* behind the widgets is the tone that is different. The opposite
+    # arrangement needs a second copy of each style and a second set of
+    # pictures.
     page = roles["_page"] = roles["surface_container"]
 
     style = ttk.Style()
@@ -1209,28 +1235,28 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     family, size = desktop["font"] or ("TkDefaultFont", 10)
     root.option_add("*Font", (family, size))
     style.configure(".", font=(family, size))
-    # Every control's height comes from what the font actually measures, so a
-    # switch, a slider and a drop-down stand the same height as each other on
-    # any desktop - which is what a column of settings needs before any amount
-    # of spacing between the rows can look regular.
+    # The measured font gives the height of each control. A switch, a slider
+    # and a drop-down then have the same height on each desktop. A column of
+    # settings needs that first. Without it, no value for the space between
+    # the rows makes the column regular.
     sizes = material.control_sizes(
         tkfont.Font(root, font=(family, size)).metrics("linespace"))
 
     root.configure(background=page)
-    # One background for the whole window. Material tells groups apart by
-    # spacing and a heading rather than by a box round each, which is what
-    # keeps a page of thirty settings from reading as thirty compartments -
-    # and it means no widget has to be told which container it is standing on.
+    # One background for the complete window. Material separates groups with
+    # space and a heading, and not with a box around each group. A page of
+    # thirty settings then does not look like thirty compartments. No widget
+    # needs the name of the container below it.
     style.configure(".", background=surface, foreground=on_surface,
                     fieldbackground=surface, bordercolor=roles["outline"],
                     focuscolor=roles["primary"],
                     troughcolor=roles["surface_container_highest"],
                     relief="flat", borderwidth=0)
     style.configure("TFrame", background=surface)
-    # The few things that stand on the page rather than on a card: the header,
-    # the status bar, the row of buttons under the pages. Named variants
-    # rather than a second theme, and only a background - everything else
-    # cascades from the style each is derived from.
+    # The few elements that stand on the page and not on a card: the header,
+    # the status bar, and the row of buttons below the pages. These are
+    # variants with a name, and not a second theme. Each variant sets a
+    # background only. Each other property comes from the parent style.
     #
     # Written out one by one rather than looped, like the buttons below: a
     # style name that only ever appears in a variable is a name nothing can
@@ -1239,16 +1265,17 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("Page.Muted.TLabel", background=page)
     style.configure("Page.Heading.TLabel", background=page)
     style.configure("Page.Good.TLabel", background=page)
-    # A group heading standing on the page rather than on a card - the preview
-    # page's two columns of effects are the ones that do.
+    # A group heading that stands on the page and not on a card. The two
+    # columns of effects on the preview page have such headings.
     style.configure("Page.Section.TLabel", background=page)
     style.configure("Page.Bad.TLabel", background=page)
     style.configure("Card.TFrame", background=surface)
-    # The same tone, and no corners. For a frame that stands *on* a card
-    # rather than being one: a card carries its own rounded corners, and those
-    # are painted against the page - so a nested one puts four notches of the
-    # page's colour on top of the card underneath it. This one is only the
-    # colour, which is what keeps it flat; see Panel._card for the corners.
+    # The same tone, and no corners. This is for a frame that stands *on* a
+    # card and is not a card. A card carries its own round corners, and the
+    # page is the colour below them. A card inside a card therefore puts
+    # four notches of the colour of the page on the card below it. This
+    # style sets the colour only, and that keeps the frame flat. See
+    # Panel._card for the corners.
     style.configure("OnCard.TFrame", background=surface)
     style.configure("TLabel", background=surface, foreground=on_surface)
     style.configure("Heading.TLabel", font=(family, size + TYPE_HEADLINE))
@@ -1296,13 +1323,13 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("Text.TButton", **button("surface", "primary", sides=2))
     style.map("Text.TButton", **label_fades("primary"))
 
-    # On the page: a notebook is the stack the pages live in, and its own
-    # background shows above and beside whatever the page puts in it - which
-    # was a dark band across the top of every card.
+    # On the page. A notebook is the stack that holds the pages. Its own
+    # background is visible above and beside the content of the page. Before
+    # this style, that background gave a dark band above each card.
     style.configure("TNotebook", background=page, borderwidth=0,
                     bordercolor=page, lightcolor=page,
                     darkcolor=page, tabmargins=(0, 4, 0, 0))
-    # On the card the list stands on, not on the page - see rail() in dress.
+    # On the card below the list, and not on the page. See rail() in dress().
     style.configure("Rail.TRadiobutton", background=surface,
                     foreground=variant, focuscolor=surface, anchor="w")
     style.map("Rail.TRadiobutton",
@@ -1318,25 +1345,26 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.configure("TRadiobutton", background=surface, foreground=on_surface,
                     focuscolor=surface, padding=(0, 3))
     style.map("TRadiobutton", background=[("active", surface)])
-    # The same radio on the page's own ground - see the two families in
-    # dress(). Without it a list of them on a page draws a block of the card
-    # colour behind every name.
+    # The same radio button on the colour of the page. See the two families
+    # in dress(). Without this style, a list of radio buttons on a page
+    # draws a block of the colour of the card behind each name.
     style.configure("Page.TRadiobutton", background=page,
                     foreground=on_surface, focuscolor=page, padding=(0, 3))
     style.map("Page.TRadiobutton", background=[("active", page)])
 
-    # Nothing here dresses a ttk.Combobox, and that is deliberate: there is
-    # not one left in the window. Every drop-down is a Field.TButton opening a
-    # Popup of our own, because a combobox drops a Tk listbox - which cannot
-    # hold a swatch, cannot be made to look like the rest of this, and is
-    # posted under a grab that kept it floating over other applications.
+    # No style here applies to a ttk.Combobox, on purpose. The window holds
+    # no combobox. Each drop-down is a Field.TButton that opens a Popup of
+    # this file. A combobox opens a Tk listbox instead. That listbox cannot
+    # hold a colour sample, and it cannot take the look of the other
+    # controls. Tk also posts it under a grab, and it then stayed above the
+    # windows of other applications.
 
-    # No selection colours here: clam pins an entry's and will not have them
-    # configured away - measured, style.lookup gives clam's own grey back
-    # whatever is set, on the base style or a derived one, and the option
-    # database does not reach it either. So nothing selects text on anyone's
-    # behalf in this window; a selection the user made is theirs, in whatever
-    # colour Tk gives it.
+    # There are no selection colours here. clam fixes the selection colours
+    # of an entry, and no configuration changes them. A measurement showed
+    # this: style.lookup returns the grey of clam for each value, on the
+    # base style and on a derived style. The option database does not reach
+    # it either. So no code in this window selects text for the user. A
+    # selection from the user keeps the colour that Tk gives it.
     style.configure("Material.TEntry", fieldbackground=surface,
                     foreground=on_surface, insertcolor=on_surface,
                     padding=(10, sizes["field_padding"]))
@@ -1345,13 +1373,14 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
                     foreground=on_surface, arrowcolor=variant,
                     padding=(10, sizes["field_padding"]),
                     arrowsize=ARROW_SIZE, anchor="w", compound="left")
-    # The background matters on a field carrying a swatch, and only there.
-    # Tk draws an image on a disabled widget through a fifty per cent
-    # stipple - the hatching you see over a greyed colour - and what shows
-    # through the holes is this option, not the shade Material.Field paints.
-    # Left at surface, half the pixels under the swatch came out the ordinary
-    # shade while the field around them was the greyed one, which in a dark
-    # theme is exactly the box this was reported as.
+    # The background is important on a field with a colour sample, and only
+    # there. Tk draws an image on a disabled widget through a stipple of
+    # fifty per cent. That stipple is the pattern over a grey colour. This
+    # option gives the colour in the holes of the pattern, and
+    # Material.Field does not. At the value surface, one half of the pixels
+    # below the colour sample kept the normal shade, and the field around
+    # them had the grey shade. In a dark theme that gives the box that a
+    # user reported.
     style.map("Field.TButton",
               foreground=[("disabled", material.disabled(roles, on_surface))],
               arrowcolor=[("disabled", material.disabled(roles, variant))],
@@ -1377,14 +1406,15 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
 class Runner:
     """Runs a command without freezing the window.
 
-    tkinter may only be touched from the thread that owns it, so the worker
-    posts lines into a queue and the UI drains it on a timer.
+Only the thread that owns tkinter can call it. So the worker puts its
+    lines into a queue, and the window reads that queue on a timer.
     """
 
     def __init__(self, widget, sink, on_state=None):
-        # sink(text, tag=None) - the tag is optional so a plain writer works.
-        # on_state(busy, code) - what the window shows while something runs,
-        # and how it ended. Optional, so a Runner works on its own.
+        # sink(text, tag=None). The tag is optional, so a simple writer works.
+        # on_state(busy, code) gives the text of the window during a command,
+        # and the result at the end. It is optional, so a Runner also works
+        # without it.
         self.widget = widget
         self.sink = sink
         self.on_state = on_state or (lambda _busy, _code: None)
@@ -1457,19 +1487,21 @@ class Runner:
 
 
 class Popup:
-    """The list a drop-down drops down, drawn here rather than left to Tk.
+    """Draws the list of a drop-down. This class draws it, and Tk does not.
 
-    A tk.Menu cannot be made to look like the rest of this window. The entry
-    you are on can only be marked with an indicator - never with the filled
-    row every other list on the desktop uses - and its trim is not ours to
-    set. It also outlives its moment: Tk posts it under a grab of its own and
-    gives the menu no say in when to go, so it went on floating over whatever
-    took the focus next, which is what a menu must never do.
+    A tk.Menu cannot take the look of the other controls of this window. It
+    marks the current entry with an indicator only. It cannot mark that entry
+    with a filled row, and each other list on the desktop uses a filled row.
+    Its border is also not settable.
 
-    So it is a window of our own. Rows we draw, and it closes when the focus
-    leaves it - by which time it is a plain Toplevel and the focus is a thing
-    we are told about. See the note below the constructor for why there is no
-    grab.
+    A tk.Menu also stays too long. Tk posts it under a grab of its own and
+    gives the menu no control of the close step. It then stayed above the
+    window that took the focus next, and a menu must never do that.
+
+    So this is a window of this file. This class draws the rows, and the
+    window closes when the focus leaves it. At that time it is a plain
+    Toplevel, and Tk reports the focus to it. The note below the constructor
+    gives the reason for the missing grab.
     """
 
     PAD_X = 14
@@ -1486,18 +1518,19 @@ class Popup:
         self.window = window = tk.Toplevel(button)
         window.withdraw()
         window.overrideredirect(True)
-        # One pixel of edge, which is the Toplevel showing through: a window
-        # cannot be given a border of its own without a frame round everything.
+        # One pixel of edge, which is the Toplevel below. A window cannot get a
+        # border of its own without a frame around each element.
         window.configure(background=roles["outline_variant"])
         inner = tk.Frame(window, background=roles["surface_container"],
                          borderwidth=0, highlightthickness=0)
         inner.pack(padx=1, pady=1, fill="both", expand=True)
 
-        # A swatch has no alpha: it is drawn against a known background and
-        # carries it in the corners and in the gap beside it. A row has three
-        # backgrounds - plain, hovered, chosen - so it needs three, or the one
-        # baked against the plain shade sits on the filled row as a patch of
-        # the wrong colour. Which is exactly what it did.
+        # A colour sample has no alpha channel. This code draws it against a
+        # known background, and the sample holds that background in its
+        # corners and in the space beside it. A row has three backgrounds:
+        # plain, hover and selected. So a row needs three samples. With one
+        # sample for the plain shade, the filled row shows a block of the
+        # incorrect colour. The rows had that fault.
         self.swatch = swatch
         for label, value in choices:
             row = tk.Label(inner, text=label, compound="left", anchor="w",
@@ -1530,24 +1563,26 @@ class Popup:
         self._place(button)
         window.deiconify()
 
-    # No grab, and that is the point rather than an omission. Measured under a
-    # window manager, with another application raised over the panel: with a
-    # grab of either kind the list stayed up, without one it goes. A grab
-    # swallows the focus change that says the application is no longer the one
-    # being used, and that notice is the only thing an override-redirect
-    # window - which is what an undecorated list has to be - ever gets. So the
-    # grab went, and the clicks it used to catch are caught by the panel
-    # instead: see Panel._panel_click.
+    # There is no grab, and that is the design and not an error. A
+    # measurement under a window manager, with another application above the
+    # panel, showed this: with a grab of each type the list stayed on the
+    # screen, and without a grab it closed.
+    #
+    # A grab takes the focus event that reports the change to another
+    # application. An override-redirect window gets that event only, and a
+    # list with no decoration must be such a window. So this class uses no
+    # grab. The panel receives the clicks that the grab received before. See
+    # Panel._panel_click.
 
     def _left(self):
-        """The focus moved: gone, unless it stayed in this application.
+        """Closes the list, if the focus left this application.
 
-        Never asked straight away, on either of the two bindings that get
-        here. A focus change arrives as it starts, and asking then can catch
-        the moment when the old window has let go and the new one has not yet
-        taken hold - which is exactly what pressing a second field while the
-        first list is open looks like. One turn of the idle loop later the
-        answer is settled.
+        The two bindings that call this never ask immediately. A focus event
+        arrives at the start of the change. An immediate question can find
+        the moment after the old window released the focus and before the new
+        window took it. A click on a second field, with the first list open,
+        gives exactly that moment. After one pass of the idle loop the answer
+        is correct.
         """
         self.window.after_idle(self._elsewhere)
 
@@ -1559,17 +1594,17 @@ class Popup:
             self.close()                        # focus is somewhere we cannot see
 
     def _place(self, button):
-        """Under the field, its top edge on the field's bottom one.
+        """Puts the list below the field, with its top edge on the field.
 
-        It used to open *over* the field, lined up so the chosen row covered
-        it - which is what a menu button does, and what several desktops do.
-        It also means the list lands in a different place depending on which
-        entry you happen to be on, and covers the thing you just pressed. Under
-        it, the field stays visible and the list is always in the same place.
+        Before, the list opened *over* the field, with the selected row on the
+        field. A menu button does that, and some desktops do it. But then the
+        list has a different position for each selected entry, and it covers
+        the control that the user pressed. Below the field, the field stays
+        visible and the list always has the same position.
 
-        Upwards instead when there is no room below, which is the one case
-        where a list that insisted on opening downwards would run off the
-        screen or be clamped back over the field it came from.
+        The list opens upwards when there is not sufficient space below. That
+        is the one condition where a list that always opens downwards goes off
+        the screen, or comes back over its own field.
         """
         window = self.window
         window.update_idletasks()
@@ -1581,19 +1616,20 @@ class Popup:
         if below + height <= window.winfo_screenheight():
             top = below
         else:
-            # Above, sitting on the field's top edge; and if it does not fit
-            # there either - a list longer than the screen - as far down as it
-            # can go, which is what the clamp does.
+            # Above, on the top edge of the field. A list that is longer than
+            # the screen does not fit there either. The clamp then puts it as
+            # far down as possible.
             top = max(0, min(button.winfo_rooty() - height,
                              window.winfo_screenheight() - height))
         left = max(0, min(left, window.winfo_screenwidth() - width))
         window.geometry("%dx%d+%d+%d" % (width, height, left, top))
 
     def _paint(self, hovered):
-        """Colour every row: the one chosen filled, the one under the pointer lit.
+        """Colours each row. The selected row is filled, and the row below the
+        pointer is bright.
 
-        The swatch is repainted with it, against the shade the row has ended
-        up: see the note where the rows are built.
+        This function paints the colour sample again, against the shade of the
+        row. See the note at the code that builds the rows.
         """
         for row, label, value in self.rows:
             if label == self.variable.get():
@@ -1638,17 +1674,17 @@ class Popup:
 
 
 class Dialog:
-    """A message in the window's own clothes.
+    """Shows a message in the style of this window.
 
-    Tk draws its message boxes itself, and next to a Material window they are
-    a visitor from another decade - which matters here because this window
-    puts one up for everything from a mistyped setting to "this reflashes the
-    ESP". A Toplevel costs about as much and inherits the theme, ttk styles
-    being global to the interpreter.
+    Tk draws its own message boxes, and beside a Material window they look
+    very old. That is important here, because this window shows a message box
+    for each event: an incorrect setting, and also a new flash of the ESP. A
+    Toplevel needs approximately the same code and takes the theme, because
+    ttk styles apply to the complete interpreter.
 
-    Modal the way a question has to be: transient to the window it belongs to,
-    grabbing the pointer, and waited on - so the caller reads the answer as a
-    return value rather than through a callback.
+    The dialog is modal, as a question must be. It is transient to its parent
+    window, it grabs the pointer, and the caller waits for it. The caller
+    then reads the answer as a return value and not through a callback.
     """
 
     def __init__(self, parent, title, message, confirm=None, deny="Cancel"):
@@ -1659,8 +1695,8 @@ class Dialog:
         window.transient(parent)
         window.resizable(False, False)
         window.protocol("WM_DELETE_WINDOW", self._deny)
-        # A ttk frame fills it, but a sliver shows while it is being laid out
-        # and the default Tk grey is not a colour this window uses.
+        # A ttk frame fills the window, but a thin part is visible during the
+        # layout step. The default grey of Tk is not a colour of this window.
         window.configure(background=ttk.Style().lookup("TFrame", "background"))
 
         body = ttk.Frame(window, padding=GROUP_GAP)
@@ -1710,14 +1746,14 @@ class Dialog:
 
 
 class CountdownDialog(Dialog):
-    """Keep these settings, or let them be put back.
+    """Asks the user to keep these settings, or to let LACT reverse them.
 
-    LACT applies a change and reverts it unless it is confirmed within a few
-    seconds. That is the feature, not an obstacle: a clock the card cannot
-    hold or a voltage it cannot run makes the screen go black, and a machine
-    that undoes it on its own is one you can still use. So this asks, and
-    answers "no" by itself if nobody is there to - which is exactly the case
-    the daemon's timer exists for.
+    LACT applies a change and reverses it after some seconds, if the user does
+    not confirm it. That is a function and not an obstacle. A clock that the
+    card cannot hold, or a voltage that it cannot use, makes the screen black.
+    A machine that reverses such a change itself stays usable. So this dialog
+    asks the question, and it answers "no" itself when no user answers. The
+    timer of the daemon exists for exactly that condition.
     """
 
     def __init__(self, parent, seconds):
@@ -1763,23 +1799,23 @@ class CountdownDialog(Dialog):
 
 
 class ColourDialog(Dialog):
-    """Pick a colour to flash: a grid of them, or type one in.
+    """Asks for a colour to flash, from a grid or from typed text.
 
-    Tk's own chooser is the ugliest window this panel could put up, and it is
-    the one that matters most - a project about colour asking for a colour.
-    The offered ones are the colours the notifications already use, which are
-    the ones this strip is known to look good in; anything else is typed, the
-    trigger taking any colour.
+    The chooser of Tk has the worst look of each window that this panel can
+    show. It is also the most important one, because this project is about
+    colour. The grid offers the colours of the notifications, and those
+    colours are correct on this strip. The user types each other colour,
+    because the trigger accepts each colour.
     """
 
     ACROSS = 5
 
     def __init__(self, parent, dress, title="Flash a colour"):
         self.chosen = None
-        # Given a way to dress a button rather than an image: an outlined
-        # button blends its own fill under the pointer, and a swatch baked
-        # against the plain shade sits on the hovered one as a box - which is
-        # the same fault as a greyed field's, and has the same answer.
+        # This takes a function that styles a button, and not an image. An
+        # outlined button mixes its own fill below the pointer. A colour
+        # sample that holds the plain shade then shows a box on the hover
+        # shade. A grey field has the same fault and the same correction.
         self.dress = dress
         super().__init__(parent, title, None, confirm="Flash")
 
@@ -1843,9 +1879,9 @@ class ProfileDialog(Dialog):
         self.listing = tk.Listbox(
             body, height=min(8, max(3, len(self.names))), activestyle="none",
             borderwidth=0, highlightthickness=0, exportselection=False,
-            # A tk widget, not a themed one: it has no style to take a colour
-            # from and has to be told. Every ttk label in this window already
-            # carries the ground it stands on - see dress().
+            # This is a tk widget and not a themed widget. It has no style with
+            # a colour, so the caller must give it one. Each ttk label in this
+            # window already holds the colour below it. See dress().
             background=self.roles["surface_container_low"],
             foreground=self.roles["on_surface"],
             selectbackground=self.roles["secondary_container"],
@@ -1898,18 +1934,18 @@ class SidebarEntry:
     """One section in the list down the left edge.
 
     A canvas rather than a ttk.Radiobutton, which is what the inner rail is.
-    That one has a single label in a single font, and this needs two: a title
-    and, under it in a smaller muted face, what the section is for. ttk has no
-    way to say that - a widget has one -font option - and a two-line label in
-    one face loses the distinction the subtitle exists to make.
+    A ttk entry has one label in one font. This entry needs two: a title, and
+    below it a smaller and weaker line that gives the subject of the section.
+    ttk cannot do that, because a widget has one -font option. A label of two
+    lines in one font removes the difference that the subtitle must show.
 
-    A canvas has neither problem, and it is also how everything else in this
-    window that ttk could not draw is drawn: the preview
-    stage, the swatches. Text items take a font and a fill apiece, so the
-    whole entry is four items on one surface.
+    A canvas has neither problem. Each other element that ttk cannot draw uses
+    a canvas: the preview stage and the colour samples. Each text item takes
+    its own font and its own fill, so the complete entry is four items on one
+    surface.
 
-    What it gives up is ttk's states, so hover and selection are bound here by
-    hand. That is three bindings, and it is the price of the second line.
+    A canvas has no ttk states, so this class binds hover and selection
+    itself. That is three bindings, and it is the cost of the second line.
     """
 
     def __init__(self, parent, roles, fonts, entry, on_pick,
@@ -1955,19 +1991,20 @@ class SidebarEntry:
         self.canvas.bind("<Leave>", lambda _event: self._hover(False))
 
     def _draw_icon(self, name):
-        """A small pictogram, drawn from primitives.
+        """Draws a small symbol from simple shapes.
 
-        Four shapes and a letter, none of them a font glyph: the symbols that
-        would say these things - a lightning bolt, a television - live in
-        emoji fonts that a machine may not have, and a missing glyph is an
-        empty box beside every entry rather than a plain one.
+        There are four shapes and one letter, and none of them is a font
+        glyph. The symbols for these subjects are a lightning bolt and a
+        television, and they are in emoji fonts. A machine can have no such
+        font. An absent glyph gives an empty box beside each entry.
         """
         left, middle = SIDEBAR_ICON_X, SIDEBAR_ENTRY_HEIGHT // 2
         colour = self.roles["on_surface_variant"]
-        # (item, which option carries its colour). Recorded as it is drawn
-        # rather than asked for later: a canvas line has no -outline at all,
-        # and itemcget raises on an option the item does not have instead of
-        # answering empty - so probing for it is a Tcl error, not a no-op.
+        # (item, the option that holds its colour). This code records the
+        # option at the draw step and does not read it later. A canvas line
+        # has no -outline option. itemcget raises an error for an absent
+        # option and does not return an empty value. A test for the option
+        # is therefore a Tcl error and not a safe call.
         self.icon = []
 
         def solid(item):
@@ -2046,9 +2083,9 @@ class SidebarEntry:
         state = ("selected" if self.selected
                  else "hover" if self.hovering else "rest")
         self.canvas.itemconfigure(self.ground, image=self._grounds[state])
-        # On the filled pill the text is the colour that container asks for,
-        # which is not the same as the one the page uses - a selected entry
-        # keeping the page's foreground is the one that goes unreadable.
+        # On the filled shape the text takes the colour of that container.
+        # That colour is not the colour of the page. A selected entry with
+        # the foreground of the page is not readable.
         lit = self.selected
         title = self.roles["on_secondary_container" if lit else "on_surface"]
         rest = self.roles["on_secondary_container" if lit
@@ -2060,21 +2097,21 @@ class SidebarEntry:
 
 
 class Indicator:
-    """A coloured dot and a sentence, at the foot of the window.
+    """Shows a coloured dot and a sentence at the foot of the window.
 
-    Two of them now: whether the LED bar is being driven, and whether HDMI CEC
-    can reach the television. Both answer a question somebody has while
-    looking at any page, which is why they are at the foot rather than on the
-    page that configures them.
+    There are two of them now. The first reports whether a program drives the
+    LED bar. The second reports whether HDMI CEC can reach the television.
+    Both answer a question that a user has on each page. For that reason they
+    are at the foot and not on the page that holds their settings.
 
-    Three states, and the third is the point. Before anything has been read
-    there is nothing to claim, and a grey dot saying "looking" is honest where
-    a red one saying "not connected" would be a fault report about a question
-    nobody has answered yet.
+    There are three states, and the third state is important. Before the first
+    read there is no answer. A grey dot with the text "looking" is correct
+    there. A red dot with the text "not connected" reports a fault, and no
+    program answered the question yet.
 
-    The dot is a canvas because a coloured disc is not something ttk draws.
-    The pair is packed and unpacked together - an indicator with no dot is a
-    sentence, and one with no sentence is a dot nobody can read.
+    The dot is a canvas, because ttk does not draw a coloured disc. This class
+    packs and unpacks the two elements together. An indicator with no dot is a
+    sentence, and an indicator with no sentence is a dot with no meaning.
     """
 
     def __init__(self, parent, roles, text):
@@ -2088,11 +2125,11 @@ class Indicator:
         self.label = ttk.Label(parent, text=text, style="Page.Muted.TLabel")
 
     def show(self, after=None):
-        """Put it in the bar, in a place that does not depend on when.
+        """Puts the indicator into the bar, at a position that does not move.
 
-        `after` pins where: an indicator shown later would otherwise land at
-        the end of whatever is packed to the left at that moment, which on a
-        window that has already reported a failure means landing after it.
+        `after` fixes the position. Without it, an indicator that comes later
+        goes to the end of the elements at the left at that moment. On a window
+        with a failure message, the indicator then comes after that message.
         """
         if self.canvas.winfo_ismapped():
             return
@@ -2117,17 +2154,17 @@ class Indicator:
 
 
 class FanCurve:
-    """The fan curve, as a graph you can take hold of.
+    """Shows the fan curve as a graph that the user can drag.
 
-    Temperature across, fan speed up. A point is dragged in both directions
-    and cannot pass its neighbours, which is what keeps the curve a function
-    of temperature rather than a shape - LACT stores it as a map keyed by
-    degrees, so two points at the same temperature is not something that can
-    be written down.
+    The temperature is the horizontal axis, and the fan speed is the vertical
+    axis. The user drags a point in both directions, and a point cannot pass
+    its neighbours. The curve is therefore a function of the temperature and
+    not a free shape. LACT stores it as a map with the degrees as the key, so
+    two points at one temperature are not possible.
 
-    Drawn on a canvas because there is nothing in ttk that is a graph, and
-    because the alternative - a column of numbers with sliders - answers "what
-    is the speed at 60 degrees" without ever answering "what shape is this".
+    This uses a canvas, because ttk has no graph. The other method is a column
+    of numbers with sliders. That method answers "what is the speed at 60
+    degrees" and never answers "what is the shape of this curve".
     The shape is the reason somebody opens a fan curve.
     """
 
@@ -2233,10 +2270,10 @@ class FanCurve:
             return
         points = sorted(self.curve.items())
         degrees, fraction = self._from(event.x, event.y)
-        # Between its neighbours, never past them. LACT keys the curve by
-        # temperature, so a point dragged over its neighbour would not swap
-        # places with it - it would land on the same key and one of the two
-        # would cease to exist.
+        # The point stays between its neighbours and never passes them. LACT
+        # uses the temperature as the key of the curve. A point that passes
+        # its neighbour does not change position with it. The two points then
+        # have the same key, and one of the two goes away.
         low = points[self.held - 1][0] + 1 if self.held > 0 else self.LOW
         high = (points[self.held + 1][0] - 1
                 if self.held + 1 < len(points) else self.HIGH)
@@ -2270,11 +2307,11 @@ class FanCurve:
         self.on_change()
 
     def remove(self):
-        """The last point, unless there are only two left.
+        """Removes the last point, but keeps a curve of two points.
 
-        Two is the fewest a curve can be drawn from, and LACT wants a curve
-        rather than a point - so this stops there rather than letting the
-        graph become something that cannot be applied.
+        Two points are the minimum for a curve, and LACT needs a curve and not
+        a point. So this function stops at two points. It does not let the
+        graph become a shape that the daemon cannot accept.
         """
         if len(self.curve) <= 2:
             return
@@ -2287,11 +2324,11 @@ class Panel:
     def __init__(self, root):
         self.root = root
         root.title("SteamOS Utility Center")
-        # Wide enough that the sidebar, the inner list and a full-width
-        # setting row all fit without the window having to be dragged bigger
-        # before anything can be read - which is what the old 820 meant once
-        # there was a second list down the left. The height is a floor only:
-        # _refit gives the window what the open page actually needs.
+        # The width holds the sidebar, the inner list and a settings row at
+        # the full width. The user does not have to make the window larger
+        # first. The old value of 820 needed that after the second list came
+        # to the left edge. The height is a minimum only. _refit gives the
+        # window the height that the open page needs.
         root.minsize(MIN_WIDTH, MIN_HEIGHT)
         root.geometry("%dx%d" % (START_WIDTH, START_HEIGHT))
         self._set_window_icon()
@@ -2331,30 +2368,31 @@ class Panel:
         # What is booked with after(), so it can be dropped when the window is
         self._preview_job = None
         self._refit_job = None
-        # And the catching-up a moved control books - see _settings_changed.
+        # The update step that a moved control schedules. See
+        # _settings_changed.
         self._catching_up = None
-        # Explanations that should use the width the window actually has
+        # The texts that must use the current width of the window
         self._wrapped = []
-        # How much narrower than the page one of them is, by widget name. A
-        # label indented under a switch has that much less room than the ones
-        # starting at the card's edge, and _rewrap hands the same width to
-        # every label - so without this the indented ones were laid out into
-        # room they do not have, and a label wider than its slot is not
-        # wrapped, it is cut off.
+        # The width that one of them loses against the page, by widget name.
+        # An indented label below a switch has that much less space than a
+        # label at the edge of the card. _rewrap gives the same width to each
+        # label. Without this map, the indented labels used a width that they
+        # do not have. A label that is wider than its space is not wrapped.
+        # The card cuts it.
         self._wrap_insets = {}
         self._wrap_width = 0
-        # ...and the same, kept per notebook - see _page_width.
+        # The same value, for each notebook. See _page_width.
         self._wrap_widths = {}
-        # The four pictures every card's corners are made of - see _card.
+        # The four pictures of the corners of each card. See _card.
         self._corners = None
-        # The rows of buttons, and how many columns each is currently laid out
-        # in - see _relay_buttons.
+        # The rows of buttons, and the current number of columns of each row.
+        # See _relay_buttons.
         self._button_rows = []
         self._button_across = {}
 
-        # The header says which *section* is open, not what the program is
-        # called - the title bar already does that, and repeating it inside
-        # the window spends the one line that could say where you are.
+        # The header gives the open *section* and not the name of the
+        # program. The title bar gives the name. A second copy of the name in
+        # the window uses the one line that can give the position of the user.
         # Two levels, outer first: the sidebar picks a section, and what a
         # section holds is its own business. Only the LED strip has an inner
         # list of pages; the rest are one page each.
@@ -2378,22 +2416,23 @@ class Panel:
                                   style="Page.Muted.TLabel",
                                   justify="left", wraplength=CONTENT_MAX)
         self.headline.pack(anchor="w", pady=(2, 0))
-        # Wrapped like everything else that is a sentence rather than a label.
-        # Left to one line it is the longest thing in the window - a toplevel
-        # asks for what its widest child wants, so the repair summary alone
-        # decided how wide the window opened.
+        # This wraps, as each other sentence does. A label does not wrap. On
+        # one line this text is the longest element in the window. A toplevel
+        # asks for the width of its widest child, so the repair summary alone
+        # gave the window its width at the start.
         self._wrapped.append(self.headline)
 
         self.sections = ttk.Notebook(main)
 
-        # The foot of the window is claimed before the pages are, and from the
-        # bottom up: pack hands out room in the order it was asked, so the
-        # pages taking all of it first left a short window with no Apply row
-        # and no status bar at all - they were packed later and there was
-        # nothing left. The pages scroll and these do not, so these go first.
+        # The foot of the window takes its space before the pages, from the
+        # bottom upwards. pack gives out the space in the order of the calls.
+        # With the pages first, a short window got no Apply row and no status
+        # bar. Those two came later, and no space was available. The pages
+        # scroll and these two do not, so these two come first.
         #
-        # Under the sections, not inside one: one Apply for every setting in
-        # the window, whichever section it is on - see apply_settings.
+        # The Apply row is below the sections and not in one section. One
+        # Apply button applies each setting in the window, in each section.
+        # See apply_settings.
         self._build_statusbar(root)
         self.runner = Runner(root, self._write, self._set_busy)
         self._build_apply(root)
@@ -2417,8 +2456,8 @@ class Panel:
         notebook = self.notebook = ttk.Notebook(strip)
         notebook.pack(side="left", fill="both", expand=True)
 
-        # Which tabs the Apply row belongs under, by widget rather than by
-        # position - reordering the tabs must not silently change this.
+        # The tabs with an Apply row, by widget and not by position. A new
+        # order of the tabs must not change this set.
         self._settings_tabs = set()
         for entry in SETTINGS_TABS:
             title, table = entry[0], entry[1]
@@ -2503,16 +2542,18 @@ class Panel:
         self._fit_window()
 
     def _page(self, notebook, build):
-        """One page of the notebook, scrolling if the window is too short.
+        """Builds one page of the notebook. It scrolls in a short window.
 
-        A page is as long as its settings are; a window is only as tall as the
-        screen allows. Without this the foot of the longest page is simply out
-        of reach on a smaller screen - and a settings panel with a setting
-        nobody can get to is worse than an ugly one.
+        The length of a page is the length of its settings. The height of a
+        window is the height of the screen at the most. Without this function,
+        the foot of the longest page is out of reach on a small screen. A
+        settings panel with an unreachable setting is worse than a panel with
+        a poor look.
 
-        Nothing appears while it is not needed: the bar shows up when the
-        content outgrows the room and goes away again when it fits, so on a
-        screen with the height for it the panel looks exactly as it did.
+        The scrollbar is visible only when it is necessary. It comes when the
+        content is longer than the space, and it goes away when the content
+        fits. On a screen with sufficient height the panel looks the same as
+        before.
         """
         holder = ttk.Frame(notebook, style="Page.TFrame")
         canvas = tk.Canvas(holder, highlightthickness=0, borderwidth=0,
@@ -2534,29 +2575,29 @@ class Panel:
             # belongs to are far enough apart to have to be traced by eye.
             width = min(canvas.winfo_width(), CONTENT_MAX)
             room = canvas.winfo_height()
-            # At least the room it has, so a page with something set to expand
-            # - the preview's stage - still fills the window when it fits.
+            # At least the available space. A page with an element that
+            # expands, such as the preview stage, then fills the window.
             height = max(wanted, room)
             canvas.itemconfigure(window, width=width, height=height)
             canvas.configure(scrollregion=(0, 0, width, height))
-            # Asking for what the content needs keeps the window opening at the
-            # size the page wants; the cap in _refit is what decides whether it
-            # gets the height. The width matters as much: a canvas does not
-            # pass on what is inside it, it asks for its own default - so
-            # without this the window opened at a canvas's idea of wide and
-            # squeezed every page into it. Only when it changed, or setting it
-            # brings this handler straight back and the two chase each other.
+            # A request for the size of the content keeps the start size of the
+            # window at the size of the page. The limit in _refit decides the
+            # height. The width is as important. A canvas does not pass on the
+            # size of its content, and it asks for its own default. Without this
+            # code, the window opened at the default width of a canvas and put
+            # each page into it. Set the size only after a change: each call
+            # starts this handler again, and the two then repeat.
             if (canvas.winfo_reqheight() != wanted
                     or canvas.winfo_reqwidth() != across):
                 canvas.configure(height=wanted, width=across)
             if (wanted > room) != bool(bar.winfo_ismapped()):
                 if wanted > room:
-                    # before= the canvas, so the bar is allocated its width
-                    # first. pack hands out the cavity in packing order, and
-                    # the canvas asks for as much width as its content wants:
-                    # packed after it there was nothing left, so the bar was
-                    # placed, sized, and never mapped - a page that scrolled
-                    # by wheel and showed no bar to say so.
+                    # The value before= is the canvas, so the bar gets its width
+                    # first. pack gives out the space in the order of the calls,
+                    # and the canvas asks for the width of its content. After the
+                    # canvas, no space was available. Tk placed the bar and gave
+                    # it a size, and it never showed the bar. The page then
+                    # scrolled with the wheel and showed no bar.
                     bar.pack(side="right", fill="y", before=canvas)
                 else:
                     bar.pack_forget()
@@ -2583,12 +2624,12 @@ class Panel:
         canvas.yview_scroll(1 if down else -1, "units")
 
     def _add_section(self, key, page):
-        """One page of the outer notebook, remembered by name.
+        """Adds one page of the outer notebook, and keeps it under its name.
 
-        By name rather than by position: the sidebar, the header and the
-        Apply row all need to say something about "the section that is open",
-        and an index into a notebook is the wrong handle for that - inserting
-        a section anywhere but the end would move every answer after it.
+        This uses a name and not a position. The sidebar, the header and the
+        Apply row must each name "the open section". An index into a notebook
+        is the incorrect key for that. A new section before the end moves the
+        index of each section after it.
         """
         self.sections.add(page, text=key)
         self._section_pages[key] = str(page)
@@ -2617,14 +2658,14 @@ class Panel:
         self._open_section(SECTIONS[0][0])
 
     def _sidebar_width(self, fonts):
-        """How wide the rail has to be for the names it is holding.
+        """Returns the width that the rail needs for its names.
 
-        Measured rather than fixed, for the same reason the control heights
-        are: how wide a name draws is the desktop's font, not ours. At
-        Plasma's default the fixed 268 was enough, and a wider face or a
-        larger size took the end off every subtitle in the list at once -
-        canvas text is cut at the edge of its canvas, with no wrap and no
-        ellipsis to say that it was.
+        This is a measurement and not a fixed value, for the same reason as
+        the control heights. The font of the desktop gives the width of a
+        name, and this project does not. At the default of Plasma the fixed
+        268 was sufficient. A wider font, or a larger size, removed the end of
+        each subtitle in the list. Canvas text ends at the edge of the canvas.
+        It does not wrap, and it shows no mark for the cut.
 
         Never narrower than it was, so a machine with a narrow font gets the
         rail this window was drawn around, and capped, so an enormous one
@@ -2651,37 +2692,37 @@ class Panel:
             self._catch_up_cec()
         elif key == "power":
             self._catch_up_gpu()
-        # Once this page has a geometry, and not before - see _relay_wrapping.
+        # After this page has a geometry, and not before. See
+        # _relay_wrapping.
         self.root.after_idle(self._relay_wrapping)
         self._tab_changed()
 
     def _build_statusbar(self, parent):
-        """The line across the foot: whether the hardware is there.
+        """Builds the line at the foot: the condition of the hardware.
 
-        At the very bottom of the window rather than on the status page,
-        because it answers the question somebody has while looking at any of
-        them - a page of LED settings is worth less if nothing is listening.
+        This is at the bottom of the window and not on the status page. It
+        answers a question that the user has on each page. A page of LED
+        settings has less value when no device receives the settings.
 
-        Only that. The version used to sit at the right-hand end and is on
-        the About page instead: it is a thing you go and look up once, not a
-        thing you keep an eye on, and the foot of every page is for the
-        second kind.
+        It holds that line only. The version was at the right end before, and
+        it is now on the About page. A user reads the version one time and
+        does not watch it. The foot of each page is for the values that a user
+        watches.
         """
         bar = self.statusbar = ttk.Frame(parent, style="Page.TFrame")
         bar.pack(side="bottom", fill="x",
                  padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, GROUP_GAP))
         self.link = Indicator(bar, self.roles, "Looking for the bar...")
         self.link.show()
-        # The second one is built here and shown only once there is a toolkit
-        # to report on - see _say_cec_link. A machine that has never installed
-        # HDMI CEC has nothing to indicate, and a permanent grey "not
-        # installed" would be the foot of the window reporting an absence
-        # nobody asked about.
+        # This code builds the second indicator here and shows it only after
+        # a toolkit is available. See _say_cec_link. A machine without HDMI
+        # CEC has nothing to report. A permanent grey "not installed" makes
+        # the foot of the window report an absence that no user asked about.
         self.cec_link = Indicator(bar, self.roles, "Looking for HDMI CEC...")
-        # Built here and packed only when there is something to say - see
-        # _say_problem. An empty label sitting in the bar would still take its
-        # padding, and the gap would be the one thing in this line that means
-        # nothing.
+        # This code builds the label here and packs it only for a message.
+        # See _say_problem. An empty label in the bar still takes its
+        # padding, and that space is then the one element of this line with
+        # no meaning.
         self.problem = ttk.Label(bar, text="\u26a0 " + PROBLEM_TEXT,
                                  style="Page.Bad.TLabel")
 
@@ -2704,9 +2745,10 @@ class Panel:
             return
         self.cec_link.show(after=self.link.label)
         if self._cec is None:
-            # Asked and got nothing back is not the same as not asked yet. The
-            # first is a toolkit that is installed and will not answer, which
-            # is a fault; the second is a window that has not looked.
+            # A question with no answer is not the same as no question. The
+            # first condition is an installed toolkit that does not answer,
+            # and that is a fault. The second condition is a window before
+            # its first read.
             if self._cec_asked:
                 self.cec_link.say(False, "HDMI CEC is not answering")
             else:
@@ -2722,9 +2764,9 @@ class Panel:
     def _build_soon(self, where, key):
         """A section that is planned but not built.
 
-        It says what it will do and what is in the way, rather than only that
-        it is coming: a page that promises a feature and explains nothing is
-        indistinguishable from one that has quietly failed to load.
+        The page gives the function and the obstacle, and not only the plan.
+        A page that gives a function and no other information looks the same
+        as a page that failed to load.
         """
         title, doing, blocked = SOON[key]
         holder = ttk.Frame(where, style="Page.TFrame")
@@ -2775,14 +2817,14 @@ class Panel:
     def _build_rail(self):
         """Fill the rail, once the notebook knows what pages it has.
 
-        A rail rather than a row of tabs is what Material suggests once there
-        are more than a handful of destinations, and six is over that line. It
-        also buys back the vertical space the tab row was using, which on a
-        window this tall is worth having.
+        Material gives a rail, and not a row of tabs, for a window with more
+        than a few destinations. Six destinations is more than that number. A
+        rail also returns the vertical space of the tab row, and a window of
+        this height needs that space.
 
-        The notebook keeps its pages and its events - only its own tab row is
-        taken out of the layout - so everything that watches for a page change
-        goes on working, and the rail is what drives it.
+        The notebook keeps its pages and its events. Only its own tab row goes
+        out of the layout. Each function that watches for a page change
+        therefore still works, and the rail drives it.
         """
         self._rail_choice = tk.StringVar(value=self.notebook.tabs()[0])
         for name in self.notebook.tabs():
@@ -2797,25 +2839,25 @@ class Panel:
     def _set_busy(self, busy, code=None):
         """What the window does while a command runs, and when it ends.
 
-        Every button that starts a command goes dead, so a second one cannot
-        be started - the Runner refuses it anyway, but only by printing a line
-        nobody is looking at - and when a command ends badly the reason goes
-        beside the status light.
+        Each button that starts a command becomes disabled, so the user cannot
+        start a second command. The Runner also refuses a second command, but
+        it reports the refusal with one line that no user reads. After a
+        command with a bad result, the reason goes beside the status light.
 
-        There was a moving rule under the title as well. It said only what the
-        greyed buttons already say, and it said it by animating four pixels
-        sixty times a second for the length of an install.
+        There was also a moving bar below the title. It gave the same
+        information as the disabled buttons, and it moved four pixels sixty
+        times each second for the complete time of an install.
         """
         self._busy = busy
         for button in self._busy_buttons:
             button.state(["disabled"] if busy else ["!disabled"])
         if not busy:
-            # These have reasons of their own to be dead, which outlive the
-            # command that greyed everything - and _busy_buttons is every
-            # button in the window, drop-down fields included, so waking them
-            # all would hand back settings that a switch above them is meant
-            # to be holding shut. Reported: pressing Apply with a rainbow
-            # scene ungreyed its colour until the window was opened again.
+            # These have their own reasons to stay disabled, and those reasons
+            # continue after the command. _busy_buttons holds each button in
+            # the window, and it also holds the drop-down fields. A call that
+            # enables all of them returns settings that a switch above them
+            # must hold closed. A user reported this: Apply with a rainbow
+            # scene enabled its colour until the next start of the window.
             self._refresh_enabled()
             self._refresh_unsaved()
             self._refresh_update()
