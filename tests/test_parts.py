@@ -304,6 +304,78 @@ class PanelPartTest(unittest.TestCase):
         self.assertEqual(part.verdict, "Version 1.0.0.")
 
 
+class ApplierCommandTest(unittest.TestCase):
+    """With a password or without one, and what decides which.
+
+    The installer writes a sudoers rule for the three appliers. A run that
+    matches a line of it needs no password. Everything else goes through
+    pkexec, which asks.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import ctl
+        self.ctl = ctl
+        # An installation where everything is in place. The test machine has
+        # none of these files, so the answer is a stub rather than a mkdir in
+        # /var/lib.
+        self.there = {ctl.SUDO_RULE, ctl.APPLY_CONFIG, ctl.APPLY_POWER,
+                      ctl.APPLY_MOUNTS}
+        was = ledpanel.os.path.exists
+        ledpanel.os.path.exists = lambda path: path in self.there or was(path)
+        self.addCleanup(setattr, ledpanel.os.path, "exists", was)
+
+    def test_an_installation_with_the_rule_needs_no_password(self):
+        command = ledpanel.apply_config_command(
+            "/src", self.ctl.STAGED["strip"])
+        self.assertEqual(command[:2], ["sudo", "-n"])
+        self.assertEqual(command[2], self.ctl.APPLY_CONFIG)
+
+    def test_no_rule_means_it_asks(self):
+        self.there.discard(self.ctl.SUDO_RULE)
+        command = ledpanel.apply_config_command(
+            "/src", self.ctl.STAGED["strip"])
+        self.assertEqual(command[0], "pkexec")
+
+    def test_no_installation_means_it_asks(self):
+        """A clone with nothing installed still works, through the scripts."""
+        self.there.discard(self.ctl.APPLY_POWER)
+        command = ledpanel.apply_power_command("/src",
+                                               self.ctl.STAGED["power"])
+        self.assertEqual(command[0], "pkexec")
+        self.assertIn("apply-power.sh", command[1])
+
+    def test_a_file_the_rule_does_not_name_means_it_asks(self):
+        """No line of the rule matches a name that nobody knew in advance."""
+        command = ledpanel.apply_config_command("/src", "/tmp/anything.conf")
+        self.assertEqual(command[0], "pkexec")
+
+    def test_asking_can_be_asked_for(self):
+        command = ledpanel.apply_config_command(
+            "/src", self.ctl.STAGED["strip"], ask=True)
+        self.assertEqual(command[0], "pkexec")
+
+    def test_giving_a_drive_away_always_asks(self):
+        """The chown walks a whole drive as root, so a person answers for it.
+
+        It carries a second argument, and no line of the rule matches a
+        command of two. The rule leaves it out on purpose.
+        """
+        command = ledpanel.apply_mounts_command(
+            "/src", self.ctl.STAGED["drives"], "/mnt/games")
+        self.assertEqual(command[0], "pkexec")
+        self.assertEqual(command[-1], "/mnt/games")
+
+    def test_writing_the_drives_without_a_chown_needs_no_password(self):
+        command = ledpanel.apply_mounts_command("/src",
+                                                self.ctl.STAGED["drives"])
+        self.assertEqual(command[:2], ["sudo", "-n"])
+
+    def test_every_area_of_the_rule_has_an_applier(self):
+        """A name in one and not the other is a run that nothing permits."""
+        for area in self.ctl.STAGED:
+            self.assertIn(area, self.ctl.APPLIER)
+
+
 class DriveTroubleTest(unittest.TestCase):
     """The reason a drive did not mount, taken out of the applier's output.
 

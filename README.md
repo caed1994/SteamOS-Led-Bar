@@ -694,9 +694,16 @@ light against a pale window is also difficult to judge.
 **Apply and Reload are below all the pages.** Apply writes each setting from
 each page. It is grey while the window and the files agree.
 
-Apply asks for your password and restarts the service only when a setting that
-the service reads is different. The **System** page's settings are in your own
-home directory, and Apply writes them with no password and no restart.
+Apply restarts the service only when a setting that the service reads is
+different. The **System** page's keyboard layout is in your own home directory,
+and Apply writes it with no restart.
+
+Apply asks for **no password** on an ordinary installation. The installer
+writes a sudoers rule that permits the three programs that put a change into
+effect, each with the one file it reads, and Apply uses it. Where the rule is
+not there, Apply asks as it did before: an installation with `--no-sudoers`, or
+one from before the rule existed. See
+[Why it needs no password](#why-it-needs-no-password).
 
 Caution: After a SteamOS update, press **Rebuild and reinstall**. The update
 brings a new kernel, and the module was built for the previous kernel. The
@@ -711,8 +718,15 @@ serial port, the baud rate and the device are not in the window, so they can
 never come from another machine.
 
 The panel runs as you and not as root. To flash the bar and to ask Steam
-questions, it needs no rights. To write the configuration, to run the self-test
-and to repair a part, it asks one time for your password.
+questions, it needs no rights. To write the configuration, the CPU settings or
+the drives, it uses the sudoers rule and asks for nothing.
+
+Three things still ask, and each of them is deliberate. **Take ownership** is
+one `chown` over a whole drive as root, and the rule leaves it out on purpose.
+**Rebuild and reinstall** runs the installer, which does everything. The
+**self-test** opens the serial port with the service stopped. A prompt now
+means one of those three, rather than being a press of a key twenty times a
+day.
 
 **That second half cannot operate in Game Mode**, because Game Mode has no
 password prompt. Add the panel as a non-Steam game for the Test page, and do

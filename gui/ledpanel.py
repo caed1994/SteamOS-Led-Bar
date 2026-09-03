@@ -15,6 +15,7 @@ import re
 import subprocess
 
 from steamos_utility_center import cec as cec_module
+from steamos_utility_center import ctl as ctl_module
 from steamos_utility_center import config as config_module
 from steamos_utility_center import lact as lact_module
 from steamos_utility_center import phone
@@ -704,10 +705,54 @@ def reinstall_command(source_dir, rebuild_module=True):
     return command
 
 
-def apply_config_command(source_dir, staged_path):
-    """Install a prepared config file and restart the service, in one prompt."""
-    return ["pkexec", os.path.join(source_dir, "scripts", "apply-config.sh"),
-            staged_path]
+# -- running one of the appliers -------------------------------------------
+#
+# Two ways in, and the difference is a password.
+#
+# The installer writes a sudoers rule for the three appliers. Each line of it
+# names one program and the one file that program reads, and there is no
+# wildcard in it. A run that matches a line needs no password at all.
+#
+# pkexec is the other way, and it asks. It is what runs when the rule is not
+# there: an installation with --no-sudoers, one from before the rule existed,
+# or an update that took the rule away in spite of the keep-list. It is also
+# what runs for the work that the rule deliberately leaves out, which today is
+# the chown of Take ownership. That one walks a whole drive as root, and a
+# person answers for it.
+#
+# The password thus means something again. It was twenty presses a day of
+# noise before, on settings that the same rule now permits anyway: the rule is
+# on the machine from the moment the installer runs, so a panel that keeps
+# asking makes nothing safer. See ctl.sudoers_text.
+
+# The reason a run failed, when the reason is rights. ctl knows the words that
+# sudo uses; this is the same question asked about a transcript.
+refused_for_rights = ctl_module.refused_for_rights
+
+
+def applier_command(area, source_dir, script, staged_path, extra=(),
+                    ask=False):
+    """Returns how to run one applier, with a password or without one.
+
+    Without one needs three things: an installation, the staged file at the
+    name the rule permits, and no extra argument. A call with an extra
+    argument is a call that no line of the rule matches, so it goes the other
+    way from the start rather than being refused first.
+    """
+    permitted = (not ask and not extra
+                 and staged_path == ctl_module.STAGED.get(area)
+                 and os.path.exists(ctl_module.APPLIER[area])
+                 and os.path.exists(ctl_module.SUDO_RULE))
+    if permitted:
+        return ["sudo", "-n", ctl_module.APPLIER[area], staged_path]
+    return ["pkexec", os.path.join(source_dir, "scripts", script),
+            staged_path] + list(extra)
+
+
+def apply_config_command(source_dir, staged_path, ask=False):
+    """Install a prepared config file and restart the service."""
+    return applier_command("strip", source_dir, "apply-config.sh",
+                           staged_path, ask=ask)
 
 
 # -- updating the clone ----------------------------------------------------
@@ -1220,10 +1265,10 @@ def read_power_config(path=None):
 power_config_text = power_module.text
 
 
-def apply_power_command(source_dir, staged_path):
-    """Install the CPU settings and put them into effect, in one prompt."""
-    return ["pkexec", os.path.join(source_dir, "scripts", "apply-power.sh"),
-            staged_path]
+def apply_power_command(source_dir, staged_path, ask=False):
+    """Install the CPU settings and put them into effect."""
+    return applier_command("power", source_dir, "apply-power.sh",
+                           staged_path, ask=ask)
 
 
 # What a line of an applier says while everything works, and the rows of a
@@ -1266,19 +1311,21 @@ def drive_trouble(transcript, most=2):
     return "\n".join(lines[-most:])
 
 
-def apply_mounts_command(source_dir, staged_path, owner_dir=""):
+def apply_mounts_command(source_dir, staged_path, owner_dir="", ask=False):
     """Returns the command that writes the drives and mounts them.
 
     `owner_dir` is a mount point to give to the desktop user, and it is
     optional. A drive that a person adds is a drive that root owns, so Steam
     cannot write a library to it until somebody says otherwise. The page has
     that as a button, and the button is this argument.
+
+    A call that carries it always asks for a password, because no line of the
+    sudoers rule matches a command of two arguments. That is the design and
+    not a limit to work around: the chown walks a whole drive as root.
     """
-    command = ["pkexec", os.path.join(source_dir, "scripts", "apply-mounts.sh"),
-               staged_path]
-    if owner_dir:
-        command.append(owner_dir)
-    return command
+    return applier_command("drives", source_dir, "apply-mounts.sh",
+                           staged_path,
+                           extra=(owner_dir,) if owner_dir else (), ask=ask)
 
 
 def mount_point_for(found):

@@ -4412,6 +4412,100 @@ class DrivesPageTest(unittest.TestCase):
         self.assertIn(os.path.join(root, "var", "mnt", "games"), said)
         self.assertIn("is a link", said)
 
+    def test_a_run_that_nothing_permits_asks_once(self):
+        """The fallback: --no-sudoers, an old installation, or a lost rule.
+
+        sudo says one sentence and exits. The same work then runs through
+        pkexec, which asks, and a person gets what they pressed for rather
+        than a refusal they can do nothing about.
+        """
+        tried = []
+
+        def start(command, done=None):
+            tried.append(command)
+            self.panel.runner.transcript = (
+                ["sudo: a password is required\n"] if len(tried) == 1
+                else ["applied\n"])
+            if done is not None:
+                done(1 if len(tried) == 1 else 0)
+            return True
+
+        self.panel.runner.start = start
+        self.panel._run_privileged(["sudo", "-n", "/bin/true"],
+                                   ["pkexec", "/bin/true"], lambda _code: None)
+        self.assertEqual(len(tried), 2)
+        self.assertEqual(tried[1][0], "pkexec")
+
+    def test_a_failure_that_is_not_about_rights_is_not_tried_again(self):
+        """A drive that is not connected does not become connected by a
+        password. A second prompt there is a question with no purpose.
+        """
+        tried, ended = [], []
+
+        def start(command, done=None):
+            tried.append(command)
+            self.panel.runner.transcript = ["the drive is not connected\n"]
+            if done is not None:
+                done(1)
+            return True
+
+        self.panel.runner.start = start
+        self.panel._run_privileged(["sudo", "-n", "/bin/true"],
+                                   ["pkexec", "/bin/true"], ended.append)
+        self.assertEqual(len(tried), 1)
+        self.assertEqual(ended, [1])
+
+    def test_a_run_that_worked_is_not_tried_again(self):
+        tried, ended = [], []
+
+        def start(command, done=None):
+            tried.append(command)
+            self.panel.runner.transcript = ["applied\n"]
+            if done is not None:
+                done(0)
+            return True
+
+        self.panel.runner.start = start
+        self.panel._run_privileged(["sudo", "-n", "/bin/true"],
+                                   ["pkexec", "/bin/true"], ended.append)
+        self.assertEqual(len(tried), 1)
+        self.assertEqual(ended, [0])
+
+    def test_a_command_that_already_asks_has_no_second_run(self):
+        """Take ownership. It asks from the start, so there is nothing to
+        fall back to and no second prompt to give a person.
+        """
+        tried, ended = [], []
+
+        def start(command, done=None):
+            tried.append(command)
+            self.panel.runner.transcript = ["sudo: a password is required\n"]
+            if done is not None:
+                done(1)
+            return True
+
+        self.panel.runner.start = start
+        self.panel._run_privileged(["pkexec", "/bin/true"], None, ended.append)
+        self.assertEqual(len(tried), 1)
+        self.assertEqual(ended, [1])
+
+    def test_the_drives_are_staged_where_the_rule_permits_them(self):
+        """A temporary name is a name that no line of the rule can hold.
+
+        The staging directory is not on a build machine, so what reaches the
+        applier here is a temporary file either way. What is under test is the
+        name that the page asked for.
+        """
+        from steamos_utility_center import ctl
+        asked = []
+        was = ctl.stage
+        ctl.stage = lambda text, path: asked.append(path) or was(text, path)
+        self.addCleanup(setattr, ctl, "stage", was)
+
+        self._apply(0, "0 drive(s) mounted, 0 did not\n")
+        self.panel._apply_drives([])
+        self.assertEqual(asked, [ctl.STAGED["drives"]])
+
     def test_the_explanation_is_on_the_page(self):
         """A label that nothing packs exists and is never drawn.
 

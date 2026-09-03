@@ -67,6 +67,11 @@ APPLY_CONFIG = os.path.join(INSTALL_DIR, "steamos-utility-center-config-apply")
 APPLY_POWER = os.path.join(INSTALL_DIR, "steamos-utility-center-power-apply")
 APPLY_MOUNTS = os.path.join(INSTALL_DIR, "steamos-utility-center-mounts-apply")
 
+# Which applier belongs to which area. The panel reads this to build the same
+# command that this file runs, so the two never name different programs.
+APPLIER = {"strip": APPLY_CONFIG, "power": APPLY_POWER,
+           "drives": APPLY_MOUNTS}
+
 CONFIG_PATH = "/etc/steamos-utility-center.conf"
 
 # Where a change waits while the applier reads it, and one fixed name for each.
@@ -150,7 +155,7 @@ def privileged(command, may_prompt=False, run=None):
     return said.strip()
 
 
-def _stage(text, path):
+def stage(text, path):
     """Writes text where the applier reads it, and returns the path it used.
 
     `path` is the fixed name that a sudoers rule permits. An installation that
@@ -213,7 +218,7 @@ def strip_write(updates, may_prompt=False, run=None, home=None):
             was = handle.read()
     except OSError:
         was = ""
-    staged = _stage(config_module.update_text(was, updates), STAGED["strip"])
+    staged = stage(config_module.update_text(was, updates), STAGED["strip"])
     try:
         return privileged([APPLY_CONFIG, staged], may_prompt, run)
     finally:
@@ -237,7 +242,7 @@ def power_write(updates, may_prompt=False, run=None, home=None):
     values = power_read()
     values.update(updates)
     power.validate(values)              # raises ValueError
-    staged = _stage(power.text(values), STAGED["power"])
+    staged = stage(power.text(values), STAGED["power"])
     try:
         return privileged([APPLY_POWER, staged], may_prompt, run)
     finally:
@@ -289,7 +294,7 @@ def drives_write(updates, may_prompt=False, run=None, home=None):
     entries = updates["drives"]
     if not isinstance(entries, list):
         raise CtlError("drives must be a list of drives")
-    staged = _stage(mounts.text(entries), STAGED["drives"])  # raises MountError
+    staged = stage(mounts.text(entries), STAGED["drives"])  # raises MountError
     try:
         return privileged([APPLY_MOUNTS, staged], may_prompt, run)
     finally:
@@ -401,7 +406,7 @@ def repair_drives(may_prompt=False, run=None, home=None):
     sudoers rule permits one file for each applier, and this way the repair
     needs no rule of its own.
     """
-    staged = _stage(mounts.text(mounts.read()), STAGED["drives"])
+    staged = stage(mounts.text(mounts.read()), STAGED["drives"])
     try:
         return privileged([APPLY_MOUNTS, staged], may_prompt, run)
     finally:

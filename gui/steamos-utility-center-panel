@@ -21,7 +21,6 @@ import queue
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 
@@ -49,6 +48,7 @@ import appsettings                                          # noqa: E402
 import preview as preview_module                            # noqa: E402
 from steamos_utility_center import cec                                 # noqa: E402
 from steamos_utility_center import config as config_module             # noqa: E402
+from steamos_utility_center import ctl                                 # noqa: E402
 from steamos_utility_center import lact                                # noqa: E402
 from steamos_utility_center import mounts                              # noqa: E402
 from steamos_utility_center import notify                              # noqa: E402
@@ -4320,20 +4320,18 @@ class Panel:
             # different helpers install them. The other method is one helper
             # for each file, and this project does not use that method on
             # purpose. See scripts/apply-power.sh.
-            staged = tempfile.NamedTemporaryFile(
-                "w", suffix=".conf", prefix="steamos-utility-center-power-", delete=False)
-            with staged:
-                staged.write(ledpanel.power_config_text(cpu))
-            os.chmod(staged.name, 0o644)
+            cpu_staged = ctl.stage(ledpanel.power_config_text(cpu),
+                                   ctl.STAGED["power"])
 
-            def cpu_done(code, path=staged.name, wanted=dict(cpu)):
+            def cpu_done(code, path=cpu_staged, wanted=dict(cpu)):
                 os.unlink(path)
                 if code == 0:
                     self.power = wanted
                     self._refresh_unsaved()
 
-            self.runner.start(
-                ledpanel.apply_power_command(SOURCE_DIR, staged.name),
+            self._run_privileged(
+                ledpanel.apply_power_command(SOURCE_DIR, cpu_staged),
+                ledpanel.apply_power_command(SOURCE_DIR, cpu_staged, ask=True),
                 cpu_done)
 
         if values == {key: self.config.get(key, config_module.DEFAULTS[key])
@@ -4358,14 +4356,15 @@ class Panel:
                 self._say("Configuration", str(exc))
                 return
 
-        staged = tempfile.NamedTemporaryFile(
-            "w", suffix=".conf", prefix="steamos-utility-center-", delete=False)
-        with staged:
-            staged.write(config_module.update_text(text, values))
-        os.chmod(staged.name, 0o644)
+        # At the name that the sudoers rule permits, where there is one. A
+        # temporary file has a name that nobody knows in advance, and no rule
+        # can name it. ctl.stage falls back to one where this directory is not
+        # there, and the run then asks for a password as it did before.
+        staged_path = ctl.stage(config_module.update_text(text, values),
+                                ctl.STAGED["strip"])
 
         def finished(code):
-            os.unlink(staged.name)
+            os.unlink(staged_path)
             if code != 0:
                 self.refresh_status()
                 return
@@ -4378,8 +4377,10 @@ class Panel:
             self.runner.start(ledpanel.restart_watchers_command(),
                               lambda _code: self.refresh_status())
 
-        self.runner.start(
-            ledpanel.apply_config_command(SOURCE_DIR, staged.name), finished)
+        self._run_privileged(
+            ledpanel.apply_config_command(SOURCE_DIR, staged_path),
+            ledpanel.apply_config_command(SOURCE_DIR, staged_path, ask=True),
+            finished)
 
     def _show_values(self, values):
         """Put these settings into the controls. Keys we do not show are
@@ -6163,15 +6164,10 @@ class Panel:
         except mounts.MountError as exc:
             self._say("Drives", str(exc))
             return
-        staged = tempfile.NamedTemporaryFile(
-            "w", suffix=".conf", prefix="steamos-utility-center-mounts-",
-            delete=False)
-        with staged:
-            staged.write(record)
-        os.chmod(staged.name, 0o644)
+        staged_path = ctl.stage(record, ctl.STAGED["drives"])
 
         def finished(code):
-            os.unlink(staged.name)
+            os.unlink(staged_path)
             if code == 0:
                 self._drives = entries
                 self._drive_where.delete(0, "end")
@@ -6184,9 +6180,36 @@ class Panel:
             self._refit_page()
             self.refresh_status()
 
-        self.runner.start(
-            ledpanel.apply_mounts_command(SOURCE_DIR, staged.name, owner),
-            finished)
+        # A run that gives a drive away carries a second argument, and no
+        # line of the sudoers rule matches a command of two. That one asks
+        # from the start, so there is no second run to make.
+        first = ledpanel.apply_mounts_command(SOURCE_DIR, staged_path, owner)
+        asking = ledpanel.apply_mounts_command(SOURCE_DIR, staged_path, owner,
+                                               ask=True)
+        self._run_privileged(first, None if first == asking else asking,
+                             finished)
+
+    def _run_privileged(self, command, asking, done):
+        """Runs work that needs root, and asks for a password only if it must.
+
+        The installer writes a sudoers rule for the three appliers, so the
+        usual run needs no password. `asking` is the same work through pkexec.
+        It runs once, and only when the first run failed because nothing
+        permits it: an installation with --no-sudoers, one from before the
+        rule existed, or an update that took the rule away.
+
+        `asking` is None where the first command already asks. Take ownership
+        is that case: it carries a second argument, and no line of the rule
+        matches a command of two.
+        """
+        def afterwards(code):
+            if code != 0 and asking is not None and \
+                    ledpanel.refused_for_rights("".join(self.runner.transcript)):
+                self.runner.start(asking, done)
+                return
+            done(code)
+
+        return self.runner.start(command, afterwards)
 
     def _build_app(self, where, table, note):
         """App Settings, which is now everything about this program itself.

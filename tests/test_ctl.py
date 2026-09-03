@@ -594,7 +594,7 @@ class StagedFileTest(unittest.TestCase):
         `sudo -n` then refuses the argument, and that refusal names the rule
         that is missing. That is a better answer than a failure to write.
         """
-        path = ctl._stage("HELLO=1\n", "/proc/no/such/place/strip.conf")
+        path = ctl.stage("HELLO=1\n", "/proc/no/such/place/strip.conf")
         self.addCleanup(os.unlink, path)
         self.assertTrue(os.path.exists(path))
 
