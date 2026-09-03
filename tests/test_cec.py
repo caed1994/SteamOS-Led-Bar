@@ -78,16 +78,16 @@ class FeatureTableTest(unittest.TestCase):
     def test_the_resume_wake_unit_is_the_toolkit_s_own(self):
         """The one switch that names a unit instead of a service.
 
-        toolkitctl has it in neither table, so the seam that would catch a
-        rename is the unit file itself - which is what this switch enables.
+        toolkitctl holds it in neither table. So the one place that finds a
+        change of the name is the unit file, and this switch enables that unit.
         """
         unit = os.path.join(HERE, "..", "cec-toolkit",
                             "systemd", "system", cec.RESUME_WAKE_UNIT)
         self.assertTrue(os.path.exists(unit), unit)
 
     def test_switching_it_goes_through_our_helper_not_the_toolkit(self):
-        # toolkitctl cannot switch it, and it is a root unit - so this is the
-        # one feature whose command is a pkexec of ours.
+        # toolkitctl cannot change it, and it is a root unit. So this is the
+        # one function with a pkexec command from this project.
         command = cec.toggle_command("resume-wake", True, source_dir="/clone")
         self.assertEqual(command[0], "pkexec")
         self.assertTrue(command[1].endswith("scripts/install-cec.sh"))
@@ -96,8 +96,8 @@ class FeatureTableTest(unittest.TestCase):
     def test_what_systemd_says_decides_whether_it_is_on(self):
         self.assertTrue(cec.resume_wake_enabled("enabled\n"))
         self.assertFalse(cec.resume_wake_enabled("disabled\n"))
-        # A runner that hands back nothing for a bad exit is saying "off",
-        # which is also what a unit that is not there means here.
+        # A runner that returns nothing after a bad exit reports "off". An
+        # absent unit has the same meaning here.
         self.assertFalse(cec.resume_wake_enabled(None))
         self.assertTrue(cec.feature_on({cec.RESUME_WAKE_REPORT: True},
                                        "resume-wake"))
@@ -111,13 +111,13 @@ class FeatureTableTest(unittest.TestCase):
     def test_no_explanation_runs_past_two_short_lines(self):
         """Reported: the page was a wall of prose nobody read.
 
-        These are switches on a page with nine of them. What each one does is
-        worth a sentence; how it does it, what it is configured by, and which
-        televisions misbehave are worth a README - and were all in here.
+        These are switches on a page with nine switches. Each switch needs one
+        sentence for its function. Its method, its settings, and the televisions
+        with a fault belong in a README, and all of them were here.
 
-        Counted rather than eyeballed, because prose grows back: every time
-        something is learned about one of these the temptation is to write it
-        down right here, where it is read most and belongs least.
+        This test counts the words, because prose returns. Each new fact about one
+        of these switches goes to this page first. Users read this page the most,
+        and the fact belongs here the least.
         """
         for name, _kind, _label, said in cec.FEATURES:
             self.assertLessEqual(len(said), 160,
@@ -150,10 +150,10 @@ class ReadStatusTest(unittest.TestCase):
     def test_output_that_is_not_json_is_an_error_not_an_empty_status(self):
         """A half-finished install prints a traceback, not a document.
 
-        Read as "nothing is enabled", that traceback would draw a page of
-        switches all showing off, which is a lie about the machine - and the
-        one after it, where somebody switches one on, would fail for a reason
-        nothing on screen explains.
+        A read of that traceback as "nothing is enabled" draws a page where each
+        switch is off. That is an incorrect report about the machine. The next
+        step, where the user turns one switch on, then fails, and no text on the
+        screen gives the reason.
         """
         with self.assertRaises(cec.CecError):
             cec.read_status("Traceback (most recent call last):\n")
@@ -190,9 +190,9 @@ class FeatureStateTest(unittest.TestCase):
     def test_enabled_is_the_question_not_active(self):
         """boot-wake runs once at session start and exits.
 
-        It is enabled and doing its job and almost never active, so a switch
-        that asked whether it was running would show it off whenever it had
-        finished - which is nearly always.
+        It is enabled, it does its work, and it is almost never active. A switch
+        that asks for the running state therefore shows off after each run, and
+        that is almost always.
         """
         found = status()
         found["services"]["boot-wake"] = {"is_enabled": True,
@@ -275,9 +275,9 @@ class CommandTest(unittest.TestCase):
                          "HDA ATI HDMI")
 
     def test_the_status_command_is_asked_of_the_installed_copy(self):
-        # Not of the vendored tree. The installed one is the one whose config
-        # and services are the machine's; running the repository's copy would
-        # report a machine nobody is using.
+        # Not the copy in this repository. The installed copy has the
+        # configuration and the services of the machine. A run of the copy in
+        # the repository reports a machine that nobody uses.
         self.assertTrue(cec.status_command(self.HOME)[0].startswith(self.HOME))
 
 
@@ -295,10 +295,10 @@ class InstalledTest(unittest.TestCase):
     def test_the_control_program_is_what_is_looked_for(self):
         """Not the config file.
 
-        /etc/steamos-cec-toolkit.conf is listed in atomic-update.conf.d, so
-        SteamOS carries it across an OS update - and it outlives an uninstall.
-        A page that keyed off the config would offer to configure a toolkit
-        that is not there.
+        atomic-update.conf.d lists /etc/steamos-cec-toolkit.conf, so SteamOS
+        keeps that file across an OS update. The file also stays after a
+        removal. A page that reads the configuration therefore offers the
+        settings of a toolkit that is not installed.
         """
         where = cec.command_path(self.home)
         os.makedirs(os.path.dirname(where))
@@ -320,12 +320,12 @@ class DeviceTest(unittest.TestCase):
             "readable": False, "writable": False})))
 
     def test_an_adapter_that_cannot_be_written_is_not_usable_either(self):
-        """CEC is a conversation, not a broadcast anybody may listen to.
+        """CEC needs two directions. It is not a broadcast in one direction.
 
-        Readable but not writable is the shape a permissions problem takes
-        after a suspend or a SteamOS update, which the toolkit installs a udev
-        rule and a helper to repair - so it is worth telling apart from having
-        no adapter, and both are worth calling unusable.
+        A device that reads and does not write is the form of a permissions
+        fault after a suspend or a SteamOS update. The toolkit installs a udev
+        rule and a helper to repair it. So this condition is different from an
+        absent adapter, and both conditions are unusable.
         """
         self.assertFalse(cec.usable(status(cec_device={
             "device": "/dev/cec0", "exists": True,
@@ -363,15 +363,15 @@ NO_PICTURE = UNREGISTERED.replace("3.0.0.0", "f.f.f.f")
 class AudioProbeTest(unittest.TestCase):
     """Asking the television whether it does volume at all.
 
-    Established the hard way on a Samsung: it accepts every volume key,
-    acts on none of them, and answers nothing - so the switch looked broken
-    and every log said the message had been sent. Asked directly it replied
-    in 26 ms:
+    A Samsung television gave this result: it accepts each volume key, it
+    acts on none of them, and it answers nothing. The switch therefore looked
+    broken, and each log reported a sent message. A direct question got an
+    answer in 26 ms:
 
         GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
             Received from TV (0): FEATURE_ABORT reason: refused (0x04)
 
-    Which is the difference between "will not" and "did not hear".
+    That is the difference between "refuses" and "did not receive".
     """
 
     def test_it_asks_the_device_the_settings_name(self):
@@ -414,12 +414,12 @@ class AudioProbeTest(unittest.TestCase):
         self.assertIn("Ask about volume", said["external-volume"])
 
 
-# The adapter's own place on the bus - reading it, claiming it, repairing the
-# permissions, and telling the toolkit where this machine is plugged in - was
-# tested here while it was a unit of this panel working around a toolkit that
-# registered nothing. It is the toolkit's own program now, so the tests went
-# with it: tests/test_cec_register.py, against
-# cec-toolkit/bin/steamos-cec-register.
+# The position of the adapter on the bus was a subject of this file before.
+# That work reads the address, claims it, repairs the permissions, and gives
+# the toolkit the position of this machine. It was a unit of this panel, and
+# it corrected a toolkit that registered nothing. It is now a program of the
+# toolkit, so its tests moved with it. They are in
+# tests/test_cec_register.py, against cec-toolkit/bin/steamos-cec-register.
 
 
 class RequirementsTest(unittest.TestCase):
@@ -443,17 +443,16 @@ class RequirementsTest(unittest.TestCase):
     def test_the_python_module_is_looked_for_differently_and_still_reported(self):
         """It is the one requirement the toolkit's installer only warns about.
 
-        So it is the one you can install straight past and discover from a
-        service log days later, which is exactly the sort of thing this page
-        should say out loud.
+        So a user can complete the install without it and find the fault in a
+        service log some days later. This page must give that message.
         """
         absent = cec.missing(module_check=lambda: False,
                              which=lambda _n: "/usr/bin")
         self.assertEqual([name for name, _why in absent], ["python dbus_next"])
 
     def test_it_is_asked_of_the_machine_rather_than_assumed(self):
-        # The real lookups, whatever this machine happens to have. What is
-        # checked is that asking does not raise - the answer is the machine's.
+        # The real lookups, for the parts of this machine. This test proves
+        # that the call raises no exception. The machine gives the answer.
         for name, why in cec.missing():
             self.assertTrue(name and why)
 

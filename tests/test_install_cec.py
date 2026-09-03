@@ -8,10 +8,10 @@ times. This script is what lets a GUI drive it: it runs as root through
 pkexec, drops back to the desktop user, and lends that user a sudo rule for
 the length of the install.
 
-The rule is the part worth testing hardest. A malformed file in
-/etc/sudoers.d takes sudo itself down for the whole machine, and one left
-behind is a grant nobody asked to keep - so the checks here are that it is
-valid before it is installed, and gone afterwards on every path out.
+The rule needs the most tests. A bad file in /etc/sudoers.d stops sudo on
+the complete machine. A file that stays gives a permission that no user
+asked to keep. So the tests here prove two things: the file is valid before
+the install, and each exit removes it.
 
 Most of this only runs as root, because the thing being tested is a program
 whose first act is to check that it is root. The decision tests above that
@@ -112,10 +112,11 @@ class ArgumentTest(unittest.TestCase):
         self.assertEqual(run("install").returncode, 2)
 
 
-# Finding the radio a controller talks to was tested here while this script
-# added what the toolkit's USB wake could not see. The class check is fixed in
-# the toolkit now, so the tests went with it - UsbWakeMatchTest in
-# tests/test_cec_toolkit.py, against cec-toolkit/bin/steamos-cec-usb-wake-apply.
+# The search for the radio of a controller was a subject of this file before.
+# This script added the radios that the USB wake of the toolkit did not find.
+# The class check is now correct in the toolkit, so its tests moved there. They
+# are in UsbWakeMatchTest in tests/test_cec_toolkit.py, against
+# cec-toolkit/bin/steamos-cec-usb-wake-apply.
 
 
 class SourceTest(unittest.TestCase):
@@ -124,9 +125,9 @@ class SourceTest(unittest.TestCase):
     def test_a_directory_with_no_installer_in_it_is_refused(self):
         """Before the sudo rule is written, not after.
 
-        The order matters more than the refusal: a wrong path noticed after
-        the rule is in place is a window where the machine is carrying a grant
-        for an install that was never going to happen.
+        The order is more important than the refusal. An incorrect path that
+        the script finds after the write of the rule leaves the machine with a
+        permission for an install that cannot start.
         """
         with tempfile.TemporaryDirectory() as empty:
             done = run("install", empty)
@@ -170,10 +171,10 @@ def _no_pkexec():
 class _fake_toolkit:
     """A source directory shaped like the vendored tree, that installs nothing.
 
-    The real installer wants cec-ctl, a CEC adapter and a live session bus.
-    What is under test here is the bridge around it - who it runs as, what it
-    hands over, and what it cleans up - so the installer is replaced by one
-    that reports its own circumstances and exits.
+    The real installer needs cec-ctl, a CEC adapter and a session bus. These
+    tests examine the script around it: the user of the run, the arguments, and
+    the cleanup step. So this fixture replaces the installer with a program that
+    reports its own conditions and exits.
     """
 
     def __init__(self, code=0):
@@ -181,10 +182,9 @@ class _fake_toolkit:
 
     def __enter__(self):
         self.holder = tempfile.TemporaryDirectory()
-        # Reachable by somebody other than the user who made it. A directory
-        # made by root is 0700, and the point of this fixture is that another
-        # user runs what is inside it - which is also true of the real thing:
-        # the vendored tree is in the desktop user's own clone.
+        # A second user must reach it. A directory from root has mode 0700, and
+        # this fixture needs a second user for the programs in it. The real
+        # tree has the same shape: it is in the clone of the desktop user.
         os.chmod(self.holder.name, 0o755)
         for name in ("install.sh", "uninstall.sh"):
             path = os.path.join(self.holder.name, name)
@@ -213,7 +213,7 @@ class _fake_toolkit:
 
 
 class BridgeTest(unittest.TestCase):
-    """The whole path, run for real. Root only - it is a root script."""
+    """Runs the complete path. This needs root, because it is a root script."""
 
     def setUp(self):
         self.addCleanup(self._clear)
@@ -282,12 +282,12 @@ class BridgeTest(unittest.TestCase):
     def test_the_rule_covers_the_installer_and_not_everything(self):
         """Narrowing this is documentation, not containment, and says so.
 
-        `sudo install` writes any file anywhere, so a rule listing it is root
-        by another name and the script's comment does not pretend otherwise.
-        What the narrowing buys is that the file names what the installer
-        touches - so a future upstream that starts calling something else
-        fails here, visibly, instead of silently gaining the run of the
-        machine under a rule that said ALL.
+        `sudo install` writes each file at each path, so a rule with that
+        command gives root rights. The comment in the script says that. The
+        narrow rule gives one result: the file names each program that the
+        installer calls. A later version of the source project that calls
+        another program then fails here, with a message. Under a rule with
+        ALL it gets the complete machine with no message.
         """
         with _fake_toolkit() as source:
             done = run("install", source, SOMEBODY, env=_no_pkexec())
@@ -298,11 +298,11 @@ class BridgeTest(unittest.TestCase):
     def test_a_rule_that_does_not_check_out_is_not_installed(self):
         """The check is consulted, not just run.
 
-        A malformed file in /etc/sudoers.d does not break one rule - sudo
-        refuses to start at all, for everybody, until somebody with a root
-        shell removes it. On a machine whose other way in is this panel that
-        is unrecoverable from the desk, so the interesting case is not that
-        the file is usually fine but that a bad one stops the install.
+        A bad file in /etc/sudoers.d does not break one rule. sudo refuses to
+        start for each user, until a user with a root shell removes the file.
+        On a machine where this panel is the other access method, a user
+        cannot repair that at the desk. So the important test is not that the
+        file is usually correct. It is that a bad file stops the install.
         """
         shims = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, shims)
@@ -333,10 +333,10 @@ class BridgeTest(unittest.TestCase):
         called = set()
         for name in ("install.sh", "uninstall.sh"):
             with open(os.path.join(tree, name)) as handle:
-                # At command position only. A bare search also matches the
-                # word inside `echo "Configuring sudo permissions"`, which is
-                # how this test first failed - on its own regex, not on the
-                # rule it was checking.
+                # At the command position only. A simple search also matches
+                # the word in `echo "Configuring sudo permissions"`. This test
+                # failed the first time for that reason: its own regular
+                # expression was wrong, and the rule was correct.
                 called.update(re.findall(
                     r"(?m)(?:^|&&|\|\||;)\s*(?:if\s+)?sudo\s+([a-z][a-z0-9-]*)\b",
                     handle.read()))
@@ -361,9 +361,10 @@ class BridgeTest(unittest.TestCase):
     def test_the_rule_is_gone_when_the_install_fails_too(self):
         """The path that gets forgotten.
 
-        An installer that exits non-zero is the ordinary case here - no CEC
-        adapter, no cec-ctl - so a rule that only got cleaned up on success
-        would be left behind on most real machines rather than on rare ones.
+        An installer with an exit code above zero is the normal case here. A
+        machine with no CEC adapter, or with no cec-ctl, gives that code. A
+        cleanup step after a success only therefore leaves the rule on most
+        real machines.
         """
         with _fake_toolkit(code=1) as source:
             done = run("install", source, SOMEBODY, env=_no_pkexec())
@@ -386,9 +387,10 @@ class BridgeTest(unittest.TestCase):
     def test_what_it_writes_is_a_file_sudo_will_accept(self):
         """A malformed file in sudoers.d takes sudo down for the machine.
 
-        Not just this rule - sudo refuses to run at all. On a machine whose
-        other way in is this panel, that is a bad afternoon, so the file is
-        checked with sudo's own checker while it still costs nothing.
+        The fault is not in one rule. sudo refuses to run at all. On a machine
+        where this panel is the other access method, that condition is
+        difficult to repair. So the script checks the file with the checker of
+        sudo, before the file is in place.
         """
         with _fake_toolkit() as source:
             done = run("install", source, SOMEBODY, env=_no_pkexec())
@@ -399,12 +401,12 @@ class BridgeTest(unittest.TestCase):
     @AS_ROOT
     @HAS_USER
     def test_nothing_is_switched_on_by_the_install(self):
-        """The page is eight switches, so the install should leave eight offs.
+        """The page has eight switches, so the install must leave eight off.
 
-        The toolkit's own installer turns the volume integration on by
-        default. Left alone, the page would open with one feature already on
-        that nobody chose - and set-external-volume writes its own files, so
-        turning it on from the page later is a complete path.
+        The installer of the toolkit turns the volume integration on by
+        default. Without this step, the page opens with one function on, and no
+        user selected it. set-external-volume also writes its own files, so the
+        user can turn it on from the page later.
         """
         with _fake_toolkit() as source:
             done = run("install", source, SOMEBODY, env=_no_pkexec())

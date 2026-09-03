@@ -1,25 +1,25 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""The CEC module: somebody else's work, forked, and now ours to keep whole.
+"""The CEC module: the work of another project, forked, and kept complete.
 
-It was vendored once, and the test here checked it was still an unmodified
-copy. It is not one any more - five bugs in it are fixed in place, see
-cec-toolkit/README.md - so the question has changed. Two things can still go
-wrong quietly and both are checked:
+This tree was a copy at one time, and the test here proved that the copy was
+unchanged. It is no longer a copy, because this project corrected five faults
+in it. See cec-toolkit/README.md. So the question is different now. Two
+faults can occur with no message, and this file checks both.
 
-Files get left out. The tree was taken as a subtree and installs itself from
-inside; something the installer reaches for and nobody copied looks identical
-here and only shows up as a broken install on a machine we cannot see.
+A file goes missing. This project took the tree as a subtree, and the tree
+installs itself from inside. A file that the installer needs, and that nobody
+copied, looks correct here. It gives a broken install on a machine of a user.
 
-The licence stops being findable. MIT is not ours to relabel and a fork with
-no record of where it came from is code nobody can trace. The record is
-ORIGIN, which is also what turns "take upstream's fixes" into a diff rather
-than a guess.
+The licence becomes difficult to find. This project cannot change the MIT
+licence, and a fork with no record of its source is code with no history. The
+record is ORIGIN. That file also makes "take the corrections of the source
+project" a diff and not a guess.
 
-Nothing here needs the network. What upstream says today is not knowable
-offline; what our own tree says about itself is, and that is the half that
-goes wrong.
+No test here needs the network. The current state of the source project is
+not available offline. The state of this tree is available, and this tree is
+the half with the faults.
 """
 
 import json
@@ -73,9 +73,9 @@ class ProvenanceTest(unittest.TestCase):
         self.assertNotEqual(said, self.record["ORIGIN_TAG"], said)
 
     def test_it_keeps_the_licence_it_arrived_under(self):
-        # MIT, and it stays MIT. This project is GPL-3.0-or-later, which can
-        # carry MIT code - it cannot relicense somebody else's copyright, and
-        # a fork does not change that.
+        # MIT, and it stays MIT. This project is GPL-3.0-or-later, and that
+        # licence can hold MIT code. It cannot change the licence of another
+        # copyright holder, and a fork does not change that rule.
         with open(os.path.join(CEC, "LICENSE")) as handle:
             said = handle.read()
         self.assertIn("MIT License", said)
@@ -101,10 +101,10 @@ class CompleteTest(unittest.TestCase):
     def test_every_file_the_installer_reaches_for_is_here(self):
         """The failure this is about happens on somebody else's machine.
 
-        decky/ and assets/ were deliberately left out - the plugin is a second
-        front end for the same helper and the assets are screenshots of it.
-        Leaving out something the installer actually installs looks identical
-        at fork time and only shows up as a broken install later.
+        This project left out decky/ and assets/ on purpose. The plugin is a
+        second front end for the same helper, and the assets are screenshots of
+        that plugin. A file that the installer installs, and that this tree does
+        not have, looks correct at the fork and gives a broken install later.
         """
         wanted = set()
         for _name, text in self._installers():
@@ -146,10 +146,10 @@ class CompleteTest(unittest.TestCase):
                                  % path)
 
     def test_the_programs_it_installs_can_be_run(self):
-        # install.sh copies these with `install -m 0755`, so the mode here is
-        # not what lands on disk - but a file that is not executable in the
-        # tree cannot be tried out where it is either, and trying things out
-        # is why this tree is in the repository rather than fetched.
+        # install.sh copies these with `install -m 0755`, so this mode is not
+        # the mode on disk. But a file in this tree with no execute bit cannot
+        # run here. A developer must be able to run it here, and that is the
+        # reason this tree is in the repository.
         for name in sorted(os.listdir(os.path.join(CEC, "bin"))):
             self.assertTrue(os.access(os.path.join(CEC, "bin", name), os.X_OK),
                             "%s is not executable" % name)
@@ -220,7 +220,7 @@ class FixedHereTest(unittest.TestCase):
         self.assertIn("--playback", program)
         self.assertIn("Logical Address Mask", program)
         unit = self._read("systemd", "user", "steamos-cec-register.service")
-        # Before the wake paths, or it is registering after the fact.
+        # Before the wake paths. After them, the registration is too late.
         self.assertIn("Before=steamos-cec-boot-wake.service", unit)
         # oneshot, or Before= does not mean "finished before".
         self.assertIn("Type=oneshot", unit)
@@ -242,7 +242,7 @@ class FixedHereTest(unittest.TestCase):
         self.assertIn("--wait", unit)
         # But not as a oneshot: waiting there would hold multi-user.target.
         self.assertIn("Type=simple", unit)
-        # And the udev rule must not pass it - udev kills a slow RUN+=.
+        # The udev rule must not pass it, because udev stops a slow RUN+=.
         self.assertNotIn("--wait", self._read("udev",
                                               "70-steamos-cec-toolkit.rules"))
 
@@ -262,24 +262,25 @@ class FixedHereTest(unittest.TestCase):
 
 
 class UsbWakeMatchTest(unittest.TestCase):
-    """Which radios steamos-cec-usb-wake-apply is willing to wake from.
+    """The radios that steamos-cec-usb-wake-apply accepts for a wake.
 
-    It looks three ways - an exact vendor:product list, a regular expression
-    over the device's name, and the USB class for Bluetooth - and on anything
-    but a Steam Deck all three could miss. Measured on an AM5 board:
+    It uses three methods: an exact vendor:product list, a regular expression
+    for the name of the device, and the USB class for Bluetooth. On a machine
+    that is not a Steam Deck, all three can fail. A measurement on an AM5 board
+    gave this:
 
         0e8d:0616 MediaTek Inc. Wireless_Device
         class=ef sub=02 proto=01
 
-    Not the Intel id the list carries. A Bluetooth radio whose name does not
-    contain the word Bluetooth. And ef/02/01 is Interface Association - "my
-    classes are in my interfaces" - which is what every wifi-and-Bluetooth
-    combo chip says, so the *device* class check could never match one. The
-    helper printed "matched":0 and gave no reason.
+    That id is not the Intel id in the list. The name of that Bluetooth radio
+    does not hold the word Bluetooth. And ef/02/01 is Interface Association,
+    which means "the classes are in the interfaces". Each combination wifi and
+    Bluetooth chip reports that class, so a check of the *device* class never
+    matched one. The helper printed "matched":0 and gave no reason.
 
-    This was worked around from outside for a while, by writing the id into
-    USB_WAKE_USB_IDS at install time. The class check looks at the interfaces
-    now, where the answer is.
+    This project corrected that from the outside for some time, and wrote the id
+    into USB_WAKE_USB_IDS at the install step. The class check now reads the
+    interfaces, which hold the answer.
     """
 
     HELPER = os.path.join(CEC, "bin", "steamos-cec-usb-wake-apply")
@@ -362,9 +363,9 @@ class UsbWakeMatchTest(unittest.TestCase):
     def test_switching_it_on_and_off_again_puts_the_setting_back(self):
         """`off` restores what was there, it does not force "disabled".
 
-        Somebody may have had the radio allowed to wake before any of this
-        was installed, and turning the feature off is not a reason to take
-        that away.
+        A user can have a radio with wake permission from before this install.
+        A change of this function to off is not a reason to remove that
+        permission.
         """
         with tempfile.TemporaryDirectory() as where:
             usb = self._machine(

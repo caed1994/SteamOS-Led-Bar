@@ -3,18 +3,19 @@
 
 """Putting the CEC adapter on the bus: cec-toolkit/bin/steamos-cec-register.
 
-The program is the CEC module's, not this panel's - it was a unit of ours for
-a while, working around a toolkit that never registered anything, and the fix
-belongs where the bug is. The tests came with it.
+The program belongs to the CEC module and not to this panel. It was a unit
+of this project for some time, and it corrected a toolkit that registered
+nothing. The correction belongs at the fault, so the program and its tests
+moved there.
 
-What they are about is timidity. Every path out that is not "claim an address
-nobody holds" has to leave the adapter exactly as it was: Steam's own daemon
-may be using it, and taking the bus off it to fix a television that is already
-on would be a worse bug than the one being fixed.
+The tests are about care. Each exit that is not "claim an address that nobody
+holds" must leave the adapter in its first condition. The daemon of Steam can
+use the adapter. To take the bus from that daemon, and to correct a television
+that is already on, is a worse fault than the first one.
 
-No machine here has a CEC adapter, a television or cec-ctl, and none of that
-is needed: everything the program reaches for outside itself is a keyword
-argument with a real default.
+No machine here has a CEC adapter, a television or cec-ctl, and the tests need
+none of those. Each external call of the program is a keyword argument with a
+real default.
 """
 
 import contextlib
@@ -61,7 +62,8 @@ REGISTERED = UNREGISTERED.replace(
     "Logical Addresses        : 0",
     "Logical Addresses        : 1")
 
-# f.f.f.f is "I do not know where I am" - no link, or an EDID not read yet.
+# f.f.f.f means "the position is not known". There is no link, or the
+# machine did not read an EDID yet.
 NO_PICTURE = UNREGISTERED.replace("3.0.0.0", "f.f.f.f")
 
 
@@ -84,8 +86,9 @@ class RegisterCase(unittest.TestCase):
         self.ran = []
         for name in ("CONFIG", "CEC_DEVICE", "TOOLKITCTL"):
             self._keep(name)
-        # An address already recorded, so most tests are about registering
-        # alone. TellTheToolkitTest empties it - that is its subject.
+        # The address is already in the file, so most tests examine the
+        # register step alone. TellTheToolkitTest clears it, because the
+        # write of the address is its subject.
         register.CONFIG = {register.PHYSICAL_ADDRESS: "3.0.0.0"}
         register.CEC_DEVICE = "/dev/cec0"
         # An executable that exists, so the "is there a toolkit" check passes
@@ -186,9 +189,10 @@ class RegisterRunTest(RegisterCase):
     def test_it_waits_for_a_picture_and_then_gives_up(self):
         """An adapter with no link has nowhere to register against.
 
-        It is waited for rather than refused, because a television that is
-        still waking up gets there - and then given up on rather than waited
-        for forever, because the unit is holding the wake service behind it.
+        The program waits for the link and does not refuse at once, because a
+        television that starts gives a link after some seconds. The program
+        then stops and does not wait without a limit, because the wake service
+        waits for this unit.
         """
         self._go([("-d", Answer(0, NO_PICTURE))], wait=3.0)
         sent = [word for row in self.ran for word in row]
@@ -227,13 +231,13 @@ class RegisterRunTest(RegisterCase):
 class AdapterAppearsLateTest(RegisterCase):
     """Reported: it works after unplugging the adapter and plugging it back.
 
-    Which is the shape of a race. A session start runs against the adapter's
-    own enumeration, and a run that looks once and finds nothing goes away for
-    good - so the adapter is never registered, and pulling it out and putting
-    it back is what finally lets something see it appear.
+    That report describes a race. A session start runs at the same time as the
+    enumeration of the adapter. A run that looks one time, and finds nothing,
+    then stops. The adapter never gets a registration, and only a removal and a
+    new connection let a program see it.
 
-    Looked for repeatedly now, inside the same budget the picture gets, so the
-    wake service is not held up any longer either way.
+    The program now looks more than one time, inside the same time budget as the
+    physical address. The wake service therefore waits no longer than before.
     """
 
     def setUp(self):
@@ -275,10 +279,10 @@ class AdapterAppearsLateTest(RegisterCase):
     def test_saying_none_turned_up_says_how_long_it_waited(self):
         """The message that cost an evening said neither of the two things.
 
-        "No CEC adapter on this machine" reads as settled fact, and it was
-        printed in the same second the unit started - so a machine whose
-        adapter was merely slow looked exactly like one that has no CEC, and
-        the log gave nobody a reason to look further.
+        "No CEC adapter on this machine" reads as a final result, and the unit
+        printed it in its first second. A machine with a slow adapter therefore
+        looked the same as a machine with no CEC, and the log gave no reason to
+        look again.
         """
         with self.assertLogs(register.LOG, "WARNING") as said:
             self._go([[]], wait=3.0)
@@ -287,7 +291,7 @@ class AdapterAppearsLateTest(RegisterCase):
         self.assertIn("--wait", whole)
 
     def test_a_machine_with_no_adapter_gives_up_inside_the_budget(self):
-        """It is holding the wake service, and holding it for nothing."""
+        """The wake service waits for this unit, and the wait has no purpose."""
         with self.assertLogs(register.LOG, "WARNING"):
             code, _at = self._go([[]], wait=3.0)
         self.assertEqual(code, 0)
@@ -308,20 +312,20 @@ class AdapterAppearsLateTest(RegisterCase):
 
 
 class HandItBackTest(RegisterCase):
-    """What an unplug and a replug do, and when we are allowed to do it.
+    """The result of a removal and a new connection, and the conditions for it.
 
-    The log that showed the need, from the machine this was reported on:
+    This log from the reported machine shows the need:
 
         [10.0] Starting Repair SteamOS CEC device permissions...
         [10.1] Finished Repair SteamOS CEC device permissions.
         [12.4] kernel: Registered IR keymap rc-cec
         [12.5] cecd: Could not add device /dev/cec0: EACCES
 
-    The permissions unit ran two seconds before the device existed and its
-    helper returned quietly when there was nothing there; the udev rule that
-    should also have done it lost a race with Steam's own daemon, which reads
-    the device once and never looks again. So nothing held a logical address,
-    and every wake went out from an address that was not ours.
+    The permissions unit ran two seconds before the device existed, and its
+    helper returned with no message and no device. The udev rule must also
+    repair the permissions, and it lost a race with the daemon of Steam. That
+    daemon reads the device one time and never reads it again. So no program
+    held a logical address, and each wake went out from an incorrect address.
     """
 
     def setUp(self):
@@ -372,11 +376,11 @@ class HandItBackTest(RegisterCase):
                          [word for row in self.ran for word in row])
 
     def test_nothing_is_nudged_when_the_daemon_already_has_it(self):
-        """Never restart a daemon that is doing its job.
+        """Never restart a daemon that works correctly.
 
-        This is the rule the whole escalation hangs on: an adapter somebody
-        holds is left exactly as it is, and only an adapter nobody holds is
-        worth interrupting anything for.
+        This is the rule for each step of the escalation. The program does not
+        touch an adapter that a program holds. Only an adapter that no program
+        holds is a reason to stop a service.
         """
         self.states = [REGISTERED]
         self._go()
@@ -401,10 +405,10 @@ class HandItBackTest(RegisterCase):
 class TellTheToolkitTest(RegisterCase):
     """Filling in the address the toolkit ships without.
 
-    All three wake paths broadcast <Active Source> only when this is set, and
-    skip it when it is not - which wakes a television without ever switching
-    it over. Nothing but `discover-cec` writes it, and the installer used not
-    to run that.
+    The three wake paths broadcast <Active Source> only with this value. Without
+    it they do not send that message, and the television starts and keeps its
+    input. Only `discover-cec` writes the value, and the installer did not run
+    that program.
     """
 
     def _go(self, config, devices=("/dev/cec0",), device="/dev/cec0",
@@ -449,9 +453,9 @@ class TellTheToolkitTest(RegisterCase):
     def test_an_adapter_already_on_the_bus_still_gets_its_address_told(self):
         """The two faults are independent, and so are their fixes.
 
-        An adapter Steam's own daemon has registered is left alone - but the
-        toolkit still does not know where it is plugged in, and that is the
-        half that switches the input.
+        The program does not touch an adapter that the daemon of Steam
+        registered. But the toolkit still does not know the position of the
+        machine, and that value switches the input.
         """
         self._go({register.PHYSICAL_ADDRESS: ""}, report=REGISTERED)
         self.assertEqual(len(self._told()), 1)
