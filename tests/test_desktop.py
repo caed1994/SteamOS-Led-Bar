@@ -3,11 +3,11 @@
 
 """The bar in Desktop Mode: what it shows, and whose it is.
 
-Two halves, and only one of them can be checked here. What a scene looks like
-is arithmetic and is settled below to the pixel. Whether *this* machine's Game
-Mode session is one the process table gives away is a question about somebody's
-Steam Machine, and no test can answer it - which is what
-`steamos-utility-center --desktop` is for.
+There are two halves, and the tests here examine one of them. The look of a
+scene is arithmetic, and the tests below prove it to the pixel. The second
+half is the question whether the process table of *this* machine gives away a
+Game Mode session. That question is about the Steam Machine of a user, and no
+test can answer it. `steamos-utility-center --desktop` answers it.
 """
 
 import os
@@ -74,10 +74,9 @@ class SceneTest(unittest.TestCase):
             self.assertEqual(scene.brightness_scale, wanted)
 
     def test_it_runs_at_the_rate_a_game_s_effects_run_at(self):
-        # The same effect in the same colour must not breathe at one speed in
-        # a game and another on the desktop. The delay is what sets that, and
-        # the module's own default is the one Steam starts from - so speed 1
-        # has to land exactly on it.
+        # One effect in one colour must breathe at the same rate in a game and
+        # on the desktop. The delay gives that rate. Steam starts from the
+        # default of the module, so speed 1 must give exactly that value.
         scene = desktop.scene_snapshot(desktop.SCENE_BREATH, "#ffffff", 128)
         self.assertEqual(scene.delay, render.DELAY_DEFAULT)
         self.assertEqual(desktop.delay_for(1.0), render.DELAY_DEFAULT)
@@ -85,10 +84,10 @@ class SceneTest(unittest.TestCase):
     def test_asking_for_twice_the_speed_halves_the_cycle(self):
         """Which is what makes the number on the slider mean anything.
 
-        delay is a position, not a duration, and the cycle scales linearly
-        with it - so the multiplier is that the other way up. Checked through
-        the renderer rather than on the field, because the field is only
-        believable if the seconds come out right.
+        delay is a position and not a duration, and the length of the cycle is
+        linear in it. So the multiplier is the inverse of the delay. This test
+        uses the renderer and not the field, because the field is only correct
+        when the seconds are correct.
         """
         for speed, wanted in ((2.0, 0.5), (0.5, 2.0), (1.0, 1.0)):
             scene = desktop.scene_snapshot(desktop.SCENE_BREATH, "#ffffff",
@@ -137,9 +136,9 @@ class SceneTest(unittest.TestCase):
     def test_a_scene_reaches_the_strip_as_the_colour_it_names(self):
         """The two ends of it: a config setting, and lit pixels.
 
-        Through the renderer that draws Steam's snapshots, because that is the
-        point of a scene being one - an effect that looked different on the
-        desktop than in a game would be the bug this shape exists to avoid.
+        This uses the renderer that draws the snapshots of Steam, and that is
+        the purpose of a scene. An effect with a different look on the desktop
+        and in a game is the fault that this design prevents.
         """
         renderer = render.Renderer(led_count=17)
         scene = desktop.scene_snapshot(desktop.SCENE_COLOR, "#00ff00", 255)
@@ -183,13 +182,13 @@ class SteadyTemperature:
 
 
 class ScenesOfTheirOwnTest(unittest.TestCase):
-    """Reported: the desktop's effects should not hang off the rainbow slot.
+    """A user asked for desktop effects that do not use the rainbow slot.
 
-    Game Mode has one slot to put these four in, because Steam's LED menu is
-    built into the client and cannot be extended. Desktop Mode is not picking
-    from that menu at all, so the four are scenes there - and this is the pair
-    of facts that has to keep being true: each one draws itself, and none of
-    them looks at RAINBOW_SHOWS to find out which one it is.
+    Game Mode has one slot for these four effects, because the LED menu is a
+    part of the Steam client and nothing can add an entry to it. Desktop Mode
+    does not use that menu, so the four are scenes there. Two facts must stay
+    true: each scene draws itself, and no scene reads RAINBOW_SHOWS for its own
+    identity.
     """
 
     def _renderer(self, **options):
@@ -230,11 +229,11 @@ class ScenesOfTheirOwnTest(unittest.TestCase):
                                  "%s under a %s slot" % (scene, shows))
 
     def test_the_rainbow_scene_is_steams_rainbow(self):
-        """And nothing else - which is the one thing that used to be true.
+        """And no other effect. That was the one correct part before.
 
-        DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire drew fire on the
-        desktop. Now that fire has a scene of its own, the rainbow means the
-        rainbow; the service says so at startup - see warn_scene_split.
+        DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire drew fire on the desktop.
+        Fire now has a scene of its own, so the rainbow means the rainbow. The
+        service reports that at the start. See warn_scene_split.
         """
         renderer = self._renderer(rainbow_shows=render.SHOWS_FIRE)
         self.assertEqual(self._lit(renderer, desktop.SCENE_RAINBOW),
@@ -264,9 +263,9 @@ class ScenesOfTheirOwnTest(unittest.TestCase):
     def test_the_frame_rate_follows_the_scene_too(self):
         """is_animated is asked the same question, and has to hear the same.
 
-        Missed, the temperature scene would be drawn sixty times a second to
-        send the same bytes, and the load gauge - which glides - would be
-        stepped four times a second, which is exactly what it exists to avoid.
+        Without that agreement, the loop draws the temperature scene sixty times
+        each second and sends the same bytes. It also moves the load gauge four
+        times each second, and that gauge must glide.
         """
         renderer = self._renderer(rainbow_shows=render.SHOWS_TEMPERATURE)
         for scene, moving in ((desktop.SCENE_TEMPERATURE, False),
@@ -304,11 +303,10 @@ class ScenesOfTheirOwnTest(unittest.TestCase):
     def test_a_file_that_used_to_mean_something_else_is_told_so(self):
         """The one config file this change reads differently than it did.
 
-        DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire drew fire on the
-        desktop yesterday and draws the rainbow today. Migrating it silently
-        either way would be guessing which of the two was meant, so the
-        service says what it now means and names the setting that gets the
-        old behaviour back.
+        DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire drew fire on the desktop
+        before, and it draws the rainbow now. A silent migration in each
+        direction is a guess about the wish of the user. So the service gives
+        the new meaning and names the setting for the old behaviour.
         """
         said = self._warned(DESKTOP_SCENE="rainbow", RAINBOW_SHOWS="fire")
         self.assertEqual(len(said), 1, said)
@@ -327,26 +325,26 @@ class ScenesOfTheirOwnTest(unittest.TestCase):
 class SourcesForTheSceneTest(unittest.TestCase):
     """Reported: DESKTOP_SCENE=load showed the rainbow.
 
-    The other half of the class above, and the half that was missing. Those
-    tests hand the renderer a sensor and a load source outright, so they prove
-    the scenes draw once something has built them - and nothing had. The two
-    builders asked RAINBOW_SHOWS and only RAINBOW_SHOWS, which is Steam's
-    menu's setting: with the slot left at the rainbow there were no counters
-    on the renderer, the load gauge had nothing to read, and _substitute did
-    what it does with a gauge that cannot read - handed the slot back to
-    Steam's rainbow.
+    This is the second half of the class above, and that half was absent. Those
+    tests give the renderer a sensor and a load source directly. So they prove
+    that the scenes draw after another step builds them, and no step did that.
+    The two builders read RAINBOW_SHOWS only, and that is the setting of the
+    Steam menu. With the slot at the rainbow, the renderer had no counters and
+    the load gauge had no values. _substitute then did its normal work for a
+    gauge with no values: it gave the slot back to the rainbow of Steam.
 
-    So the desktop showed a rainbow when you picked the load gauge, which is
-    the one effect you picked it instead of. Both gauges, by the same two
-    lines; the fire and the aurora were never affected, being arithmetic.
+    So the desktop showed a rainbow after a user selected the load gauge, and
+    the rainbow is the effect that the user replaced. The same two lines caused
+    this for both gauges. The fire and the aurora are arithmetic, and they never
+    had this fault.
     """
 
     def _config(self, **overrides):
         return dict(config_module.DEFAULTS, **overrides)
 
     def test_the_desktop_scene_gets_the_counters_it_asks_for(self):
-        # The report, in one line. RAINBOW_SHOWS is left at its default,
-        # which is what everyone who has not changed it has.
+        # The report, in one line. RAINBOW_SHOWS keeps its default, and each
+        # user with no change to it has that value.
         settings = self._config(DESKTOP_SCENE=desktop.SCENE_LOAD)
         self.assertEqual(settings["RAINBOW_SHOWS"], render.SHOWS_RAINBOW)
         self.assertIsNotNone(service.build_load_source(settings))
@@ -369,10 +367,10 @@ class SourcesForTheSceneTest(unittest.TestCase):
     def test_nothing_is_read_that_nothing_shows(self):
         """A machine showing neither gauge opens neither.
 
-        Not a tidiness point. The load source resolves a sysfs path and reads
-        /proc/stat four times a second forever, and the sensor is a file the
-        settings can point anywhere - neither is work to do on behalf of an
-        effect nobody has asked for.
+        This is not a style rule. The load source resolves a sysfs path and reads
+        /proc/stat four times each second, for the complete session. The sensor is
+        a file, and the settings can give each path for it. Neither is work for an
+        effect that no user selected.
         """
         for scene in (desktop.SCENE_STEAM, desktop.SCENE_COLOR,
                       desktop.SCENE_FIRE, desktop.SCENE_RAINBOW):
@@ -416,14 +414,14 @@ class SourcesForTheSceneTest(unittest.TestCase):
     def test_every_pairing_of_the_two_settings_draws_the_scene(self):
         """All of them, because which pairing broke was not obvious.
 
-        It was reported as happening with RAINBOW_SHOWS=temperature and
-        DESKTOP_SCENE=load - one pairing out of ten, which sounds like
-        something about those two effects together. It was not: every pairing
-        was broken *except* the two where both settings happen to name the
-        same effect, and those two are the ones anybody testing this reaches
-        for. So the shape of the bug was the whole grid minus its diagonal,
-        and a test that checked a case or two could sit on that diagonal
-        without meaning to. This walks the grid.
+        A user reported it with RAINBOW_SHOWS=temperature and DESKTOP_SCENE=load.
+        That is one pair of ten, and it looked like a fault of those two effects
+        together. It was not.
+
+        Each pair was broken *except* the two pairs where both settings name the
+        same effect. A person who tests this selects those two pairs first. So the
+        fault covered the complete grid without its diagonal. A test of one or two
+        cases can use that diagonal by accident. This test reads the complete grid.
         """
         for shows in render.RAINBOW_CHOICES:
             for scene in (desktop.SCENE_LOAD, desktop.SCENE_TEMPERATURE):
@@ -436,10 +434,10 @@ class SourcesForTheSceneTest(unittest.TestCase):
     def test_the_gauges_look_the_same_whichever_mode_asked_for_them(self):
         """And the fix did not make the desktop's gauge a different gauge.
 
-        The slot's setting has no business reaching a scene - see
-        test_the_scene_wins_over_the_slot above, which says the same thing
-        about the drawing. This says it about the wiring: the sources are
-        built from either question and are the same sources.
+        The setting of the slot must not reach a scene. See
+        test_the_scene_wins_over_the_slot above, which proves that for the draw
+        step. This test proves it for the build step: each question builds the
+        same sources.
         """
         for scene, shows in ((desktop.SCENE_LOAD, render.SHOWS_LOAD),
                              (desktop.SCENE_TEMPERATURE,
@@ -450,10 +448,9 @@ class SourcesForTheSceneTest(unittest.TestCase):
     def test_the_diagnostics_name_the_mode_that_is_showing_it(self):
         """--load and --temperature told half the truth, which misdirects.
 
-        "Set RAINBOW_SHOWS=load to put this there" is the Game Mode answer,
-        and someone reading it is as likely to be asking because their
-        desktop is showing the wrong thing. Following it puts the gauge in
-        the mode they were not looking at.
+        "Set RAINBOW_SHOWS=load to put this there" is the answer for Game Mode.
+        A user who reads it can also ask because the desktop shows the wrong
+        effect. That answer then puts the gauge in the other mode.
         """
         # A line each, and each says whether that mode has the gauge or what
         # to set for it. Checked as "tells me to set it" against "does not",
@@ -474,7 +471,7 @@ class SourcesForTheSceneTest(unittest.TestCase):
 
 
 class DescribeTest(unittest.TestCase):
-    """What --desktop says a scene is doing, which is how a knob is trusted."""
+    """The report of --desktop about a scene. A user trusts a control by it."""
 
     def _said(self, scene):
         return desktop.describe(scene, "#00b0ff", 90, 2.0)
@@ -487,10 +484,10 @@ class DescribeTest(unittest.TestCase):
     def test_a_rainbow_still_names_its_brightness(self):
         """The report that started this.
 
-        A rainbow makes its own colours, so the line only listed the colour
-        and the brightness together - and a report naming neither reads as a
-        brightness that is not in play. Which is exactly what came back:
-        "the slider does nothing".
+        A rainbow makes its own colours, so the line gave the colour and the
+        brightness together. A report with neither of the two reads as a
+        brightness with no result. A user reported exactly that: "the slider
+        does nothing".
         """
         said = self._said(desktop.SCENE_RAINBOW)
         self.assertIn("brightness 90", said)
@@ -508,26 +505,25 @@ class DescribeTest(unittest.TestCase):
         self.assertEqual(self._said(desktop.SCENE_OFF), desktop.SCENE_OFF)
 
     def test_it_is_named_the_way_the_setting_is(self):
-        # Not "manual", which is what the shim calls the effect one colour
-        # becomes - the word in the report has to be the word in the file.
+        # Not "manual", which is the name of that effect in the shim. The word
+        # in the report must be the word in the file.
         self.assertTrue(self._said(desktop.SCENE_COLOR).startswith(
             desktop.SCENE_COLOR))
 
     def _named_when_it_matters(self, **renderer_options):
         """Each setting moved, the strip re-rendered, the line checked.
 
-        Not "does the table say so" - that would only be the implementation
-        read back. Both ways round matter and for the same reason: a setting
-        doing something and going unmentioned is what "the slider does
-        nothing" was, and a setting mentioned while doing nothing is how
-        somebody comes to move it and see no change.
+        This does not ask "does the table say so", because that reads back the
+        code. Both directions are important, for one reason. A setting with a
+        result and no line in the report is the fault behind "the slider does
+        nothing". A setting with a line and no result makes a user move it and
+        see no change.
 
-        Every scene is drawn the way the service draws it: the scene's own
-        `shows` handed down with the snapshot, which for the four this project
-        added is the whole of what tells them apart. Both sensors are here so
-        each of them draws itself rather than falling back to the rainbow -
-        the fallback is a different effect, and it answers to different
-        settings.
+        This draws each scene as the service draws it: the `shows` value of the
+        scene goes down with the snapshot. For the four effects of this project
+        that value is the complete difference between them. Both sensors are here,
+        so each scene draws itself and does not use the rainbow. The rainbow is a
+        different effect with different settings.
         """
         renderer = render.Renderer(led_count=17, temperature=SteadyTemperature(),
                                    load=SteadyLoad(), **renderer_options)
@@ -553,12 +549,12 @@ class DescribeTest(unittest.TestCase):
     def test_the_gauge_answers_to_neither_slider(self):
         """Reported: the two sliders must not reach the CPU and GPU gauge.
 
-        A load scene draws a reading, so brightness and speed would change
-        what it says rather than how it looks. The report has to stop naming
-        them at the same moment they stop working, which is what the walk
-        above checks for every scene at once - and it now walks the load
-        gauge, so this is the walk with the rainbow slot set the other way to
-        prove the scene is not quietly reading that instead.
+        A load scene draws a value, so the brightness and the speed change the
+        value and not the look. The report must stop naming them at the moment
+        they stop working. The loop above proves that for each scene at one
+        time, and it now also reads the load gauge. This test runs that loop
+        with the rainbow slot at another value, and it proves that the scene
+        does not read that setting.
         """
         self._named_when_it_matters(rainbow_shows=render.SHOWS_FIRE)
 
@@ -578,8 +574,8 @@ class GameModeTest(unittest.TestCase):
         self.assertEqual(desktop.running_game_mode(self.root), "")
 
     def test_the_compositor_game_mode_runs_under_is_the_giveaway(self):
-        # Steam is running in both modes and so is a compositor; gamescope is
-        # the one that is only there in Game Mode.
+        # Steam runs in both modes, and a compositor runs in both modes.
+        # gamescope runs in Game Mode only.
         _proc(self.root, {1: "systemd", 700: "gamescope", 701: "steam"})
         self.assertEqual(desktop.running_game_mode(self.root), "gamescope")
 
@@ -594,17 +590,17 @@ class GameModeTest(unittest.TestCase):
             self.assertEqual(desktop.running_game_mode(root), name, name)
 
     def test_something_merely_mentioning_it_is_not_it(self):
-        # comm is the executable's name, not a command line, so this is only
-        # possible for a program actually called that - but a startswith over
-        # names is exactly the check that would take "gamescopereaper" for the
-        # session, and the answer would be a bar frozen on Steam's last state.
+        # comm is the name of the executable and not a command line, so only a
+        # program with that name gives this. But a startswith on the names
+        # accepts "gamescopereaper" as the session. The result is a bar that
+        # holds the last state of Steam.
         _proc(self.root, {1: "systemd", 700: "not-gamescope"})
         self.assertEqual(desktop.running_game_mode(self.root), "")
 
     def test_a_process_that_exits_while_being_read_is_not_an_error(self):
-        # /proc is a directory listing of things that are leaving. Between
-        # the listing and the read is a race nobody can win, and losing it
-        # must not take the service down.
+        # /proc lists processes, and a process can end at each moment. There is
+        # a race between the listing and the read, and no program can win it. A
+        # loss of that race must not stop the service.
         os.makedirs(os.path.join(self.root, "404"))     # listed, no comm
         _proc(self.root, {700: "gamescope"})
         self.assertEqual(desktop.running_game_mode(self.root), "gamescope")
@@ -625,9 +621,9 @@ class OwnershipTest(unittest.TestCase):
     def _watch(self, running="", **kwargs):
         """A watch reading a made-up process table.
 
-        `running` is what it finds, or a list of what it finds on each look in
-        turn - the last of which it goes on finding, so a test says what
-        changes and not how often it is asked.
+        `running` is the result of one look, or a list with one result for each
+        look. The watch keeps the last entry for each later look. A test
+        therefore gives the changes and not the number of calls.
         """
         answers = [running] if isinstance(running, str) else list(running)
         self.looked = []
@@ -636,10 +632,10 @@ class OwnershipTest(unittest.TestCase):
             self.looked.append(1)
             return answers[min(len(self.looked) - 1, len(answers) - 1)]
 
-        # A machine that has been up for hours unless a test says otherwise.
-        # Read from /proc it would be whatever the machine running the tests
-        # happens to be, and a build machine that has just come up would fail
-        # every one of these - see BootTest for the boot itself.
+        # A machine with a long uptime, and a test can give another value. A
+        # read from /proc gives the uptime of the test machine, and a build
+        # machine that started a moment before fails each of these tests. See
+        # BootTest for the boot itself.
         kwargs.setdefault("uptime", lambda: 10000.0)
         return desktop.Ownership(look=look, **kwargs)
 
@@ -666,11 +662,12 @@ class OwnershipTest(unittest.TestCase):
                                             1000.0))
 
     def test_a_device_nobody_ever_wrote_to_is_not_a_recent_write(self):
-        # The module stamps the time when it loads, so an untouched device
-        # carries a timestamp that reads as a write moments ago - which would
-        # hold the scene off for the grace, for a write that never happened.
-        # Asked of a machine that is long since up, the boot being the one
-        # time the scene is held off on purpose - see BootTest.
+        # The module writes the time at its load step. A device with no write
+        # therefore carries a timestamp of a moment before, and that reads as a
+        # recent write. The grace then holds the scene back for a write that
+        # never occurred. This test uses a machine with a long uptime. The boot
+        # is the one time that the code holds the scene back on purpose. See
+        # BootTest.
         untouched = self._snapshot(seq=shim.UNTOUCHED_SEQ, wrote_at=999.0)
         self.assertIsNone(desktop.steam_wrote_ago(untouched, 1000.0))
         self.assertFalse(self._watch("").steam_has_it(untouched, 1000.0))
@@ -681,10 +678,10 @@ class OwnershipTest(unittest.TestCase):
     def test_a_download_on_the_desktop_keeps_the_bar_steam_s(self):
         """Which is why the grace is worth having at all.
 
-        Steam writes the progress bar as it fills, and every write pushes the
-        grace out again - so the bar stays Steam's for as long as the download
-        is filling it. Nothing set out to do that; it fell out of the grace,
-        and it is the half of this behaviour worth keeping.
+        Steam writes the progress bar at each step, and each write moves the end
+        of the grace. The bar therefore stays with Steam for the complete
+        download. Nobody designed that behaviour. It is a result of the grace,
+        and it is the half of the behaviour to keep.
         """
         watch = self._watch("", grace=2.0)
         for when in (10.0, 11.0, 12.0):
@@ -695,16 +692,16 @@ class OwnershipTest(unittest.TestCase):
     def test_steam_putting_back_what_it_found_is_steam_letting_go(self):
         """Reported: a few seconds of the Game Mode effect after a download.
 
-        When the download finishes Steam restores the effect that was set in
-        Game Mode - so the last thing it writes is the state it was resting
-        at before any of it started, and the grace went on showing that for
-        its full length. A strange few seconds: an effect nobody asked for,
-        between the download and the desktop's own.
+        At the end of a download, Steam writes the effect of Game Mode again. Its
+        last write is therefore the state from before the download, and the grace
+        showed that state for its complete length. The result is some seconds of
+        an effect that no user selected, between the download and the desktop
+        scene.
         """
         watch = self._watch("", grace=2.0)
         resting = self._snapshot(wrote_at=-60.0)
 
-        # At rest, and the scene learns what Steam is resting at.
+        # At rest, and the scene reads that rest state of Steam.
         self.assertFalse(watch.steam_has_it(resting, 0.0))
         self.assertIsNotNone(watch.at_rest)
 
@@ -729,9 +726,9 @@ class OwnershipTest(unittest.TestCase):
         self.assertTrue(watch.steam_has_it(moved, 10.1))
 
     def test_it_only_learns_the_resting_state_while_the_scene_has_the_bar(self):
-        # What is on the shim while Steam is driving is not what Steam will
-        # rest at - it is the middle of a download. Learning it there would
-        # make the very next progress write look like a restore.
+        # The value on the shim during a Steam session is not the rest state of
+        # Steam. It is one step of a download. A read there makes the next
+        # progress write look like the end of the download.
         watch = self._watch("", grace=2.0)
         watch.steam_has_it(self._snapshot(wrote_at=-60.0), 0.0)
         resting = watch.at_rest
@@ -787,10 +784,10 @@ class OwnershipTest(unittest.TestCase):
     def test_the_first_answer_is_said_even_when_it_is_the_dull_one(self):
         """Because the journal is the only way to see any of this.
 
-        There is no terminal in Game Mode, so what the service decided during
-        a session can only be read afterwards - and a log that only spoke up
-        on a change would leave a service started on the desktop saying
-        nothing at all, which reads exactly like a check that never ran.
+        Game Mode has no terminal, so a user reads the decisions of the service
+        after the session. A log with a line for a change only leaves a service
+        that starts on the desktop with no line, and that looks the same as a
+        check that did not run.
         """
         with self.assertLogs("steamos_utility_center.desktop", "INFO") as caught:
             self._watch("").game_mode(1000.0)
@@ -815,10 +812,9 @@ class JournalTest(unittest.TestCase):
     def test_the_lines_it_wants_are_the_ones_it_wrote(self):
         """The two ends of it, which is the whole reason this can be trusted.
 
-        A report that searched for wording the log had stopped using would
-        answer "nothing here" forever - and that reads exactly like a machine
-        whose Game Mode was never recognised, which is the bug it is meant to
-        find.
+        A report that searches for old text of the log always answers "nothing
+        here". That answer looks the same as a machine where the service never
+        found Game Mode, and that is the fault that the report must find.
         """
         found = desktop.read_journal(self.SAMPLE)
         self.assertEqual(len(found), 3)
@@ -865,9 +861,10 @@ class JournalTest(unittest.TestCase):
 class ReportedDownloadTest(unittest.TestCase):
     """The whole sequence, walked once, in the order it was reported in.
 
-    Kept as one test rather than split up because what was wrong was not any
-    single answer - each of them was defensible - but the shape of the run:
-    scene, download, and then a few seconds of something nobody asked for.
+    This is one test and not a set of tests. The fault was not one answer,
+    because each answer was correct alone. The fault was the sequence of the
+    run: the scene, the download, and then some seconds of an effect that no
+    user selected.
     """
 
     class Device:
@@ -918,10 +915,10 @@ class ReportedDownloadTest(unittest.TestCase):
     def test_the_tail_is_gone_however_long_the_grace_is(self):
         """Which is what makes the two changes independent.
 
-        The grace is now short, and short is a guess about how often Steam
-        writes while a download runs - something nothing here can know. If
-        that guess is wrong the grace goes back up, and this is what says
-        the reported fault does not come back with it.
+        The grace is short now, and that length is a guess about the write rate
+        of Steam during a download. No code here can know that rate. A wrong
+        guess makes the grace longer again, and this test proves that the
+        reported fault does not return with a longer grace.
         """
         for grace in (2.0, 8.0, 60.0):
             device = self.Device()
@@ -936,15 +933,15 @@ class ReportedDownloadTest(unittest.TestCase):
 
 
 class BootTest(unittest.TestCase):
-    """The few seconds in which the machine has not decided what it is.
+    """The seconds before the machine gives its mode.
 
-    Reported: at switch-on the bar ran the startup breath for a few seconds,
-    then the desktop scene, then the startup breath again, and then Steam took
-    over. The middle two are the boot showing through. This service starts at
-    multi-user.target, which is before the session that says which mode this
-    is - so for a while a machine booting into Game Mode is indistinguishable
-    from a desktop: no gamescope yet, and nothing written to the LEDs. The
-    scene took that as its cue, and gamescope appearing took it back.
+    A user reported this: at the start the bar ran the startup breath for some
+    seconds, then the desktop scene, then the startup breath again, and then
+    Steam took control. The two middle steps come from the boot. This service
+    starts at multi-user.target, and that is before the session that gives the
+    mode. So for some seconds a machine that starts in Game Mode looks the same
+    as a desktop: gamescope does not run yet, and no program wrote to the LEDs.
+    The scene started there, and the start of gamescope ended it.
     """
 
     def _watch(self, up, running="", **kwargs):
@@ -967,8 +964,9 @@ class BootTest(unittest.TestCase):
     def test_and_does_once_the_machine_is_up_with_no_game_mode_in_sight(self):
         """Which is the whole reason the scene exists on such a machine.
 
-        A bar that waited for a Game Mode session that may never happen would
-        be a setting that does nothing on a desktop-only machine.
+        A bar that waits for a Game Mode session is a setting with no result on
+        a machine with a desktop only. Such a machine can have no Game Mode
+        session.
         """
         watch = self._watch(up=8.0)
         untouched = self._untouched()
@@ -983,7 +981,8 @@ class BootTest(unittest.TestCase):
         self.assertFalse(watch.steam_has_it(self._untouched(), 1000.0))
 
     def test_steam_writing_ends_it_whatever_the_clock_says(self):
-        # The window is for "neither mode has spoken yet". One of them has.
+        # The window applies while neither mode gave an answer. Here one mode
+        # gave one.
         watch = self._watch(up=8.0)
         written = shim.make_snapshot(effect=shim.EFFECT_RAINBOW)
         written.seq, written.monotonic_ns = 9, int(990.0 * 1e9)
@@ -1025,16 +1024,18 @@ class BootTest(unittest.TestCase):
 class DownloadGapTest(unittest.TestCase):
     """The gap between Steam's writes, which the grace was shorter than.
 
-    Reported from a real machine, downloading a 100 GB game over a fast line:
-    about two seconds of the download's bar, then about five of the desktop's
-    own effect, then the download's again, all the way through. Steam writes
-    the progress bar once per step it can show, and the grace ran out in every
-    gap between two of them - so the bar changed hands a dozen times a minute
-    for a quarter of an hour.
+    A real machine gave this report during a download of a 100 GB game over a
+    fast line: approximately two seconds of the download bar, then
+    approximately five seconds of the desktop effect, then the download bar
+    again, for the complete download. Steam writes the progress bar one time
+    for each step that it can show, and the grace ended in each gap between two
+    writes. The bar therefore changed owner twelve times each minute, for
+    fifteen minutes.
 
-    The gap is not a constant, either. The bar has the same number of steps
-    whatever the connection, so it is the download's length divided by that -
-    seven seconds here, a minute on a line a tenth as fast.
+    The gap is also not a constant. The bar has the same number of steps for
+    each connection, so the gap is the length of the download divided by that
+    number. It was seven seconds here, and one minute on a line that is ten
+    times slower.
     """
 
     Device = ReportedDownloadTest.Device
@@ -1078,9 +1079,9 @@ class DownloadGapTest(unittest.TestCase):
         self.assertTrue(all(shown), shown.count(False))
 
     def test_the_download_still_ends_the_moment_steam_puts_it_back(self):
-        # The patience is only a backstop. What actually ends a download is
-        # Steam restoring what it was resting at, which is recognised exactly
-        # - so a long patience costs nothing at the end of one.
+        # The patience is a fallback only. The write of the rest state by Steam
+        # ends a download, and this code finds that write exactly. So a long
+        # patience costs nothing at the end of a download.
         _shown, after = self._run(gap=7.0)
         self.assertEqual(after, [False, False, False])
 
@@ -1098,11 +1099,10 @@ class DownloadGapTest(unittest.TestCase):
     def test_game_mode_does_not_leave_a_resting_state_behind_it(self):
         """Or the session after it would never get the bar back.
 
-        What Steam rests at is learned on the desktop, and a Game Mode session
-        can leave the bar showing something else entirely. Carried across, the
-        old one would read as Steam showing something of its own for the whole
-        of the patience - which is the handover taking two minutes instead of
-        two seconds.
+        The service reads the rest state of Steam on the desktop, and a Game
+        Mode session can leave a different effect on the bar. With the old
+        value, the service reads that as an effect of Steam for the complete
+        patience. The handover then takes two minutes and not two seconds.
         """
         device = self.Device()
         watch = desktop.Ownership(look=lambda: sessions[0], interval=0.0)
@@ -1126,9 +1126,9 @@ class DownloadGapTest(unittest.TestCase):
 class DumpColumnTest(unittest.TestCase):
     """How often Steam writes, which is the one thing --dump could not say.
 
-    It matters because the grace has to outlast the gap between two of a
-    download's writes, and nothing in this project can work that out from the
-    outside - it is Steam's business how often it redraws a progress bar.
+    This is important because the grace must be longer than the gap between
+    two writes of a download. No code in this project can calculate that gap.
+    Steam decides the redraw rate of a progress bar.
     """
 
     def _written(self, seq, at_seconds):
@@ -1153,9 +1153,8 @@ class DumpColumnTest(unittest.TestCase):
     def test_a_write_that_went_by_unseen_is_said_so(self):
         """Because a gap measured across one is not the gap anybody wanted.
 
-        The shim hands out the current state rather than a queue, so two
-        writes inside one wait come back as one - and the counter is the only
-        thing that gives that away.
+        The shim gives the current state and not a queue. Two writes inside one
+        wait therefore give one read. Only the counter reports the second write.
         """
         first = self._written(4, 100.0)
         said = service.dump_line(self._written(7, 100.2), first.monotonic_ns,
@@ -1172,15 +1171,16 @@ class DumpColumnTest(unittest.TestCase):
 class RecordedFadeTest(unittest.TestCase):
     """The fade Steam puts around a download, recorded on a Steam Machine.
 
-    Reported as the Game Mode effect flashing for under a second at each end
-    of a download. What --dump showed is that Steam dims its own effect to
-    nothing before the progress bar appears and brings it back up afterwards,
-    a step every thirty milliseconds - and every step of both fades differs
-    from the state at rest in the brightness and in nothing else.
+    A user reported a flash of the Game Mode effect at each end of a download,
+    each one shorter than one second. --dump showed the cause: Steam reduces
+    the brightness of its own effect to zero before the progress bar, and it
+    raises the brightness again at the end. Each step takes thirty
+    milliseconds, and each step of both fades is different from the rest state
+    in the brightness only.
 
-    The values below are that recording. Kept because it is a fact about
-    somebody's machine rather than something reasoned out here, and the whole
-    fix rests on it.
+    The values below are that recording. They stay here because they are a fact
+    about a real machine and not a calculation. The complete correction uses
+    them.
     """
 
     BLUE = (1, 90, 255, 255)
@@ -1222,8 +1222,8 @@ class RecordedFadeTest(unittest.TestCase):
                 shown.append((held[0], watch.steam_has_it(held[0], when)))
 
         for snapshot, gap in self._recorded():
-            # The service looks between two of Steam's writes, which is what
-            # lets the scene settle in and learn what Steam is resting at.
+            # The service reads between two writes of Steam. The scene then starts
+            # and reads the rest state of Steam.
             for step in range(1, int(gap / 0.25) + 1):
                 look(clock + step * 0.25)
             clock += gap
@@ -1236,10 +1236,10 @@ class RecordedFadeTest(unittest.TestCase):
     def test_the_game_mode_effect_never_reaches_the_bar(self):
         """The reported fault, as one sentence about the whole run.
 
-        Not "the fade-out is the scene's and the fade-in is too", which would
-        be the fix read back. Whatever else happens, the rainbow must not be
-        what the bar is showing at any point - it is the desktop's bar, and
-        the download is the only thing Steam has to say on it.
+        This does not test "the scene owns the fade-out and the fade-in",
+        because that reads back the code. For each other behaviour, the bar must
+        never show the rainbow. The bar belongs to the desktop, and the download
+        is the one message of Steam on it.
         """
         settled = False
         for snapshot, steams in self._walk():
@@ -1253,16 +1253,16 @@ class RecordedFadeTest(unittest.TestCase):
                                 % snapshot.brightness_scale)
 
     def test_the_download_itself_still_gets_the_bar(self):
-        # The control. A scene that simply never gave way would pass the test
-        # above and lose the thing that test is protecting.
+        # The control case. A scene that never gives the bar to Steam passes
+        # the test above and breaks the behaviour that the test keeps.
         lit = [steams for snapshot, steams in self._walk()
                if snapshot.effect == shim.EFFECT_MANUAL
                and snapshot.brightness_scale > 0]
         self.assertTrue(lit and all(lit), "the progress bar did not show")
 
     def test_half_a_lit_rainbow_is_the_same_rainbow(self):
-        # The whole of it in one line: what makes two states the same thing
-        # Steam is resting at, and what does not.
+        # The complete rule in one line: the properties that make two states
+        # one rest state of Steam, and the properties that do not.
         rest = [self.BLUE] * 17
         bright = self._state(shim.EFFECT_RAINBOW, 55, rest)
         dimmed = self._state(shim.EFFECT_RAINBOW, 5, rest)
@@ -1346,10 +1346,9 @@ class ConfigurationTest(unittest.TestCase):
     def test_every_setting_on_the_page_reaches_the_scene(self):
         """The check that would have caught a knob wired to nothing.
 
-        Three of these are read in one place each, and a service that read
-        three of the four would look exactly like one where a slider does
-        nothing - which is a thing to hear about from a test rather than from
-        somebody moving it.
+        One place reads each of three settings. A service that reads three of
+        the four looks the same as a service where one slider has no result. A
+        test must report that, and not a user who moves the slider.
         """
         plain = service.build_scene(self._config(DESKTOP_SCENE="breath"))
         for key, value, field in (("DESKTOP_COLOR", "#3a76f0", "pixels"),
