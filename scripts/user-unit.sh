@@ -63,6 +63,17 @@ UNIT_DIR="$ROOT/etc/systemd/system"
 UNIT_PATH="$UNIT_DIR/$NAME.service"
 POWER_UNIT_PATH="$UNIT_DIR/$NAME-power.service"
 UDEV_PATH="$ROOT/etc/udev/rules.d/99-$NAME.rules"
+# The drives of the System page.
+#
+# The record is under /var, which is its own partition on SteamOS and survives
+# an update whatever the new image does with /etc. The unit writes the mount
+# units again from it at every boot. The keep-list asks SteamOS to carry the
+# files of this project into the new image, which is the official way and the
+# one that needs no unit at all. See server/steamos_utility_center/mounts.py.
+MOUNTS_RECORD_PATH="$INSTALL_DIR/mounts.conf"
+MOUNTS_UNIT_PATH="$UNIT_DIR/$NAME-mounts.service"
+MOUNTS_APPLIER_PATH="$INSTALL_DIR/$NAME-mounts-apply"
+KEEP_LIST_PATH="$ROOT/etc/atomic-update.conf.d/$NAME.conf"
 SLEEP_HOOK_PATH="$ROOT/usr/lib/systemd/system-sleep/$NAME"
 # This name did not change with the other names, because this project does not
 # write the file. The installer of leds-valve-shim writes it under this name,

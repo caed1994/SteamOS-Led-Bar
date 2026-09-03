@@ -341,8 +341,8 @@ class PartitionTest(unittest.TestCase):
         self.assertEqual(found[0]["label"], "games")
 
     def test_the_partition_steamos_boots_from_is_not(self):
-        # It is mounted at /boot, which the page refuses anyway. Offering it
-        # is offering a person the one drive they must not touch.
+        # It is mounted at /boot, which the page refuses anyway. A menu with
+        # it in offers a person the one drive they must not touch.
         self.assertNotIn("AAAA-BBBB", [one["uuid"] for one in self._found()])
 
     def test_a_machine_where_lsblk_says_nothing_offers_nothing(self):
@@ -467,7 +467,7 @@ class WriteTest(unittest.TestCase):
         """A record this refuses must not be a machine with no drives.
 
         The applier calls this before it replaces anything, so a rejection
-        keeps whatever was working. See scripts/apply-mounts.sh.
+        keeps each drive that operated. See scripts/apply-mounts.sh.
         """
         self._write([GAMES])
         with self.assertRaises(mounts.MountError):

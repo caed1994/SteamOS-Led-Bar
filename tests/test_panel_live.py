@@ -14,6 +14,7 @@ and skips otherwise. It is the only test here that needs a display.
 """
 
 import io
+import json
 import os
 import sys
 import unittest
@@ -4072,3 +4073,192 @@ class AppearanceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(_has_display(), "no tkinter or no display")
+class DrivesPageTest(unittest.TestCase):
+    """The drives on the System page, in a real window.
+
+    Nothing here mounts anything. The partitions come from a recorded lsblk
+    answer, and the privileged applier is recorded rather than run: a test
+    that ran pkexec would ask whoever runs the suite for a password.
+
+    What is under test is the seam between the page and the applier. The rules
+    themselves are in tests/test_mounts.py.
+    """
+
+    LSBLK = {"blockdevices": [
+        {"name": "/dev/sdb1", "uuid": "12345678-1234-1234-1234-123456789abc",
+         "fstype": "ext4", "size": 2000398934016, "label": "games",
+         "mountpoint": None},
+        {"name": "/dev/sdc1", "uuid": "A1B2-C3D4", "fstype": "exfat",
+         "size": 512110190592, "label": "shared", "mountpoint": None},
+    ]}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        import tempfile
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.home = holder.name
+        was = os.environ.get("HOME")
+        os.environ["HOME"] = self.home
+        self.addCleanup(lambda: os.environ.__setitem__("HOME", was)
+                        if was is not None else os.environ.pop("HOME", None))
+
+        # The record and the machine, both answered here. Panel.__init__ reads
+        # the record, so this stands before the window is built.
+        self.mounts = self.panel_module.mounts
+        self.record = []
+        self._was = (self.mounts.read, self.mounts.partitions)
+        self.mounts.read = lambda path=None: list(self.record)
+        self.mounts.partitions = lambda run=None: [
+            dict(one, uuid=one["uuid"], type=one["fstype"],
+                 device=one["name"], label=one["label"], size=one["size"],
+                 mountpoint="")
+            for one in self.LSBLK["blockdevices"]]
+        self.addCleanup(self._put_back)
+
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.said = []
+        self.panel._say = lambda title, message: self.said.append(message)
+        self.panel._ask = lambda *args, **kwargs: True
+        self.ran = []
+        self.panel.runner.start = lambda command, done=None: (
+            self.ran.append(command), True)[1]
+        self.root.update()
+        self.panel._open_section("keyboard")
+        self.root.update()
+
+    def _put_back(self):
+        self.mounts.read, self.mounts.partitions = self._was
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def _staged(self):
+        """The record that the page handed to the applier, read back."""
+        self.assertTrue(self.ran, "no command reached the applier")
+        with open(self.ran[-1][2]) as handle:
+            return json.load(handle)
+
+    def _add(self, where, which=0):
+        offered = self.panel._menus["drive-partition"]
+        self.panel._drive_choice.set(offered[which][0])
+        self.panel._drive_where.delete(0, "end")
+        self.panel._drive_where.insert(0, where)
+        self.panel.add_drive()
+
+    def test_the_page_offers_the_partitions_of_the_machine(self):
+        """Read off lsblk, and not typed.
+
+        A UUID is not a value to ask a person to copy by hand, and it is the
+        value that decides which drive gets mounted where.
+        """
+        offered = [said for said, _uuid
+                   in self.panel._menus["drive-partition"]]
+        self.assertTrue(any("/dev/sdb1" in one for one in offered), offered)
+        self.assertTrue(any("games" in one for one in offered), offered)
+
+    def test_picking_one_offers_a_mount_point(self):
+        # The label of the filesystem is the name a person gave the drive.
+        offered = self.panel._menus["drive-partition"]
+        self.panel._drive_choice.set(offered[0][0])
+        self.root.update()
+        self.assertEqual(self.panel._drive_where.get(), "/mnt/games")
+
+    def test_adding_one_hands_the_record_to_the_applier(self):
+        self._add("/mnt/games")
+        found = self._staged()
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["where"], "/mnt/games")
+        self.assertEqual(found[0]["uuid"],
+                         "12345678-1234-1234-1234-123456789abc")
+
+    def test_the_command_is_the_privileged_applier(self):
+        self._add("/mnt/games")
+        command = self.ran[-1]
+        self.assertEqual(command[0], "pkexec")
+        self.assertTrue(command[1].endswith("scripts/apply-mounts.sh"),
+                        command[1])
+
+    def test_nothing_the_page_runs_names_fstab(self):
+        """The one file this page must never write.
+
+        /etc/fstab also holds the entries for /, /boot, /home and /var. This
+        page writes a mount unit, which belongs to this project alone.
+        """
+        self._add("/mnt/games")
+        for command in self.ran:
+            for part in command:
+                self.assertNotIn("fstab", part)
+
+    def test_a_mount_point_that_belongs_to_steamos_never_reaches_root(self):
+        """Refused in the window, before any privileged command runs.
+
+        The applier refuses it as well, and both are wanted: a page that sent
+        it and relied on the refusal would ask for a password first, and then
+        report a failure for something it knew about.
+        """
+        self._add("/usr")
+        self.assertEqual(self.ran, [])
+        self.assertTrue(self.said)
+        self.assertIn("/usr", self.said[-1])
+
+    def test_a_drive_with_no_mount_point_is_refused(self):
+        self._add("")
+        self.assertEqual(self.ran, [])
+        self.assertTrue(self.said)
+
+    def test_a_filesystem_with_no_owner_takes_one_from_the_options(self):
+        """exfat records no owner, so every file belongs to whoever mounts it.
+
+        Without this the drive belongs to root, Steam cannot write a library
+        to it, and no chown can change that: the filesystem has nowhere to
+        record the answer.
+        """
+        self._add("/mnt/shared", which=1)
+        found = self._staged()
+        self.assertIn("uid=%d" % os.getuid(), found[0]["options"])
+        self.assertIn("gid=%d" % os.getgid(), found[0]["options"])
+
+    def test_a_configured_drive_is_no_longer_offered_to_add(self):
+        # Two units on one UUID is one drive mounted twice, and the second
+        # mount is the one that fails.
+        self.record = [{"uuid": "12345678-1234-1234-1234-123456789abc",
+                        "where": "/mnt/games", "type": "ext4",
+                        "options": "defaults,noatime", "timeout": "5s"}]
+        self.panel._drives = list(self.record)
+        self.panel._show_drives()
+        self.root.update()
+        offered = [uuid for _said, uuid
+                   in self.panel._menus["drive-partition"]]
+        self.assertNotIn("12345678-1234-1234-1234-123456789abc", offered)
+
+    def test_giving_a_drive_away_names_it_to_the_applier(self):
+        """The chown, as the second argument and not as a second command.
+
+        One prompt for the whole operation. A second pkexec would be a second
+        password for a thing a person asked for once.
+        """
+        entry = {"uuid": "12345678-1234-1234-1234-123456789abc",
+                 "where": "/mnt/games", "type": "ext4",
+                 "options": "defaults,noatime", "timeout": "5s"}
+        self.panel._drives = [entry]
+        self.panel.own_drive(entry)
+        self.assertEqual(self.ran[-1][-1], "/mnt/games")
+
+    def test_removing_one_writes_the_record_without_it(self):
+        entry = {"uuid": "12345678-1234-1234-1234-123456789abc",
+                 "where": "/mnt/games", "type": "ext4",
+                 "options": "defaults,noatime", "timeout": "5s"}
+        self.panel._drives = [entry]
+        self.panel.remove_drive(entry)
+        self.assertEqual(self._staged(), [])

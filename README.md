@@ -619,7 +619,7 @@ of pages.
 | **LED Strip** | all the settings for the bar, on seven pages. See below |
 | **CPU & GPU power** | the CPU governor and the energy preference. It also has the graphics card if [LACT](#the-graphics-card) runs. See [CPU power](#cpu-power) |
 | **HDMI CEC Mods** | control of the television over HDMI. See [HDMI CEC](#hdmi-cec) |
-| **Keyboard Layout** | the layout that Game Mode uses. See [Keyboard layout](#keyboard-layout) |
+| **System** | the layout that Game Mode uses, and the second drives of this machine. See [Keyboard layout](#keyboard-layout) and [Drives](#drives) |
 | **Status** | the condition of each part of the toolbox, each with the button that repairs it |
 | **App Settings** | this program: its [appearance](#light-and-dark) and its [updates](#updates-and-removal) |
 | **About** | the version, the licence and the credits |
@@ -1005,6 +1005,62 @@ echo "XKB_DEFAULT_LAYOUT=kz" > ~/.config/environment.d/10-keyboard.conf
 To change between two layouts, write a list with a comma (`de,us`). The panel
 does not touch the other `XKB_DEFAULT_*` variables in that file, such as a
 model, a variant or the change options. It edits its own line only.
+
+### Drives
+
+A second drive for a Steam library, on the same **System** page.
+
+A line that you add to `/etc/fstab` does not survive a SteamOS update. SteamOS
+writes the new image into the other partition slot and boots into it. `/etc`
+belongs to that image, so your line is in the old slot and the new slot has the
+`fstab` of the image. `/home` and `/var` are their own partitions and stay.
+
+So this page does not write `/etc/fstab`. It writes one systemd mount unit for
+each drive, and systemd builds the same units from `fstab` anyway:
+
+```
+/etc/systemd/system/mnt-games.mount
+```
+
+**Never put `/etc/fstab` in a keep-list.** It also holds the entries for `/`,
+`/boot`, `/home` and `/var`. A copy of it that survives an update writes those
+entries over the entries of the new image, and the machine that does not boot
+is a worse outcome than the drive that does not mount.
+
+Three things carry a drive across an update:
+
+| | |
+| --- | --- |
+| `/var/lib/steamos-utility-center/mounts.conf` | what you asked for. `/var` is its own partition and stays |
+| `/etc/atomic-update.conf.d/steamos-utility-center.conf` | asks SteamOS to keep the units. The official way, on an image that honours it |
+| `steamos-utility-center-mounts.service` | writes the units again at every boot, for an image that does not |
+
+The keep-list also covers the configuration, the units and the udev rule of
+this project. Nothing protected those before, so they had the same exposure as
+that `fstab` line.
+
+The page reads the partitions with `lsblk`, so you pick a drive rather than
+type a UUID. The unit names the drive by UUID and not by `/dev/sda2`: the
+kernel gives out those names in the order it finds the drives, so a second
+drive on a second port can take the name of the first one.
+
+A drive is **wanted** by `multi-user.target` and not required by it. This is
+the `nofail` of `fstab`: a drive that is not connected does not stop the boot.
+
+**Give it to me** runs one `chown` over the mount point, so that Steam can
+write a library there. It is offered for `ext4`, `btrfs`, `xfs` and `f2fs`,
+which record an owner for each file. `exfat`, `ntfs3` and `vfat` record none,
+and the page writes `uid=` and `gid=` into their mount options instead.
+
+To see what the machine has:
+
+```bash
+steamos-utility-center --mounts
+```
+
+A drive that the record names and that has no unit reports `NO UNIT`. That is
+an update that did not honour the keep-list, and the repair unit writes the
+unit again at the next boot.
 
 ## Diagnostics and troubleshooting
 

@@ -177,6 +177,12 @@ rm -rf "${INSTALL_DIR:?}/steamos_utility_center"
 cp -r "$SOURCE_DIR/server/steamos_utility_center" "$INSTALL_DIR/"
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-center" "$INSTALL_DIR/steamos-utility-center"
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-center-power" "$INSTALL_DIR/steamos-utility-center-power"
+# The applier of the drives, beside the programs it works with. The boot-time
+# repair unit runs it from here, and the panel runs it through pkexec, so it
+# must not live in the clone: a person who moves the clone would take it away
+# from the unit. See server/steamos-utility-center-mounts.service.
+install -m 0755 "$SOURCE_DIR/scripts/apply-mounts.sh" \
+    "$INSTALL_DIR/steamos-utility-center-mounts-apply"
 find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
 
 # The commit of those files, so that the panel can report a clone that moved
@@ -272,6 +278,37 @@ say "Installing systemd unit to $POWER_UNIT_PATH"
 sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     "$SOURCE_DIR/server/steamos-utility-center-power.service" > "$POWER_UNIT_PATH"
 chmod 0644 "$POWER_UNIT_PATH"
+
+# The drives of the System page.
+#
+# The unit writes the mount units again at every boot, for a SteamOS update
+# that did not honour the keep-list. It is enabled only on a machine that has
+# a record, because a unit that nobody asked for is a unit that a person must
+# examine. The panel enables it at the first drive. See scripts/apply-mounts.sh.
+say "Installing systemd unit to $MOUNTS_UNIT_PATH"
+sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
+    "$SOURCE_DIR/server/steamos-utility-center-mounts.service" \
+    > "$MOUNTS_UNIT_PATH"
+chmod 0644 "$MOUNTS_UNIT_PATH"
+if [[ -f "$MOUNTS_RECORD_PATH" ]]; then
+    say "Keeping the drives in $MOUNTS_RECORD_PATH"
+    systemctl enable "$(basename "$MOUNTS_UNIT_PATH")" >/dev/null 2>&1 || true
+fi
+
+# Ask SteamOS to carry this project into the next image.
+#
+# A SteamOS update rebuilds /etc from the new image, and this project wrote
+# nothing that asked for its files back. Its configuration, its units and its
+# udev rule thus had the exposure that loses a hand-written line in
+# /etc/fstab. See server/steamos_utility_center/mounts.py.
+say "Writing $KEEP_LIST_PATH"
+install -d -m 0755 "$(dirname "$KEEP_LIST_PATH")"
+if ! keep_said="$("$INSTALL_DIR/steamos-utility-center" --write-mounts \
+                 "$MOUNTS_RECORD_PATH" 2>&1)"; then
+    warn "could not write the keep-list, so a SteamOS update can take this"
+    warn "installation away again:"
+    warn "  $keep_said"
+fi
 
 if [[ -f "$POWER_CONFIG_PATH" ]]; then
     say "Keeping existing $POWER_CONFIG_PATH"

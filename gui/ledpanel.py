@@ -1235,6 +1235,36 @@ def apply_power_command(source_dir, staged_path):
             staged_path]
 
 
+def apply_mounts_command(source_dir, staged_path, owner_dir=""):
+    """Returns the command that writes the drives and mounts them.
+
+    `owner_dir` is a mount point to give to the desktop user, and it is
+    optional. A drive that a person adds is a drive that root owns, so Steam
+    cannot write a library to it until somebody says otherwise. The page has
+    that as a button, and the button is this argument.
+    """
+    command = ["pkexec", os.path.join(source_dir, "scripts", "apply-mounts.sh"),
+               staged_path]
+    if owner_dir:
+        command.append(owner_dir)
+    return command
+
+
+def mount_point_for(found):
+    """Returns the mount point to offer for a partition, from its own label.
+
+    A person who adds a drive has a name for it, and the filesystem carries
+    one. A partition with the label games gives /mnt/games, which is the
+    answer that the person wants. A partition with no label uses its device
+    name. A partition with neither gives nothing, and the page then asks.
+    """
+    name = str(found.get("label") or "").strip()
+    if not name:
+        name = os.path.basename(str(found.get("device") or ""))
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-").lower()
+    return "/mnt/%s" % name if name else ""
+
+
 def power_choices(offered, current="", labels=None, unset=True):
     """Returns (label, value) pairs for a CPU setting that the machine offers.
 

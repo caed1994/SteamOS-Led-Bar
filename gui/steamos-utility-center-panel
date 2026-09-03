@@ -51,6 +51,7 @@ import syssettings                                          # noqa: E402
 from steamos_utility_center import cec                                 # noqa: E402
 from steamos_utility_center import config as config_module             # noqa: E402
 from steamos_utility_center import lact                                # noqa: E402
+from steamos_utility_center import mounts                              # noqa: E402
 from steamos_utility_center import notify                              # noqa: E402
 from steamos_utility_center import power                               # noqa: E402
 from steamos_utility_center import render                              # noqa: E402
@@ -369,7 +370,11 @@ SECTIONS = (
     ("strip", "LED Strip", "Configure the lighting", "strip"),
     ("power", "CPU & GPU power", "Governor, EPP and the card", "bolt"),
     ("cec", "HDMI CEC Mods", "Control and tweaks", "screen"),
-    ("keyboard", "Keyboard Layout", "Layout for the session", "keys"),
+    # It was "Keyboard Layout". The drives are here too now, and both are
+    # settings of the machine rather than of the bar. The key stays "keyboard",
+    # because the code refers to a section by that key and a rename of it is a
+    # rename in every place that names the section.
+    ("keyboard", "System", "Keyboard and drives", "keys"),
     # This is not a page of the LED strip, and it was a page of the strip
     # before. It reports on the *installation*: the kernel module, the
     # units, the udev rule, and the services that stay alive across Game
@@ -2350,6 +2355,10 @@ class Panel:
         # turns up later can be added to both.
         self._menus = {}
         self._widgets = {}
+        # The drives of the System page, from the record under /var. Read once
+        # and kept, because each change writes the whole list back.
+        self._drives = mounts.read()
+        self._partitions = []
         # key -> the variable its drop-down writes
         self._menu_parts = {}
         # The one drop-down standing open, if any
@@ -2485,7 +2494,8 @@ class Panel:
             if key in SECTION_SETTINGS:
                 table, note = SECTION_SETTINGS[key]
                 build = {"app": self._build_app,
-                         "power": self._build_power}.get(
+                         "power": self._build_power,
+                         "keyboard": self._build_system}.get(
                              key, self._build_settings)
                 page = self._page(self.sections,
                                   lambda where, b=build, t=table, n=note:
@@ -5926,6 +5936,201 @@ class Panel:
         self.runner.start(
             ledpanel.flash_firmware_command(SOURCE_DIR, environment),
             lambda _code: self.refresh_status())
+
+    # -- the drives ---------------------------------------------------------
+
+    def _build_system(self, where, table, note):
+        """The System page: the keyboard layout, and the drives.
+
+        Both are settings of the machine and not of the bar, which is why they
+        share a section. They are not alike in one way that matters. The
+        keyboard layout is written into the home directory of the user and
+        needs no rights at all. A mount unit is in /etc and needs root, so this
+        page now has a privileged half where it had none.
+        """
+        outer = self._build_settings(where, table, note)
+        self._build_drives(outer)
+        return outer
+
+    def _build_drives(self, parent):
+        """The second drives of this machine, and what mounts them.
+
+        This writes no /etc/fstab. A SteamOS update rebuilds /etc from the new
+        image, so a line that a person adds to fstab is lost at the next
+        update. This page writes one systemd mount unit for each drive, which
+        is a file of this project and safe to carry across an update. See
+        server/steamos_utility_center/mounts.py.
+        """
+        box = self._section(parent, "Drives", card=True)
+        self._note(
+            box,
+            "A second drive for a Steam library. SteamOS rebuilds /etc at "
+            "every update, so a line in /etc/fstab does not survive one. This "
+            "writes a mount unit instead, and asks SteamOS to keep it.")
+
+        self.drives_box = ttk.Frame(box, style="OnCard.TFrame")
+        self.drives_box.pack(fill="x", pady=(GROUP_GAP, 0))
+
+        # The partition to add, read off the machine rather than typed. A UUID
+        # is not a value to ask a person to copy.
+        row = ttk.Frame(box, style="OnCard.TFrame")
+        row.pack(fill="x", pady=(GROUP_GAP, 0))
+        ttk.Label(row, text="Add").pack(side="left", padx=(0, GROUP_GAP))
+        self._drive_choice = tk.StringVar()
+        self._drive_field = self._field(row, "drive-partition",
+                                        self._drive_choice, [], "",
+                                        width=SENSOR_WIDTH)
+        self._drive_field.pack(side="left")
+        self._drive_where = ttk.Entry(row, style="Material.TEntry", width=22)
+        self._drive_where.pack(side="left", padx=(GROUP_GAP, 0))
+        self._drive_choice.trace_add("write", lambda *_a: self._drive_picked())
+
+        self._buttons(box, (("Add this drive", self.add_drive),), lead=ROW_GAP)
+        self.drives_said = ttk.Label(box, style="Muted.TLabel", justify="left")
+        self._wrapped.append(self.drives_said)
+        self._wrap_insets[str(self.drives_said)] = 2 * GROUP_GAP
+        self._show_drives()
+        return box
+
+    def _drive_picked(self):
+        """Offers a mount point for the partition that a person selected.
+
+        The label of the filesystem is the name that the person gave the
+        drive, so /mnt/<label> is the answer they would type. An entry that
+        somebody already filled in is left alone.
+        """
+        if self._drive_where.get().strip():
+            return
+        found = self._drive_by_uuid(self._value_for("drive-partition",
+                                                    self._drive_choice.get()))
+        if found:
+            self._drive_where.insert(0, ledpanel.mount_point_for(found))
+
+    def _drive_by_uuid(self, uuid):
+        for found in getattr(self, "_partitions", ()):
+            if found["uuid"] == uuid:
+                return found
+        return None
+
+    def _show_drives(self):
+        """Draws the drives of the record, and refills the partition menu."""
+        for child in self.drives_box.winfo_children():
+            child.destroy()
+
+        self._partitions = mounts.partitions()
+        taken = {entry["uuid"] for entry in self._drives}
+        offered = [(mounts.partition_said(found), found["uuid"])
+                   for found in self._partitions if found["uuid"] not in taken]
+        self._menus["drive-partition"] = offered
+        self._drive_field.configure(
+            text=offered[0][0] if offered else "no drive to add")
+        self._drive_choice.set(offered[0][0] if offered else "")
+
+        if not self._drives:
+            ttk.Label(self.drives_box,
+                      text="No drive is configured here.",
+                      style="Muted.TLabel").pack(anchor="w")
+            return
+        for entry in sorted(self._drives, key=lambda one: one["where"]):
+            self._build_one_drive(entry)
+
+    def _build_one_drive(self, entry):
+        """One row: what it is, where it goes, and how to take it away."""
+        row = ttk.Frame(self.drives_box, style="OnCard.TFrame")
+        row.pack(fill="x", pady=(0, ROW_GAP))
+        said = "%s   %s" % (entry["where"], entry["type"])
+        mounted = os.path.ismount(entry["where"])
+        ttk.Label(row, text=said).pack(side="left")
+        ttk.Label(row, text="mounted" if mounted else "not mounted",
+                  style="Good.TLabel" if mounted else "Muted.TLabel").pack(
+                      side="left", padx=(GROUP_GAP, 0))
+        ttk.Button(row, text="Remove", style="Text.TButton",
+                   command=lambda one=entry: self.remove_drive(one)).pack(
+                       side="right")
+        # A drive that a person adds belongs to root, so Steam cannot write a
+        # library to it. This is the chown, and it is offered only for a
+        # filesystem that records an owner: exfat and vfat take theirs from the
+        # mount options instead, and a chown on one of those fails.
+        if not mounts.needs_owner_option(entry["type"]):
+            ttk.Button(row, text="Give it to me", style="Text.TButton",
+                       command=lambda one=entry: self.own_drive(one)).pack(
+                           side="right", padx=(0, GROUP_GAP))
+
+    def add_drive(self):
+        """Adds the partition that is selected, and writes the drives."""
+        uuid = self._value_for("drive-partition", self._drive_choice.get())
+        found = self._drive_by_uuid(uuid)
+        where = self._drive_where.get().strip()
+        if not found:
+            self._say("Drives", "Pick a drive first.")
+            return
+        if not where:
+            self._say("Drives", "Say where the drive should be mounted, for "
+                                "example /mnt/games.")
+            return
+        entry = {"uuid": uuid, "where": where, "type": found["type"]}
+        # exfat, ntfs3 and vfat record no owner, so the mount options carry
+        # one. Without this the drive belongs to root and Steam cannot write
+        # to it, and no chown can change that.
+        if mounts.needs_owner_option(found["type"]):
+            entry["options"] = "%s,%s" % (
+                mounts.DEFAULT_OPTIONS,
+                mounts.owner_options(os.getuid(), os.getgid()))
+        try:
+            mounts.validate(entry)
+        except mounts.MountError as exc:
+            self._say("Drives", str(exc))
+            return
+        self._apply_drives(self._drives + [entry])
+
+    def remove_drive(self, entry):
+        """Takes one drive away, after asking. This unmounts it."""
+        if not self._ask("Drives",
+                         "This unmounts %s and stops mounting it at the "
+                         "next boot.\n\nNothing on the drive is touched."
+                         % entry["where"],
+                         confirm="Remove"):
+            return
+        self._apply_drives([one for one in self._drives
+                            if one["where"] != entry["where"]])
+
+    def own_drive(self, entry):
+        """Gives one mounted drive to the desktop user, with one prompt."""
+        if not self._ask("Drives",
+                         "This gives every file under %s to you, so that "
+                         "Steam can write a library there.\n\nOn a drive "
+                         "with many files it takes a while."
+                         % entry["where"],
+                         confirm="Give it to me"):
+            return
+        self._apply_drives(self._drives, owner=entry["where"])
+
+    def _apply_drives(self, entries, owner=""):
+        """Writes the record, then hands it to the privileged applier."""
+        try:
+            record = mounts.text(entries)
+        except mounts.MountError as exc:
+            self._say("Drives", str(exc))
+            return
+        staged = tempfile.NamedTemporaryFile(
+            "w", suffix=".conf", prefix="steamos-utility-center-mounts-",
+            delete=False)
+        with staged:
+            staged.write(record)
+        os.chmod(staged.name, 0o644)
+
+        def finished(code):
+            os.unlink(staged.name)
+            if code == 0:
+                self._drives = entries
+                self._drive_where.delete(0, "end")
+            self._show_drives()
+            self._refit_page()
+            self.refresh_status()
+
+        self.runner.start(
+            ledpanel.apply_mounts_command(SOURCE_DIR, staged.name, owner),
+            finished)
 
     def _build_app(self, where, table, note):
         """App Settings, which is now everything about this program itself.

@@ -207,6 +207,28 @@ rm -f "$UNIT_PATH"
 systemctl disable "$NAME-power.service" 2>/dev/null || true
 rm -f "$POWER_UNIT_PATH"
 
+# The drives of the System page.
+#
+# Unmount each one before the unit files go, or the drive stays mounted until
+# the machine restarts. systemd forgets a unit whose file is gone at the next
+# daemon-reload, so `stop` after that finds no such unit.
+#
+# The record under /var stays. It is the answer to "which drives did I have",
+# and a second install reads it back. --purge takes it, with the settings.
+systemctl disable --now "$NAME-mounts.service" 2>/dev/null || true
+rm -f "$MOUNTS_UNIT_PATH" "$MOUNTS_APPLIER_PATH"
+shopt -s nullglob
+for mount_unit in "$UNIT_DIR"/*.mount; do
+    grep -q "written by the SteamOS Utility Center" "$mount_unit" || continue
+    say "Unmounting $(basename "$mount_unit")"
+    systemctl disable --now "$(basename "$mount_unit")" 2>/dev/null || true
+    rm -f "$mount_unit"
+done
+shopt -u nullglob
+
+# And the file that asked SteamOS to keep all of the above.
+rm -f "$KEEP_LIST_PATH"
+
 # And each file from before the rename.
 #
 # A person who uninstalls can have run the new installer never: they clone,
@@ -248,6 +270,9 @@ rm -rf "${INSTALL_DIR:?}"
 
 if [[ $PURGE -eq 1 ]]; then
     rm -f "$CONFIG_PATH" "$POWER_CONFIG_PATH"
+    # The record of the drives goes with the settings, and not before. It is
+    # under /var and the rm -rf above already took it, so this is the line
+    # that says so rather than a second removal.
     # The settings of the panel. They are in the home directory of the desktop
     # user and not in /etc, and this script did not report that file before.
     [[ -n "${WATCHER_HOME:-}" ]] \

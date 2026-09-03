@@ -1317,19 +1317,22 @@ class PanelSettingsTest(unittest.TestCase):
         """The outer level: the type of the settings.
 
         The bar comes first, because it is the subject of the program and a user
-        opens it each time. The two sections with no page come next. The keyboard
-        layout is the last of the four, because a user sets it one time. About is
-        not in this list, because it holds no settings. It is at the foot of the
-        sidebar, and for that reason it has its own name and is not a fifth entry.
+        opens it each time. Then come the settings of the machine, and the System
+        page is the last of those: a user sets a keyboard layout and a drive one
+        time. About is not in this list, because it holds no settings. It is at the
+        foot of the sidebar, and for that reason it has its own name and is not a
+        sixth entry.
         """
         assigned = self._assignments()
         sections = ast.literal_eval(assigned["SECTIONS"])
         self.assertEqual([entry[0] for entry in sections],
                          ["strip", "power", "cec", "keyboard", "status",
                           "app"])
+        # "System" and no longer "Keyboard Layout". The drives are on that
+        # page as well now, and both are settings of the machine.
         self.assertEqual([entry[1] for entry in sections],
                          ["LED Strip", "CPU & GPU power", "HDMI CEC Mods",
-                          "Keyboard Layout", "Status", "App Settings"])
+                          "System", "Status", "App Settings"])
         self.assertEqual(ast.literal_eval(assigned["ABOUT"])[0], "about")
         # Every one of them says what it is for. A sidebar of five titles with
         # a blank line under one of them is a sidebar that failed to draw.
