@@ -304,6 +304,57 @@ class PanelPartTest(unittest.TestCase):
         self.assertEqual(part.verdict, "Version 1.0.0.")
 
 
+class DriveTroubleTest(unittest.TestCase):
+    """The reason a drive did not mount, taken out of the applier's output.
+
+    Every line here came from a real machine. The panel showed "A command
+    failed. Start the panel from a terminal to see why", and the third line
+    from the end said exactly what was wrong.
+    """
+
+    REAL = """wrote /etc/systemd/system/mnt-SN7100.mount
+wrote /etc/atomic-update.conf.d/steamos-utility-center.conf
+Job failed. See "journalctl -xe" for details.
+warning: mnt-SN7100.mount did not mount. Is the drive connected?
+* mnt-SN7100.mount - /mnt/SN7100, mounted by the SteamOS Utility Center
+     Loaded: loaded (/etc/systemd/system/mnt-SN7100.mount; enabled)
+     Active: failed (Result: resources)
+      Where: /mnt/SN7100
+       What: /dev/disk/by-uuid/7fba6088-cfa1-45c2-a61d-703d64ec2867
+
+Sep 03 20:26:02 FractalMachine systemd[1]: mnt-SN7100.mount: Mount path /mnt/SN7100 is not canonical (contains a symlink).
+Sep 03 20:26:02 FractalMachine systemd[1]: mnt-SN7100.mount: Failed with result 'resources'.
+"""
+
+    def test_it_finds_the_line_that_answers_the_question(self):
+        said = ledpanel.drive_trouble(self.REAL, most=2)
+        self.assertIn("not canonical", said)
+
+    def test_the_date_and_the_host_are_not_in_it(self):
+        """A card is not wide enough for a journal prefix and an answer."""
+        said = ledpanel.drive_trouble(self.REAL, most=3)
+        self.assertNotIn("FractalMachine", said)
+        self.assertNotIn("Sep 03", said)
+
+    def test_the_lines_that_report_progress_are_left_out(self):
+        said = ledpanel.drive_trouble(self.REAL, most=4)
+        self.assertNotIn("wrote /etc", said)
+        self.assertNotIn("Where:", said)
+
+    def test_it_holds_the_number_of_lines_it_was_asked_for(self):
+        self.assertEqual(len(ledpanel.drive_trouble(self.REAL,
+                                                    most=2).splitlines()), 2)
+
+    def test_a_run_that_printed_nothing_gives_nothing(self):
+        self.assertEqual(ledpanel.drive_trouble(""), "")
+        self.assertEqual(ledpanel.drive_trouble([]), "")
+
+    def test_a_correct_run_gives_nothing_worth_showing(self):
+        self.assertEqual(
+            ledpanel.drive_trouble("wrote /etc/systemd/system/mnt-games.mount\n"
+                                   "1 drive(s) mounted, 0 did not\n"), "")
+
+
 class SummaryTest(unittest.TestCase):
 
     def _parts(self, **broken):

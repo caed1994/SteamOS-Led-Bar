@@ -4339,6 +4339,79 @@ class DrivesPageTest(unittest.TestCase):
         self._draw(self.GAMES)
         self.assertEqual(len(self._named("Take ownership")), 1)
 
+    # What a real machine printed when a mount unit named a path with a
+    # symlink in it. The panel showed "A command failed. Start the panel from
+    # a terminal to see why", and the answer was in this text all the time.
+    FAILED = ("wrote /etc/systemd/system/mnt-SN7100.mount\n"
+              "warning: mnt-SN7100.mount did not mount. Is the drive "
+              "connected?\n"
+              "     Active: failed (Result: resources)\n"
+              "Sep 03 20:26:02 FractalMachine systemd[1]: mnt-SN7100.mount: "
+              "Mount path /mnt/SN7100 is not canonical (contains a "
+              "symlink).\n")
+
+    def _apply(self, code, said=""):
+        """Runs one apply and gives the runner's answer back to the page."""
+        def start(command, done=None):
+            self.ran.append(command)
+            self.panel.runner.transcript = [said]
+            if done is not None:
+                done(code)
+            return True
+
+        self.panel.runner.start = start
+
+    def test_the_reason_a_drive_did_not_mount_is_on_the_page(self):
+        """A person had to open a terminal to read it.
+
+        The applier prints the reason, the runner keeps every line of it, and
+        the card said nothing. This is the line that answers the question.
+        """
+        self._apply(1, self.FAILED)
+        self._add("/mnt/games")
+        said = self.panel.drives_said.cget("text")
+        self.assertIn("not canonical", said)
+        self.assertNotIn("FractalMachine", said, "the journal prefix stayed")
+
+    def test_that_sentence_is_drawn_and_not_only_built(self):
+        """The second label on this card that nothing placed.
+
+        The first was the paragraph about /etc/fstab. Both were built, both
+        were added to the wrap list, and neither was ever on the window.
+        """
+        self._apply(1, self.FAILED)
+        self._add("/mnt/games")
+        self.root.update()
+        self.assertTrue(self.panel.drives_said.winfo_ismapped(),
+                        "the sentence was built and never placed")
+
+    def test_a_run_that_worked_leaves_no_warning_behind(self):
+        self._apply(1, self.FAILED)
+        self._add("/mnt/games")
+        self._apply(0, "1 drive(s) mounted, 0 did not\n")
+        self._add("/mnt/games")
+        self.assertEqual(self.panel.drives_said.cget("text"), "")
+
+    def test_a_mount_point_that_is_a_link_says_where_it_landed(self):
+        """systemd carries no link, so the record holds the other name.
+
+        A list that showed a path nobody typed, with nothing to say why, is a
+        page that looks wrong.
+        """
+        import tempfile
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        root = os.path.realpath(holder.name)
+        os.makedirs(os.path.join(root, "var", "mnt"))
+        os.symlink(os.path.join(root, "var", "mnt"),
+                   os.path.join(root, "mnt"))
+
+        self._apply(0, "1 drive(s) mounted, 0 did not\n")
+        self._add(os.path.join(root, "mnt", "games"))
+        said = self.panel.drives_said.cget("text")
+        self.assertIn(os.path.join(root, "var", "mnt", "games"), said)
+        self.assertIn("is a link", said)
+
     def test_the_explanation_is_on_the_page(self):
         """A label that nothing packs exists and is never drawn.
 

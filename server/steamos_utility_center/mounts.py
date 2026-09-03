@@ -114,6 +114,35 @@ class MountError(ValueError):
     """A drive that must not be written. The panel catches it by name."""
 
 
+def canonical(where):
+    """Returns the mount point with each symlink in it resolved.
+
+    systemd refuses a mount unit whose `Where=` holds a symlink. It says so:
+
+        mnt-SN7100.mount: Mount path /mnt/SN7100 is not canonical
+        (contains a symlink).
+
+    The unit then fails with `Result: resources`, the drive stays unmounted,
+    and the chown of Take ownership refuses because there is nothing there.
+
+    This is the one difference between a mount unit and a line in /etc/fstab
+    that a person notices. `mount` follows a symlink and mounts the drive.
+    systemd does not, because a unit is named after its own mount point: two
+    names for one directory are two units for one mount, and systemd cannot
+    tell that they are the same.
+
+    On SteamOS this is not a rare case. The root filesystem is read-only, so
+    several directories in / are links into /var. A person who writes
+    /mnt/games gets a unit that never mounts.
+
+    A mount point that does not exist yet is resolved to the same degree: the
+    part of it that exists is resolved, and the rest is added. That is correct
+    here, because systemd makes the last directory itself.
+    """
+    where = str(where or "").rstrip("/") or "/"
+    return os.path.realpath(where)
+
+
 def escape(where):
     """Returns the unit name of a mount point, as systemd escapes it.
 
@@ -172,12 +201,21 @@ def validate(entry):
                          % entry.get("where", ""))
     if ".." in where.split("/"):
         raise MountError("the mount point must not hold .. : %s" % where)
-    if where in REFUSED:
-        raise MountError("%s belongs to SteamOS, so this refuses to mount "
-                         "over it" % where)
     if "\n" in where or "\\" in where:
         raise MountError("the mount point holds a character that a unit file "
                          "cannot carry")
+
+    # The refusal is against the resolved path, which is the directory the
+    # drive lands on. A check of the typed path alone is a check that a
+    # symlink walks around: /mnt/x that points at /usr reads as /mnt/x, and
+    # mounts on /usr.
+    landing = canonical(where)
+    for named in (where, landing):
+        if named in REFUSED:
+            raise MountError(
+                "%s belongs to SteamOS, so this refuses to mount over it"
+                % named + ("" if named == where
+                           else " (%s is a link to it)" % where))
 
     uuid = str(entry.get("uuid", ""))
     if not UUID.match(uuid):
@@ -205,7 +243,9 @@ def unit_text(entry):
     belongs to the filesystem.
     """
     validate(entry)
-    where = str(entry["where"]).rstrip("/")
+    # The resolved path, because systemd refuses a unit whose mount point
+    # holds a symlink. See canonical.
+    where = canonical(entry["where"])
     options = str(entry.get("options", "")) or DEFAULT_OPTIONS
     timeout = str(entry.get("timeout", "")) or DEFAULT_TIMEOUT
     return "\n".join((
@@ -252,13 +292,18 @@ def read(path=None):
 
 
 def text(entries):
-    """Returns the record of these drives, ready to write."""
+    """Returns the record of these drives, ready to write.
+
+    The mount point is the resolved one. The record is what the page shows,
+    what the unit is named after, and what os.path.ismount is asked about, and
+    those three must be the one path that the drive lands on. See canonical.
+    """
     out = []
     for entry in entries:
         validate(entry)
         out.append({
             "uuid": str(entry["uuid"]),
-            "where": str(entry["where"]).rstrip("/"),
+            "where": canonical(entry["where"]),
             "type": str(entry["type"]),
             "options": str(entry.get("options", "")) or DEFAULT_OPTIONS,
             "timeout": str(entry.get("timeout", "")) or DEFAULT_TIMEOUT,
@@ -275,7 +320,9 @@ def duplicates(entries):
     """
     seen, twice = set(), []
     for entry in entries:
-        where = str(entry.get("where", "")).rstrip("/")
+        # The resolved path, or two names for one directory read as two
+        # drives and both units then fight over it.
+        where = canonical(entry.get("where", ""))
         if where in seen and where not in twice:
             twice.append(where)
         seen.add(where)

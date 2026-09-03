@@ -5999,7 +5999,15 @@ class Panel:
         self._drive_choice.trace_add("write", lambda *_a: self._drive_picked())
 
         self._buttons(box, (("Add this drive", self.add_drive),), lead=ROW_GAP)
+        # What the last apply said. It is empty until there is something to
+        # say, and it holds the reason a drive did not mount: a person had to
+        # start this panel from a terminal to read that, and the reason was in
+        # the output all the time. See ledpanel.drive_trouble.
+        #
+        # This label was built and never placed, which is the second time a
+        # label on this card was. tests/test_panel_live.py measures both now.
         self.drives_said = ttk.Label(box, style="Muted.TLabel", justify="left")
+        self.drives_said.pack(anchor="w", pady=(ROW_GAP, 0))
         self._wrapped.append(self.drives_said)
         self._wrap_insets[str(self.drives_said)] = 2 * GROUP_GAP
         self._show_drives()
@@ -6083,6 +6091,11 @@ class Panel:
                    command=lambda one=entry: self.remove_drive(one)).grid(
                        row=row, column=DRIVE_REMOVE, sticky="w", pady=gap)
 
+    def _tell_drives(self, said, bad=False):
+        """Puts one sentence under the drives, or takes the last one away."""
+        self.drives_said.configure(
+            text=said, style="Bad.TLabel" if bad else "Muted.TLabel")
+
     def add_drive(self):
         """Adds the partition that is selected, and writes the drives."""
         uuid = self._value_for("drive-partition", self._drive_choice.get())
@@ -6108,6 +6121,17 @@ class Panel:
         except mounts.MountError as exc:
             self._say("Drives", str(exc))
             return
+        # A mount unit holds no symlink, so the drive is recorded under the
+        # resolved name. On SteamOS the root filesystem is read-only and
+        # several directories in / are links into /var, so a person who writes
+        # /mnt/games gets /var/mnt/games. Both names reach the same directory,
+        # and the list would otherwise show one that nobody typed.
+        landing = mounts.canonical(where)
+        self._drive_note = ("" if landing == where.rstrip("/") else
+                            "%s is a link, so the drive is recorded as %s. "
+                            "A mount unit carries no link, and both names "
+                            "reach the same directory."
+                            % (where.rstrip("/"), landing))
         self._apply_drives(self._drives + [entry])
 
     def remove_drive(self, entry):
@@ -6151,6 +6175,11 @@ class Panel:
             if code == 0:
                 self._drives = entries
                 self._drive_where.delete(0, "end")
+                self._tell_drives(getattr(self, "_drive_note", ""))
+            else:
+                self._tell_drives(
+                    ledpanel.drive_trouble(self.runner.transcript), bad=True)
+            self._drive_note = ""
             self._show_drives()
             self._refit_page()
             self.refresh_status()

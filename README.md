@@ -1063,6 +1063,25 @@ A drive that the record names and that has no unit reports `NO UNIT`. That is
 an update that did not honour the keep-list, and the repair unit writes the
 unit again at the next boot.
 
+**A mount point holds no symlink.** systemd refuses a mount unit whose path
+holds one, and it says so in the journal:
+
+```
+mnt-SN7100.mount: Mount path /mnt/SN7100 is not canonical (contains a symlink).
+```
+
+This is the one difference between a mount unit and a line in `/etc/fstab` that
+you notice. `mount` follows a symlink, and a unit does not: a unit is named
+after its own mount point, and two names for one directory are two units for
+one mount. On SteamOS the root filesystem is read-only and several directories
+in `/` are links into `/var`, so this is not a rare case.
+
+The page thus resolves the path before it writes anything. Write `/mnt/games`
+on a machine where `/mnt` is a link, and the drive is recorded as
+`/var/mnt/games`. The page says so once, and both names reach the same
+directory. The refusal list is checked against the resolved path also, so a
+link cannot be used to reach `/usr` under another name.
+
 ## The command that speaks JSON
 
 The panel is a window on the desktop. `steamos-utility-centerctl` is the same

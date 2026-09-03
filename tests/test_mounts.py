@@ -81,6 +81,78 @@ class EscapeTest(unittest.TestCase):
                          mounts.escape("/mnt/games"))
 
 
+class CanonicalTest(unittest.TestCase):
+    """A mount point with a symlink in it, which systemd refuses.
+
+    This is the fault that a real machine found. /mnt/SN7100 was written, the
+    unit loaded, and systemd said:
+
+        Mount path /mnt/SN7100 is not canonical (contains a symlink).
+
+    The unit failed with `Result: resources`, the drive stayed unmounted, and
+    Take ownership then refused because there was nothing under the mount
+    point. The line in /etc/fstab that the same person had before worked,
+    because `mount` follows a symlink and a mount unit does not.
+    """
+
+    def setUp(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.root = os.path.realpath(holder.name)
+        # The shape of a read-only root: a directory in /var, and a link to it
+        # from the name that a person types.
+        os.makedirs(os.path.join(self.root, "var", "mnt"))
+        os.symlink(os.path.join(self.root, "var", "mnt"),
+                   os.path.join(self.root, "mnt"))
+        self.typed = os.path.join(self.root, "mnt", "SN7100")
+        self.landing = os.path.join(self.root, "var", "mnt", "SN7100")
+
+    def _drive(self):
+        return dict(GAMES, where=self.typed)
+
+    def test_the_link_is_resolved(self):
+        self.assertEqual(mounts.canonical(self.typed), self.landing)
+
+    def test_a_mount_point_that_does_not_exist_yet_is_resolved_too(self):
+        """systemd makes the last directory, so it must not have to be there."""
+        self.assertFalse(os.path.exists(self.typed))
+        self.assertEqual(mounts.canonical(self.typed), self.landing)
+
+    def test_the_unit_names_the_resolved_path(self):
+        """The whole fault: systemd refuses the unit without this."""
+        text = mounts.unit_text(self._drive())
+        self.assertIn("Where=%s" % self.landing, text)
+        self.assertNotIn("Where=%s" % self.typed, text)
+
+    def test_the_record_holds_the_resolved_path(self):
+        """The page shows it, and os.path.ismount is asked about it.
+
+        A record with the typed path shows a drive as "not mounted" while it
+        is mounted, because the mount is on the other name.
+        """
+        found = json.loads(mounts.text([self._drive()]))
+        self.assertEqual(found[0]["where"], self.landing)
+
+    def test_two_names_for_one_directory_are_one_drive(self):
+        second = dict(GAMES, uuid="abcdef01-2345-6789-abcd-ef0123456789",
+                      where=self.landing)
+        both = [self._drive(), second]
+        self.assertEqual(mounts.duplicates(both), [self.landing])
+
+    def test_a_link_that_points_at_a_refused_path_is_refused(self):
+        """A check of the typed path alone is a check a symlink walks around."""
+        os.symlink("/usr", os.path.join(self.root, "var", "mnt", "sneaky"))
+        with self.assertRaises(mounts.MountError) as caught:
+            mounts.validate(dict(GAMES, where=os.path.join(
+                self.root, "mnt", "sneaky")))
+        self.assertIn("/usr", str(caught.exception))
+
+    def test_a_path_with_no_link_in_it_is_unchanged(self):
+        """On a machine where /mnt is a directory, nothing here happens."""
+        plain = os.path.join(self.root, "var", "mnt", "games")
+        self.assertEqual(mounts.canonical(plain), plain)
+
+
 class RefusalTest(unittest.TestCase):
     """What must never reach a unit file.
 

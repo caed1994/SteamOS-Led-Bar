@@ -1226,6 +1226,46 @@ def apply_power_command(source_dir, staged_path):
             staged_path]
 
 
+# What a line of an applier says while everything works, and the rows of a
+# `systemctl status` block that repeat what the unit file holds. A page that
+# showed these would show a wall of text, and the one line that answers the
+# question would be in the middle of it.
+#
+# A phrase anywhere in the line, and not at the start of it: the summary at
+# the end begins with a number, so "1 drive(s) mounted" and "0 drive(s)
+# mounted" are the same line with a different count in front.
+DRIVE_PROGRESS = ("wrote /", "removed /", "unmounting ", "giving ",
+                  "configuration applied", "cpu settings applied",
+                  "drive(s) mounted", "loaded:", "active:", "invocation:",
+                  "where:", "what:", "process:", "tasks:", "memory:",
+                  "cgroup:")
+
+# The prefix that journalctl puts in front of a line: the date, the host and
+# the program. The answer is after it, and the width of a card is not enough
+# for both.
+JOURNAL = re.compile(r"^[A-Z][a-z]{2} +\d+ [\d:]+ \S+ [^:]+: ")
+
+
+def drive_trouble(transcript, most=2):
+    """Returns what an applier said about a failure, short enough for a page.
+
+    A person had to start this panel from a terminal to read the reason that a
+    drive did not mount. The reason was in the output all the time.
+
+    The last lines, because a program that fails says why at the end. The
+    lines that report progress are dropped, and the prefix of journalctl with
+    them: the answer is a mount point and a reason, not a date and a host.
+    """
+    lines = []
+    for line in "".join(transcript).splitlines():
+        line = JOURNAL.sub("", line.strip())
+        low = line.lower()
+        if not line or any(word in low for word in DRIVE_PROGRESS):
+            continue
+        lines.append(line)
+    return "\n".join(lines[-most:])
+
+
 def apply_mounts_command(source_dir, staged_path, owner_dir=""):
     """Returns the command that writes the drives and mounts them.
 
