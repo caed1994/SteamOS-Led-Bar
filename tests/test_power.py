@@ -3,10 +3,9 @@
 
 """The CPU governor and the EPP, against a sysfs built here.
 
-Never against the real one. The machine running the suite has its own cpufreq
-or none at all, and a test that read it would be a test whose answer depends
-on the build machine - and one that wrote it would be a test that changes how
-the build machine runs.
+No test uses the real sysfs. The machine of the suite has its own cpufreq,
+or it has none. A test that reads the real sysfs gives an answer from the
+build machine. A test that writes it changes how the build machine runs.
 """
 
 import importlib.machinery
@@ -25,7 +24,9 @@ from steamos_utility_center import power                               # noqa: E
 
 
 def _applier():
-    """The installed script, imported by path - it has no .py on the end."""
+    """Returns the installed script. It has no .py suffix, so this loads it by
+        path.
+        """
     path = os.path.join(HERE, "..", "server", "steamos-utility-center-power")
     loader = importlib.machinery.SourceFileLoader("steamos_utility_center_power", path)
     spec = importlib.util.spec_from_loader("steamos_utility_center_power", loader)
@@ -103,8 +104,9 @@ class ReadingTest(FakeCpu):
         self.assertEqual(power.driver(self.root), "amd-pstate-epp")
 
     def test_it_reports_the_driver_mode(self):
-        # active and passive offer different governors and only one of them
-        # has an EPP, so which it is matters to what a page should show.
+        # The active mode and the passive mode offer different governors, and
+        # only one of the two has an EPP. The mode therefore decides the rows
+        # of the page.
         self.assertEqual(power.driver_mode(self.root), "active")
 
     def test_what_is_set_right_now(self):
@@ -141,18 +143,18 @@ class ValidateTest(FakeCpu):
 
     def test_an_epp_this_machine_does_not_have_is_refused(self):
         # With a governor, because without one the preference is not a
-        # setting at all and there is nothing to check - see epp_in_play.
+        # setting and there is nothing to check. See epp_in_play.
         with self.assertRaises(ValueError):
             power.validate({"CPU_GOVERNOR": "powersave", "CPU_EPP": "turbo"},
                            self.root)
 
     def test_an_epp_without_a_governor_is_not_checked_at_all(self):
-        # Not an oversight: it is not going to be written either, so refusing
-        # it would be refusing to save a value that changes nothing.
+        # This is not an error. The applier does not write it, so a refusal
+        # refuses a value with no result.
         power.validate({"CPU_GOVERNOR": "", "CPU_EPP": "turbo"}, self.root)
 
     def test_the_message_names_what_is_on_offer(self):
-        # So the answer to "then what may I set" is in the refusal itself.
+        # So the refusal itself lists the values that the machine accepts.
         with self.assertRaises(ValueError) as caught:
             power.validate({"CPU_GOVERNOR": "ondemand"}, self.root)
         self.assertIn("powersave", str(caught.exception))
@@ -175,10 +177,10 @@ class ApplyTest(FakeCpu):
     def test_the_performance_governor_leaves_the_preference_alone(self):
         """The kernel's rule, and the reason this is one program.
 
-        Under `performance` the firmware is pinned to its top preference and
-        the EPP file stops accepting anything else. Writing it anyway would
-        be a refusal reported as a failure - on a setting that was applied
-        exactly as asked.
+        Under `performance` the kernel fixes the firmware at its highest
+        preference, and the EPP file accepts no other value. A write of another
+        value gives a refusal, and the applier reports that as a failure. The
+        setting itself was correct.
         """
         before = self._get(0, power.EPP)
         code, said = self._apply(CPU_GOVERNOR="performance", CPU_EPP="power")
@@ -215,18 +217,18 @@ class ApplyTest(FakeCpu):
 
 
 class PinnedListTest(FakeCpu):
-    """Reported: the setting was refused after the governor had been applied.
+    """A user reported a refused setting, one step after a governor change.
 
-    The kernel collapses energy_performance_available_preferences to the one
-    pinned value while the performance governor is running. So after applying
-    that governor, picking powersave and a preference in the same sitting was
-    checked against a list of one and refused - a valid pair, rejected because
-    of the state the machine happened to be in on the way there.
+    The kernel reduces energy_performance_available_preferences to one value
+    under the performance governor. After a run with that governor, a user
+    selected powersave and a preference together. The check then used a list of
+    one value and refused the pair. The pair was valid, and the state of the
+    machine before the change caused the refusal.
     """
 
     def setUp(self):
         super().setUp()
-        # What the machine looks like once `performance` has been applied.
+        # The state of the machine after a run with `performance`.
         for cpu in range(self.CPUS):
             where = os.path.join(self.root,
                                  "sys/devices/system/cpu/cpu%d/cpufreq" % cpu)
@@ -277,10 +279,11 @@ class GovernorRulesTheEppTest(FakeCpu):
     def test_a_preference_left_in_the_file_stops_applying_with_it(self):
         """The half that would otherwise be a setting nobody can see.
 
-        Set the pair, then take the governor back to "leave it to SteamOS".
-        The preference is still in the config file - the panel hides the row
-        rather than clearing it - and it must stop being written, or it is a
-        setting still in force with nothing on screen that shows it.
+        This test sets the pair and then sets the governor back to "leave it
+        to SteamOS". The preference stays in the configuration file, because
+        the panel hides the row and does not clear it. The applier must stop
+        the write of that value. Without that, the setting stays active and
+        nothing on the screen shows it.
         """
         self._apply(CPU_GOVERNOR="powersave", CPU_EPP="power")
         self.assertEqual(self._get(0, power.EPP), "power")
@@ -300,10 +303,10 @@ class GovernorRulesTheEppTest(FakeCpu):
 class IntelTest(FakeCpu):
     """The same shape, from the other vendor.
 
-    intel_pstate in its active mode offers the same two governors and the
-    same five preferences as amd-pstate does, and pins the preference under
-    the same governor - so everything here works on it, and this is the test
-    that says so rather than an assumption in a comment.
+    intel_pstate in its active mode offers the same two governors and the same
+    five preferences as amd-pstate. It also fixes the preference under the same
+    governor. So each function here works on it. This test proves that, and a
+    comment does not claim it.
 
     What Intel does not have is /sys/devices/system/cpu/amd_pstate/status.
     The mode is in the driver's own name instead: intel_pstate is the active
@@ -379,9 +382,8 @@ class PassiveModeTest(FakeCpu):
     def test_so_it_is_not_a_setting_here_and_is_never_written(self):
         """No file to write, so the value is carried and ignored.
 
-        Refusing it would be refusing to save a config that is perfectly
-        good on the machine it came from - and this one has nowhere to put it
-        either way.
+        A refusal refuses a configuration that is correct on its own machine.
+        This machine also has no file for the value.
         """
         wanted = {"CPU_GOVERNOR": "schedutil", "CPU_EPP": "power"}
         self.assertFalse(power.epp_in_play(wanted, self.root))
@@ -429,7 +431,7 @@ class ConfigFileTest(FakeCpu):
                          self.applier.load(path))
 
     def test_the_shipped_file_sets_nothing(self):
-        """An installation nobody has configured leaves the CPU alone."""
+        """An install with no settings does not change the CPU."""
         shipped = os.path.join(HERE, "..", "server", "steamos-utility-center-power.conf")
         self.assertEqual(ledpanel.read_power_config(shipped),
                          dict(power.DEFAULTS))
@@ -447,7 +449,7 @@ class MenuTest(FakeCpu):
                          ["performance", "powersave"])
 
     def test_a_configured_value_the_machine_lacks_is_kept_and_marked(self):
-        # Dropping it would look like the setting had changed by itself.
+        # Without the entry, the setting looks different for no reason.
         offered = ledpanel.power_choices(power.governors(self.root),
                                          current="ondemand")
         self.assertIn("ondemand", [value for _label, value in offered])
@@ -455,9 +457,9 @@ class MenuTest(FakeCpu):
         self.assertIn("not offered", label)
 
     def test_the_wording_explains_the_kernel_s_own_words(self):
-        # "powersave" reads like something for a battery, and on amd-pstate
-        # active it is the ordinary setting - the one that lets the firmware
-        # range at all.
+        # The name "powersave" reads as a setting for a battery. On amd-pstate
+        # in active mode it is the normal setting, and it is the one that gives
+        # the firmware a range.
         offered = ledpanel.power_choices(power.governors(self.root),
                                          labels=power.LABELS)
         labels = dict((value, label) for label, value in offered)

@@ -62,9 +62,9 @@ class SlotTest(unittest.TestCase):
                          render._rainbow(snapshot, 0.0, renderer))
 
     def test_every_choice_the_config_offers_can_be_rendered(self):
-        # The validator accepts these names, so each one has to reach a
-        # renderer - a name that validates and then does nothing would leave
-        # the rainbow in place with no error anywhere.
+        # The validator accepts these names, so each name must reach a
+        # renderer. A name that passes the validator, and then does nothing,
+        # leaves the rainbow on the strip and gives no message.
         sources = {render.SHOWS_TEMPERATURE: {"temperature": FakeTemperature()},
                    render.SHOWS_LOAD: {"load": FakeLoad()}}
         for name in config.RAINBOW_CHOICES:
@@ -84,8 +84,8 @@ class SlotTest(unittest.TestCase):
                              effect)
 
     def test_a_choice_whose_hardware_is_missing_falls_back(self):
-        # Asking for the load gauge on a machine that has no counters must
-        # not draw a dark strip: that looks like a service that has died.
+        # A request for the load gauge on a machine with no counters must not
+        # draw a dark strip. That looks like a service that stopped.
         renderer = _renderer(rainbow_shows=render.SHOWS_LOAD)
         snapshot = _rainbow_snapshot()
         self.assertEqual(renderer.render_logical(snapshot, 0.0),
@@ -116,8 +116,8 @@ class SlotTest(unittest.TestCase):
 class Stepping(load.LoadSource):
     """A real source whose counters jump from idle to a game and stay there.
 
-    Real enough to carry the smoothing, which is the thing under test - a fake
-    that just hands back a number would be testing the fake.
+    This source is real enough for the damping step, and that step is the
+    subject of the test. A fake that returns one number tests the fake.
     """
 
     def __init__(self, **kwargs):
@@ -181,8 +181,9 @@ class LoadGlideTest(unittest.TestCase):
         self.assertGreater(self._walk(60)[-1], 0.85 * self.HALF * 0.7)
 
     def test_every_frame_of_the_glide_has_something_new_to_draw(self):
-        # Which is what earns it the full frame rate. Sampled while it is
-        # actually moving - once arrived it holds still, as it should.
+        # That movement is the reason for the full frame rate. This test
+        # samples the effect during the movement. At the end it holds still,
+        # which is correct.
         gliding = self._walk(60)[31:71]
         self.assertTrue(all(b > a for a, b in zip(gliding, gliding[1:])))
 
@@ -227,8 +228,8 @@ class LoadGaugeTest(unittest.TestCase):
         self.assertEqual(frame[half + 1], render.LOAD_GPU_COLOUR)
 
     def test_an_idle_machine_still_shows_something(self):
-        # Nothing lit at all is indistinguishable from a strip that has been
-        # switched off, which is the one thing a meter must never look like.
+        # A strip with no light looks the same as a strip that is off, and a
+        # meter must never look like that.
         frame = self._frame(0.0, 0.0)
         self.assertTrue(max(max(pixel) for pixel in frame) > 0)
 
@@ -256,12 +257,12 @@ class LoadGaugeTest(unittest.TestCase):
         return renderer.render(snapshot, 0.4)
 
     def test_the_brightness_setting_does_not_reach_the_gauge(self):
-        """Reported, and it is what the gauge is saying rather than a look.
+        """A user reported this. The value of the gauge causes it, not a style.
 
-        Each half fills to say how busy that chip is, and the floor under the
-        innermost LED is what says "idle" rather than "off" - so a dimmed
-        gauge is a gauge reading low. Steam's own brightness and a desktop
-        scene's are the same setting here and both stop at the same place.
+        Each half fills to give the load of that chip. The minimum brightness of
+        the innermost LED gives "idle" and not "off". A dark gauge therefore
+        reports a low load. The brightness of Steam and the brightness of a
+        desktop scene are one setting here, and both stop at the same value.
         """
         self.assertEqual(self._sent(brightness=40), self._sent(brightness=255))
 
@@ -271,9 +272,9 @@ class LoadGaugeTest(unittest.TestCase):
         self.assertEqual(self._sent(delay=2), self._sent(delay=20))
 
     def test_the_brightness_ceiling_still_does(self):
-        # MAX_BRIGHTNESS is about how much current the strip may draw, which
-        # is not a matter of taste - a gauge that ignored it could pull more
-        # than the supply has.
+        # MAX_BRIGHTNESS gives the maximum current of the strip. It is not a
+        # style setting. A gauge that does not use it can take more current
+        # than the supply gives.
         self.assertLess(max(self._sent(max_brightness=80)),
                         max(self._sent(max_brightness=255)))
 
@@ -295,9 +296,9 @@ class LoadGaugeTest(unittest.TestCase):
     def test_the_counters_are_read_once_a_frame_and_not_once_a_question(self):
         """Because reading them is what moves the glide along.
 
-        fractions() advances the bar a little every time it is called, so a
-        frame that asked twice - once to draw and once to decide how bright
-        it goes out - would run at twice the rate it was drawn at.
+        fractions() moves the bar a small step at each call. A frame with two
+        calls, one for the draw step and one for the brightness, therefore
+        moves at twice the frame rate.
         """
         asked = []
 
@@ -350,12 +351,12 @@ class LoadColourTest(unittest.TestCase):
         self.assertEqual(gpu, render.LOAD_GPU_COLOUR)
 
     def test_the_same_colour_twice_is_allowed(self):
-        """Unreadable as a gauge, and still not ours to refuse.
+        """A gauge that a user cannot read, and the service still accepts it.
 
-        What makes this one work is the halves being told apart, so two of one
-        colour is a bar that has stopped saying which chip is which - but
-        "too similar" is taste, not arithmetic, and the config file says so
-        rather than the validator.
+        The two halves need different colours. With one colour, the bar no
+        longer gives the chip of each half. But "too similar" is a matter of
+        style and not arithmetic. So the configuration file gives that advice,
+        and the validator does not refuse the value.
         """
         cpu, gpu = self._sides(load_cpu_colour=(255.0, 0.0, 0.0),
                                load_gpu_colour=(255.0, 0.0, 0.0))
@@ -369,9 +370,9 @@ class LoadColourTest(unittest.TestCase):
     def test_swapping_moves_the_reading_and_its_colour_together(self):
         """Which chip is on which side, for a strip mounted the other way up.
 
-        Both halves of the answer move: a swap that took the colours across
-        and left the readings would be a gauge whose colours had stopped
-        saying which chip is which, which is the one thing they are for.
+        Both parts of the answer move. A swap of the colours, with the values
+        at their first position, gives a gauge where the colours no longer
+        name the chips. That is the one purpose of the colours.
         """
         renderer = _renderer(load=FakeLoad(1.0, 0.0), load_swap=True)
         frame = renderer.render_logical(_rainbow_snapshot(), 0.0)
@@ -473,8 +474,9 @@ class LoadColourSettingTest(unittest.TestCase):
         self.assertEqual(gpu, tuple(int(c) for c in render.LOAD_GPU_COLOUR))
 
     def test_every_spelling_of_a_colour_works_here_too(self):
-        # parse_color's, not a second reading of its own - a name, a hex
-        # triplet and three numbers all mean the same thing everywhere else.
+        # This uses parse_color and does not read the value a second time. A
+        # name, a hex triplet and three numbers have the same meaning in each
+        # other place.
         cpu, gpu = self._sides(LOAD_CPU_COLOR="achievement",
                                LOAD_GPU_COLOR="0,255,255")
         self.assertEqual(cpu, notify.KINDS[notify.KIND_ACHIEVEMENT])
@@ -528,8 +530,8 @@ class FireTest(unittest.TestCase):
                 self.assertGreaterEqual(green, blue, tick)
 
     def test_the_same_moment_draws_the_same_frame(self):
-        # A function of time, not a random draw - so a dropped frame resumes
-        # where it would have been instead of jumping.
+        # This is a function of the time and not a random value. After a lost
+        # frame the effect therefore continues at the correct position.
         first, second = self._renderer(), self._renderer()
         snapshot = _rainbow_snapshot()
         self.assertEqual(first.render_logical(snapshot, 3.7),
@@ -627,8 +629,8 @@ class CpuCountersTest(unittest.TestCase):
         self.assertIsNone(load.read_cpu_totals("/nonexistent/proc/stat"))
 
     def test_the_first_reading_is_only_a_baseline(self):
-        # Since-boot totals would show a machine that has been up for a week
-        # at its week-long average, which is never what it is doing now.
+        # Totals from the boot show a machine after one week at its average
+        # over that week. That value is not the current load.
         source = load.LoadSource(interval=0.0, smoothing=0.0,
                                  stat_path=self._stat(20, 0, 10, 60, 10),
                                  gpu_pattern="/nonexistent/*")

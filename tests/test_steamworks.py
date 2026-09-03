@@ -3,9 +3,9 @@
 
 """Tests for the Steamworks achievement watcher.
 
-The API itself needs a running Steam and a game, so what is verified here is
-everything around it: finding the library, working out which game is running,
-and turning polled state into "this one just unlocked".
+The API needs a running Steam and a game. So these tests examine each step
+around it: the search for the library, the name of the running game, and the
+step that converts a polled state into a new unlock.
 """
 
 import os
@@ -243,8 +243,9 @@ class SteamDiscoveryTest(unittest.TestCase):
         self.assertIsNone(elf.elf_class(os.path.join(self.tmpdir, "gone")))
 
     def test_explicit_library_of_the_wrong_arch_is_refused(self):
-        # Proton ships files/lib (32-bit) beside files/lib64, and the 32-bit
-        # one sorts first - loading it fails with a bare "wrong ELF class".
+        # Proton has files/lib (32-bit) beside files/lib64, and the 32-bit
+        # path comes first in the sort. A load of it fails with the message
+        # "wrong ELF class".
         wrong = elf.ELFCLASS32 \
             if steamworks.WANTED_ELF_CLASS == elf.ELFCLASS64 \
             else elf.ELFCLASS64
@@ -300,7 +301,8 @@ class SteamDiscoveryTest(unittest.TestCase):
         self.assertEqual(versions, sorted(versions, reverse=True))
 
     def test_process_scan_survives_unreadable_entries(self):
-        # /proc is full of processes we may not read; that must not raise.
+        # /proc holds many processes that this program cannot read. Such a
+        # process must raise no exception.
         self.assertIsNone(steamworks._app_id_from_processes() or None)
 
 
@@ -336,10 +338,11 @@ class ProcessScanRhythmTest(unittest.TestCase):
 class WatcherSessionLifetimeTest(unittest.TestCase):
     """The watcher handles one game session and then ends its process.
 
-    SteamAPI_Init registers the process with Steam as an instance of that
-    game. Measured on hardware: Steam keeps a game on "Stopping" while such a
-    registration exists, and SteamAPI_Shutdown does not clear it - only the
-    process ending does. So the loop must not just detach and carry on.
+    SteamAPI_Init registers the process with Steam as an instance of that game.
+    A measurement on hardware showed this: Steam keeps a game in the state
+    "Stopping" while such a registration exists. SteamAPI_Shutdown does not
+    clear it, and only the end of the process clears it. So the loop must not
+    detach and continue.
     """
 
     messages_enabled = False
@@ -421,8 +424,8 @@ class _FakeStats:
         self._opened.append(self.app_id)
 
     def close(self):
-        # Idempotent, like the real one - the loop closes on the way out and
-        # the shutdown handler closes again.
+        # This accepts more than one call, as the real function does. The loop
+        # closes it at the end, and the shutdown handler closes it again.
         if self._open:
             self._open = False
             self._closed.append(self.app_id)
@@ -521,11 +524,11 @@ class CallbackMsgLayoutTest(unittest.TestCase):
 class LibrarySearchTest(unittest.TestCase):
     """Where a libsteam_api.so is looked for.
 
-    Found on a real machine: the only copies our globs saw belonged to one
-    Proton version, while the Steam client's own copies under steamrt64/ sat
-    right there unnoticed. Those matter most - they come with Steam itself, so
-    they are present whatever games or Proton versions are installed, and
-    newer Proton no longer ships one at all.
+    A real machine gave this result: the globs found the copies of one Proton
+    version only, and they did not find the copies of the Steam client under
+    steamrt64/. Those copies are the most important. They come with Steam, so
+    they are on each machine, for each set of games and Proton versions. A newer
+    Proton also has no copy.
     """
 
     def setUp(self):
@@ -686,11 +689,14 @@ class BindingAcrossSdkVersionsTest(unittest.TestCase):
 class DispatchModeTest(unittest.TestCase):
     """Steam allows one callback dispatch mode per session.
 
-    Measured on hardware: SteamAPI_ManualDispatch_Init() answered "Cannot be
-    used, standard dispatch has already been selected" because opening the
-    session had already pumped it with SteamAPI_RunCallbacks. Whichever mode
-    is used first is the one Steam keeps, so the choice belongs to the session
-    and has to be made before anything pumps.
+    A measurement on hardware gave this answer from
+    SteamAPI_ManualDispatch_Init():
+
+        Cannot be used, standard dispatch has already been selected
+
+    The step that opened the session called SteamAPI_RunCallbacks first. Steam
+    keeps the first mode of the session, so the session owns that choice. It must
+    make the choice before the first call.
     """
 
     def _session(self, manual):
@@ -802,9 +808,10 @@ class FriendMessageDecodingTest(unittest.TestCase):
                          [2, 3, 4])
 
     def test_persona_state_changes_are_not_messages(self):
-        # 304 is the same twelve bytes and starts with the same SteamID - it
-        # arrives when a friend comes online or starts typing. Filtering by
-        # size instead of by number would flash the bar for both.
+        # Callback 304 has the same twelve bytes and starts with the same
+        # SteamID. It arrives when a friend comes online, and also when a
+        # friend starts to type. A filter on the size, and not on the number,
+        # therefore flashes the bar for both.
         listener = self._listener([(304, self.PAYLOAD)])
         self.assertEqual(self._messages(listener), [])
 
@@ -824,9 +831,9 @@ class FriendMessageDecodingTest(unittest.TestCase):
 class FriendOnlineDecodingTest(unittest.TestCase):
     """Turning PersonaStateChange_t into "a friend just came online".
 
-    Steam sends 304 for every change to anyone it knows about - a new avatar,
-    a nickname, someone starting a game - so the flag is what carries the
-    meaning, and the same callback arrives for strangers in a group chat.
+    Steam sends 304 for each change to each person that it knows: a new avatar,
+    a new nickname, or a start of a game. So the flag carries the meaning. The
+    same callback also arrives for an unknown person in a group chat.
     """
 
     FRIEND = 76561198008351377
@@ -874,10 +881,11 @@ class FriendOnlineDecodingTest(unittest.TestCase):
         self.assertEqual(self._online(listener), [self.FRIEND])
 
     def test_other_changes_are_not_a_friend_coming_online(self):
-        # From EPersonaChange: 0x0001 a name change, 0x0010 someone starting a
-        # game, 0x0002 a status change - away back to online, which is not the
-        # same as arriving. All three come constantly while a friend list is
-        # loaded, and none of them is someone coming online.
+        # From EPersonaChange: 0x0001 is a name change, 0x0010 is a start of a
+        # game, and 0x0002 is a status change. A status change is a move from
+        # away to online, and that is not an arrival. The three arrive many
+        # times during a load of the friend list, and none of them is a friend
+        # who comes online.
         listener = self._listener([(304, self._payload(self.FRIEND, 0x0001)),
                                    (304, self._payload(self.FRIEND, 0x0010)),
                                    (304, self._payload(self.FRIEND, 0x0002))])
@@ -984,9 +992,9 @@ class MessageFlashTest(WatcherSessionLifetimeTest):
         self.assertIn("message", self.flashes)
 
     def test_a_burst_is_one_flash_not_five(self):
-        # Retriggering restarts the animation, so five triggers would hold the
-        # strip lit far longer than one notification - and that is what browns
-        # out a strip running off the ESP's USB rail.
+        # A second trigger starts the animation again. Five triggers therefore
+        # keep the strip lit much longer than one notification. That current
+        # makes the voltage drop on a strip on the USB rail of the ESP.
         self.pending_messages = [(1, n) for n in range(5)]
         self._run([1942280, 1942280, None])
         self.assertEqual(self.flashes.count("message"), 1)
@@ -999,9 +1007,9 @@ class MessageFlashTest(WatcherSessionLifetimeTest):
 class AchievementsSwitchedOffTest(MessageFlashTest):
     """Someone who wants message flashes but not achievement ones.
 
-    Both are found through one Steamworks session, so switching one off has to
-    leave the other working rather than taking the session with it - which is
-    why this runs the whole session-lifetime suite again with it off.
+    One Steamworks session gives both. So a change of one switch to off must
+    keep the other function, and it must not close the session. For that reason
+    this class runs the complete session suite again with that switch off.
     """
 
     achievements_enabled = False
@@ -1016,9 +1024,9 @@ class AchievementsSwitchedOffTest(MessageFlashTest):
         self.assertEqual(self.closed, [1942280])
 
     def test_the_flash_still_fires_before_it_exits(self):
-        # Same property as the inherited test it replaces - a flash detected
-        # on the last poll still goes out before the process leaves - but the
-        # achievement is no longer the one that can prove it.
+        # This has the same subject as the test that it replaces: a flash from
+        # the last poll goes out before the end of the process. But the
+        # achievement is no longer the event that proves it.
         self.pending_messages = [(1, 2)]
         self._run([1942280, 1942280, None])
         self.assertEqual(self.flashes, ["message"])
@@ -1041,8 +1049,9 @@ class FriendOnlineFlashTest(MessageFlashTest):
         self._patch(service, "_open_friend_listener",
                     lambda _stats, chat: self.listened.append(chat) or self)
 
-    # The inherited message tests, with the switch off: whatever the listener
-    # hands back, chat must stay silent - the two share one poll().
+    # The message tests from the parent class, with the switch off. The chat
+    # must give no flash for each answer of the listener. The two functions
+    # share one poll().
     def test_a_message_flashes_the_bar(self):
         self.pending_messages = [(1, 2)]
         self._run([1942280, 1942280, None])
@@ -1089,13 +1098,13 @@ class FriendOnlineFlashTest(MessageFlashTest):
 
 
 class NothingLeftToWatchForTest(MessageFlashTest):
-    """Messages wanted, achievements off - and messages turn out impossible.
+    """Messages on and achievements off, and the machine cannot do messages.
 
-    The switches allow it and the config is valid, so nothing catches this at
-    startup: it only comes out once a game starts and the library is asked.
-    Attaching anyway would register the process as the game and report
-    nothing, and only the process ending clears that registration - so the
-    session must not be opened, or must not be kept.
+    The switches permit it and the configuration is valid, so no check at the
+    start finds it. It appears only after a game starts and the code asks the
+    library. An attach in that condition registers the process as the game and
+    reports nothing. Only the end of the process clears that registration. So
+    the code must not open the session, or it must not keep it.
     """
 
     achievements_enabled = True     # overridden per test
@@ -1156,17 +1165,18 @@ class NothingToWatchForTest(unittest.TestCase):
                          service.NOTHING_TO_WATCH_EXIT)
 
     def test_systemd_is_told_not_to_restart_that(self):
-        # The watcher exits 0 after every game and is restarted on purpose, so
-        # "nothing to do" has to be a different code - or the unit respawns
-        # every RestartSec forever, saying so in the journal each time.
+        # The watcher exits with 0 after each game, and the unit restarts it on
+        # purpose. So "nothing to do" needs a different code. Without that, the
+        # unit starts it again at each RestartSec, and it writes a line in the
+        # journal each time.
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                             "server", "steamos-utility-center-achievements.service")
         with open(path) as handle:
             unit = handle.read()
         self.assertIn("RestartPreventExitStatus=%d"
                       % service.NOTHING_TO_WATCH_EXIT, unit)
-        # And it is a setting, not a failure - without this the journal calls
-        # doing as it was told "Failed with result 'exit-code'".
+        # This is a setting and not a failure. Without this line, the journal
+        # reports correct behaviour as "Failed with result 'exit-code'".
         self.assertIn("SuccessExitStatus=%d" % service.NOTHING_TO_WATCH_EXIT,
                       unit)
         self.assertNotEqual(service.NOTHING_TO_WATCH_EXIT, 0,
@@ -1219,16 +1229,17 @@ class TypingNoticeTest(unittest.TestCase):
         self.assertEqual(self._messages(listener), [(self.SENDER, 3)])
 
     def test_typing_then_sending_flashes_once(self):
-        # The sequence a real message produces: a typing notice, then the
-        # message. Only the second one may reach the bar.
+        # The sequence of a real message: a typing notice, and then the
+        # message. Only the second event goes to the bar.
         self._pending = [(343, self._payload(4)), (343, self._payload(5))]
         listener = self._listener({4: steamworks.CHAT_ENTRY_TYPING,
                                    5: steamworks.CHAT_ENTRY_CHAT_MSG})
         self.assertEqual(self._messages(listener), [(self.SENDER, 5)])
 
     def test_other_entry_kinds_are_ignored_too(self):
-        # Left the conversation, was kicked, historical chat replayed on
-        # connect - none of those is someone writing to you now.
+        # A person left the conversation, a person was removed, or Steam sent
+        # the old chat again at the connect step. None of those events is a
+        # new message.
         self._pending = [(343, self._payload(6))]
         listener = self._listener({6: 11})       # k_EChatEntryTypeHistoricalChat
         self.assertEqual(self._messages(listener), [])
