@@ -229,10 +229,10 @@ SLOT_EFFECTS = (
     ("Temperature", render.SHOWS_TEMPERATURE,
      "Colour carries the reading, cool to hot"),
     # This text names no colour and no side, because both are settings now.
-        # The colours are LOAD_CPU_COLOR and LOAD_GPU_COLOR, and the sides are
-        # LOAD_SWAP. A text that says "amber on the left" below a bar that the
-        # user made green, and then reversed, contradicts the page. So the text
-        # says only what the effect always does.
+    # The colours are LOAD_CPU_COLOR and LOAD_GPU_COLOR, and the sides are
+    # LOAD_SWAP. A text that says "amber on the left" below a bar that the
+    # user made green, and then reversed, contradicts the page. So the text
+    # says only what the effect always does.
     ("Load", render.SHOWS_LOAD, "A bar for each chip, out of the middle"),
 )
 

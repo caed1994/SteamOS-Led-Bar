@@ -227,9 +227,9 @@ def run_checks(probe=None, config=None):
             repairable=False))
 
     # Report this only when the file is on disk, and it must never be on
-        # disk. A line that is always in the list gives a green line about HDMI
-        # CEC on each machine without HDMI CEC. The checklist then reports on a
-        # part that is not in the installation that it examines.
+    # disk. A line that is always in the list gives a green line about HDMI
+    # CEC on each machine without HDMI CEC. The checklist then reports on a
+    # part that is not in the installation that it examines.
     if probe.exists(CEC_INSTALL_RULE):
         checks.append(Check(
             "No sudo rule left over from a CEC install", False,
@@ -313,13 +313,13 @@ class Part:
         self.name = name
         self.ok = ok
         # One line, for the heading of the block. Give the fault and not the
-                # fact of a fault: "no adapter" is better than "not working".
+        # fact of a fault: "no adapter" is better than "not working".
         self.verdict = verdict
         # The Checks or lines behind it, shown when the block is unfolded.
         self.detail = list(detail)
         # The repair for this part, if there is one. This is a name and not a
-                # function, so that this module needs no part of the window. See
-                # PART_REPAIRS in the panel for the action of each name.
+        # function, so that this module needs no part of the window. See
+        # PART_REPAIRS in the panel for the action of each name.
         self.repair = repair
 
     @property
@@ -427,8 +427,8 @@ def cec_part(status, installed):
               "Features on: %s" % (", ".join(on) if on else "none")]
     if not cec_module.usable(status):
         # The cost of this condition goes into the detail and not into the
-                # verdict. The verdict is one line in a headline. This text is the
-                # paragraph to read after the user opens the block.
+        # verdict. The verdict is one line in a headline. This text is the
+        # paragraph to read after the user opens the block.
         cost = adapter_gone_cost(status)
         return Part("cec", "HDMI CEC", False,
                     "%s cannot be reached, so nothing can be sent."
@@ -479,9 +479,9 @@ def layout_part(layout, labels=None):
                     "Left to the system.")
     named = (labels or {}).get(layout, layout)
     # This text is in the line and not behind a fold. There is one sentence
-        # to say about a keyboard layout. To put one sentence behind a Details
-        # button, which the user must find and click, is worse than a line that
-        # is a little longer.
+    # to say about a keyboard layout. To put one sentence behind a Details
+    # button, which the user must find and click, is worse than a line that
+    # is a little longer.
     return Part("keyboard", "Keyboard layout", True,
                 "%s. Applies to Game Mode at the next login." % named)
 
@@ -498,9 +498,9 @@ def panel_part(version, update_state=None, update_said="", behind="",
         old copy.
         """
     # Show both commits. The question for this block is which code runs now.
-        # A version number does not answer that question. It changes when a
-        # person changes it, and it never changes between two commits on the
-        # same day.
+    # A version number does not answer that question. It changes when a
+    # person changes it, and it never changes between two commits on the
+    # same day.
     installed = installed_commit() if installed is None else installed
     detail = []
     if installed:
@@ -568,8 +568,8 @@ def parts_summary(parts):
         return "Everything is in order."
     if len(problems) == 1:
         # Give the name of one fault. The sentence is then the same sentence
-                # that the block of the part shows, and the user opens that block
-                # next.
+        # that the block of the part shows, and the user opens that block
+        # next.
         return "%s: %s" % (problems[0].name, problems[0].verdict)
     return "%d problems: %s." % (len(problems),
                                  ", ".join(part.name for part in problems))
@@ -1181,9 +1181,9 @@ def sensor_choices(sensors, chosen=None, current="auto"):
 
     if current and current not in [value for _label, value in choices]:
         # This value came from a manual edit and the machine does not have it
-                # now. A removed eGPU, an unloaded driver or a spelling error causes
-                # this. The entry shows the setting of the service. Without the
-                # entry, the setting looks different for no reason.
+        # now. A removed eGPU, an unloaded driver or a spelling error causes
+        # this. The entry shows the setting of the service. Without the
+        # entry, the setting looks different for no reason.
         choices.append(("%s (not found)" % current, current))
     return _uniquify(choices)
 
@@ -1250,9 +1250,9 @@ def power_choices(offered, current="", labels=None, unset=True):
         """
     labels = labels or {}
     # `unset` is False for the preference, which has no such entry. The
-        # panel writes the preference only with a governor. So "leave the file
-        # alone" has no meaning for it. This project controls the CPU or it does
-        # not control it, and the governor gives that answer.
+    # panel writes the preference only with a governor. So "leave the file
+    # alone" has no meaning for it. This project controls the CPU or it does
+    # not control it, and the governor gives that answer.
     choices = [("Leave it to SteamOS", "")] if unset else []
     for value in offered:
         choices.append((labels.get(value, value), value))
@@ -1380,8 +1380,8 @@ def gpu_state(path=None, ask=None):
     devices = list(found) if isinstance(found, list) else []
     if not devices:
         # A daemon with no card has nothing to configure. This is a state of
-                # its own, so the page can report it. Without the state, the page
-                # shows an empty card selector.
+        # its own, so the page can report it. Without the state, the page
+        # shows an empty card selector.
         return {"gpu": "", "name": "", "devices": []}
     gpu = devices[0].get("id", "")
     state = {
@@ -1393,8 +1393,8 @@ def gpu_state(path=None, ask=None):
         "clocks": talk("device_clocks_info", {"id": gpu}) or {},
     }
     # Read the profiles separately. An older daemon does not have them, and
-        # then the page must lose its profile selector only, and not the
-        # complete block.
+    # then the page must lose its profile selector only, and not the
+    # complete block.
     try:
         state["profiles"], state["profile"] = lact_module.profiles(where)
     except lact_module.LactError:

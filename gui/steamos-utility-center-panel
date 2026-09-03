@@ -58,19 +58,21 @@ from steamos_utility_center import shim                                # noqa: E
 from steamos_utility_center import __version__ as VERSION              # noqa: E402
 
 
-# Which settings to show, in order: key, label, kind, and for numeric ones the
-# two ends and the step. The bounds repeat what config.validate() enforces,
-# which raises text where a slider needs numbers - but the validator stays the
-# authority, so a disagreement here is caught rather than shipped. The step is
-# what the slider can stop on, ttk.Scale being continuous whatever is drawn on
-# it. Every range starts on a multiple of its step, so both ends are reachable.
+# The settings to show, in order: the key, the label, the type, and for a
+# numeric setting the two limits and the step. The limits repeat the limits of
+# config.validate(). That function raises text, and a slider needs numbers.
+# But the validator stays the authority, and the tests find a difference
+# between the two. The step is the value that the slider can stop on, because
+# ttk.Scale is continuous. Each range starts on a multiple of its step, so the
+# slider can reach both limits.
 STRIP = [
     ("The strip", [
-        # 60, not the 1024 the service accepts: a metre of strip is 30 or 60
-        # LEDs, and past that the slider spends most of its travel on lengths
-        # nobody is fitting to a Steam Machine. The firmware and the link
-        # would carry about twice this - a longer strip is a config file away,
-        # and the panel keeps whatever it finds there.
+        # The limit is 60, and not the 1024 that the service accepts. One
+        # metre of strip has 30 or 60 LEDs. Above 60, most of the travel of
+        # the slider covers lengths that no user connects to a Steam
+        # Machine. The firmware and the link carry approximately twice this
+        # number. A user can set a longer strip in the configuration file,
+        # and the panel keeps that value.
         ("LED_COUNT", "LEDs on the strip", "int", 1, 60, 1),
         ("REVERSE", "Flip the strip direction", "bool", None, None, None),
         ("MAX_BRIGHTNESS", "Maximum brightness", "int", 0, 255, 1),
@@ -85,32 +87,34 @@ STRIP = [
         # frozen, so the strip has to carry on alone.
         ("STANDBY_PULSE", "Pulse white while the machine sleeps", "bool",
          None, None, None),
-        # Steam's LED menu cannot be extended, so anything of ours has to take
-        # over an entry it already offers - and the rainbow is the one people
-        # give up most readily. One slot, so it holds whichever of these is
-        # picked rather than the first feature that wanted it.
+        # Nothing can add an entry to the LED menu of Steam. So an effect of
+        # this project must use an entry that the menu already has. Users
+        # give up the rainbow entry the most readily. There is one slot, and
+        # it holds the effect that the user selects. It does not hold the
+        # first effect that asked for it.
         ("RAINBOW_SHOWS", "The Rainbow entry shows", "named",
          ledpanel.rainbow_choices(config_module.RAINBOW_CHOICES), None, None),
-        # The whole bar takes one colour; these two say where on the scale it
-        # sits. Below the first mark it is green, above the second red, and
-        # yellow lands halfway between - so the two ranges are kept apart,
-        # and no pair the sliders can offer breaks TEMPERATURE_SPAN.
+        # The complete bar takes one colour, and these two settings give the
+        # position on the scale. Below the first mark the bar is green.
+        # Above the second mark it is red. Yellow is between the two. So
+        # the two marks stay apart, and no pair from the sliders breaks
+        # TEMPERATURE_SPAN.
         #
-        # The ends are narrower than the validator's 0..150: a mark down at 0
-        # or up at 150 would paint one colour for every reading a machine
-        # ever produces, which is a gauge that has stopped saying anything.
-        # Five degrees at a time, because a gauge is read at a glance and a
-        # single degree either way is not a difference you can see on it.
+        # The limits are narrower than the 0 to 150 of the validator. A mark
+        # at 0, or a mark at 150, gives one colour for each value that a
+        # machine produces. Such a gauge reports nothing. The step is five
+        # degrees, because a user reads a gauge quickly, and one degree
+        # makes no visible difference on it.
         ("TEMPERATURE_MIN", "Green up to (degrees)", "float", 20, 50, 5),
         ("TEMPERATURE_MAX", "Red from (degrees)", "float", 60, 90, 5),
         # Not a "choice": the values are paths into /sys and the machine
         # decides what they are, so the menu is built from what it reports.
         ("TEMPERATURE_SENSOR", "Temperature sensor", "sensor",
          None, None, None),
-        # And what the load gauge needs, in the order the menu above lists the
-        # two: temperature, then load. Two rows rather than one setting with a
-        # pair in it - they are two independent answers, and a menu of pairs
-        # would be the wheel squared.
+        # The settings of the load gauge, in the order of the menu above:
+        # temperature, then load. These are two rows and not one setting
+        # with a pair of colours in it. They are two independent answers,
+        # and a menu of pairs holds each combination of the colour wheel.
         ("LOAD_CPU_COLOR", "CPU half", "named",
          ledpanel.load_colours(), None, None),
         ("LOAD_GPU_COLOR", "GPU half", "named",
@@ -122,11 +126,11 @@ STRIP = [
     ]),
 ]
 
-# What the bar does while Steam is not driving it. Its own page because it is
-# its own question: everything on Strip describes the hardware and applies
-# whoever is driving, and everything under Notifications is an interruption.
-# This is the one page about what the bar looks like the rest of the time - and
-# only in Desktop Mode, which is the sentence under it.
+# The behaviour of the bar when Steam does not drive it. This is a page of its
+# own, because it is a question of its own. Each setting on Strip describes the
+# hardware and applies to each driver. Each setting under Notifications is an
+# interruption. This page describes the bar for the rest of the time. It
+# applies in Desktop Mode only, and the sentence below the page says so.
 DESKTOP = [
     (None, [
         ("DESKTOP_SCENE", "In Desktop Mode show", "named",
@@ -134,19 +138,20 @@ DESKTOP = [
         ("DESKTOP_COLOR", "Colour", "named",
          ledpanel.NOTIFICATION_COLOURS, None, None),
         ("DESKTOP_BRIGHTNESS", "Brightness", "int", 0, 255, 1),
-        # The scene's own, the way Steam's speed slider sets a game's: it
-        # writes the same delay field, so twice as fast means the same thing
-        # in both. The ends are where that field runs out, and they repeat
-        # DESKTOP_SPEED_FLOOR and _CEILING - written out because the tests
-        # read this table literally, and checked against the validator there.
+        # The speed of the scene. The speed slider of Steam sets the speed of
+        # a game in the same way. It writes the same delay field, so a
+        # factor of two has the same meaning in both. The limits are the
+        # limits of that field, and they repeat DESKTOP_SPEED_FLOOR and
+        # DESKTOP_SPEED_CEILING. The numbers are here because the tests read
+        # this table directly, and those tests compare them to the validator.
         ("DESKTOP_SPEED", "Effect speed", "float", 0.4, 4.0, 0.1),
     ]),
 ]
 
-# What the page says for itself. Without it the three rows above describe a
-# setting that appears not to work: somebody who tries them in Game Mode - the
-# panel runs there - sees the bar ignore every one of them, and nothing on the
-# page would explain why.
+# The text of the page. Without it, the three rows above look like a setting
+# with no result. The panel also runs in Game Mode. A user who changes the
+# rows there sees no change on the bar, and no text on the page gives the
+# reason.
 DESKTOP_NOTE = (
     "Only in Desktop Mode. Switch to Game Mode and Steam's own LED settings "
     "take the bar back, untouched by anything here.")
@@ -157,16 +162,19 @@ STYLE_CHOICES = ledpanel.style_choices(config_module.NOTIFY_STYLES)
 KIND_STYLE_CHOICES = ledpanel.style_choices(config_module.NOTIFY_STYLES,
                                             inherit=notify.STYLE_INHERIT)
 
-# One notification per line: the switch, then the colour and the shape beside
-# it. Written as a switch with two stepped-in rows under it, which is what this
-# was, four of them came to twelve near-identical lines you had to scroll to
-# compare - and they are four answers to the same question, which is exactly
-# what a column is for. The two menus are found from the prefix rather than
-# named here, because a kind whose colour and shape are spelled one way in the
-# service and another way here is a menu that edits nothing.
-# Named here for the builder to compare against, spelled as words in the
-# tables below the way every other kind is: the tests read those tables
-# literally, and a name in one would hide the kind from them.
+# One notification on each line: the switch, and then the colour and the shape
+# beside it. Before, each notification was a switch with two indented rows
+# below it. Four notifications then gave twelve almost equal lines, and the
+# user had to scroll to compare them. They are four answers to one question,
+# and a column shows such answers.
+#
+# This table finds the two menus from the prefix and does not name them. A
+# type of notification with one spelling in the service and another spelling
+# here gives a menu that changes nothing.
+#
+# The name below is for the builder to compare against. The tables below use
+# the word itself, as they do for each other type. The tests read those tables
+# directly, and a name in a table hides the type from them.
 FLASH = "flash"
 # A switch whose look is not anybody's to arrange; the text says why instead.
 FIXED = "fixed"
@@ -191,49 +199,52 @@ NOTIFICATIONS = [
          "FRIEND", None, None),
     ]),
     ("From this machine", [
-        # A warning has to mean the same thing on every machine, so there is
-        # nothing to arrange here - only whether it fires.
+        # A warning must have the same meaning on each machine. So there is no
+        # setting here for the colour or the shape. The one setting is the
+        # switch.
         ("NOTIFY_WARNING", "Overheating", "fixed",
          "always red, in the alarm shape", None, None),
     ]),
     ("From your phone", [
-        # One row, and on purpose: every notification the phone sends flashes
-        # the same, and that is the whole of the setting. PHONE_APPS gives an
-        # app a look of its own and PHONE_APPS_ONLY silences the rest, but
-        # both are lists you write by hand, and a switch here that only meant
-        # something once you had edited the file elsewhere was a switch whose
-        # label could not explain itself. They stay settings of the file,
-        # where the comments have room to say what they do.
+        # One row, on purpose. Each notification from the phone flashes in the
+        # same way, and that is the complete setting. PHONE_APPS gives one
+        # app its own look, and PHONE_APPS_ONLY stops each other app. But
+        # both settings are lists that the user writes manually. A switch
+        # here works only after an edit of that file, and its label cannot
+        # explain that. So they stay settings of the file. There the
+        # comments have the space to describe them.
         ("NOTIFY_PHONE", "Phone notifications", "flash", "PHONE",
          None, None),
     ]),
     ("How it looks", [
-        # One to ten seconds. Below that every shape has something to do -
-        # grow and retract, swell three times, blink twice, cross the bar -
-        # and none of it is visible in half a second. Above it a flash stops
-        # being a notification and starts being the bar's normal state; the
-        # validator still takes up to a minute for anyone who means it.
+        # One to ten seconds. Each shape has a movement: it grows and
+        # retracts, it swells three times, it blinks twice, or it crosses
+        # the bar. In half a second the user sees none of that movement.
+        # Above ten seconds a flash is no longer a notification, and it
+        # becomes the normal state of the bar. The validator still accepts
+        # one minute for a user who wants it.
         ("NOTIFY_DURATION", "Flash duration (seconds)", "float",
          1.0, 10.0, 0.5),
-        # The shape everything uses unless it was given one of its own -
-        # including --notify with a colour, which is nobody's kind.
+        # The shape for each notification with no shape of its own. This
+        # includes --notify with a colour, which has no type.
         ("NOTIFY_STYLE", "Default flash shape", "named",
          STYLE_CHOICES, None, None),
     ]),
 ]
 
-# Set once and left alone: the defaults suit a 17 LED bar on the shipped
-# firmware, and each of these is a knob you turn because something specific is
-# wrong - a strip that is not 17 LEDs, colours that look blotchy when dimmed,
-# a link that cannot keep up. One unnamed group: this tab is allowed to be a
-# list, since nobody browses it.
+# The user sets these once and does not change them again. The defaults are
+# correct for a 17 LED bar on the firmware of this project. The user changes
+# one of these settings for one specific fault: a strip with a different
+# number of LEDs, colours with visible steps at a low brightness, or a link
+# that is too slow. This is one group with no name. This tab can be a list,
+# because no user reads it for information.
 ADVANCED = [
     (None, [
         ("MAPPING", "Mapping of the logical LEDs", "choice",
          config_module.MAPPINGS, None, None),
         ("GAMMA", "Gamma", "float", 0.1, 4.0, 0.1),
-        # Whole seconds: this is "how long before the bar mentions it again",
-        # which nobody thinks about in halves.
+        # Whole seconds. This is the time before the bar shows the same
+        # notification again, and a user does not think in half seconds.
         ("NOTIFY_REPEAT_GAP", "Notify repeat cooldown (s)", "int", 0, 120, 1),
         ("FPS", "Frames per second", "int", 1, 240, 1),
         ("IDLE_FPS", "Frames per second when idle", "int", 1, 240, 1),
@@ -242,24 +253,20 @@ ADVANCED = [
     ]),
 ]
 
-# The tabs that carry settings, in the order they are shown. Test and
-# Status & repair come after them and are things you do rather than set,
-# which is why the Apply row does not appear under those two.
-# A third item is a line of explanation under the page's settings, for a page
-# whose rows cannot say when they apply.
-# The machine's own settings, which are not the LED service's and are not in
-# its config file. Its own page for the same reason Desktop mode has one: it
-# is its own question, and the thing it changes is the computer rather than
-# the bar.
+# The settings of the machine. They are not settings of the LED service, and
+# they are not in the configuration file of the service. This is a page of its
+# own, for the same reason as the Desktop mode page. It is a question of its
+# own, and it changes the computer and not the bar.
 #
-# Everything here is written into the user's home and needs no rights at all -
-# see syssettings. That is what makes the keyboard layout the right first one
-# to sit here: no helper script, no password, and nothing that a wrong value
-# leaves in a state a reboot cannot undo.
-# The key is written out rather than taken from syssettings, the way the scene
-# names below are: this table is read literally by the tests, and a name they
-# have to resolve is a name they cannot check. That it is the right one is
-# itself checked there.
+# Each setting here goes into the home directory of the user and needs no
+# rights. See syssettings. That is the reason the keyboard layout is the first
+# setting here: no helper script, no password, and no value that puts the
+# machine into a state that a restart cannot correct.
+#
+# The key is written here, and this table does not take it from syssettings.
+# The scene names below use the same method. The tests read this table
+# directly, and they cannot check a name that they must resolve first. The
+# tests also prove that this key is the correct one.
 SYSTEM = [
     ("Keyboard", [
         ("XKB_DEFAULT_LAYOUT", "Keyboard layout", "named",
@@ -272,9 +279,9 @@ SYSTEM_NOTE = (
     "its on-screen keyboard. Desktop Mode keeps its own layout in the system "
     "settings and is not changed by this.")
 
-# The LED strip's own pages - the inner list, inside one section. System is
-# not among them any more: a keyboard layout is not a setting of the bar, and
-# it is now a section of its own. See SECTION_SETTINGS.
+# The pages of the LED strip. They are the inner list, inside one section.
+# System is no longer one of them. A keyboard layout is not a setting of the
+# bar, and it is now a section of its own. See SECTION_SETTINGS.
 SETTINGS_TABS = (
     ("Strip", STRIP),
     ("Desktop mode", DESKTOP, DESKTOP_NOTE),
@@ -286,9 +293,10 @@ SETTINGS_TABS = (
 # pages. Kept as a table for the same reason SETTINGS_TABS is one: between
 # them these two are every settings row in the window, and the tests walk
 # both. A section missing from here is one Apply would never collect.
-# How the CPU trades speed against power. Both rows are "power" kind, which
-# means their menus are built from what this machine reports rather than from
-# anything written here - see power.py for why a list would be wrong.
+# The balance of the CPU between speed and power. Both rows have the type
+# "power". The panel makes their menus from the values that this machine
+# reports, and not from a list in this file. power.py gives the reason a list
+# is incorrect.
 POWER = [
     ("CPU", [
         ("CPU_GOVERNOR", "Governor", "power", None, None, None),
@@ -303,8 +311,8 @@ POWER_NOTE = (
     "range - the performance governor pins it and the kernel refuses the "
     "setting. Leaving both alone is the default and touches nothing.")
 
-# The panel's own preferences. Its own table for the same reason it has its
-# own file: nothing outside this window reads it - see appsettings.
+# The preferences of the panel. It has its own table for the same reason it
+# has its own file: no program outside this window reads it. See appsettings.
 APP = [
     ("Appearance", [
         ("THEME", "Colours", "theme", None, None, None),
@@ -328,17 +336,18 @@ SECTION_SETTINGS = {
 # to. See Panel._saved and Panel.apply_settings.
 SYSTEM_KEYS = frozenset(syssettings.DEFAULTS)
 
-# And which belong to the CPU, which is a third file with a third way of being
-# written: /etc, so root, so a helper through pkexec - the same shape as the
-# LED service's own config rather than the keyboard layout's. Kept apart from
-# SYSTEM_KEYS for exactly that reason: those two sets differ in who may write
-# them, which is the only distinction the window has to make.
+# The settings of the CPU. They are a third file with a third write method.
+# The file is in /etc, so it needs root, so a helper writes it through pkexec.
+# The configuration of the LED service has the same shape, and the keyboard
+# layout does not. This set is separate from SYSTEM_KEYS for that reason. The
+# two sets have different write rights, and that is the one difference that
+# the window must know.
 POWER_KEYS = frozenset(power.DEFAULTS)
 
-# And the window's own, which are the odd ones out in every way: no file in
-# /etc, no root, and no Apply either. A look you have to press a button to see
-# is a look you are choosing blind, so these take effect the moment they are
-# picked - see Panel._theme_chosen.
+# The settings of the window. They are different in each way: no file in /etc,
+# no root, and no Apply button. A user who must press a button to see a look
+# selects that look without a view of it. So these settings take effect
+# immediately. See Panel._theme_chosen.
 APP_KEYS = frozenset(appsettings.DEFAULTS)
 
 # -- the window's top level -------------------------------------------------

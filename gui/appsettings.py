@@ -97,8 +97,8 @@ def read(home=None):
     lines = _lines(path(home))
     if lines is None:
         # There is no file with the current name. This can be a first
-                # start. It can also be a user who installed the panel before the
-                # change of name. See OLD_CONFIG_FILE.
+        # start. It can also be a user who installed the panel before the
+        # change of name. See OLD_CONFIG_FILE.
         lines = _lines(os.path.join(home or os.path.expanduser("~"),
                                     CONFIG_DIR, OLD_CONFIG_FILE))
     if lines is None:

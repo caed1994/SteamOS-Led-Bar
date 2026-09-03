@@ -196,7 +196,7 @@ class Ladder:
         if floor is not None:
             self.chroma = max(self.chroma, floor)
         # A seed with no hue is a pure grey accent. Without this step, such a
-                # seed takes its hue from the rounding error of atan2.
+        # seed takes its hue from the rounding error of atan2.
         if own < 0.002:
             self.chroma = min(self.chroma, own)
         self.lightness = lightness
@@ -253,8 +253,8 @@ ROLES = {
     "on_error_container": ("error", 10, 90),
 
     # This role is not in Material. Material has no colour for a good
-        # condition. A checklist of green ticks needs one role with the same
-        # behaviour as the other roles.
+    # condition. A checklist of green ticks needs one role with the same
+    # behaviour as the other roles.
     "positive": ("positive", 40, 80),
     "positive_container": ("positive", 90, 30),
     "on_positive_container": ("positive", 10, 90),
@@ -325,9 +325,9 @@ def control_sizes(linespace):
         """
     control = max(CONTROL_FLOOR, linespace + CONTROL_PADDING)
     # The same height as a drop-down, and not some pixels less. The rows
-        # have a fixed pitch. A control with less height therefore gets more
-        # space around it than its neighbours get. That made a switch above a
-        # drop-down look incorrectly spaced, although the rows were equal.
+    # have a fixed pitch. A control with less height therefore gets more
+    # space around it than its neighbours get. That made a switch above a
+    # drop-down look incorrectly spaced, although the rows were equal.
     switch = max(SWITCH_FLOOR, control)
     knob = max(KNOB_FLOOR, control - 12)
     # The groove is drawn inside an image as tall as the knob, so an odd
@@ -345,9 +345,9 @@ def control_sizes(linespace):
         "track": track,
         "radio": max(RADIO_FLOOR, control - 12),
         # The space that a drop-down needs above and below its text, to get
-                # the height of the other controls. This is four pixels less than
-                # the arithmetic gives, because ttk adds a field border of eight
-                # pixels. No style option changes that border.
+        # the height of the other controls. This is four pixels less than
+        # the arithmetic gives, because ttk adds a field border of eight
+        # pixels. No style option changes that border.
         "field_padding": max(3, (control - linespace) // 2 - 4),
     }
 
