@@ -78,8 +78,8 @@ class SerialLoopbackTest(unittest.TestCase):
     def start_esp(self):
         """Attaches the fake ESP, for a test that does not read the master.
 
-                The reader thread takes the bytes of a test that reads the master.
-                """
+        The reader thread takes the bytes of a test that reads the master.
+        """
         # The slave fd stays open on purpose: with no process on that end,
         # reads on the master fail with EIO.
         self.esp = FakeEsp(self.master)

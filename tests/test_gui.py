@@ -856,8 +856,8 @@ class InstalledCommitTest(unittest.TestCase):
     def test_the_keyboard_layout_says_its_one_sentence_in_the_line(self):
         """One sentence behind a Details button is worse than a longer line.
 
-                A user reported that fold as one that is not worth a click.
-                """
+        A user reported that fold as one that is not worth a click.
+        """
         part = ledpanel.layout_part("de", {"de": "German (de)"})
         self.assertEqual(part.detail, [])
         self.assertIn("Game Mode", part.verdict)
@@ -1134,9 +1134,9 @@ class MenuTranslationTest(unittest.TestCase):
 class SensorMenuTest(unittest.TestCase):
     """The menu of the sensor setting comes from the machine.
 
-        The value is a path into /sys, and the panel must not show such a path
-        to a user.
-        """
+    The value is a path into /sys, and the panel must not show such a path
+    to a user.
+    """
 
     def _sensor(self, chip, label, path=None, rank=(0, 0)):
         return {"chip": chip, "label": label, "rank": rank,

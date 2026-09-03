@@ -156,11 +156,11 @@ def layout_names(paths=XKB_RULES):
 def _parse_rules(lines):
     """Returns the `! layout` section of an xkb rules list.
 
-        The file holds sections, and a `! name` line starts each section. Each
-        entry is a code and then a description. The other sections hold models,
-        variants and options. This function does not read them, and the first of
-        them stops the loop.
-        """
+    The file holds sections, and a `! name` line starts each section. Each
+    entry is a code and then a description. The other sections hold models,
+    variants and options. This function does not read them, and the first of
+    them stops the loop.
+    """
     found, inside = {}, False
     for line in lines:
         if line.startswith("!"):
@@ -200,10 +200,10 @@ def layouts(names=None, extra=()):
 def directory(home=None):
     """Returns the environment.d directory of the user of the panel.
 
-        `home` is a parameter, and this function does not read the environment
-        directly. A test can then give a directory that it made itself. The
-        sensor readers and the process readers of the service have the same shape.
-        """
+    `home` is a parameter, and this function does not read the environment
+    directly. A test can then give a directory that it made itself. The
+    sensor readers and the process readers of the service have the same shape.
+    """
     return os.path.join(home or os.path.expanduser("~"), ENVIRONMENT_D)
 
 
@@ -235,10 +235,10 @@ def read(home=None):
 def _parse_environment(lines):
     """Returns a systemd environment.d file as {name: value}.
 
-        This is not a shell file. It holds NAME=VALUE lines, `#` starts a comment,
-        and a value can have quotation marks. The last line for a name wins. The
-        generator of systemd does the same with a file that gives a name twice.
-        """
+    This is not a shell file. It holds NAME=VALUE lines, `#` starts a comment,
+    and a value can have quotation marks. The last line for a name wins. The
+    generator of systemd does the same with a file that gives a name twice.
+    """
     found = {}
     for line in lines:
         line = line.strip()

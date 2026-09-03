@@ -25,8 +25,8 @@ from steamos_utility_center import power                               # noqa: E
 
 def _applier():
     """Returns the installed script. It has no .py suffix, so this loads it by
-        path.
-        """
+    path.
+    """
     path = os.path.join(HERE, "..", "server", "steamos-utility-center-power")
     loader = importlib.machinery.SourceFileLoader("steamos_utility_center_power", path)
     spec = importlib.util.spec_from_loader("steamos_utility_center_power", loader)

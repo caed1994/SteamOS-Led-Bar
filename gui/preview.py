@@ -49,9 +49,9 @@ LOAD_WALK = ((0.05, 0.02), (0.22, 0.10), (0.35, 0.62), (0.78, 0.96),
 class _Scripted:
     """Returns the value that the walk of the preview gives.
 
-        The real sources read the hardware and damp the value. Here the walk is
-        the purpose, so this class gives the value with no damping.
-        """
+    The real sources read the hardware and damp the value. Here the walk is
+    the purpose, so this class gives the value with no damping.
+    """
 
     def __init__(self):
         self.celsius_value = SWEEP_LOW
@@ -89,10 +89,10 @@ def _along(waypoints, fraction):
 class Preview:
     """Gives the pixels of one effect at one moment, from the real renderers.
 
-        `settings` holds the values in the widgets of the panel now. An absent
-        key takes the default value of the release. The picture therefore shows
-        the temperature marks, the notification colours and the flash duration.
-        """
+    `settings` holds the values in the widgets of the panel now. An absent
+    key takes the default value of the release. The picture therefore shows
+    the temperature marks, the notification colours and the flash duration.
+    """
 
     def __init__(self, settings=None):
         self.settings = settings or {}
@@ -279,11 +279,11 @@ def hex_colour(pixel):
 def toward(pixel, amount, backdrop=BACKDROP):
     """Mixes `pixel` this far towards the backdrop, as #rrggbb.
 
-        A canvas has no alpha channel and no blur. So this module draws a glow as
-        a solid colour, and mixes that colour with the background first. This
-        method works only with one known flat background colour. That is the
-        reason the stage does not follow the desktop theme.
-        """
+    A canvas has no alpha channel and no blur. So this module draws a glow as
+    a solid colour, and mixes that colour with the background first. This
+    method works only with one known flat background colour. That is the
+    reason the stage does not follow the desktop theme.
+    """
     base = [int(backdrop[index:index + 2], 16) for index in (1, 3, 5)]
     return "#%02x%02x%02x" % tuple(
         max(0, min(int(ground + (channel - ground) * amount), 255))

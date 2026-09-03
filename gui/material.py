@@ -118,12 +118,12 @@ def to_oklch(colour):
 def from_oklch(lightness, chroma, hue):
     """Returns a colour at this lightness and hue, with the maximum chroma.
 
-        A request for more chroma than sRGB holds at a lightness is normal,
-        because there is no strong near-white colour. So this function removes the
-        excess chroma. The clamp in from_oklab would move the hue instead.
-        Sixteen bisection steps put the edge inside one rounding step of one
-        channel.
-        """
+    A request for more chroma than sRGB holds at a lightness is normal,
+    because there is no strong near-white colour. So this function removes the
+    excess chroma. The clamp in from_oklab would move the hue instead.
+    Sixteen bisection steps put the edge inside one rounding step of one
+    channel.
+    """
     if not _in_gamut(lightness, chroma, hue):
         low, high = 0.0, chroma
         for _ in range(16):
@@ -140,9 +140,9 @@ def from_oklch(lightness, chroma, hue):
 def blend(background, foreground, amount):
     """Puts `amount` of one colour over another colour, both "#rrggbb".
 
-        This is plain sRGB compositing, because a translucent layer on a screen
-        does the same. It is not a perceptual mix, and it must not be one.
-        """
+    This is plain sRGB compositing, because a translucent layer on a screen
+    does the same. It is not a perceptual mix, and it must not be one.
+    """
     if amount <= 0:
         return background
     if amount >= 1:
@@ -170,17 +170,17 @@ NEUTRAL_VARIANT_CHROMA = 0.026
 def lightness_of(tone):
     """Returns the Material tone 0 to 100 as an OKLab lightness.
 
-        The result is not tone/100. The Material tone is CIE L*, and the L of
-        OKLab is the cube root of the luminance. Tone 50 is therefore OKLab 0.57.
-        A direct use of the tone makes each surface darker than the specification
-        gives, and the dark scheme the most of all. Tone 6 then becomes almost
-        black, and not a dark grey with visible detail.
+    The result is not tone/100. The Material tone is CIE L*, and the L of
+    OKLab is the cube root of the luminance. Tone 50 is therefore OKLab 0.57.
+    A direct use of the tone makes each surface darker than the specification
+    gives, and the dark scheme the most of all. Tone 6 then becomes almost
+    black, and not a dark grey with visible detail.
 
-        The luminance connects the two scales. L* to Y is the standard CIE pair,
-        with the linear segment at the low end. That segment keeps the curve
-        flat at black. For a neutral colour, the L of OKLab is the cube root of
-        Y. So the conversion becomes one line for most of the range.
-        """
+    The luminance connects the two scales. L* to Y is the standard CIE pair,
+    with the linear segment at the low end. That segment keeps the curve
+    flat at black. For a neutral colour, the L of OKLab is the cube root of
+    Y. So the conversion becomes one line for most of the range.
+    """
     if tone > 8:
         return (tone + 16.0) / 116.0
     return (tone / 903.3) ** (1 / 3.0)
@@ -319,10 +319,10 @@ THUMB_OFF = 0.25
 def control_sizes(linespace):
     """Returns the pixel sizes of each control, for a font of this height.
 
-        `linespace` is the measured height of the font, and only tkinter can give
-        it. The caller passes it in. A machine with no display can then test the
-        arithmetic.
-        """
+    `linespace` is the measured height of the font, and only tkinter can give
+    it. The caller passes it in. A machine with no display can then test the
+    arithmetic.
+    """
     control = max(CONTROL_FLOOR, linespace + CONTROL_PADDING)
     # The same height as a drop-down, and not some pixels less. The rows
     # have a fixed pitch. A control with less height therefore gets more
@@ -374,10 +374,10 @@ def scheme(seed, dark=False, error=None, positive=None):
 def layer(roles, container, content, opacity):
     """Returns a state layer: `content` over `container` at this strength.
 
-        Both parameters are role names and not colours. That keeps the states
-        consistent. A button and a tab in the same state then use the same two
-        roles, and not two selected colours that become different with time.
-        """
+    Both parameters are role names and not colours. That keeps the states
+    consistent. A button and a tab in the same state then use the same two
+    roles, and not two selected colours that become different with time.
+    """
     return blend(roles[container], roles[content], opacity)
 
 
@@ -394,11 +394,11 @@ def disabled_container(roles, on="on_surface", over="surface"):
 def contrast(first, second):
     """Returns the WCAG contrast ratio between two "#rrggbb", from 1 to 21.
 
-        This function selects no colour. The tone pairs of the specification do
-        that. The tests use this function to prove that the pairs keep their
-        contrast in OKLab. The change from HCT to OKLab is the one step that can
-        break them without a visible sign.
-        """
+    This function selects no colour. The tone pairs of the specification do
+    that. The tests use this function to prove that the pairs keep their
+    contrast in OKLab. The change from HCT to OKLab is the one step that can
+    break them without a visible sign.
+    """
     def relative(colour):
         red, green, blue = (_to_linear(channel) for channel in _unpack(colour))
         return 0.2126 * red + 0.7152 * green + 0.0722 * blue

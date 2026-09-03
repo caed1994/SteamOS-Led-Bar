@@ -88,11 +88,11 @@ def _lines(where):
 def read(home=None):
     """Returns the preferences, with a default for each bad or absent value.
 
-        A file that no program wrote is the normal condition. A file with a value
-        that this version does not know is a value from a later version, or a
-        spelling error. Neither condition must stop the panel. So this function
-        returns the default in both conditions.
-        """
+    A file that no program wrote is the normal condition. A file with a value
+    that this version does not know is a value from a later version, or a
+    spelling error. Neither condition must stop the panel. So this function
+    returns the default in both conditions.
+    """
     values = dict(DEFAULTS)
     lines = _lines(path(home))
     if lines is None:

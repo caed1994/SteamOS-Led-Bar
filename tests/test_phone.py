@@ -1134,9 +1134,9 @@ class UnitFileTest(unittest.TestCase):
     def _directives(self):
         """Returns the setting lines only.
 
-                A comment with the text "PartOf=" is then not a setting. The comment
-                of this unit holds that text, and it gives the reason for no PartOf=.
-                """
+        A comment with the text "PartOf=" is then not a setting. The comment
+        of this unit holds that text, and it gives the reason for no PartOf=.
+        """
         return [line.strip() for line in self.text.splitlines()
                 if line.strip() and not line.strip().startswith("#")]
 

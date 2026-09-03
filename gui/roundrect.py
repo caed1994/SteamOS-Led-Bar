@@ -106,11 +106,11 @@ def coverage(x, y, width, height, radius):
 def _coverage_grid(width, height, radii, border_width):
     """Returns the cover of the shape and of the border, for each pixel.
 
-        The key is the geometry only. The panel draws one shape in more than one
-        colour. A button in its normal, hover and pressed shades gives three
-        pictures of the same rectangle. The measurement is the slow part of the
-        two. Nothing writes to the result, so one grid serves all three pictures.
-        """
+    The key is the geometry only. The panel draws one shape in more than one
+    colour. A button in its normal, hover and pressed shades gives three
+    pictures of the same rectangle. The measurement is the slow part of the
+    two. Nothing writes to the result, so one grid serves all three pictures.
+    """
     outer = _shape(width, height, radii)
     inner = (_shape(width - 2 * border_width, height - 2 * border_width,
                     tuple(max(0.0, value - border_width) for value in radii))
@@ -140,11 +140,11 @@ def rows(width, height, radius, fill, background, border=None, border_width=1,
          open_bottom=False):
     """Returns the pixels of one rounded rectangle, as rows of "#rrggbb".
 
-        Each pixel outside the shape gets the value of `background`. The picture
-        then goes onto that colour with no visible edge. This is necessary because
-        there is no alpha channel. For the same reason, each caller must give the
-        colour below the picture.
-        """
+    Each pixel outside the shape gets the value of `background`. The picture
+    then goes onto that colour with no visible edge. This is necessary because
+    there is no alpha channel. For the same reason, each caller must give the
+    colour below the picture.
+    """
     ring = bool(border) and border_width > 0
     grid = _coverage_grid(width, height, corner_radii(radius),
                           border_width if ring else 0)
@@ -185,14 +185,14 @@ def segment_coverage(x, y, start, end, thickness):
 def draw_check(picture, color, thickness=2.2, box=None):
     """Puts a tick into a picture, into all of it or into one part of it.
 
-        This module draws the tick and does not take it from a font. At this size
-        the incorrect fallback font is not readable, and the machine decides which
-        font that is.
+    This module draws the tick and does not take it from a font. At this size
+    the incorrect fallback font is not readable, and the machine decides which
+    font that is.
 
-        `box` is (left, top, width, height). Use it for a tick that belongs to an
-        area smaller than the picture. The thumb of a switch is such an area: it
-        is a circle at a position along a track, and not the track.
-        """
+    `box` is (left, top, width, height). Use it for a tick that belongs to an
+    area smaller than the picture. The thumb of a switch is such an area: it
+    is a circle at a position along a track, and not the track.
+    """
     if box is None:
         box = (0, 0, len(picture[0]), len(picture))
     left, top, width, height = box
@@ -212,11 +212,11 @@ def draw_check(picture, color, thickness=2.2, box=None):
 def draw_chevron(picture, color, thickness=2.0, box=None, up=False):
     """Draws two strokes that meet at a point: the mark of a drop-down.
 
-        This module draws the mark and does not leave it to the widget set. The
-        two types of drop-down here draw it differently. One draws a thin line,
-        and the other draws a triangle with half the height of the field. A page
-        with both types must show one mark.
-        """
+    This module draws the mark and does not leave it to the widget set. The
+    two types of drop-down here draw it differently. One draws a thin line,
+    and the other draws a triangle with half the height of the field. A page
+    with both types must show one mark.
+    """
     if box is None:
         box = (0, 0, len(picture[0]), len(picture))
     left, top, width, height = box
@@ -261,11 +261,11 @@ def draw_disc(picture, centre_x, centre_y, radius, colour):
 def draw_ring(picture, centre_x, centre_y, radius, thickness, colour):
     """Draws a circle with no fill: a disc with a smaller disc removed.
 
-        To cut the hole, this function keeps the pixels below the disc and writes
-        them back. A ring can therefore go over any picture. A radio button on a
-        card needs this, because the middle of the button is the card and not a
-        colour that this module knows.
-        """
+    To cut the hole, this function keeps the pixels below the disc and writes
+    them back. A ring can therefore go over any picture. A radio button on a
+    card needs this, because the middle of the button is the card and not a
+    colour that this module knows.
+    """
     keep = [row[:] for row in picture]
     draw_disc(picture, centre_x, centre_y, radius, colour)
     height, width = len(picture), len(picture[0])
