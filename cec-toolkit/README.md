@@ -12,15 +12,15 @@ this project runs on, and the fixes are now in here rather than worked around
 from outside. [ORIGIN](ORIGIN) records the fork point and how to take upstream
 changes; [What is different here](#what-is-different-here) lists the changes.
 
-It is a module of its own. It installs and uninstalls itself, it is managed
-through `steamos-cec-toolkitctl`, and nothing in the SteamOS Utility Center is
-needed to run it - the panel is one front end, a terminal is another.
+It is a module of its own. It installs and removes itself, and
+`steamos-cec-toolkitctl` controls it. It does not need the SteamOS Utility
+Center to run. The panel is one front end, and a terminal is another.
 
 > Upstream's disclaimer applies here too: this is a community solution for
 > DIY/self-installed SteamOS machines. It is not a Valve project. It was
-> written against one HTPC setup - a Radeon 9070 XT with a UGREEN
-> DisplayPort-to-HDMI CEC adapter on `/dev/cec0` - and this fork has been run
-> on two more.
+> written for one HTPC setup: a Radeon 9070 XT with a UGREEN
+> DisplayPort-to-HDMI CEC adapter on `/dev/cec0`. This fork also runs on two
+> other machines.
 
 ## What is different here
 
@@ -34,15 +34,15 @@ Five fixes, each of which was a workaround in the panel's repository first.
 | The installer never ran `discover-cec`, so `CEC_PHYSICAL_ADDRESS` stayed empty - and every wake path skips `<Active Source>` when it is empty. | The television turned on and stayed on the input it was already on. | `bin/steamos-cec-register` writes it, at install time and at every session start. |
 | USB wake matched Bluetooth radios by **device** class. Every wifi-and-Bluetooth combo chip reports class `ef/02/01` (Interface Association) and puts its real classes in its interfaces, so the check could not match one. | `steamos-cec-usb-wake-apply` reported `"matched":0` and a controller could not wake the machine. | `bin/steamos-cec-usb-wake-apply` looks at `bInterfaceClass` as well. |
 
-Nothing else has been rewritten. The tree is not in the SteamOS Utility
-Center's style and is not being moved into it: a diff against upstream is worth
-more than consistent formatting.
+This fork changes nothing else. The tree does not follow the style of the
+SteamOS Utility Center, and it must stay that way. A small difference against
+the source project is more important than one style.
 
 ## Install
 
-From the SteamOS Utility Center, the HDMI CEC page installs and removes this
-and has a switch for each feature. By hand, as the normal desktop user - not as
-root:
+In the SteamOS Utility Center, the HDMI CEC page installs and removes this
+toolkit and has a switch for each function. To do it manually, run this
+command as the normal desktop user. Do not run it as root:
 
 ```bash
 ./install.sh
@@ -185,11 +185,12 @@ cec-ctl -d /dev/cec0 --show-topology
 wpctl status
 ```
 
-Leave `CEC_VOLUME_INITIATOR` empty for the normal path, where the kernel uses
-the adapter's own logical address. Set it to `0` only for receivers that accept
-volume only from the television's address. If there is no separate audio system
-and the television renders sound itself, use `CEC_AUDIO_LOGICAL_ADDRESS=0`; LG
-televisions may also want `CEC_SIMPLINK_ACK=1`.
+Leave `CEC_VOLUME_INITIATOR` empty for the normal path. The kernel then uses
+the logical address of the adapter. Set it to `0` only for a receiver that
+accepts volume from the address of the television only. If there is no
+separate audio system, and the television makes the sound, use
+`CEC_AUDIO_LOGICAL_ADDRESS=0`. An LG television can also need
+`CEC_SIMPLINK_ACK=1`.
 
 ## Putting the adapter on the bus
 
@@ -197,9 +198,9 @@ televisions may also want `CEC_SIMPLINK_ACK=1`.
 CEC, and again at the end of an install. For every `/dev/cec*` it:
 
 1. waits for the device node, because a session start races enumeration;
-2. leaves alone any adapter that already holds a logical address - if Steam's
-   own `cecd` has it, that is the right outcome and nothing here should
-   interfere;
+2. does not touch an adapter that already holds a logical address. If the
+   `cecd` of Steam holds it, that is the correct condition, and this helper
+   must not change it;
 3. repairs the device's permissions and restarts `cecd` when nothing holds one,
    which is what an unplug and a replug do;
 4. writes the adapter's physical address into the user config, so the wake
@@ -207,9 +208,9 @@ CEC, and again at the end of an install. For every `/dev/cec*` it:
 5. claims a logical address itself, as a last resort, so a machine whose `cecd`
    will not take the adapter can still send.
 
-It gives up quietly. An adapter with no physical address is one plugged into a
-television that is off, and waiting there is standing in front of the wake that
-was about to fix it.
+It stops without a message. An adapter with no physical address is an
+adapter that is connected to a television that is off. A helper that waits
+there also delays the wake that corrects the condition.
 
 ## Why relative volume needs a shim
 
@@ -224,18 +225,22 @@ accept the identical command sent as if it came from the television. So the
 speaks `org.pipewire.ExternalVolume` but sends volume with
 `cec-ctl --raw-msg -f <initiator> -t <audio-system>`.
 
-Most **televisions** refuse System Audio Control outright - a `FEATURE_ABORT`
-with reason `refused` comes back in about 20 ms. Volume over CEC needs an
-amplifier that speaks it; no configuration makes a television that says no say
-yes.
+Most **televisions** refuse System Audio Control. They return a
+`FEATURE_ABORT` with the reason `refused` in approximately 20 ms. Volume over
+CEC needs an amplifier that supports it. No configuration changes the answer
+of a television that refuses.
 
 ## Waking the machine with a controller
 
-`--enable-usb-wake` switches on USB wakeup for the radio a controller talks to.
-It matches on three things: an exact `vendor:product` list, a regular
-expression over the device's name, and the USB class for Bluetooth - now
-checked on the interfaces as well as the device, which is what a combo wifi and
-Bluetooth chip needs.
+`--enable-usb-wake` turns on USB wakeup for the radio that a controller uses.
+It matches on three items:
+
+- an exact `vendor:product` list
+- a regular expression for the name of the device
+- the USB class for Bluetooth
+
+This fork reads that class on the interfaces and on the device. A combination
+wifi and Bluetooth chip needs the interfaces.
 
 What it can do ends at the hardware. A radio that cannot wake the board from
 S3, or a kernel that will not arm it, is not something a `power/wakeup` file
@@ -275,5 +280,5 @@ Each validates its own subcommands. Do not broaden the rule.
 
 ## Licence
 
-MIT - see [LICENSE](LICENSE). Upstream's copyright stands; the second line
-covers the changes made in this fork.
+MIT. See [LICENSE](LICENSE). The copyright of the source project stays. The
+second line covers the changes in this fork.

@@ -9,15 +9,19 @@ ORIGIN_COMMIT=cc48b949dfea349d517fa8a9fd385ce19d4e2d5e
 
 # This is a fork, not a copy.
 #
-# It began as the SteamOS CEC Toolkit by Twsts, taken at the commit above and
-# kept unmodified in vendor/ for a while. That stopped making sense. Five
-# things in it did not work on the machines this project runs on, and each one
-# was worked around from the outside - a unit of ours to register the adapter,
-# a drop-in to stop its boot wake blocking the session, a repair pass for the
-# permissions race, a step to write the physical address its installer never
-# writes, and a search for Bluetooth radios its USB wake could not see. Five
-# workarounds is not a vendored tree any more; it is a fork with the changes
-# in the wrong repository.
+# It started as the SteamOS CEC Toolkit by Twsts. This project took it at the
+# commit above and kept it unchanged in vendor/ for some time. Five functions
+# in it did not work on the machines that this project runs on. This project
+# corrected each of the five from the outside:
+#
+#   a unit to register the adapter
+#   a drop-in to stop the boot wake from delaying the session
+#   a repair step for the permissions race
+#   a step to write the physical address that the installer does not write
+#   a search for the Bluetooth radios that the USB wake did not find
+#
+# A tree with five external corrections is not a vendored tree. It is a fork
+# with its changes in the wrong repository.
 #
 # So the fixes are in here now, where the bugs are, and the workarounds are
 # gone. See README.md for what changed. The tree is still a module of its own:
