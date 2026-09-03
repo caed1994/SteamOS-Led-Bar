@@ -56,6 +56,7 @@ from . import config as config_module
 from . import lact
 from . import mounts
 from . import power
+from . import shim
 from . import syssettings
 
 # Where an installation puts the programs that need root. A stable path, and
@@ -302,10 +303,12 @@ def drives_write(updates, may_prompt=False, run=None, home=None):
 
 
 def cec_read(home=None):
-    """What the toolkit's own file holds. It is not the toolkit's status.
+    """Whether the toolkit is there. It is not the state of its switches.
 
-    The status needs a process. See status(full=True), which asks the toolkit
-    itself.
+    Each switch is a systemd unit, and only systemd knows whether it is
+    enabled. That answer needs a process, so it is in status(full=True), which
+    asks the toolkit. A front end reads the switches from there and polls
+    this.
     """
     return {"installed": cec.installed(home)}
 
@@ -317,17 +320,48 @@ def cec_offers():
             "actions": [name for name, _label, _tail in cec.ACTIONS]}
 
 
-def cec_write(updates, may_prompt=False, run=None, home=None):
-    """Writes settings into the toolkit's own configuration.
+# The one CEC switch that this command cannot operate.
+#
+# It controls a root unit that the toolkit's own control program does not
+# know, so the panel switches it through a helper of ours under pkexec. Game
+# Mode has nobody to answer a password, and a rule for that helper would
+# permit far more than one switch: the helper installs and removes the whole
+# toolkit.
+BY_HAND = ("resume-wake",)
 
-    This needs no root: the toolkit writes a file of the user, which has
-    priority over the one in /etc. See cec.set_config_command.
+
+def cec_write(updates, may_prompt=False, run=None, home=None):
+    """Switches a feature of the toolkit, or writes a setting of it.
+
+    Both in one call, because both are what a person changes on that page. A
+    key that names a feature is a switch, and every other key is a setting.
+
+    Neither needs root. A switch is a systemd unit of the user, and a setting
+    goes into a file of the user that has priority over the one in /etc. See
+    cec.toggle_command and cec.set_config_command.
     """
     run = _run if run is None else run
-    code, said = run(cec.set_config_command(updates, home))
-    if code != 0:
-        raise CtlError(said.strip() or "the toolkit refused the settings")
-    return said.strip()
+    said = []
+    settings = {}
+    for key, value in updates.items():
+        if key not in cec.BY_NAME:
+            settings[key] = value
+            continue
+        if key in BY_HAND:
+            raise CtlError(
+                "%s is switched in the panel and not here. It controls a unit "
+                "of root, and Game Mode has nobody to ask for a password."
+                % key)
+        code, answer = run(cec.toggle_command(key, bool(value), home))
+        if code != 0:
+            raise CtlError(answer.strip() or "the toolkit refused %s" % key)
+        said.append(answer.strip())
+    if settings:
+        code, answer = run(cec.set_config_command(settings, home))
+        if code != 0:
+            raise CtlError(answer.strip() or "the toolkit refused the settings")
+        said.append(answer.strip())
+    return "\n".join(one for one in said if one)
 
 
 # The table that makes a new setting free. To add an area is four functions
@@ -558,14 +592,37 @@ def _cec_status(run, home):
     return cec.read_status(said)
 
 
+def _cec_features(said, run):
+    """Returns {name: whether it is on} for each switch of the toolkit."""
+    if not isinstance(said, dict) or said.get("ok") is False:
+        return {}
+    # resume-wake is not in that document. It is a unit of root, and only
+    # systemd knows it. See cec.resume_wake_command.
+    code, answer = run(cec.resume_wake_command())
+    carried = dict(said)
+    carried[cec.RESUME_WAKE_REPORT] = (code == 0
+                                       and cec.resume_wake_enabled(answer))
+    return {name: cec.feature_on(carried, name) for name in cec.BY_NAME}
+
+
 def status(full=False, run=None, home=None):
     """Every area at once.
 
     Without `full` this opens files and starts no process. That is the half a
     front end can ask for again and again while a person watches a page.
     """
+    drives = AREA["drives"]["read"](home=home)["drives"]
     answer = {"areas": {name: AREA[name]["read"](home=home)
                         for name in AREAS},
+              # The three answers that a front end puts at the top of a page.
+              # Each one is a file that is there or is not, so this stays the
+              # half that costs no process.
+              "ready": {
+                  "module": os.path.exists(shim.DEFAULT_DEVICE),
+                  "cec": cec.installed(home),
+                  "mounted": sum(1 for one in drives if one["mounted"]),
+                  "drives": len(drives),
+              },
               "sudo_rule": os.path.exists(SUDO_RULE),
               "full": bool(full)}
     if not full:
@@ -580,6 +637,12 @@ def status(full=False, run=None, home=None):
                                       for name in UNITS})
     answer["partitions"] = _tried(mounts.partitions)
     answer["cec"] = _tried(lambda: _cec_status(run, home))
+    # Whether each switch is on, worked out here and not by a front end. The
+    # answer is in three different places of the toolkit's status document,
+    # and cec.feature_on is the one function that knows which. A second copy
+    # in TypeScript is a second answer.
+    answer["cec_features"] = _tried(
+        lambda: _cec_features(answer["cec"], run))
     answer["gpu"] = _tried(lambda: {"available": lact.available()})
     return answer
 

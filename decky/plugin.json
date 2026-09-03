@@ -1,0 +1,10 @@
+{
+  "name": "SteamOS Utility Center",
+  "author": "caed1994",
+  "api_version": 1,
+  "flags": [],
+  "publish": {
+    "tags": ["led", "cec", "power", "storage", "steam-machine"],
+    "description": "Control the LED bar, the CPU power, HDMI CEC and the drives of a SteamOS Utility Center installation, from Game Mode."
+  }
+}

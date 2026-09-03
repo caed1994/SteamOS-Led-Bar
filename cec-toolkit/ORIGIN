@@ -35,6 +35,13 @@ ORIGIN_COMMIT=cc48b949dfea349d517fa8a9fd385ce19d4e2d5e
 #            is one of two front ends for the same helper, not a dependency of
 #            it. Nothing in this tree installs it; the docs still mention it
 #            where they describe how the pieces fit together.
+#
+#            There is a decky/ at the top of this repository now, and it is
+#            not this one. That is a plugin of this project: it calls
+#            steamos-utility-centerctl, and the CEC page of it is one of five.
+#            The shape of its backend, and the three environment variables
+#            that it corrects, come from the plugin here. decky/main.py says
+#            so, and the README credits it.
 #   assets/  8.6 MB of screenshots of that plugin.
 #
 # Taking upstream changes:

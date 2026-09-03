@@ -352,6 +352,30 @@ else
     fi
 fi
 
+# The Game Mode plugin, where Decky Loader is installed.
+#
+# Only where it is. A machine with no Decky gets no directory made for it and
+# no message about a program that its owner did not ask for.
+#
+# Decky reads a plugin when it starts, so a new one appears after Decky is
+# restarted. The plugin needs nothing built: dist/index.js is in the
+# repository, because nobody must run npm on a Steam Machine.
+if watcher_user_dirs && [[ -d "$WATCHER_HOME/homebrew/plugins" ]]; then
+    decky_where="$WATCHER_HOME/$DECKY_PLUGIN"
+    say "Installing the Game Mode plugin to $decky_where"
+    if runuser -u "$WATCHER_USER" -- mkdir -p "$decky_where/dist"; then
+        for decky_file in plugin.json main.py package.json dist/index.js; do
+            runuser -u "$WATCHER_USER" -- \
+                cp "$SOURCE_DIR/decky/$decky_file" \
+                   "$decky_where/$decky_file" \
+                || warn "could not copy decky/$decky_file"
+        done
+        say "  restart Decky, or the machine, to see it"
+    else
+        warn "could not write $decky_where"
+    fi
+fi
+
 if [[ -f "$POWER_CONFIG_PATH" ]]; then
     say "Keeping existing $POWER_CONFIG_PATH"
 else

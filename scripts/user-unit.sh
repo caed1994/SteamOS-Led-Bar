@@ -148,6 +148,9 @@ CTL_COMMAND_LINK="$ROOT/usr/local/bin/${NAME}ctl"
 # writes it, and the uninstaller removes it. See ctl.sudoers_text, which is
 # where the text of it is.
 SUDO_RULE_PATH="$ROOT/etc/sudoers.d/zz-$NAME"
+# Where Decky Loader keeps a plugin, under the home of the desktop user. It is
+# in /home, so a SteamOS update does not take it away.
+DECKY_PLUGIN="homebrew/plugins/SteamOS Utility Center"
 
 WATCHER_UNIT="$NAME-achievements.service"
 PHONE_UNIT="$NAME-phone.service"

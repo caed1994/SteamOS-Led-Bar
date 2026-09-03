@@ -23,10 +23,11 @@ Twenty effects on a simulated strip, each with an explanation.
 6. [Notifications](#notifications)
 7. [The control panel](#the-control-panel)
 8. [The command that speaks JSON](#the-command-that-speaks-json)
-9. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
-10. [Updates and removal](#updates-and-removal)
-11. [How it works](#how-it-works)
-12. [Credits and licence](#credits-and-licence)
+9. [Game Mode](#game-mode)
+10. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
+11. [Updates and removal](#updates-and-removal)
+12. [How it works](#how-it-works)
+13. [Credits and licence](#credits-and-licence)
 
 ## Quick start
 
@@ -1186,6 +1187,52 @@ also:
 {"error": "no such area: bar. There are: cec, drives, keyboard, power, strip", "ok": false}
 ```
 
+## Game Mode
+
+`decky/` is a plugin for [Decky Loader](https://decky.xyz). It puts the
+settings that a person changes from a sofa into the Quick Access menu of Game
+Mode, where the panel cannot go.
+
+The installer copies it in, but only on a machine that has Decky. Restart Decky
+or the machine afterwards, and the plugin is in the menu. Nothing has to be
+built: `decky/dist/index.js` is in this repository, because nobody must run npm
+on a Steam Machine.
+
+What is on the page:
+
+| Section | What it holds |
+| ------- | ------------- |
+| This machine | the module, HDMI CEC, and how many drives are mounted |
+| LED bar | the rainbow slot, the desktop scene, the brightness, notifications |
+| CPU power | the governor and the energy preference |
+| Television | wake, standby, and each switch of the HDMI CEC toolkit |
+| Drives | each drive with its state, and one button to mount them again |
+
+The keyboard layout is not there. It is set one time, and that belongs in the
+panel.
+
+The plugin holds no rule of its own. Every value comes from
+`steamos-utility-centerctl`, and every change goes back to it, so the plugin
+and the panel are two front ends for one answer. Its backend is 115 lines and
+each method is one call.
+
+**It runs with no root at all.** `plugin.json` carries an empty `flags`, so
+Decky starts it as you. The three programs that need rights are reached the
+same way the panel reaches them, through the
+[sudoers rule](#why-it-needs-no-password).
+
+Two things are in the panel and not here, and both on purpose. **Take
+ownership** walks a whole drive as root. **Wake the television on resume**
+controls a unit of root that the toolkit's own control program does not know.
+Game Mode has nobody to answer a password for either, so the page shows the
+second one and refuses to move it.
+
+To build the page again after a change to it:
+
+```bash
+cd decky && npm install && npm run build
+```
+
 ## Diagnostics and troubleshooting
 
 **Start with the self test.** It does not use Steam and it does not use the
@@ -1335,6 +1382,13 @@ authors. That licence applies to that directory on its own terms: a person who
 changes the code in it must release those changes under GPL-2.0+ also. The
 commit, the checksums and the full licence text are in
 [leds-valve-shim/PROVENANCE.md](leds-valve-shim/PROVENANCE.md).
+
+`decky/` is a plugin of this project and not of that one. The shape of its
+backend, and the three environment variables that it corrects, come from the
+Decky plugin of the **SteamOS CEC Toolkit**, which is **MIT**. Those three are
+the knowledge that costs a day to find: Decky starts a plugin with no session
+around it, and a program that inherits Steam's `LD_LIBRARY_PATH` loads the
+wrong libraries. `decky/main.py` says so at the top of the file.
 
 `cec-toolkit/` started as the
 **[SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit)** by

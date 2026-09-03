@@ -1,0 +1,4 @@
+# The build brings these. dist/index.js is committed, because Decky loads it
+# and nobody must run npm on a Steam Machine to get a plugin that works.
+node_modules/
+dist/index.js.map

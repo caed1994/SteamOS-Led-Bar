@@ -276,6 +276,13 @@ fi
 # not tidy either.
 rm -f "$SUDO_RULE_PATH"
 
+# The Game Mode plugin, where this installed one. Only the directory that this
+# project writes, and not the plugins of other people beside it.
+if watcher_user_dirs && [[ -d "$WATCHER_HOME/$DECKY_PLUGIN" ]]; then
+    echo "Removing the Game Mode plugin."
+    rm -rf "${WATCHER_HOME:?}/$DECKY_PLUGIN"
+fi
+
 rm -rf "${INSTALL_DIR:?}"
 
 if [[ $PURGE -eq 1 ]]; then
