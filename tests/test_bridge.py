@@ -178,7 +178,7 @@ class TestRenderer(unittest.TestCase):
         self.assertEqual(payload[-3:], bytes(3), "far end should stay dark")
 
     def test_reverse_moves_the_progress_bar_to_the_other_end(self):
-        # The strip's data end is not always where the bar should start.
+        # The data end of the strip is not always the start of the bar.
         snapshot = self._progress_snapshot(6)
         payload = render.Renderer(led_count=30, reverse=True).render(snapshot, 0.0)
         self.assertEqual(payload[:3], bytes(3), "near end should now be dark")
@@ -293,8 +293,8 @@ class TestRenderer(unittest.TestCase):
         return sum(1 for led in range(shim.LOGICAL_LEDS) if frame[led * 3] > 40)
 
     def test_patrol_num_does_not_change_the_dot_count(self):
-        # patrol_num is most likely live position state, not a count. Reading
-        # it as one painted three dots on a bar that should show one.
+        # patrol_num is most probably a live position and not a count. A read
+        # of it as a count painted three dots on a bar with one dot.
         renderer = render.Renderer(led_count=shim.LOGICAL_LEDS,
                                    mapping=render.MAPPING_CROP)
         plain = shim.make_snapshot(shim.EFFECT_PATROL, (255, 40, 0))
@@ -399,16 +399,16 @@ class TestConfig(unittest.TestCase):
         self.assertIn("# a comment", updated)
 
     def test_every_withdrawn_setting_really_is_gone(self):
-        # A name in both tables would be read as retired and never reach the
-        # code that wants it - a setting that silently stopped working.
+        # A name in both tables reads as retired and never reaches the code
+        # that needs it. The setting then stops with no message.
         for key in config.RETIRED:
             self.assertNotIn(key, config.DEFAULTS, key)
 
     def test_a_withdrawn_setting_that_still_means_something_is_carried_over(self):
-        # Being ignored is right for an option that stopped meaning anything.
-        # TEMPERATURE_GAUGE=1 means exactly one of the choices that replaced
-        # it, and dropping it would switch off a gauge somebody is looking at
-        # with no error and nothing to search for.
+        # An option with no meaning is correct to ignore. But
+        # TEMPERATURE_GAUGE=1 means one of the entries that replaced it. A
+        # drop of that value turns off a gauge that a user reads, and it gives
+        # no message and no text to search for.
         path = self._write("LED_COUNT=17\nTEMPERATURE_GAUGE=1\n")
         self.assertEqual(config.load(path)["RAINBOW_SHOWS"], "temperature")
 
@@ -476,8 +476,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.DEFAULTS[key], notify.STYLE_INHERIT, key)
 
     def test_following_the_general_shape_is_not_itself_a_shape(self):
-        # "default" is stored in the same field as a shape name, so a shape
-        # called that would be unreachable - and nobody would know why.
+        # The field holds "default" and also a shape name. A shape with that
+        # name is therefore unreachable, and no message gives the reason.
         from steamos_utility_center import notify
         self.assertNotIn(notify.STYLE_INHERIT, notify.STYLES)
 
@@ -525,11 +525,11 @@ class TestFirmwareConsistency(unittest.TestCase):
 class MisconfiguredDeviceTest(unittest.TestCase):
     """DEVICE pointing at something that is not the shim must not spin.
 
-    Every way to get this wrong leaves the device readable, so poll() returns
-    at once every time and the main loop has nothing to wait on. Measured
-    before the backoff: 49k turns a second against a device that reads as
-    garbage, and 288k against one that reads as empty - the second in complete
-    silence, because an empty read raised nothing to log.
+    Each incorrect device is still readable, so poll() returns at once each
+    time and the main loop waits for nothing. A measurement before the backoff
+    gave 49k passes each second against a device with unusable content, and 288k
+    passes against a device with no content. The second case gave no message,
+    because an empty read raises no exception.
     """
 
     def _turns_per_second(self, device, window=0.4):
@@ -559,8 +559,8 @@ class MisconfiguredDeviceTest(unittest.TestCase):
         thread.join(timeout=10)
         return len(turns) / (time.monotonic() - started)
 
-    # Comfortably above FPS, far below a spin. FPS only applies once a
-    # snapshot has been read; neither device here ever yields one.
+    # Above FPS, and much below a loop with no wait. FPS applies after the
+    # first snapshot, and neither device here gives one.
     CEILING = 500
 
     def test_a_device_that_reads_as_garbage_does_not_spin(self):
@@ -583,12 +583,12 @@ if __name__ == "__main__":
 class RefusedConfigurationTest(unittest.TestCase):
     """A file the service will not accept must stop it, not spin it.
 
-    Found on hardware: one hand-written line naming an option that does not
-    exist (WARNING_COLOR, by analogy with the two colours that are settings)
-    put the unit in a restart loop. Every three seconds it started, refused
-    the file and died, which buried the one line saying which option was
-    wrong under forty lines of systemd noise - and the installer, glancing
-    once at is-active, called it running.
+    A machine gave this result: one manual line with an option that does not
+    exist put the unit in a restart loop. The line was WARNING_COLOR, from the
+    names of the two colours that are settings. Each three seconds the unit
+    started, refused the file and stopped. Forty lines of systemd messages then
+    covered the one line with the incorrect option. The installer read
+    is-active one time and reported the service as running.
     """
 
     def _run_with(self, text):
@@ -603,10 +603,10 @@ class RefusedConfigurationTest(unittest.TestCase):
         return service.main(["--config", path, "--check-config"])
 
     def test_an_unknown_option_is_refused_with_the_documented_code(self):
-        # A typo, not WARNING_COLOR: that one is in config.RETIRED, which is
-        # the other half of the same incident. An option we withdrew is read
-        # and ignored on purpose - the loop it caused is worth preventing at
-        # both ends, but only one of them is the reader's mistake.
+        # A spelling error, and not WARNING_COLOR. That name is in
+        # config.RETIRED, which is the second half of the same fault. The
+        # reader ignores a withdrawn option on purpose. Both ends must prevent
+        # the loop, and only one end is an error of the reader.
         code = self._run_with("LED_COUNT=17\nLED_COUTN=60\n")
         self.assertEqual(code, service.CONFIG_REFUSED_EXIT)
 
@@ -640,9 +640,10 @@ class RefusedConfigurationTest(unittest.TestCase):
 class ConfigRewritingTest(unittest.TestCase):
     """Changing settings must not shred the file explaining them.
 
-    The shipped config is mostly comments - what each option does, why the
-    baud rate is what it is. A control panel that rewrites it from parsed
-    values would leave a bare list of assignments behind.
+    The configuration file of the release is mostly comments. They give the
+    function of each option, and the reason for the baud rate. A control panel
+    that writes it again from the parsed values leaves a list of assignments
+    only.
     """
 
     SAMPLE = (
@@ -712,10 +713,10 @@ class ConfigRewritingTest(unittest.TestCase):
     def test_an_option_named_twice_is_rewritten_everywhere(self):
         """A duplicate must not outrank the change.
 
-        Hand-editing is how this file is meant to be used, so a key can end up
-        in it twice - and parse_file() takes the last one. Rewriting only the
-        first left the stale duplicate to win, with the panel reporting success
-        and the service quietly keeping the old value.
+        A user edits this file manually, so a key can occur twice.
+        parse_file() takes the last one. A write to the first one only lets
+        the old second line win. The panel then reports a success, and the
+        service keeps the old value with no message.
         """
         doubled = ("LED_COUNT=17\n"
                    "MAX_BRIGHTNESS=255\n"
@@ -835,9 +836,10 @@ class StandbyTest(unittest.TestCase):
         self.assertIsNone(runner.standby_since)
 
     def test_the_words_are_not_flashes(self):
-        # They travel on the notification pipe, which is otherwise a colour or
-        # a kind - so they have to be taken off it before the overlay sees
-        # them, or "standby" would be logged as an unparseable colour.
+        # They come through the notification pipe, and that pipe otherwise
+        # carries a colour or a type. So this code must remove them before the
+        # overlay reads them. Without that, the log reports "standby" as a
+        # colour that it cannot parse.
         runner = self._runner()
         flashed = []
         runner.overlay.trigger = lambda word, now: flashed.append(word)
@@ -870,25 +872,24 @@ class StandbyQuietTest(unittest.TestCase):
                effect=None):
         """Run the real loop against a FIFO fed with snapshots.
 
-        `effect` is what Steam is asking for, which only matters to a test
-        about Game Mode: the default is one still colour, and a rainbow is the
-        one effect whose meaning another setting can change.
+        `effect` is the request of Steam, and only a test about Game Mode needs
+        it. The default is one still colour. The rainbow is the one effect where
+        another setting changes the meaning.
 
-        `every` is how long the feed waits between two of them, which is what
-        a test about the frame rate needs to vary: nothing about the loop's
-        own rate shows while the device is written to faster than it.
+        `every` is the wait of the feed between two snapshots. A test about the
+        frame rate changes this value. The rate of the loop is not visible while
+        the feed writes the device faster than that rate.
 
-        `seq` pins the sequence number, which is how the module says whether
-        anything has written to it: pinned at UNTOUCHED_SEQ it never has, and
-        that is a boot before Steam starts. Left out, the number climbs from
-        just above it, which is an ordinary session.
+        `seq` fixes the sequence number, and the module uses that number to report
+        a write. At UNTOUCHED_SEQ no program wrote to it, and that is a boot before
+        Steam starts. Without this argument the number counts up from a value above
+        it, and that is a normal session.
 
-        `writes` stops the feed after that many snapshots, holding the device
-        open. A device that is written to every 20ms wakes the loop every
-        20ms, so the loop's own choice of frame rate never shows - and that
-        choice is the only thing some of this is about. One write and then
-        silence is also what a real machine does: Steam writes when a setting
-        changes, not sixty times a second.
+        `writes` stops the feed after that number of snapshots and keeps the device
+        open. A device with a write each 20 ms wakes the loop each 20 ms, so the
+        rate of the loop is not visible. Some tests here examine only that rate.
+        One write and then no write is also the behaviour of a real machine: Steam
+        writes at a change of a setting, and not sixty times each second.
         """
         from steamos_utility_center import shim as shim_module
 
@@ -957,10 +958,10 @@ class StandbyQuietTest(unittest.TestCase):
                          "one frame is all it takes to end the standby")
 
     def test_it_lets_go_after_half_a_minute_of_being_awake(self):
-        # If the resume hook never runs - removed, or an earlier hook failed -
-        # the bar must not breathe at a machine that is plainly in use.
-        # monotonic() does not advance across a suspend, so this cannot fire
-        # during a real one however long it lasts.
+        # The resume hook can fail to run: a user removed it, or an earlier
+        # hook failed. The bar must then not breathe at a machine in use.
+        # monotonic() does not count during a suspend, so this cannot start
+        # during a real suspend of each length.
         runner = self._runner()
         runner._enter_standby()
         runner.standby_since -= service.STANDBY_MAX_AWAKE + 1
@@ -1010,8 +1011,9 @@ class StartupBreathTest(StandbyQuietTest):
         self.assertEqual(runner.link.standby, [])
 
     def test_a_flash_still_gets_through(self):
-        # A notification before Steam turns up has to be shown - and since
-        # frames end the ESP's breath, it has to be asked for again after.
+        # A notification before the start of Steam must reach the bar. A frame
+        # also ends the breath of the ESP, so this code must request that
+        # breath again at the end.
         runner = self._runner()
         runner.overlay.trigger("achievement", time.monotonic())
         self._drive(runner, seconds=0.6, seq=service.UNTOUCHED_SEQ)
@@ -1069,10 +1071,10 @@ class FrameRateTest(StandbyQuietTest):
     def test_a_quiet_device_still_gets_its_heartbeat_and_no_more(self):
         """The other end, and the one a first attempt at this broke.
 
-        The firmware blanks the strip if the host goes quiet, so an unchanging
-        scene still has to be resent - at IDLE_FPS, which is the whole of that
-        setting. Cutting the wait short whenever a frame was due turned that
-        into sixty a second.
+        The firmware clears the strip when the host stops. So the loop must send
+        a scene with no change again, at IDLE_FPS. That is the complete purpose
+        of the setting. A shorter wait at each due frame made that sixty frames
+        each second.
         """
         runner = self._runner(FPS=60, IDLE_FPS=4)
         self._drive(runner, seconds=1.2, writes=1)
@@ -1139,23 +1141,23 @@ class DesktopSceneTest(StandbyQuietTest):
         self.assertEqual(self._pixel(runner), self.STEAM_GREEN)
 
     def test_a_scene_comes_up_without_waiting_for_a_game_mode_session(self):
-        # A machine booted into Desktop Mode has a shim nobody has written to,
-        # and the loop leaves that to the ESP's startup breath. There is
-        # something to show now, so it is shown - otherwise the scene would
-        # only ever appear after the first trip through Game Mode.
+        # A machine that starts in Desktop Mode has a shim with no write, and
+        # the loop leaves that condition to the startup breath of the ESP.
+        # There is now a scene to show, so the loop shows it. Without this
+        # code, the scene appears only after the first pass through Game Mode.
         runner = self._runner()
         self._drive(runner, seq=service.UNTOUCHED_SEQ)
         red, green, blue = self._pixel(runner)
         self.assertEqual((red, green, blue), (0, 0, 255))
 
     def test_but_not_in_the_middle_of_the_boot(self):
-        """Reported: the boot effect, the scene, the boot effect, then Steam.
+        """A user reported this sequence: boot effect, scene, boot effect, Steam.
 
-        This service is up before the session that says which mode the machine
-        is in, so for a few seconds a boot into Game Mode looks exactly like a
-        desktop - and the scene took that as its cue. The startup breath is
-        what belongs there, and it should run through to Steam without the
-        scene appearing in the middle of it.
+        This service starts before the session that gives the mode of the
+        machine. For some seconds a boot into Game Mode therefore looks the same
+        as a desktop, and the scene started there. The startup breath belongs in
+        that time. It must run until Steam starts, and the scene must not
+        interrupt it.
         """
         runner = self._runner(uptime=8.0)
         self._drive(runner, seq=service.UNTOUCHED_SEQ)
@@ -1170,8 +1172,8 @@ class DesktopSceneTest(StandbyQuietTest):
         self.assertEqual(len(runner.link.standby), 1)
 
     def test_a_notification_still_covers_the_scene(self):
-        # A scene is what the bar does when nothing is happening; a flash is
-        # something happening. Red over blue, so neither could be mistaken.
+        # A scene is the behaviour of the bar with no event. A flash is an
+        # event. This uses red over blue, so the two are clear.
         runner = self._runner(NOTIFY=True, NOTIFY_WARNING=False,
                               NOTIFY_DURATION=2.0)
         runner.overlay.trigger("warning", time.monotonic())
@@ -1180,15 +1182,15 @@ class DesktopSceneTest(StandbyQuietTest):
                         "the flash never got over the scene")
 
     def test_the_scene_picks_its_own_effect_and_not_the_rainbow_slot_s(self):
-        """Reported: on the desktop the four should stand on their own.
+        """A user asked for the four effects as separate scenes on the desktop.
 
-        Through the loop rather than through the renderer, because the loop is
-        where the two answers meet: Game Mode's slot is a setting on the
-        renderer and the desktop's is a property of the scene, and only the
-        frame going out says which of them won.
+        This test uses the loop and not the renderer, because the loop holds both
+        answers. The slot of Game Mode is a setting of the renderer, and the
+        desktop scene is a property of the scene. Only the frame at the output
+        gives the answer that won.
 
-        Fire against aurora, with the slot set to neither, so a scene that
-        went on reading RAINBOW_SHOWS would draw the same bar for both.
+        This uses fire against aurora, with the slot at a third value. A scene
+        that still reads RAINBOW_SHOWS therefore draws the same bar for both.
         """
         frames = {}
         for scene in ("fire", "aurora", "rainbow"):
@@ -1196,17 +1198,16 @@ class DesktopSceneTest(StandbyQuietTest):
                                   MAPPING="stretch")
             self._drive(runner)
             self.assertTrue(runner.link.sent, "nothing was sent at all")
-            # The whole frame rather than its first LED. All three of these
-            # move, so the frame that happens to be last is whatever the clock
-            # said - and two effects can share one pixel at some instant
-            # without being remotely the same picture.
+            # The complete frame, and not its first LED. The three effects
+            # move, so the clock decides the last frame. Two effects can also
+            # have one equal pixel at one moment, with two different pictures.
             frames[scene] = runner.link.sent[-1]
         self.assertEqual(len(set(frames.values())), len(frames), frames)
 
     def test_a_game_mode_rainbow_still_shows_what_the_slot_holds(self):
-        # The other half. Nothing the desktop does may reach a snapshot Steam
-        # wrote, or the slot - which is the only way to have these effects in
-        # a game at all - would have stopped working.
+        # The second half. No desktop setting must reach a snapshot from
+        # Steam. Without that rule the slot stops, and the slot is the one
+        # method to use these effects in a game.
         held = self._runner(scene="fire", RAINBOW_SHOWS="aurora",
                             running="gamescope")
         plain = self._runner(scene="fire", RAINBOW_SHOWS="rainbow",
@@ -1217,16 +1218,16 @@ class DesktopSceneTest(StandbyQuietTest):
         self.assertNotEqual(held.link.sent[-1], plain.link.sent[-1])
 
     def test_the_frame_rate_follows_what_is_on_the_bar(self):
-        """Which is not what Steam last said, while a scene is up.
+        """The rate follows the scene and not the last state of Steam.
 
-        The idle rate exists for a scene that does not change, and Steam's
-        own last state is a still one here - so asked about that instead of
-        about what is being drawn, a desktop breath would be run at four
-        frames a second and stutter.
+        The idle rate is for a scene with no change. The last state of Steam here
+        is a still colour. A read of that state, and not of the current scene,
+        runs a desktop breath at four frames each second, and the breath then
+        moves in steps.
 
-        Driven from one write and then silence, because that is the only way
-        the loop's own choice of rate shows at all: a device written to every
-        20ms wakes it every 20ms whatever it decided.
+        This test uses one write and then no write. That is the one method that
+        shows the rate of the loop. A device with a write each 20 ms wakes the
+        loop each 20 ms, for each rate.
         """
         steam = shim.make_snapshot(shim.EFFECT_MANUAL)
         self.assertFalse(service.Runner(dict(

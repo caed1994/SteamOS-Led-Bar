@@ -48,11 +48,11 @@ class OverlayTest(unittest.TestCase):
         frame = self.overlay.apply(self.base, 100.5)
         self.assertNotEqual(frame, self.base)
         self.assertEqual(len(frame), 4 * 3)
-        # The achievement colour, on whichever LED is lit - taken from the
-        # table rather than spelled out here, so changing what an achievement
-        # looks like is one edit and not a hunt through the tests. Compared by
-        # ratio: this is mid-flash, so every channel is scaled by the envelope
-        # and only their proportions survive.
+        # The achievement colour, on each lit LED. This comes from the table
+        # and is not written here. A change to the look of an achievement is
+        # then one edit, and not a search through the tests. The comparison
+        # uses the ratio, because this is the middle of a flash. The envelope
+        # scales each channel there, and only the proportions stay.
         lit = max(range(4), key=lambda led: frame[led * 3])
         shown = frame[lit * 3:lit * 3 + 3]
         wanted = notify.KINDS[notify.KIND_ACHIEVEMENT]
@@ -129,9 +129,9 @@ class OverlayTest(unittest.TestCase):
 class QueueTest(unittest.TestCase):
     """Two things happening at once are two things to say.
 
-    Before this, a flash replaced whatever was running. An achievement and a
-    message land in the same tick often enough - the watcher checks both on
-    the same poll - and the second one silently ate the first.
+    Before this code, a flash replaced the running flash. An achievement and a
+    message arrive in the same tick often, because the watcher reads both on
+    one poll. The second flash then removed the first one with no message.
     """
 
     def setUp(self):
@@ -147,11 +147,11 @@ class QueueTest(unittest.TestCase):
     def _looks_like(self, colour, kind):
         """Whether a lit pixel is this kind's colour, whatever its brightness.
 
-        Against the table rather than by hand-written channel inequalities:
-        "red > green > blue" identified gold, and went on passing for anything
-        else warm - then stopped meaning anything at all when the achievement
-        colour moved to a yellow, where red and green are equal. A ratio holds
-        whichever colour the table names next.
+        This compares against the table and not with a rule on the channels. The
+        rule "red > green > blue" identified gold, and it also passed for each
+        other warm colour. It then had no meaning after the achievement colour
+        became a yellow, where red and green are equal. A ratio works for each
+        colour that the table gives.
         """
         wanted = notify.KINDS[kind]
         if max(colour) == 0:
@@ -177,8 +177,8 @@ class QueueTest(unittest.TestCase):
         self.assertIsNone(self.overlay.frame(4.5), "and then the bar is free")
 
     def test_the_bar_is_claimed_while_anything_is_waiting(self):
-        # The service drops to the idle frame rate when nothing is animating,
-        # which would show the queue as a stutter.
+        # The service moves to the idle frame rate with no animation, and the
+        # queue then moves in visible steps.
         self.overlay.trigger("achievement", 0.0)
         self.overlay.trigger("message", 0.0)
         self.overlay.frame(2.1)
@@ -209,9 +209,10 @@ class QueueTest(unittest.TestCase):
 class RepeatGapTest(unittest.TestCase):
     """Someone typing at you once a second must not hold the bar lit.
 
-    The watcher already collapses a burst into one trigger per poll, but the
-    polls keep coming - and each one used to restart the flash, so the bar
-    blinked out and regrew every second for as long as the chat lasted.
+    The watcher already reduces a group of events to one trigger for each
+    poll. But the polls continue, and each poll started the flash again. The
+    bar therefore went dark and grew again each second, for the complete time
+    of the chat.
     """
 
     def setUp(self):
@@ -259,9 +260,9 @@ class RepeatGapTest(unittest.TestCase):
 class ConfiguredColourTest(unittest.TestCase):
     """The trigger word stays the interface; which colour it means is local.
 
-    Callers ask for "achievement" - the watcher, a launcher hook, the panel's
-    test button - so the colour has to be settled here rather than by every
-    one of them.
+    A caller asks for "achievement". The watcher, a launcher hook and the test
+    button of the panel are such callers. So this module decides the colour, and
+    each caller does not.
     """
 
     def _middle(self, overlay):
@@ -299,10 +300,11 @@ class ConfiguredColourTest(unittest.TestCase):
 
 
 class ConfiguredStyleTest(unittest.TestCase):
-    """Each kind may flash in a shape of its own; the rest follow the general.
+    """Each type can have its own shape. The other types use the default.
 
-    Colour alone runs out when two notifications are the same colour, or when
-    an achievement should feel like more of an event than a friend logging in.
+    The colour alone is not sufficient for two notifications with one colour.
+    It is also not sufficient when an achievement needs more attention than a
+    friend who comes online.
     """
 
     def _overlay(self, **kwargs):
@@ -320,24 +322,24 @@ class ConfiguredStyleTest(unittest.TestCase):
         self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
 
     def test_an_arbitrary_colour_follows_the_general_one(self):
-        # A colour is nobody's kind, so there is nothing to look up - it must
-        # not fall through to whatever the last configured shape was.
+        # A colour has no type, so there is no shape to read. The code must
+        # not use the last configured shape.
         overlay = self._overlay(styles={"achievement": notify.STYLE_PULSE})
         overlay.trigger("#00ff88", 0.0)
         self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
 
     def test_a_shape_nothing_implements_is_dropped_at_the_door(self):
-        # Deliberately not a shape name anyone might add later: this test is
-        # about a value the service has never heard of, and it stopped being
-        # about that the day "sparkle" became real.
+        # This is not a shape name that a later version can add, on purpose.
+        # This test is about a value that the service does not know. On the
+        # day that "sparkle" became a real shape, the test lost its subject.
         overlay = self._overlay(styles={"achievement": "kaleidoscope"})
         overlay.trigger("achievement", 0.0)
         self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
         self.assertNotIn("achievement", overlay.styles)
 
     def test_a_queued_flash_keeps_its_own_shape(self):
-        # The queue holds the kind, not the shape, so the lookup has to happen
-        # when it finally starts - not when it was put in line.
+        # The queue holds the type and not the shape. So the code reads the
+        # shape at the start of the flash, and not at the queue step.
         overlay = self._overlay(styles={"message": notify.STYLE_PULSE})
         overlay.trigger("achievement", 0.0)
         overlay.trigger("message", 0.0)
@@ -376,11 +378,11 @@ class ConfiguredStyleTest(unittest.TestCase):
 
 
 class ShapeInTheTriggerTest(unittest.TestCase):
-    """"comet:#1a9fff" - one flash in that shape, without configuring it.
+    """Accepts "comet:#1a9fff": one flash in that shape, with no setting.
 
-    Choosing between five shapes by writing each into the config and
-    restarting the service is the wrong way round, so a trigger may name the
-    shape it wants for itself.
+    A user compares five shapes. A write of each shape into the configuration,
+    with a restart of the service, is a slow method. So a trigger can give the
+    shape itself.
     """
 
     def _overlay(self, **kwargs):
@@ -405,8 +407,9 @@ class ShapeInTheTriggerTest(unittest.TestCase):
         self.assertEqual(overlay.current.style, notify.STYLE_BLOOM)
 
     def test_an_unknown_prefix_is_not_a_prefix(self):
-        # It stays part of the colour, which then fails to parse - so nonsense
-        # is refused rather than silently flashed in the default shape.
+        # It stays a part of the colour, and the parser then refuses that
+        # colour. So the service refuses a bad value and does not flash it in
+        # the default shape.
         overlay = self._overlay()
         self.assertFalse(overlay.trigger("kaleidoscope:#1a9fff", 0.0))
         self.assertIsNone(overlay.current)
@@ -416,9 +419,9 @@ class ShapeInTheTriggerTest(unittest.TestCase):
         self.assertFalse(overlay.trigger("comet:", 0.0))
 
     def test_two_shapes_of_one_colour_are_two_triggers(self):
-        # Same colour, so without this the second would be read as a repeat of
-        # the first and dropped by the quiet time - which would make the
-        # buttons on the Test tab look broken.
+        # The two have one colour. Without this code, the service reads the
+        # second as a repeat of the first and the quiet time removes it. The
+        # buttons on the Test tab then look broken.
         overlay = self._overlay()
         self.assertTrue(overlay.trigger("comet:#1a9fff", 0.0))
         self.assertTrue(overlay.trigger("pulse:#1a9fff", 0.0))
@@ -457,9 +460,10 @@ class ShapeInTheTriggerTest(unittest.TestCase):
 class FixedWarningTest(unittest.TestCase):
     """A warning looks the same everywhere, and nothing can change that.
 
-    The other three are yours to arrange - which is fine, you know what your
-    own bar means. A warning is the one you must not have to recognise, so it
-    is red and the alarm shape on every machine, whatever the settings say.
+    A user sets the other three types. That is correct, because the user knows
+    the meaning of that bar. A warning is the one type that each user must
+    recognise. So it is red, in the alarm shape, on each machine, for each
+    setting.
     """
 
     def _overlay(self, **kwargs):
@@ -496,9 +500,10 @@ class FixedWarningTest(unittest.TestCase):
 class BrightnessCeilingTest(unittest.TestCase):
     """A flash has to respect MAX_BRIGHTNESS, and for more than looks.
 
-    People cap it because the strip runs off the ESP's USB rail, and a flash
-    is the worst case there: the whole bar lit at once. Measured before this
-    was fixed - a capped strip rendered at 80 and flashed at 254.
+    A user sets a limit because the strip takes its current from the USB rail
+    of the ESP. A flash is the highest load there, because the complete bar is
+    lit. A measurement before the correction gave this: a strip with a limit
+    rendered at 80 and flashed at 254.
     """
 
     def _peak(self, cap, kind="achievement"):
@@ -532,9 +537,10 @@ class BrightnessCeilingTest(unittest.TestCase):
         self.assertEqual(self._peak(0), 0)
 
     def test_no_floor_is_imposed_the_way_the_renderer_imposes_one(self):
-        # MIN_BRIGHTNESS is a floor under what Steam asked for, and a flash
-        # asks for nothing. It also has to fade to nothing at both ends, or
-        # two in a row would run together - so the overlay takes no floor.
+        # MIN_BRIGHTNESS is a minimum for the value of Steam, and a flash asks
+        # for no value. A flash must also go to zero at both ends. Without
+        # that, two flashes in sequence become one. So the overlay uses no
+        # minimum.
         overlay = notify.NotificationOverlay(duration=2.0, led_count=17)
         overlay.trigger("achievement", 0.0)
         self.assertEqual(max(overlay.frame(0.0)), 0, "it starts from nothing")
@@ -551,8 +557,8 @@ class ConfiguredOverlayTest(unittest.TestCase):
         return settings
 
     def test_a_shape_left_at_the_default_is_not_passed_on(self):
-        # "default" is the absence of a choice, so it must not arrive at the
-        # overlay as a shape name - there is none by that name to draw.
+        # "default" means no selection, so it must not reach the overlay as a
+        # shape name. There is no shape with that name to draw.
         from steamos_utility_center import service
         self.assertEqual(service.notification_styles(self._config()), {})
 
@@ -578,9 +584,10 @@ class ConfiguredOverlayTest(unittest.TestCase):
             self.assertIn(kind, notify.KINDS)
 
     def test_every_kind_is_either_configurable_or_deliberately_fixed(self):
-        # And the other way round: a trigger word that is in neither table is
-        # one nobody decided about, which is how warning started out - it had
-        # no options because it had been forgotten, not because it was fixed.
+        # And in the other direction: a trigger word in neither table is a
+        # word with no decision. The warning type started in that condition.
+        # It had no options because nobody added them, and not because it is
+        # fixed.
         from steamos_utility_center import config as config_module
         configurable = {kind for kind, _prefix
                         in config_module.CONFIGURABLE_KINDS}
@@ -699,8 +706,8 @@ class BloomShapeTest(unittest.TestCase):
         self.assertGreater(levels[0], 240)
 
     def test_breathes_rather_than_blinking(self):
-        # A hard off reads as a blink; the bar should look like it takes a
-        # breath, so the dip stays visibly lit.
+        # A step to zero reads as a blink. The bar must look like a breath, so
+        # the low point stays visible.
         low = self._levels(self.BREATH_LOW)
         self.assertGreater(min(low), 0, "the breath must not switch off")
         self.assertLess(max(low), 80, "and it has to dip noticeably")
@@ -730,8 +737,8 @@ class BloomShapeTest(unittest.TestCase):
             self.assertEqual(levels, levels[::-1], "asymmetric at %.2f" % fraction)
 
     def test_fades_out_rather_than_cutting_off(self):
-        # The retract runs to zero exactly at the end, so the last frame is a
-        # faint glow in the middle - not a hard switch-off.
+        # The retract reaches zero at the end, so the last frame is a weak
+        # light in the middle and not a step to zero.
         self.assertLess(max(self._levels(0.99)), 60)
         self.assertGreater(max(self._levels(0.90)), 0)
 
@@ -775,15 +782,15 @@ class ShapeTestCase(unittest.TestCase):
 
 
 class DoubleFlashShapeTest(ShapeTestCase):
-    """Blink, blink, wait - and again, at the same speed however long it runs."""
+    """Blinks twice, waits, and repeats at the same rate for each length."""
 
     STYLE = notify.STYLE_DOUBLE_FLASH
 
     def _lit_spans(self, overlay, duration, fps=60):
         """(start, end) in seconds of each stretch the bar is lit, as rendered.
 
-        Sampled at the frame rate the service actually runs while a flash is
-        on - anything shorter than a frame is not a blink, it is a rumour.
+        This samples at the frame rate of the service during a flash. A light
+        that is shorter than one frame is not a blink.
         """
         spans, start = [], None
         for step in range(int(duration * fps)):
@@ -821,8 +828,8 @@ class DoubleFlashShapeTest(ShapeTestCase):
             self.assertLess(end - start, 0.2, "that is a pulse, not a blink")
 
     def test_a_longer_flash_means_more_pairs_not_slower_ones(self):
-        # The point of measuring in seconds: a strobe that slows down when the
-        # notification is made longer has stopped being a strobe.
+        # This is the reason for the measurement in seconds. A strobe that
+        # becomes slower with a longer notification is no longer a strobe.
         short = self._lit_spans(self._overlay(duration=3.5), 3.5)
         long = self._lit_spans(self._overlay(duration=10.0), 10.0)
         self.assertGreater(len(long), len(short))
@@ -904,9 +911,9 @@ class CometShapeTest(ShapeTestCase):
                            "and it has to fade away from the head")
 
     def test_nothing_is_lit_ahead_of_the_head(self):
-        # Bar the front edge itself, which is deliberately soft: a hard step
-        # looks blocky on a short strip, so the LED the head is arriving at is
-        # already partly lit. Beyond that it must be dark.
+        # But not the front edge, which is soft on purpose. A hard step looks
+        # rough on a short strip, so the next LED of the head is already
+        # partly lit. Each LED after that must be dark.
         width = max(notify.COMET_MIN_HEAD, notify.COMET_HEAD * self.LEDS)
         overlay = self._overlay()
         levels = self._levels(overlay, self.DURATION * 0.5)
@@ -954,7 +961,7 @@ class CometShapeTest(ShapeTestCase):
 
 
 class AlternateShapeTest(ShapeTestCase):
-    """Two halves in antiphase - the shape that says something is wrong."""
+    """Two halves in opposite phase. This shape reports a fault."""
 
     STYLE = notify.STYLE_ALTERNATE
 
@@ -1099,8 +1106,8 @@ class SparkleShapeTest(ShapeTestCase):
         self.assertEqual(self._levels(short, 0.4), self._levels(long, 0.4))
 
     def test_the_same_moment_draws_the_same_frame(self):
-        # Spread by arithmetic rather than by a random draw, so a dropped
-        # frame resumes where it would have been.
+        # The positions come from arithmetic and not from a random value, so
+        # the effect continues correctly after a lost frame.
         self.assertEqual(self._levels(self._overlay(), 1.234),
                          self._levels(self._overlay(), 1.234))
 
