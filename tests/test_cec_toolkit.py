@@ -204,7 +204,7 @@ class InstalledAndRemovedTest(unittest.TestCase):
 
 
 class FixedHereTest(unittest.TestCase):
-    """The five fixes, each of which was a workaround somewhere else first.
+    """The six fixes, each of which was a workaround somewhere else first.
 
     Checked because each one is a single line or two in a file nobody reads
     often, and each one silently un-breaks a whole feature. A revert that
@@ -259,6 +259,64 @@ class FixedHereTest(unittest.TestCase):
         helper = self._read("bin", "steamos-cec-usb-wake-apply")
         self.assertIn("bInterfaceClass", helper)
         self.assertIn("has_bluetooth_interface", helper)
+
+    def test_the_standby_before_sleep_runs_once(self):
+        """The unit or the system-sleep hook, and never both.
+
+        The switch installed both, and both run the same helper. systemd ran
+        the unit before sleep.target and then the hook from
+        systemd-suspend.service, so each suspend sent the standby twice and
+        cost twice the time. A shutdown ran the unit only, because systemd
+        runs no system-sleep hook there.
+        """
+        control = self._read("bin", "steamos-cec-power-standby-control")
+        # The unit is the one that stays: it covers a suspend and a shutdown.
+        self.assertIn('systemctl enable "$UNIT"', control)
+        self.assertNotIn('ln -sf "$HELPER" "$HOOK"', control)
+        unit = self._read("systemd", "system",
+                          "steamos-cec-before-sleep.service")
+        self.assertIn("WantedBy=sleep.target shutdown.target", unit)
+
+    def test_a_hook_from_an_earlier_install_is_taken_away(self):
+        """Or the second run continues on a machine that updates.
+
+        Three places remove it: the switch, so turning the feature on repairs
+        the machine; the installer, so an update repairs it without the
+        switch; and the uninstaller, which named a path this toolkit never
+        wrote and left the hook as a symlink to a helper that was gone.
+        """
+        hook = "/etc/systemd/system-sleep/steamos-cec-before-sleep"
+        control = self._read("bin", "steamos-cec-power-standby-control")
+        self.assertEqual(control.count('rm -f "$HOOK"'), 2, "on and off")
+        self.assertIn('HOOK="%s"' % hook, control)
+        for name in ("install.sh", "uninstall.sh"):
+            self.assertIn("rm -f %s" % hook, self._read(name), name)
+
+    def test_the_settle_time_is_not_two_seconds_on_every_suspend(self):
+        """It is on each suspend and each shutdown, so it is short.
+
+        cec-ctl returns once the adapter sent the message, and a television
+        acknowledges CEC in milliseconds. The wait is for the set to act on
+        it before the HDMI link goes away.
+        """
+        helper = self._read("bin", "steamos-cec-before-sleep")
+        self.assertIn("TV_STANDBY_SETTLE_SECONDS:-0.5", helper)
+        # And named in the file, or nobody can raise it for a slow set.
+        self.assertIn("TV_STANDBY_SETTLE_SECONDS",
+                      self._read("config",
+                                 "steamos-cec-toolkit.conf.example"))
+
+    def test_the_bus_calls_cannot_hold_the_suspend(self):
+        """busctl waits 25 seconds for a method call by default.
+
+        Two calls go to the cecd of Steam. A daemon that is not there fails at
+        once, and a daemon that stopped answering held the suspend for 50
+        seconds. The calls are an attempt: the cec-ctl messages below them do
+        the same work.
+        """
+        helper = self._read("bin", "steamos-cec-before-sleep")
+        self.assertEqual(helper.count("busctl --user --timeout="), 2)
+        self.assertNotIn("busctl --user call", helper)
 
 
 class UsbWakeMatchTest(unittest.TestCase):

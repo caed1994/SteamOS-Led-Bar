@@ -93,6 +93,11 @@ CEC_STANDBY_OPCODE=0x36
 #                   after CEC Standby, such as some Philips Android/Titan OS TVs.
 CEC_SLEEP_TV_ACTION=standby
 
+# How long to wait after the last CEC message before the machine suspends or
+# shuts down. This is on every suspend and every shutdown, so it is short.
+# Raise it for a TV that misses the standby.
+TV_STANDBY_SETTLE_SECONDS=0.5
+
 # Optional input inactive suspend service.
 # Suspends SteamOS after this CEC source is no longer active for the delay.
 INPUT_INACTIVE_SUSPEND_DELAY_SECONDS=60

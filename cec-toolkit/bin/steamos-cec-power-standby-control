@@ -6,14 +6,25 @@ HELPER="/var/lib/steamos-cec-toolkit/steamos-cec-before-sleep"
 UNIT_FILE="/etc/systemd/system/$UNIT"
 HOOK="/etc/systemd/system-sleep/steamos-cec-before-sleep"
 
+# The unit only, and no system-sleep hook.
+#
+# This switch installed both before, and both run the same helper. The unit is
+# WantedBy=sleep.target shutdown.target, and the hook is a program in
+# /etc/systemd/system-sleep. On a suspend systemd started the unit before
+# sleep.target and then ran the hook from systemd-suspend.service, so the
+# helper sent the same standby twice and each suspend cost twice its time.
+#
+# The unit is the one that stays: it covers a suspend and a shutdown, and the
+# hook covers a suspend only. "on" also removes a hook from an earlier install,
+# or the second run continues after an update.
+
 case "${1:-}" in
   on)
     if [[ ! -x "$HELPER" || ! -f "$UNIT_FILE" ]]; then
       echo "missing $HELPER or $UNIT_FILE" >&2
       exit 1
     fi
-    install -d -m 0755 /etc/systemd/system-sleep
-    ln -sf "$HELPER" "$HOOK"
+    rm -f "$HOOK"
     systemctl daemon-reload
     systemctl enable "$UNIT"
     ;;
@@ -25,6 +36,8 @@ case "${1:-}" in
   status)
     active="$(systemctl is-active "$UNIT" 2>/dev/null || true)"
     enabled="$(systemctl is-enabled "$UNIT" 2>/dev/null || true)"
+    # Reported because a hook on disk is now a leftover of an older install
+    # and not a part of this feature. See the note above.
     hook_enabled=false
     [[ -x "$HOOK" || -L "$HOOK" ]] && hook_enabled=true
     printf '{"active":"%s","enabled":"%s","is_active":%s,"is_enabled":%s,"hook_enabled":%s}\n' \

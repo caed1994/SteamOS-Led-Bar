@@ -176,6 +176,10 @@ sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-permissions-apply" \
   /var/lib/steamos-cec-toolkit/steamos-cec-permissions-apply
 sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-before-sleep" \
   /var/lib/steamos-cec-toolkit/steamos-cec-before-sleep
+# An earlier version put the same helper in /etc/systemd/system-sleep as well,
+# and a suspend then ran it twice. The unit covers a suspend and a shutdown, so
+# the hook goes. See bin/steamos-cec-power-standby-control.
+sudo rm -f /etc/systemd/system-sleep/steamos-cec-before-sleep
 sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-resume-wake" \
   /var/lib/steamos-cec-toolkit/steamos-cec-resume-wake
 sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-usb-wake-apply" \

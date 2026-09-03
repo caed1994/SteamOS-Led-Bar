@@ -24,7 +24,8 @@ Center to run. The panel is one front end, and a terminal is another.
 
 ## What is different here
 
-Five fixes, each of which was a workaround in the panel's repository first.
+Six fixes. The first five were a workaround in the panel's repository
+before this fork. The sixth came from a report after it.
 
 | What was wrong | What it did | Fixed in |
 | --- | --- | --- |
@@ -33,6 +34,7 @@ Five fixes, each of which was a workaround in the panel's repository first.
 | `steamos-cec-permissions.service` runs at `multi-user.target` and the adapter is often not enumerated yet, so it repairs nothing and `cecd` gets `EACCES` - permanently, because it reads the device once. | CEC worked after a replug and not after a boot. | `--wait SECONDS` in `bin/steamos-cec-permissions-apply`, passed by the unit. The register helper also restarts `cecd` when nothing holds an address. |
 | The installer never ran `discover-cec`, so `CEC_PHYSICAL_ADDRESS` stayed empty - and every wake path skips `<Active Source>` when it is empty. | The television turned on and stayed on the input it was already on. | `bin/steamos-cec-register` writes it, at install time and at every session start. |
 | USB wake matched Bluetooth radios by **device** class. Every wifi-and-Bluetooth combo chip reports class `ef/02/01` (Interface Association) and puts its real classes in its interfaces, so the check could not match one. | `steamos-cec-usb-wake-apply` reported `"matched":0` and a controller could not wake the machine. | `bin/steamos-cec-usb-wake-apply` looks at `bInterfaceClass` as well. |
+| `power-standby` installed the standby helper twice: as `steamos-cec-before-sleep.service`, and as a program in `/etc/systemd/system-sleep`. systemd ran the unit before `sleep.target` and then the hook from `systemd-suspend.service`. | Each suspend sent the standby twice and waited for it twice, approximately 8.5 s. Each shutdown waited approximately 4.25 s, and a `cecd` that stopped answering added 50 s more. | The unit only, in `bin/steamos-cec-power-standby-control`. `TV_STANDBY_SETTLE_SECONDS` is 0.5 s and not 2 s, and the two `busctl` calls carry `--timeout=2`. |
 
 This fork changes nothing else. The tree does not follow the style of the
 SteamOS Utility Center, and it must stay that way. A small difference against

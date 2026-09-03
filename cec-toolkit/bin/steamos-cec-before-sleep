@@ -24,7 +24,14 @@ TV_LOGICAL_ADDRESS="${TV_LOGICAL_ADDRESS:-0}"
 CEC_PLAYBACK_LOGICAL_ADDRESS="${CEC_PLAYBACK_LOGICAL_ADDRESS:-4}"
 CEC_PHYSICAL_ADDRESS="${CEC_PHYSICAL_ADDRESS:-}"
 CEC_SLEEP_TV_ACTION="${CEC_SLEEP_TV_ACTION:-standby}"
-TV_STANDBY_SETTLE_SECONDS="${TV_STANDBY_SETTLE_SECONDS:-2}"
+# The wait after the last message, before the machine suspends or stops.
+#
+# cec-ctl returns when the adapter sent the message, so this is the time that
+# the television needs to act on it before the HDMI link goes away. A CEC
+# message is acknowledged in some milliseconds, and the default of 2 seconds
+# was on each suspend and each shutdown. Raise it in the configuration file
+# for a set that needs longer.
+TV_STANDBY_SETTLE_SECONDS="${TV_STANDBY_SETTLE_SECONDS:-0.5}"
 INPUT_INACTIVE_SUSPEND_MARKER="/run/user/$STEAMOS_CEC_UID/steamos-cec-input-inactive-suspend"
 
 case "$CEC_SLEEP_TV_ACTION" in
@@ -43,6 +50,12 @@ run_as_user_bus() {
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$STEAMOS_CEC_UID/bus" \
     "$@"
 }
+
+# busctl waits 25 seconds for a method call by default, and the two calls below
+# go to the cecd of Steam. A daemon that is not there fails at once. A daemon
+# that stopped answering held the suspend for 50 seconds, and the calls are an
+# attempt and not a requirement: the cec-ctl messages below do the same work.
+BUSCTL_TIMEOUT=2
 
 current_playback_logical_address() {
   local logical
@@ -120,14 +133,14 @@ fi
 echo "steamos-cec: running sleep/shutdown CEC action '$CEC_SLEEP_TV_ACTION'"
 
 if [[ "$CEC_SLEEP_TV_ACTION" == "standby" ]]; then
-  run_as_user_bus busctl --user call \
+  run_as_user_bus busctl --user --timeout="$BUSCTL_TIMEOUT" call \
     com.steampowered.CecDaemon1 \
     /com/steampowered/CecDaemon1/Daemon \
     com.steampowered.CecDaemon1.Daemon1 \
     Standby b true \
     || true
 
-  run_as_user_bus busctl --user call \
+  run_as_user_bus busctl --user --timeout="$BUSCTL_TIMEOUT" call \
     com.steampowered.CecDaemon1 \
     /com/steampowered/CecDaemon1/Devices/Cec0 \
     com.steampowered.CecDaemon1.CecDevice1 \
