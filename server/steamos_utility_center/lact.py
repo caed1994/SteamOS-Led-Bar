@@ -1,44 +1,55 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Talking to LACT, if it is there.
+"""Communication with LACT, when LACT is present.
 
-LACT is the Linux AMDGPU Controller Tool - somebody else's daemon that owns
-the graphics card's power limit, clocks, voltage and fans. None of that work
-is ours and none of it is vendored: unlike the CEC toolkit, there is nothing
-to install. Either lactd is running on this machine or it is not, and this
-module is what asks.
+LACT is the Linux AMDGPU Controller Tool. It is another person's daemon, and it
+owns the power limit, the clocks, the voltage and the fans of the graphics
+card.
 
-**How it is spoken to.** The daemon listens on a unix socket and speaks
-newline-delimited JSON: one request object in, one response object out. That
-is the whole protocol, so there is no client library here and none needed -
-`socket` and `json` from the standard library are the client.
+None of that work is ours, and no part of LACT is in this repository. Unlike
+the CEC toolkit, there is nothing to install. Either lactd runs on this machine
+or it does not, and this module asks the question.
+
+**The protocol.** The daemon listens on a unix socket. It speaks JSON with one
+document on each line: one request object in, one response object out.
+
+That is the full protocol. There is thus no client library here and none is
+necessary. `socket` and `json` from the standard library are the client.
 
     {"command": "list_devices"}
     {"status": "ok", "data": [{"id": "...", "name": "..."}]}
 
-**No password.** The daemon chowns its socket to the first of `wheel`, `sudo`
-that exists, and on SteamOS the desktop user is in `wheel` - so the panel
-talks to it as itself, the way the HDMI CEC switches do. A machine configured
-otherwise says so in /etc/lact/config.yaml, and a refused connection is
-reported rather than swallowed.
+**No password is necessary.** The daemon gives its socket to the first group
+of `wheel` and `sudo` that exists. On SteamOS the desktop user is in `wheel`.
 
-**Two things this module is careful about, both because getting them wrong is
-expensive on somebody else's machine.**
+The panel thus speaks to the daemon as the user, as the HDMI CEC switches do. A
+machine with a different configuration says so in /etc/lact/config.yaml, and
+this module reports a refused connection.
 
-A configuration change is *pending* until confirmed. `set_gpu_config` answers
-with a number of seconds, and unless `confirm_pending_config` arrives inside
-that window the daemon puts the old settings back. That is not an obstacle to
-work around - it is what makes a bad voltage a mistake instead of a machine
-that will not boot - so it is modelled here rather than hidden.
+**This module is careful about two things.** A mistake in either is expensive
+on another person's machine.
 
-And what a card can be told varies by card. The ranges for clocks and voltage
-come from the daemon's own report of that GPU, read leniently: the table is a
-tagged union whose shape depends on vendor and generation, so rather than
-model every variant this looks for the ranges wherever they are and draws
-nothing for a knob it cannot find. A hardcoded shape would be one that is
-wrong on somebody's hardware, which is the same rule the governor page
-follows.
+First, a configuration change is *pending* until a confirmation.
+`set_gpu_config` answers with a number of seconds. Without a
+`confirm_pending_config` inside that time, the daemon puts the old settings
+back.
+
+That is not an obstacle to remove. It is what makes a wrong voltage a mistake
+and not a machine that cannot boot. This module thus models it and does not
+hide it.
+
+Second, the values that a card accepts are different for each card. The ranges
+for the clocks and the voltage come from the daemon's own report of that GPU,
+and this module reads that report with care.
+
+The table is a tagged union. Its shape depends on the manufacturer and the
+generation. This module thus does not model each variant. It looks for the
+ranges in each position and draws no control that it cannot find a range for.
+
+A fixed shape is a shape that is wrong on somebody's hardware, and a wrong
+shape here is a control that writes a value the card refuses. The governor page
+follows the same rule.
 """
 
 from __future__ import annotations
@@ -47,69 +58,78 @@ import json
 import os
 import socket
 
-# Where the daemon listens. LACT can also be given a TCP port, which is off by
-# default and which this does not use: a panel on the machine has no reason to
-# reach across a network, and the socket is the path the permissions are set
-# up for.
+# Where the daemon listens. LACT can also open a TCP port. That port is off by
+# default and this module does not use it: a panel on the machine has no reason
+# to use a network, and the permissions are set for the socket.
 SOCKET_PATH = "/run/lactd.sock"
 
-# Every function below takes `path=None` and resolves it here rather than
-# writing `path=SOCKET_PATH` in its signature. A default in a signature is
-# bound once, when the module is imported - so the constant above could never
-# be changed afterwards, by a test or by anything else, and the change would
-# be silently ignored rather than refused.
+# Each function below takes `path=None` and reads the constant here. None of
+# them writes `path=SOCKET_PATH` in its signature.
+#
+# Python evaluates a default in a signature one time, at the import of the
+# module. The constant above is thus fixed after that. A test that changed it
+# would have no effect, and nothing would report the failure.
 
 
 def _where(path):
     return path or SOCKET_PATH
 
-# Long enough for a daemon that is busy applying something, short enough that
-# a wedged one does not hold the window. Every call here is one short round
-# trip to a local socket; a second is already generous.
+# Long enough for a daemon that applies a setting, and short enough that a
+# daemon that stops does not hold the window. Each call here is one short
+# exchange with a local socket, and one second is already sufficient.
 TIMEOUT = 2.0
 
-# What the confirm window defaults to when the daemon does not say. Its own
-# default is five seconds; this is only the fallback for an answer that has no
-# number in it, and it is short on purpose - guessing high would leave settings
-# applied that the daemon has already reverted.
+# The confirmation time to use when the daemon does not give one. The daemon's
+# own default is five seconds.
+#
+# This value is for an answer with no number in it, and it is deliberately
+# short. A high value leaves settings on the page that the daemon already put
+# back.
 CONFIRM_SECONDS = 5
 
-# The knobs this panel offers, in the order they are shown. Each names the key
-# in LACT's gpu config, the label, the unit, and where its range comes from -
-# because the range is the GPU's, not ours, and a knob whose range cannot be
-# read is one this machine does not have.
+# The controls that this panel offers, in the order of the display. Each entry
+# names the key in the gpu config of LACT, the label, the unit, and the source
+# of its range.
 #
-# Not the whole config. LACT's own window has per-power-state offset tables, VF
-# curves and firmware heuristics; those are for somebody sitting with it open
-# and a stress test running, and copying them here would be a second, worse
-# LACT. These four are the ones people actually reach for.
+# The range belongs to the GPU and not to this project. A control whose range
+# this module cannot read is a control that this machine does not have.
+#
+# This is not the full configuration. The window of LACT has offset tables for
+# each power state, VF curves and firmware settings. Those are for a person
+# with that window open and a stress test in progress. A copy of them here is a
+# second and worse LACT.
+#
+# These four controls are the controls that people use.
 POWER_CAP = "power_cap"
 
-# Where the clocks sit in the config document. A newer daemon keeps them at
-# the top beside the power cap; an older one gathered them into a block of
-# their own. Both are read, and which one is written is decided by the
-# document itself rather than here - see with_knob.
+# The position of the clocks in the configuration document. A new daemon keeps
+# them at the top, beside the power limit. An old daemon keeps them in a block
+# of their own.
+#
+# This module reads both. The document decides which one this module writes,
+# and this file does not. See with_knob.
 CLOCKS_BLOCK = "clocks_configuration"
 
-# The GPU clock offset is not one number in the document but a table of them,
-# one per power state. LACT's own window offers a single offset and writes it
-# into state 0, and this follows it.
+# The GPU clock offset in the document is not one number. It is a table of
+# numbers, one for each power state. The window of LACT offers one offset and
+# writes it into state 0, and this module does the same.
 GPU_CLOCK_OFFSET = "gpu_clock_offset"
 GPU_CLOCK_OFFSETS = "gpu_clock_offsets"
 OFFSET_STATE = "0"
 
 # (key, label, unit, where its range comes from, where its slider starts)
 #
-# The last field is which end of what the card reports *now* an untouched
-# slider sits at: "max" and "min" take that end of the reported range, "now"
-# the single value reported for it. Starting a maximum at the top of what the
-# card would *accept* instead reads an untouched card as one clocked higher
-# than it runs - which is how the VRAM slider came to say 1500 on a card
-# whose memory runs at 1259.
+# The last field gives the start position of a control that nobody has set. It
+# names an end of what the card reports *now*: "max" and "min" take that end of
+# the reported range, and "now" takes the one value that the card reports.
 #
-# sclk and sclk_offset are alternatives rather than a pair: an RDNA card
-# reports no absolute core-clock range and takes an offset instead, an older
-# one the other way about, and each card is offered whichever it reports.
+# A maximum that starts at the top of what the card would *accept* reads an
+# unchanged card as a card with a higher clock than it runs. That is how the
+# VRAM control showed 1500 on a card whose memory runs at 1259.
+#
+# sclk and sclk_offset are alternatives and not a pair. An RDNA card reports no
+# absolute core-clock range and takes an offset. An older card is the opposite.
+# Each card thus gets the control that it reports.
 KNOBS = (
     (POWER_CAP, "Power limit", "W", "power", "max"),
     ("max_core_clock", "Maximum GPU clock", "MHz", "sclk", "max"),
@@ -119,38 +139,41 @@ KNOBS = (
     ("min_memory_clock", "Minimum VRAM clock", "MHz", "mclk", "min"),
 )
 
-# The table kinds whose memory clock is shown at twice what it is stored at.
-# LACT's window does this because the memory is DDR and the table holds the
-# controller's own clock: a card reporting 1259 is shown as 2518, and 2400
-# typed into that window is stored as 1200. Doubled here too, so that two
-# windows open beside each other do not disagree about the same card by a
-# factor of two - and undone in with_knob, so what is written is what LACT
-# would have written.
+# The table kinds whose memory clock appears at two times the stored value.
+#
+# The window of LACT does this because the memory is DDR and the table holds
+# the clock of the controller. A card that reports 1259 appears as 2518, and a
+# value of 2400 in that window is stored as 1200.
+#
+# This module does the same. Two windows beside each other thus do not report
+# the same card with a factor of two between them. with_knob reverses the
+# factor, so this module writes what LACT writes.
 MEMORY_DOUBLED = ("rdna",)
 
-# How the fan is driven. LACT's own two, named the same.
+# How the fan is driven. These are LACT's own two modes, with its names.
 FAN_STATIC = "static"
 FAN_CURVE = "curve"
 
-# A curve nobody has set yet. Not LACT's default - it makes its own when fan
-# control is switched on - but what this panel draws while there is nothing to
-# draw, so the editor has points to move rather than an empty box.
+# A curve that nobody has set. This is not the default of LACT: LACT makes its
+# own curve when a person switches fan control on. This is what this panel
+# draws while there is no curve, so that the editor has points to move.
 STARTING_CURVE = {40: 0.3, 50: 0.35, 60: 0.5, 70: 0.75, 80: 1.0}
 
 
-# The fan settings that live in the card's *firmware* rather than in LACT's
-# own control loop - RDNA3 and newer. Each entry is
+# The fan settings in the *firmware* of the card, and not in the control loop
+# of LACT. RDNA3 cards and newer cards have them. Each entry is
 #
 #     (reported-as, written-as, label, unit)
 #
-# and the two names differ for four of the six, which is the thing to get
-# wrong here: the daemon reports `target_temp` and accepts `target_temperature`,
-# reports `zero_rpm_enable` and accepts `zero_rpm`, reports
-# `zero_rpm_temperature` and accepts `zero_rpm_threshold`. Written out as one
-# table so there is a single place they can disagree.
+# The two names are different for four of the six, and that is the mistake to
+# avoid here. The daemon reports `target_temp` and accepts
+# `target_temperature`. It reports `zero_rpm_enable` and accepts `zero_rpm`. It
+# reports `zero_rpm_temperature` and accepts `zero_rpm_threshold`.
 #
-# The labels and units are LACT's own words, so somebody reading its window
-# and this one is reading the same names for the same things.
+# One table holds each pair, so there is one place where they can be wrong.
+#
+# The labels and the units are LACT's own words. A person who reads its window
+# and this one thus reads the same names for the same settings.
 FIRMWARE = (
     ("zero_rpm_enable", "zero_rpm", "Zero RPM", ""),
     ("zero_rpm_temperature", "zero_rpm_threshold",
@@ -161,38 +184,40 @@ FIRMWARE = (
     ("minimum_pwm", "minimum_pwm", "Minimum fan speed", "%"),
 )
 
-# Where they sit in the config document, and where the card reports them.
+# Their position in the configuration document, and where the card reports
+# them.
 FIRMWARE_CONFIG = "pmfw_options"
 FIRMWARE_REPORT = "pmfw_info"
 
 
 class LactError(Exception):
-    """The daemon is not there, would not answer, or refused what was asked."""
+    """The daemon is absent, gave no answer, or refused the request."""
 
 
 def available(path=None):
-    """Whether there is a socket to talk to at all.
+    """Returns whether there is a socket to speak to.
 
-    A file test rather than a connection, so this can be asked often and from
-    anywhere - it is what decides whether the GPU half of the power page is
-    drawn, and that question comes up on every visit.
+    This is a file test and not a connection. A caller can thus ask it often
+    and from each place. It decides whether the panel draws the GPU half of the
+    power page, and that question occurs at each visit to the page.
 
-    Being there is not the same as answering: a socket file outlives a daemon
-    that was killed. `ping` is what settles that, and the page asks it once.
+    A socket that exists is not a daemon that answers: a socket file stays after
+    a stop of the daemon. `ping` answers that question, and the page asks it one
+    time.
     """
     return os.path.exists(_where(path))
 
 
 def request(name, args=None):
-    """One request object. Arguments are omitted entirely when there are none.
+    """Returns one request object. It omits the arguments when there are none.
 
-    The daemon rejects `"args": null` on commands that take none, so an empty
-    dictionary is left out rather than sent empty.
+    The daemon refuses `"args": null` on a command that takes no arguments.
+    This function thus omits an empty dictionary and does not send one.
 
-    Args come as a dictionary rather than as keywords, and that is not
-    fussiness: one of LACT's own arguments is called `command`, which as a
-    keyword collides with the name of the command it belongs to. Its argument
-    names are its own and this should not be a place they can clash with.
+    The arguments come as a dictionary and not as keywords. One of LACT's own
+    arguments has the name `command`, and as a keyword that name collides with
+    the name of the command. The argument names belong to LACT, and this module
+    must not be a place where they can collide.
     """
     made = {"command": name}
     if args:
@@ -201,12 +226,13 @@ def request(name, args=None):
 
 
 def read_answer(text):
-    """Unwrap one response. Returns its data, or raises with what it said.
+    """Reads one response. Returns its data, or raises with its message.
 
-    Kept apart from the socket so every caller downstream can be tested
-    against a recorded answer, and so the two ways an answer can be useless -
-    not JSON, or JSON saying "error" - are told apart here rather than by each
-    caller.
+    This function is separate from the socket. Each caller can thus be tested
+    against a recorded answer.
+
+    An answer is useless in two ways: it is not JSON, or it is JSON that says
+    "error". This function separates the two, and each caller does not.
     """
     try:
         found = json.loads(text)
@@ -222,12 +248,14 @@ def read_answer(text):
 
 
 def talk(name, path=None, args=None, timeout=TIMEOUT):
-    """Send one request and read one answer.
+    """Sends one request and reads one answer.
 
-    A fresh connection per request rather than a kept one. The daemon is happy
-    either way, and a socket held open across a window's lifetime is a socket
-    to reconnect after every daemon restart, every suspend and every update -
-    which is state to get wrong for no gain on a request that takes
+    It makes a new connection for each request and does not keep one. The
+    daemon accepts both methods.
+
+    A socket that stays open for the life of a window is a socket to connect
+    again after each restart of the daemon, each suspend and each update. That
+    is state to get wrong, and it gains nothing on a request of some
     milliseconds.
     """
     path = _where(path)
@@ -241,9 +269,9 @@ def talk(name, path=None, args=None, timeout=TIMEOUT):
     except socket.timeout:
         raise LactError("LACT did not answer within %g seconds" % timeout)
     except PermissionError:
-        # The one failure with a fix somebody can act on: the socket belongs
-        # to a group this user is not in. Worth its own sentence rather than
-        # "connection refused".
+        # This is the one failure with a repair that a person can make: the
+        # socket belongs to a group that this user is not in. It thus has its
+        # own sentence and not "connection refused".
         raise LactError(
             "%s will not accept this user - LACT's daemon.admin_group in "
             "/etc/lact/config.yaml names the group that may, and this user is "
@@ -254,11 +282,11 @@ def talk(name, path=None, args=None, timeout=TIMEOUT):
 
 
 def _read_line(link):
-    """One newline-terminated answer, however many packets it arrives in.
+    """Returns one answer that ends with a newline, from any number of packets.
 
-    A single recv is not a message: the device list of a machine with two
-    cards already exceeds one, and read as if it were, the JSON is truncated
-    and the error blames the daemon for the client's mistake.
+    One recv is not one message. The device list of a machine with two cards is
+    larger than one packet. A read of one packet gives truncated JSON, and the
+    error then names the daemon for a mistake of the client.
     """
     chunks = []
     while True:
@@ -280,12 +308,13 @@ def devices(path=None):
 
 
 def first_device(path=None):
-    """The card to show. The first one, and this panel shows only that.
+    """Returns the card to show. It is the first card, and the only card.
 
-    A machine with two graphics cards is a machine whose owner wants LACT's
-    own window, not four sliders on somebody's LED panel. Naming the choice
-    here means the page can say so rather than silently configure whichever
-    card came back first.
+    The owner of a machine with two graphics cards wants the window of LACT and
+    not four controls on an LED panel.
+
+    This function has a name, so that the page can report the choice. Without
+    it, the page configures the first card in the list and reports nothing.
     """
     found = devices(path)
     return found[0].get("id", "") if found else ""
@@ -304,10 +333,10 @@ def gpu_config(gpu, path=None):
 
 
 def set_gpu_config(gpu, config, path=None):
-    """Apply a configuration. Returns how long there is to confirm it.
+    """Applies a configuration. Returns the time to confirm it.
 
-    The number is the daemon's, not ours - it is configurable there - so it is
-    passed back rather than assumed. See confirm().
+    The number belongs to the daemon and not to this project. It is a setting
+    there. This function thus returns it and does not assume it. See confirm().
     """
     found = talk("set_gpu_config", path, {"id": gpu, "config": config})
     try:
@@ -317,21 +346,21 @@ def set_gpu_config(gpu, config, path=None):
 
 
 def confirm(path=None, keep=True):
-    """Keep the pending configuration, or put the old one back now.
+    """Keeps the pending configuration, or puts the old one back now.
 
-    Reverting explicitly rather than waiting out the clock: somebody who has
-    decided is somebody who should not have to watch a countdown finish.
+    It reverses the change directly and does not wait for the clock. A person
+    who made a decision must not watch a countdown to its end.
     """
     return talk("confirm_pending_config", path,
                 {"command": "confirm" if keep else "revert"})
 
 
 def profiles(path=None):
-    """The profiles LACT has, and which one is on.
+    """Returns the profiles of LACT and the active profile, as (names, current).
 
-    Returned as (names, current). The daemon reports this in more than one
-    shape across versions - a bare list in older ones, a document with the
-    current one named in newer - so both are read and neither is assumed.
+    The daemon reports this in more than one shape. An old daemon reports a
+    list. A new daemon reports a document that names the active profile. This
+    function reads both and assumes neither.
     """
     found = talk("list_profiles", path)
     if isinstance(found, dict):
@@ -344,7 +373,7 @@ def profiles(path=None):
 
 
 def set_profile(name, path=None):
-    """Switch to a saved profile. The default one is spelled as no name."""
+    """Changes to a saved profile. The default profile has no name."""
     return talk("set_profile", path, {"name": name} if name else None)
 
 
@@ -352,12 +381,14 @@ def set_profile(name, path=None):
 
 
 def power_range(found):
-    """(minimum, maximum, current, default) watts, or None where unreported.
+    """Returns (minimum, maximum, current, default) watts. None where absent.
 
-    From the card's own stats. A machine whose driver publishes no power cap -
-    which is most integrated graphics - reports none of these, and the page
-    then does not draw a power slider rather than drawing one that writes to
-    nothing.
+    The values come from the statistics of the card. A machine whose driver
+    publishes no power limit reports none of them. Most integrated graphics do
+    not publish one.
+
+    The page then draws no power control. Without this test it draws a control
+    that writes nowhere.
     """
     power = (found or {}).get("power") or {}
     return {
@@ -369,18 +400,22 @@ def power_range(found):
 
 
 def ranges(found):
-    """What clocks and voltage this card will accept, as {name: (min, max)}.
+    """Returns the clocks and the voltage the card accepts, {name: (min, max)}.
 
-    Searched for rather than read from a known place, and that is deliberate.
-    The clocks table is a tagged union - AMD, Nvidia, Intel, and several
-    generations within AMD - whose shape this panel would have to track
-    version by version. What every one of them has in common is an `od_range`
-    holding `sclk`, `mclk` and `vddc` as {min, max}, so this looks for that
-    wherever it sits and offers whatever it finds.
+    This function searches for the values. It does not read them from a known
+    position, and that is deliberate.
 
-    The cost of the alternative is what decided it: a hardcoded path is one
-    that is wrong on somebody's hardware, and wrong here means a slider that
-    writes a clock the card will not take.
+    The clocks table is a tagged union: AMD, Nvidia, Intel, and several
+    generations inside AMD. This panel would have to follow its shape for each
+    version.
+
+    Each variant has an `od_range` with `sclk`, `mclk` and `vddc` as
+    {min, max}. This function thus looks for that key in each position and
+    offers what it finds.
+
+    The cost of the alternative decided this. A fixed path is wrong on
+    somebody's hardware, and wrong here is a control that writes a clock the
+    card refuses.
     """
     out = {}
     for where in _find(found, "od_range"):
@@ -390,8 +425,8 @@ def ranges(found):
             span = _span(span)
             if span and name not in out:
                 out[name] = span
-    # The three plain maxima LACT reports beside the table, for cards whose
-    # table has no range of its own to offer.
+    # The three maximum values that LACT reports beside the table. They are
+    # for a card whose table has no range of its own.
     for name, key in (("sclk", "max_sclk"), ("mclk", "max_mclk"),
                       ("vddc", "max_voltage")):
         top = _number((found or {}).get(key))
@@ -401,7 +436,7 @@ def ranges(found):
 
 
 def _span(value):
-    """One {min, max} pair, when both ends are there and make a range."""
+    """Returns one {min, max} pair, when both ends are present and valid."""
     if not isinstance(value, dict):
         return None
     low, high = _number(value.get("min")), _number(value.get("max"))
@@ -411,11 +446,11 @@ def _span(value):
 
 
 def _find(where, key, depth=0):
-    """Every value stored under `key`, however deep. Depth-limited.
+    """Returns each value under `key`, at any depth. The depth has a limit.
 
-    The limit is not defensive dressing: these documents are the daemon's and
-    a malformed or unexpectedly recursive one should not hang the window that
-    is only trying to draw a slider.
+    The limit is necessary. These documents belong to the daemon. A document
+    that is malformed or recursive must not stop the window, which only draws a
+    control.
     """
     if depth > 8 or not isinstance(where, (dict, list)):
         return
@@ -437,10 +472,10 @@ def _number(value):
 
 
 def memory_scale(clocks):
-    """2 where the memory clock is shown at twice what it is stored at.
+    """Returns 2 where the memory clock appears at two times its stored value.
 
-    Keyed off the table's own `kind`, which is the daemon's word for the
-    shape it is reporting rather than a guess at what the card is.
+    The key is the `kind` of the table. That is the daemon's own word for the
+    shape that it reports, and not a guess about the card.
     """
     for kind in _find(clocks, "kind"):
         if isinstance(kind, str) and kind in MEMORY_DOUBLED:
@@ -449,16 +484,18 @@ def memory_scale(clocks):
 
 
 def reported(found):
-    """What the card says each knob is set to now, as {name: value}.
+    """Returns the current value of each control, as {name: value}.
 
-    Kept apart from ranges(), because they answer different questions: one is
-    what the card would accept, this is where it actually sits, and a slider
-    nobody has written to belongs at the second. A card can report a ceiling
-    well above what it runs - 1500 against 1259 on RDNA - and starting the
-    slider at the ceiling says the card is clocked somewhere it is not.
+    This function is separate from ranges(), because the two answer different
+    questions. ranges() gives what the card accepts. This gives where the card
+    is now. A control that nobody has set belongs at the second value.
 
-    Searched for in the same way and for the same reason as the ranges: the
-    table is a tagged union whose shape is the daemon's business.
+    A card can report a maximum far above what it runs: 1500 against 1259 on
+    RDNA. A control that starts at the maximum thus reports a clock that the
+    card does not use.
+
+    It searches in the same way as ranges() and for the same reason: the table
+    is a tagged union whose shape belongs to the daemon.
     """
     out = {}
     for key, name in (("current_sclk_range", "sclk"),
@@ -467,9 +504,9 @@ def reported(found):
             span = _span(where)
             if span and name not in out:
                 out[name] = span
-    # The offsets, which are plain numbers in that same table - and share
-    # their names with the {min, max} entries in od_range, so the ones that
-    # are not numbers here are those.
+    # The offsets are numbers in the same table. They also share their
+    # names with the {min, max} entries in od_range. An entry here that is
+    # not a number is thus one of those.
     for name in ("sclk_offset", "voltage_offset"):
         for value in _find(found, name):
             number = _number(value)
@@ -479,11 +516,11 @@ def reported(found):
 
 
 def knob_value(config, key):
-    """What one knob is set to in a config document, wherever it lives.
+    """Returns the value of one control in a document, at any position.
 
-    Both shapes are read rather than one: the document is the daemon's own
-    answer, and whether it keeps the clocks at the top or in a block of their
-    own is the daemon's to decide, not something to insist on from here.
+    It reads both shapes. The document is the daemon's own answer. The daemon
+    decides whether it keeps the clocks at the top or in a block, and this
+    module does not.
     """
     config = config or {}
     if key == GPU_CLOCK_OFFSET:
@@ -494,11 +531,13 @@ def knob_value(config, key):
 
 
 def _offset_value(offsets):
-    """The one GPU clock offset out of the table of them.
+    """Returns the one GPU clock offset from the table of offsets.
 
-    State 0 is the one LACT's window writes and the one this offers. A card
-    carrying offsets only for other states is still read from, so the slider
-    shows a number somebody set rather than nothing at all.
+    State 0 is the state that the window of LACT writes, and it is the state
+    that this module offers.
+
+    This function also reads a card with offsets for other states only. The
+    control thus shows a number that a person set, and not an empty control.
     """
     number = _number(offsets)
     if number is not None:
@@ -511,12 +550,14 @@ def _offset_value(offsets):
 
 
 def offered(config, clocks, found_stats):
-    """Which knobs this card actually has, with their range and value.
+    """Returns the controls that this card has, with each range and value.
 
-    Built from what the daemon reported rather than from KNOBS alone: a knob
-    with no range is one the card does not expose, and drawing it would be
-    offering a setting that writes nowhere. Same rule as the governor page -
-    the machine is asked, not remembered.
+    This comes from the report of the daemon and not from KNOBS alone. A
+    control with no range is a control that the card does not publish, and to
+    draw it is to offer a setting that writes nowhere.
+
+    The governor page follows the same rule: this project asks the machine and
+    does not remember an answer.
     """
     spans = ranges(clocks)
     power = power_range(found_stats)
@@ -530,20 +571,23 @@ def offered(config, clocks, found_stats):
                 continue
             span = (int(power["min"]), int(power["max"]))
             value = config.get(key)
-            # What the card is set to right now, which for the power cap is a
-            # thing the card reports whether or not LACT has written it.
+            # The current value of the card. For the power limit, the card
+            # reports that value whether or not LACT wrote it.
             fallback = power["current"] or power["default"] or span[1]
         else:
             span = spans.get(source)
             if span is None:
-                # No window for this knob. For the voltage offset that is not
-                # the same as not having one: an RDNA2 card publishes an
-                # od_range of nothing but nulls and still reports the offset
-                # it is set to and takes a new one, and an older card reports
-                # an absolute voltage range instead of a window. Both are
-                # offered the window either side of nothing that they accept;
-                # everything else with no range is a knob the card does not
-                # have, and drawing it would write nowhere.
+                # There is no range for this control. For the voltage offset,
+                # that is not the same as a card with no offset.
+                #
+                # An RDNA2 card publishes an od_range of null values. It still
+                # reports the offset that it is set to, and it accepts a new
+                # one. An older card reports an absolute voltage range in place
+                # of a range of offsets.
+                #
+                # Both cards thus get the range around zero that they accept.
+                # Each other control with no range is a control that the card
+                # does not have, and to draw it is to write nowhere.
                 if source != "voltage_offset" or not (
                         "vddc" in spans
                         or now.get("voltage_offset") is not None):
@@ -560,26 +604,28 @@ def offered(config, clocks, found_stats):
                 value = float(value) * scale
         out.append({"key": key, "label": label, "unit": unit,
                     "min": span[0], "max": span[1],
-                    # What this slider is shown and set in against what the
-                    # document holds - see MEMORY_DOUBLED. Carried with the
-                    # knob so the one function that writes can undo it.
+                    # The factor between the unit of this control and the unit of
+                    # the document. See MEMORY_DOUBLED. It travels with the
+                    # control, so that the one function that writes can reverse
+                    # it.
                     "scale": scale,
                     "value": None if value is None else float(value),
-                    # Where the slider starts when nothing is set. Kept apart
-                    # from `value` so "set to this" and "not set, and this is
-                    # what that means" stay different questions.
+                    # The start position of the control when nothing is set. It is
+                    # separate from `value`, so that "set to this value" and "not
+                    # set, and this is the result" stay two questions.
                     "start": float(value if value is not None else fallback)})
     return out
 
 
 def _start(now, source, end, span):
-    """Where a slider with nothing written to it sits.
+    """Returns the position of a control that nobody has set.
 
-    What the card reports for that knob now, and the end of its accepted
-    range only when it reports nothing: the range is what the card would
-    take, which on a card whose ceiling sits above what it runs is a
-    different number, and drawing it would say the card is clocked somewhere
-    it is not.
+    It returns what the card reports for that control now. It returns an end
+    of the accepted range only when the card reports nothing.
+
+    The range is what the card accepts. On a card whose maximum is above what
+    it runs, that is a different number, and it reports a clock that the card
+    does not use.
     """
     found = now.get(source)
     if isinstance(found, tuple):
@@ -597,11 +643,11 @@ def _start(now, source, end, span):
 
 
 def fan(config):
-    """How the fan is set, in the shape the page draws.
+    """Returns the fan settings, in the form that the page draws.
 
-    `enabled` is LACT's own switch: off means the card's firmware drives the
-    fan, which is what it does on a machine nobody has touched, and every
-    other value here is inert until it is on.
+    `enabled` is LACT's own switch. Off means that the firmware of the card
+    drives the fan, and that is the state of a machine that nobody changed.
+    Each other value here has no effect until the switch is on.
     """
     settings = (config or {}).get("fan_control_settings") or {}
     curve = {}
@@ -619,17 +665,19 @@ def fan(config):
 
 
 def firmware(found_stats):
-    """The firmware fan settings this card actually has.
+    """Returns the firmware fan settings that this card has.
 
-    The card is asked, and the asking is the capability test: the daemon
-    reads each of these out of sysfs and reports the ones whose file exists,
-    so a card without them - anything before RDNA3 - reports nothing and gets
-    no controls rather than controls that write nowhere. It is upstream's own
-    rule; its window gates them the same way.
+    This function asks the card, and the question is the test. The daemon reads
+    each setting from sysfs and reports the ones whose file exists.
 
-    Reported whether or not LACT is driving the fan, because these are the
-    firmware's settings rather than LACT's: they apply while the card is
-    looking after its own fan, which is the state most people leave it in.
+    A card without them reports nothing and thus gets no controls. Each card
+    before RDNA3 is such a card. Without this test it gets controls that write
+    nowhere. This is the rule of the upstream project, and its window uses the
+    same test.
+
+    It reports the settings whether or not LACT drives the fan. These are the
+    settings of the firmware and not of LACT. They apply while the card
+    controls its own fan, and most people leave the card in that state.
     """
     info = ((found_stats or {}).get("fan") or {}).get(FIRMWARE_REPORT) or {}
     out = []
@@ -648,8 +696,8 @@ def firmware(found_stats):
         if isinstance(span, (list, tuple)) and len(span) == 2:
             low, high = _number(span[0]), _number(span[1])
         else:
-            # What upstream falls back to when the card reports a value with
-            # no range: from nothing up to where it is now.
+            # What the upstream project uses when the card reports a value
+            # with no range: from zero to the current value.
             low, high = 0, current
         if low is None or high is None or high <= low:
             continue
@@ -660,11 +708,11 @@ def firmware(found_stats):
 
 
 def with_firmware(config, values):
-    """A copy of the config with the firmware fan settings written in.
+    """Returns a copy of the config with the firmware fan settings in it.
 
-    Into their own block, which is neither where the fan curve lives nor the
-    top level - a third place, and the only reason this function exists is so
-    that nothing else has to know which.
+    They go into a block of their own. That block is not the position of the
+    fan curve and not the top level. It is a third position, and this function
+    exists so that no other function must know which.
     """
     made = dict(config or {})
     options = dict(made.get(FIRMWARE_CONFIG) or {})
@@ -678,17 +726,20 @@ def with_firmware(config, values):
 
 
 def with_fan(config, enabled=None, mode=None, static_speed=None, curve=None):
-    """A copy of the config with the fan settings changed.
+    """Returns a copy of the full config with the fan settings changed.
 
-    A copy, and the whole config, because that is the interface: LACT's
-    set_gpu_config replaces the document rather than patching it, so anything
-    dropped here is a setting silently turned off on somebody's card. Every
-    caller reads the current config first and hands it back changed.
+    It is a copy, and it is the full config, because that is the interface. The
+    set_gpu_config command of LACT replaces the document and does not patch it.
+
+    A setting that this function omits is thus a setting that stops on
+    somebody's card, with no message. Each caller reads the current config
+    first and returns it with the change.
     """
     made = dict(config or {})
     settings = dict(made.get("fan_control_settings") or {})
-    # The keys LACT requires in a settings block, filled from what is there or
-    # from its own defaults - a block missing one of them is refused whole.
+    # The keys that LACT needs in a settings block. This function fills each
+    # one from the document or from the default of LACT. LACT refuses a full
+    # block that has no value for one of them.
     settings.setdefault("temperature_key", "edge")
     settings.setdefault("interval_ms", 500)
     settings.setdefault("mode", FAN_CURVE)
@@ -709,20 +760,24 @@ def with_fan(config, enabled=None, mode=None, static_speed=None, curve=None):
 
 
 def with_knob(config, key, value, scale=1):
-    """A copy of the config with one knob changed, in the place it lives.
+    """Returns a copy of the config with one control changed at its position.
 
-    Three places, so this is the one function that knows which - a page that
-    guessed would write a clock into a key nothing reads, and the daemon
-    would take the document and report success. The power cap is a field of
-    its own; the GPU clock offset is a table of them, one per power state;
-    everything else is a plain field, at the top of the document unless this
-    document keeps a clocks_configuration block, which is where an older
-    daemon gathered them. Decided by the document rather than by a version
+    There are three positions, so this is the one function that knows which. A
+    page that guessed writes a clock into a key that nothing reads, and the
+    daemon accepts the document and reports success.
+
+    The power limit is a field of its own. The GPU clock offset is a table of
+    offsets, one for each power state. Each other control is a field, at the
+    top of the document.
+
+    The exception is a document with a clocks_configuration block, where an
+    older daemon collected them. The document decides this and not a version
     number, because the document is the daemon's own answer.
 
-    `scale` is what the slider was shown in against what the document holds,
-    and it is undone here: a memory clock offered as 2400 is stored as 1200,
-    which is what LACT's own window stores for the same slider.
+    `scale` is the factor between the unit of the control and the unit of the
+    document, and this function reverses it. A memory clock that the page
+    offers as 2400 is thus stored as 1200, which is what the window of LACT
+    stores for the same control.
     """
     made = dict(config or {})
     if key == POWER_CAP:
@@ -739,8 +794,8 @@ def with_knob(config, key, value, scale=1):
         if offsets:
             made[GPU_CLOCK_OFFSETS] = offsets
         else:
-            # Rather than an empty table, which is a card told to hold no
-            # offsets rather than one nobody has given any.
+            # Not an empty table. An empty table is a card with an
+            # instruction to hold no offsets, and not a card with none.
             made.pop(GPU_CLOCK_OFFSETS, None)
         return made
     if CLOCKS_BLOCK in made:
