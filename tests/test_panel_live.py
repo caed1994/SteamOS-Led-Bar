@@ -4318,7 +4318,7 @@ class DrivesPageTest(unittest.TestCase):
     def test_the_buttons_of_two_drives_stand_in_one_column(self):
         """One grid for every drive, and not one row each.
 
-        The second drive here is exfat, which offers no "Give it to me". That
+        The second drive here is exfat, which offers no "Take ownership". That
         column stays empty on its row rather than closing up, so Remove stands
         under Remove.
         """
@@ -4335,9 +4335,9 @@ class DrivesPageTest(unittest.TestCase):
         writes them when the drive is added.
         """
         self._draw(self.SHARED)
-        self.assertEqual(self._named("Give it to me"), [])
+        self.assertEqual(self._named("Take ownership"), [])
         self._draw(self.GAMES)
-        self.assertEqual(len(self._named("Give it to me")), 1)
+        self.assertEqual(len(self._named("Take ownership")), 1)
 
     def test_the_explanation_is_on_the_page(self):
         """A label that nothing packs exists and is never drawn.

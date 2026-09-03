@@ -1047,8 +1047,8 @@ drive on a second port can take the name of the first one.
 A drive is **wanted** by `multi-user.target` and not required by it. This is
 the `nofail` of `fstab`: a drive that is not connected does not stop the boot.
 
-**Give it to me** runs one `chown` over the mount point, so that Steam can
-write a library there. It is offered for `ext4`, `btrfs`, `xfs` and `f2fs`,
+**Take ownership** runs one `chown` over the mount point, so that Steam
+can write a library there. It is offered for `ext4`, `btrfs`, `xfs` and `f2fs`,
 which record an owner for each file. `exfat`, `ntfs3` and `vfat` record none,
 and the page writes `uid=` and `gid=` into their mount options instead.
 
