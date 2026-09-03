@@ -12,15 +12,17 @@
 
 set -euo pipefail
 
-# Named by the kernel module, which is vendored from another project and is
-# not ours to rename - see scripts/user-unit.sh.
+# The kernel module gives this name. That module is a copy from another
+# project, and this project cannot rename it. See scripts/user-unit.sh.
 SHIM_DEVICE="/dev/valve-leds-shim"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Every path this installs to, where the achievement watcher's user unit
-# lives, and how to reach the user's systemd. Shared with uninstall.sh so the
-# two cannot disagree - they used to hold their own copies of the paths.
+# Each path that this installs to, the position of the user unit of the
+# achievement watcher, and how to reach the systemd of the user.
+#
+# uninstall.sh reads the same file, so the two cannot become different. Each of
+# them had its own copy of these paths.
 # shellcheck source=scripts/user-unit.sh
 source "$SOURCE_DIR/scripts/user-unit.sh"
 
@@ -33,11 +35,13 @@ REBUILD_MODULE=0
 SKIP_WATCHER=0
 FLASH_ENV=""
 
-# The firmware builds, in the order the menu offers them. Descriptions say
-# which pin the strip goes on, because that is the part that has to match the
-# wiring - see docs/WIRING.md. None of them is recommended over another: the
-# soldering has already decided, and a hint here only sends people looking for
-# a difference that is not there.
+# The firmware builds, in the order of the menu.
+#
+# Each description gives the pin of the strip, because the pin must match the
+# wiring. See docs/WIRING.md.
+#
+# No build is better than another build. The wiring decides. A recommendation
+# here makes people search for a difference that is not there.
 FIRMWARE_ENVS=(
     "nodemcuv2:ESP8266 (NodeMCU, D1 mini), strip on GPIO2"
     "esp8266_gpio14:ESP8266, strip on GPIO14 / D5 - keeps older wiring"
@@ -90,10 +94,12 @@ command -v python3 >/dev/null || die "python3 not found"
 
 # --- the read-only rootfs ---------------------------------------------------
 #
-# Once, before anything is asked or written. pacman needs it as much as the
-# suspend hook and the kernel module do, and doing it around each write in turn
-# is how the hook ended up being installed while the rootfs had been locked
-# again, which aborts the whole run. See scripts/user-unit.sh.
+# One time, before a question and before a write. pacman needs an unlocked root
+# filesystem, and so do the suspend hook and the kernel module.
+#
+# One unlock for each write is how this script installed the hook while the
+# root filesystem was locked again. That ends the full run. See
+# scripts/user-unit.sh.
 
 unlock_rootfs || true
 
@@ -173,16 +179,19 @@ install -m 0755 "$SOURCE_DIR/server/steamos-utility-center" "$INSTALL_DIR/steamo
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-center-power" "$INSTALL_DIR/steamos-utility-center-power"
 find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
 
-# Which commit those files came from, so the panel can say when the clone has
-# moved on without them. Written last of the three, so a stamp that is there
-# is a stamp for files that are all there too.
+# The commit of those files, so that the panel can report a clone that moved
+# ahead of them. This is the last of the three writes, so a stamp that exists
+# is a stamp for files that all exist.
 #
-# safe.directory because this runs as root over somebody else's clone, and
-# git refuses to read one it thinks belongs to a stranger - refuses loudly
-# and usefully in a terminal, and pointlessly here, where the answer is only
-# ever shown back to the person who owns it. A clone git will not talk about
-# leaves no stamp rather than a wrong one: the panel says "not recorded",
-# which is true and is not a claim that anything is up to date.
+# It uses safe.directory because this script runs as root over the clone of
+# another person, and git refuses to read a clone of another owner.
+#
+# That refusal is correct and useful in a terminal. It has no value here, where
+# the panel shows the answer to the owner of the clone.
+#
+# A clone that git refuses gives no stamp, and not a wrong stamp. The panel
+# then reports "not recorded". That is true, and it is not a report that the
+# machine is current.
 if stamp="$(git -C "$SOURCE_DIR" -c "safe.directory=$SOURCE_DIR" \
         rev-parse HEAD 2>/dev/null)" && [[ -n "$stamp" ]]; then
     printf '%s\n' "$stamp" > "$STAMP_PATH"
@@ -191,14 +200,16 @@ else
     rm -f "$STAMP_PATH"
 fi
 
-# A name to type. Everything lives in /var/lib so it survives a SteamOS
-# update, and nothing there is on anybody's PATH - so every command in the
-# README was one people could read and not run. A symlink costs nothing and
-# makes the documentation true.
+# A name that a person can type. Each file is in /var/lib, so that a SteamOS
+# update does not remove it. Nothing in /var/lib is on a PATH.
 #
-# On the read-only rootfs, so a SteamOS update takes it away again along with
-# the kernel module - and the same re-run of this script puts both back. Not
-# fatal either way: the full path works whether this exists or not.
+# Without this link, a person can read each command in the README and can run
+# none of them. A symlink costs nothing and makes the documentation true.
+#
+# It is on the read-only root filesystem, so a SteamOS update removes it with
+# the kernel module. One run of this script puts both back.
+#
+# Its absence is not a failure: the full path operates in both cases.
 # COMMAND_LINK is in scripts/user-unit.sh, so the uninstaller removes the same
 # one this creates.
 COMMAND_STATUS="$INSTALL_DIR/steamos-utility-center"
@@ -233,9 +244,11 @@ udevadm control --reload >/dev/null 2>&1 || warn "could not reload udev rules"
 udevadm trigger --subsystem-match=tty >/dev/null 2>&1 || true
 
 say "Installing the suspend hook to $SLEEP_HOOK_PATH"
-# What tells the strip the machine is going to sleep. Without it the strip
-# simply goes dark during a suspend, as it did before - so a system without
-# /usr/lib/systemd/system-sleep is a missing feature, not a failed install.
+# The program that tells the strip about a suspend. Without it, the strip goes
+# dark during a suspend, as it did before.
+#
+# A system with no /usr/lib/systemd/system-sleep thus has one feature less. It
+# is not a failed installation.
 if [ -d "$(dirname "$SLEEP_HOOK_PATH")" ]; then
     install -m 0755 "$SOURCE_DIR/systemd-sleep/steamos-utility-center" \
         "$SLEEP_HOOK_PATH"
@@ -248,11 +261,13 @@ sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     "$SOURCE_DIR/server/steamos-utility-center.service" > "$UNIT_PATH"
 chmod 0644 "$UNIT_PATH"
 
-# The CPU settings. Its unit is installed but deliberately not enabled: with
-# nothing set in the config file it would run at every boot to do nothing, and
-# a service somebody did not ask for is a service they have to wonder about.
-# The panel enables it the first time a setting is applied - see
-# scripts/apply-power.sh.
+# The CPU settings. This installs the unit and deliberately does not enable it.
+#
+# With no setting in the configuration file, the unit runs at each boot and
+# does nothing. A service that nobody asked for is a service that a person must
+# examine.
+#
+# The panel enables it at the first setting. See scripts/apply-power.sh.
 say "Installing systemd unit to $POWER_UNIT_PATH"
 sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     "$SOURCE_DIR/server/steamos-utility-center-power.service" > "$POWER_UNIT_PATH"
@@ -341,14 +356,14 @@ install_user_units() {
         fi
     done
 
-    # Keep the user's systemd running when no session is open. Without this it
-    # stops with the last session, taking every user unit with it - and
-    # switching between Desktop Mode and Game Mode ends a session. Both
-    # watchers are written to outlive that switch, and neither can while the
-    # thing that runs them does not.
+    # Keep the user's systemd alive when no session is open. Without this it
+    # stops with the last session and takes every user unit with it. A change
+    # between Desktop Mode and Game Mode ends a session. Both watchers must
+    # stay alive across that change, and they cannot while the systemd that
+    # runs them stops.
     #
-    # Measured on a Steam Deck: in Game Mode the bridge was not running at
-    # all, which is why it never even reported that KDE Connect had gone.
+    # Measured on a Steam Deck: in Game Mode the bridge did not run at all.
+    # That is why it never reported that KDE Connect went away.
     if enable_linger "$WATCHER_USER"; then
         say "Keeping $WATCHER_USER's services running across Game Mode"
         LINGER_NOTE=""
@@ -359,11 +374,11 @@ install_user_units() {
         LINGER_NOTE=" - but NOT across Game Mode, see above"
     fi
 
-    # Units this project used to install and does not any more - see
-    # RETIRED_USER_UNITS in scripts/user-unit.sh. Here rather than with the
-    # rest of the migration, because that half only runs on a machine that
-    # still has the old *names*: everybody upgrading from the last release
-    # has these, and nothing else would ever take them away.
+    # Units that this project installed before and does not install now. See
+    # RETIRED_USER_UNITS in scripts/user-unit.sh. This is here and not with
+    # the other migration steps. Those steps run only on a machine with the
+    # old unit *names*. Every user who updates from the last release has
+    # these units, and no other step removes them.
     if remove_retired_user_files; then
         say "Removed the CEC units this project no longer installs"
     fi
@@ -373,13 +388,13 @@ install_user_units() {
     return 0
 }
 
-# linger_is_on() is in scripts/user-unit.sh: the uninstaller asks the same
-# question to say whether it left the switch on.
+# linger_is_on() is in scripts/user-unit.sh. The uninstaller asks the same
+# question, to report whether it left the switch on.
 #
-# Turn it on, and then look. Trusting the exit code is how the log can say it
-# was done while the panel says it is off, with nothing anywhere to explain
-# the difference - so what loginctl had to say for itself is passed on rather
-# than thrown away, as it used to be.
+# Turn it on, and then read it back. The exit code alone is not sufficient.
+# With the exit code alone, the log can report success while the panel
+# reports that lingering is off, and no message explains the difference. So
+# this function passes on the text of loginctl instead of it discarding it.
 enable_linger() {   # enable_linger USER
     local reply
     linger_is_on "$1" && return 0
@@ -389,10 +404,10 @@ enable_linger() {   # enable_linger USER
     return 1
 }
 
-# Starting them is separate from installing them, and deliberately later: the
-# achievement watcher wants the service up, and the bridge wants its pipe. The
-# files, though, have to be on disk before anything that can fail - see where
-# this is called from.
+# The start step is separate from the install step, and it is later on
+# purpose. The achievement watcher needs the service, and the bridge needs
+# its pipe. But the files must be on disk before the first step that can
+# fail. See the position of the call to install_user_units.
 start_user_units() {
     if [[ $SKIP_WATCHER -eq 1 || -z "${WATCHER_USER:-}" ]]; then
         return 0                        # nothing was installed to start
@@ -409,21 +424,20 @@ start_user_units() {
     return 0
 }
 
-# Here, before anything that can fail. Everything after this point - pacman,
-# the kernel module, the firmware flash - can end the run under set -e, and
-# these files depend on none of it. Installed at the end, as they were, they
-# were simply absent on a machine where an earlier step went wrong, and
-# nothing anywhere said so. Starting them is separate and stays late.
+# Here, before the first step that can fail. Each step after this point can
+# end the run under set -e: pacman, the kernel module, and the firmware
+# flash. These files need none of those steps. When the installer wrote them
+# at the end, a machine with one bad step earlier did not get them, and no
+# message said so. The start step is separate and stays at the end.
 install_user_units || true
 
 # --- build prerequisites ----------------------------------------------------
 #
-# On a machine that has never built anything, getting the module compiled is
-# three problems deep and none of them is the module: the rootfs is read-only,
-# pacman's keyring has never been initialised so every install fails on
-# signatures rather than on the package, and the headers are named after the
-# exact kernel rather than after "linux". Finding that name by hand is where a
-# first install stalls, so work it out here.
+# On a machine that never built a module, three problems come before the
+# module itself. The rootfs is read-only. The keyring of pacman is empty, so
+# every install fails on the signature and not on the package. The headers
+# carry the name of the exact kernel and not the name "linux". A first
+# install stops when the user must find that name, so this script finds it.
 
 # Both places a distribution keeps its module trees. Named once so the header
 # lookup and the "is it there" check cannot start disagreeing, and so the
@@ -445,8 +459,8 @@ kernel_headers_package() {  # kernel_headers_package [release]
             fi
         fi
     done
-    # No pkgbase to read - derive it from the release instead. Everything a
-    # SteamOS kernel is called ends in neptune-NNN, which is the package.
+    # There is no pkgbase file to read, so derive the name from the release.
+    # The name of each SteamOS kernel ends in neptune-NNN, which is the package.
     if [[ "$release" =~ (neptune(-[0-9]+)?) ]]; then
         printf 'linux-%s-headers' "${BASH_REMATCH[1]}"
         return 0
@@ -528,8 +542,8 @@ install_build_prerequisites() {  # install_build_prerequisites <missing...>
         [[ "$answer" =~ ^[YyJj] ]] || { say "Leaving that to you."; return 1; }
     fi
 
-    # pacman writes to the rootfs, which was unlocked at the top of this run
-    # and stays that way until the end - see unlock_rootfs.
+    # pacman writes to the rootfs. The start of this run unlocked the rootfs,
+    # and the rootfs stays unlocked until the end. See unlock_rootfs.
     if rootfs_is_readonly; then
         warn "the rootfs is read-only, so pacman cannot install anything"
         return 1
@@ -609,9 +623,9 @@ install_shim_module() {
     say "Building and installing the leds-valve-shim kernel module"
     "$dir/install.sh" || return 1
     [[ -e "$SHIM_DEVICE" ]] || return 1
-    # The kernel this was just built for is the one running. Every other copy
-    # belongs to a kernel a SteamOS update has moved on from, and is a file
-    # nothing will ever load again - see remove_stale_shims.
+    # The build used the kernel that runs now. Each other copy belongs to a
+    # kernel that a SteamOS update replaced. No program loads such a copy
+    # again. See remove_stale_shims.
     remove_stale_shims "$release"
     return 0
 }
@@ -626,12 +640,15 @@ fi
 
 # --- firmware ---------------------------------------------------------------
 
-# Where PlatformIO lives depends on how it was installed: the standalone
-# installer puts it in ~/.platformio/penv/bin, "pip install --user" in
-# ~/.local/bin, a distribution package somewhere on the system PATH. So ask
-# the user's login shell first - that is the setup that already works when
-# they run ./flash-esp.sh by hand, whatever their profile does - and only fall
-# back to the known locations if their profile does not put it on PATH.
+# The location of PlatformIO depends on the install method:
+#
+# - the standalone installer puts it in ~/.platformio/penv/bin
+# - "pip install --user" puts it in ~/.local/bin
+# - a distribution package puts it on the system PATH
+#
+# So ask the login shell of the user first. That shell is the one that works
+# when the user starts ./flash-esp.sh, whatever the profile contains. If the
+# profile does not put pio on the PATH, look in the known locations.
 find_pio() {
     local candidate
     candidate="$(runuser -l "$WATCHER_USER" -c 'command -v pio' 2>/dev/null \
@@ -650,22 +667,22 @@ find_pio() {
     return 1
 }
 
-# The standalone installer, not pip. SteamOS keeps the rootfs read-only, so a
-# system-wide pip install cannot write at all, and "pip install --user" lands
-# in a directory the next system update resets. This one puts the whole thing
-# under ~/.platformio, which survives - and it is what PlatformIO themselves
-# tell you to use.
+# The standalone installer, and not pip. SteamOS keeps the rootfs read-only,
+# so a system-wide pip install cannot write. "pip install --user" writes to a
+# directory that the next system update resets. The standalone installer puts
+# all of PlatformIO under ~/.platformio, which a system update keeps. It is
+# also the method that the PlatformIO documentation gives.
 PLATFORMIO_INSTALLER_URL="https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py"
 
-# PLATFORMIO_PATH_LINE and its comment are in scripts/user-unit.sh: the
-# uninstaller deletes exactly these two lines again, and a line written in one
-# spelling and looked for in another is a line nobody removes.
+# PLATFORMIO_PATH_LINE and its comment are in scripts/user-unit.sh. The
+# uninstaller deletes these two lines again. One spelling in the write step
+# and a different spelling in the search step leaves the line on disk.
 
 add_platformio_to_path() {
     local profile="$WATCHER_HOME/.bashrc"
-    # The standalone installer leaves the PATH to you, so without this "pio"
-    # is only found by things that know where to look - this installer does,
-    # your shell does not.
+    # The standalone installer does not change the PATH. Without this step,
+    # only a program that knows the location finds "pio". This installer
+    # knows the location. The shell of the user does not know it.
     if grep -qF "$PLATFORMIO_PATH_MARK" "$profile" 2>/dev/null; then
         return 0                        # already there; do not stack copies
     fi
@@ -720,11 +737,11 @@ ensure_platformio() {
 flash_firmware() {
     [[ -n "$FLASH_ENV" ]] || return 0
 
-    # PlatformIO lives in the user's home - the toolchains land in
-    # ~/.platformio and "pio" itself in ~/.local/bin - so this has to run as
-    # them. As root it would either not find pio at all, or download a few
-    # hundred megabytes of toolchain into a root-owned ~/.platformio that
-    # breaks every later run.
+    # PlatformIO is in the home directory of the user. The toolchains are in
+    # ~/.platformio and "pio" is in ~/.local/bin. So this must run as that
+    # user. As root it does not find pio, or it downloads some hundred
+    # megabytes of toolchain into a ~/.platformio that root owns. A
+    # root-owned copy makes each later run of the user fail.
     if ! watcher_user_dirs; then
         warn "cannot tell which user to flash as - run the installer with"
         warn "sudo from your normal account, or run ./flash-esp.sh yourself."
@@ -742,8 +759,8 @@ flash_firmware() {
         return 1
     fi
 
-    # ensure_platformio ran further up and has already asked, so a miss here
-    # means the answer was no, or the install did not finish.
+    # ensure_platformio ran above and asked the user there. So no pio at this
+    # point means that the user said no, or that the install did not complete.
     local pio_path=""
     pio_path="$(find_pio || true)"
     if [[ -z "$pio_path" ]]; then
@@ -786,11 +803,11 @@ png_width() {  # png_width <file> - pixels, or nothing if it will not read
 }
 
 install_panel_icon() {
-    # Prints what the Icon= line should say. An icon theme is where a menu
-    # looks first, so the picture goes in there under the entry's own name;
-    # a name also survives the clone being moved, which an absolute path
-    # would not. Falls back to the path, and then to a stock icon, because
-    # an entry with no picture at all looks broken.
+    # Prints the value for the Icon= line. A menu looks in an icon theme
+    # first, so the picture goes into the theme under the name of the entry.
+    # A name also stays correct after a move of the clone. An absolute path
+    # does not. If that is not possible, this uses the path, and then a
+    # stock icon. An entry with no picture looks like an error.
     local source_icon="$SOURCE_DIR/gui/steamos-utility-center-panel.png"
     if [[ ! -f "$source_icon" ]]; then
         printf 'preferences-desktop-display'
@@ -856,17 +873,17 @@ install_control_panel || true
 say "Enabling steamos-utility-center.service"
 systemctl daemon-reload
 systemctl enable steamos-utility-center.service
-# Deliberately not "enable --now": that starts a stopped service but leaves a
-# running one alone, so installing over a running copy would keep serving the
-# old code from the old unit - files updated, behaviour not. Restarting always
-# lands on what was just installed.
+# Not "enable --now", on purpose. That command starts a stopped service and
+# does not touch a service that runs. An install over a running copy then
+# keeps the old code from the old unit: new files, but the same behaviour.
+# A restart always runs what this installer wrote.
 systemctl restart steamos-utility-center.service
 
-# systemctl restart returns once the process has been launched, so a service
-# that dies on its own configuration is genuinely "active" for the moment in
-# between - and a crash loop cycles through active, failed and activating, so
-# one glance can land anywhere. Look again once it has had time to fail, and
-# count the restarts.
+# systemctl restart returns when the process starts. A service that stops on
+# its own configuration is therefore "active" for a short time. A restart
+# loop also moves through active, failed and activating, so a single read
+# gives any of the three. Read the state again after the time it needs to
+# fail, and count the restarts.
 sleep 4
 restarts="$(systemctl show -p NRestarts --value steamos-utility-center.service \
             2>/dev/null || true)"
@@ -879,17 +896,18 @@ else
     else
         warn "Service is not active."
     fi
-    # Print the reason here rather than leaving it to be dug out of the
-    # journal: a bad line in the configuration says so plainly, and that is
-    # exactly the message worth seeing at the end of an install.
+    # Print the reason here, and do not make the user find it in the
+    # journal. A bad line in the configuration gives a clear message, and
+    # that message is the one to show at the end of an install.
     warn "The last thing it said:"
     journalctl -u steamos-utility-center.service -n 5 --no-pager -o cat 2>/dev/null \
         | sed 's/^/    /' >&2 || true
 fi
 
-# The service creates the notification pipe at startup and carries on without
-# it if that fails, logging one warning - which means a broken setup still
-# reports "active" and simply never flashes. Check for it here instead.
+# The service makes the notification pipe at start. If that fails, it writes
+# one warning and continues. A machine with this fault still reports
+# "active" and never flashes the LED bar. So this installer looks for the
+# pipe here.
 notify_setting() {  # notify_setting <KEY> <default>
     local value=""
     if [[ -f "$CONFIG_PATH" ]]; then
@@ -916,9 +934,9 @@ fi
 
 start_user_units || true
 
-# Everything that needed a writable / has been written by now. Do it here
-# rather than leaving it to the exit trap, so the last thing on screen is the
-# summary and not a line about filesystems.
+# Each step that needs a writable / is complete at this point. Do this here
+# and not in the exit trap. Then the last text on the screen is the summary
+# and not a message about filesystems.
 relock_rootfs
 
 cat <<EOF
