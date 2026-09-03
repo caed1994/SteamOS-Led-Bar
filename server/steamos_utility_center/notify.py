@@ -504,7 +504,7 @@ class NotificationOverlay:
         self.current = None
         # (kind, colour, shape), in the order of arrival
         self.pending = []
-        self._quiet_until = {}      # kind -> when it may be shown again
+        self._quiet_until = {}      # kind -> the time of the next flash
 
     @property
     def active(self):

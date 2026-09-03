@@ -3044,7 +3044,7 @@ class Panel:
         try:
             print(text, end="", file=sys.stderr)
         except (OSError, ValueError):
-            pass                                # nobody is reading it any more
+            pass                                # no reader is left
 
     def _say_problem(self, failed):
         """Show or clear the warning beside the status lights.
@@ -4427,10 +4427,11 @@ class Panel:
         self._write("Saved %d settings to %s\n\n" % (len(values), path))
 
     def load_profile(self):
-        """Read a profile into the controls - and no further.
+        """Reads a profile into the controls, and does nothing more.
 
-        Deliberately not applied: it lands in the window the same way Reload
-        does, so you see what arrived before anything is written to /etc.
+        This function does not apply the profile, on purpose. The values come
+        into the window as Reload puts them there. The user therefore sees the
+        new values before this program writes to /etc.
         """
         directory = ledpanel.profiles_dir(SOURCE_DIR)
         path = ProfileDialog(self.root, directory, self.roles,
@@ -4447,9 +4448,9 @@ class Panel:
         self._write("Loaded %d settings from %s\n" % (shown, path))
         skipped = len(values) - shown
         if skipped:
-            # Options the service has but this window does not - the serial
-            # port and its like. Saying so beats letting someone believe they
-            # were applied and lost.
+            # Settings of the service that this window does not show. The
+            # serial port is one of them. This message is better than a user
+            # who believes that Apply wrote them and lost them.
             self._write("%d setting(s) in the file are not shown here and "
                         "were left alone.\n" % skipped)
         self._write("Nothing is written yet - press Apply to keep it.\n\n")
@@ -4467,9 +4468,9 @@ class Panel:
     BUTTONS_ACROSS = 4
 
     PREVIEW_FPS = 25
-    # The stage takes whatever room the page has left and the strip is laid
-    # out to fit it, rather than being drawn at one fixed size in the corner.
-    # It is the thing this page is for, so it should be the thing on it.
+    # The stage takes the free space of the page, and the strip takes the
+    # size of the stage. The stage is not one fixed size in a corner. The
+    # stage is the subject of this page, so it must be the largest element.
     PREVIEW_CELL_MAX = 56       # a wide window must not give absurd LEDs
     PREVIEW_BAR_MAX = 84
     PREVIEW_BAR_MIN = 22
@@ -4480,12 +4481,12 @@ class Panel:
         """A simulated strip, so an effect can be looked at before it is set."""
         outer = ttk.Frame(parent, style="Page.TFrame")
 
-        # The stage keeps its own dark backdrop whatever the desktop is set to
-        # - a strip is judged against a dim room, not against the theme - so it
-        # is a raised panel rather than part of the page. It expands: the page
-        # is shorter than the tallest one and the slack has to go somewhere,
-        # and a dim room with a strip in the middle of it is a better use of
-        # that room than blank window.
+        # The stage keeps its dark background for each desktop theme. A user
+        # reads a strip against a dark room and not against the theme. So the
+        # stage is a raised panel and not a part of the page. It also expands.
+        # This page is shorter than the tallest page, and the free space must
+        # go somewhere. A dark room with a strip in the middle is a better use
+        # of that space than an empty window.
         stage = self._card(outer, padding=10)
         stage.pack(fill="both", expand=True, padx=SIDE_MARGIN,
                    pady=(GROUP_GAP, ROW_GAP))
@@ -4518,10 +4519,10 @@ class Panel:
         self.preview_choice.trace_add("write",
                                       lambda *_a: self._preview_chosen())
 
-        # Not "in the rainbow slot" any more: the slot is where these four go
-        # in Game Mode, and on the desktop each of them is a scene of its own.
-        # Naming one of the two places would send whoever is looking at the
-        # other one hunting for a heading that is not there.
+        # The title is no longer "in the rainbow slot". The slot holds these
+        # four effects in Game Mode, and on the desktop each of them is a scene
+        # of its own. A title with one of the two places makes a user of the
+        # other place look for a heading that is not there.
         groups = (("Our effects", "slot"),
                   ("Notification shapes", "shape"))
         for column, (title, wanted) in enumerate(groups):
@@ -4533,10 +4534,10 @@ class Panel:
             for label, kind, name, _blurb in preview_module.entries():
                 if kind != wanted:
                     continue
-                # The ground it is packed onto, for the same reason _ground
-                # exists: a radio paints its own background and its own
-                # indicator, both against a ground fixed when the style was
-                # made - see the two families in dress().
+                # The surface below it, for the same reason as _ground. A radio
+                # button paints its own background and its own indicator. Both
+                # use a colour from the build step of the style. See the two
+                # families in dress().
                 ttk.Radiobutton(
                     box, text=label, value=kind + ":" + name,
                     variable=self.preview_choice,
@@ -4555,10 +4556,11 @@ class Panel:
             page=True).pack(anchor="w", padx=SIDE_MARGIN,
                             pady=(GROUP_GAP, GROUP_GAP))
 
-        # This page is shorter than the tallest one, and the slack has to land
-        # somewhere. Halved between the stage and here, so the room the strip
-        # stands in grows with the window without swallowing the lot - all of
-        # it left the strip adrift in the middle of a very large dark box.
+        # This page is shorter than the tallest page, and the free space must
+        # go somewhere. The stage takes one half and this frame takes the
+        # other half. The space of the strip then grows with the window and
+        # does not take all of the free space. With all of it, the strip
+        # stood alone in the middle of a very large dark box.
         ttk.Frame(outer, style="Page.TFrame").pack(fill="both", expand=True)
 
         self._preview = preview_module.Preview()
@@ -4574,10 +4576,11 @@ class Panel:
     def _stop_timers(self, event=None):
         """Drop what is booked, so nothing fires at a window that has gone.
 
-        All three have something pending most of the time - the preview while
-        its page is up, the resize between a fold and the layout pass that
-        follows it, and the idle catch-up - and Tk reports a callback that
-        outlives its window as an invalid command name.
+        All three have work in the queue for most of the time. The preview has
+        work while its page is open. The resize has work between a fold and the
+        layout pass after it. The idle catch-up has work after a change. Tk
+        reports a callback for a window that no longer exists as an invalid
+        command name.
         """
         if event is not None and event.widget is not self.root:
             return                              # a child of ours, not the window
@@ -4602,9 +4605,9 @@ class Panel:
     def _preview_leds(self, count):
         """Lay out this many LEDs, rebuilding the canvas if the number changed.
 
-        The strip length is a setting, and the point of this page is now that
-        it shows the strip you have - so dragging that slider has to be
-        followed, not assumed away.
+        The length of the strip is a setting, and this page must show the
+        strip of the machine. So this function follows that slider and does
+        not use a fixed number.
         """
         if count == len(self._preview_items):
             return
@@ -4621,9 +4624,9 @@ class Panel:
     def _preview_layout(self, _event=None):
         """Lay the strip out for the room the canvas actually has.
 
-        Sized from the width - seventeen LEDs across it, whatever it is - and
-        centred in the height, so the strip sits in the middle of its dim room
-        however tall the page leaves that room.
+        The width gives the size: seventeen LEDs across it, at each width.
+        The strip is in the centre of the height, so it is in the middle of
+        its dark room at each height of the page.
         """
         width = self.preview_canvas.winfo_width()
         height = self.preview_canvas.winfo_height()
@@ -4660,10 +4663,10 @@ class Panel:
                 and self.notebook.select() == str(self.preview_tab))
 
     def _preview_tick(self):
-        """One frame, then book the next - but only while the tab is up.
+        """Draws one frame and schedules the next, while the tab is open.
 
-        A window on another tab must not be drawing seventeen rectangles
-        twenty-five times a second for nobody.
+        A window on another tab must not draw seventeen rectangles twenty-five
+        times each second with no viewer.
         """
         self._preview_job = None
         if not self._preview_visible():
@@ -4717,15 +4720,15 @@ class Panel:
     def _buttons(self, parent, entries, style="Tonal.TButton", lead=0):
         """A row of buttons that wraps rather than running off the window.
 
-        Six shape buttons in a row are wider than the window is at its
-        smallest, and a row packed left simply loses the last of them - so they
-        are gridded and the columns are counted, not packed and hoped for.
+        Six shape buttons in one row are wider than the minimum width of the
+        window, and a row that packs to the left loses the last buttons. So
+        this function uses a grid and counts the columns.
 
-        Four to a row is where it starts; how many actually fit is measured
-        once the row has a width - see _relay_buttons. Stretched to equal
-        columns, a button whose name is longer than its share of the row is
-        not made narrower, it is cut off, and "Wake the television" became
-        "Wake the televisic".
+        The row starts with four buttons. This code measures the number that
+        fits after the row has a width. See _relay_buttons. The columns are
+        equal and they stretch. A button with a name that is longer than its
+        column does not become narrower. The row cuts it, and "Wake the
+        television" became "Wake the televisic".
 
         `lead` is the room above the row, for the places where it follows a
         column of settings rather than a paragraph.
@@ -4764,10 +4767,9 @@ class Panel:
                                 ("warning", "Warning"))
         ] + [("Pick a colour...", self.flash_colour)])
 
-        # The shapes, all in one colour, so what differs between the buttons
-        # is only the thing you are choosing between. Nothing is saved: this
-        # asks the service for one flash in that shape, which is what makes it
-        # useful for choosing at all.
+        # The shapes, in one colour, so the shape is the one difference
+        # between the buttons. This saves nothing. It asks the service for one
+        # flash in that shape, and that makes it useful for a comparison.
         shapes = self._section(outer, "Try a flash shape", card=True)
         self._note(shapes,
                    "Shown in Steam blue and not saved anywhere - pick one "
@@ -4844,9 +4846,9 @@ class Panel:
         try:
             self._gpu = ledpanel.gpu_state()
         except lact.LactError as exc:
-            # Installed and unhappy is not the same as absent, and the block
-            # says which - "no daemon" hides the page, "would not answer" is a
-            # fault worth reading.
+            # An installed daemon with a fault is not the same as no daemon, and
+            # the block reports which one it is. "no daemon" hides the page.
+            # "would not answer" is a fault to read.
             self._gpu = None
             self._gpu_error = str(exc)
         self._gpu_asked = True
@@ -4894,9 +4896,10 @@ class Panel:
     def _build_gpu_profiles(self, inner):
         """LACT's own saved profiles, if it has any.
 
-        Listed rather than edited. Making one is choosing settings, naming
-        them and deciding when they switch themselves on - which is LACT's
-        window's job, and copying it here would be a second, worse one.
+        This block lists them and does not edit them. To make one, a user
+        selects settings, gives them a name, and gives the condition that
+        turns them on. The window of LACT does that work, and a copy here is a
+        second and worse copy.
         """
         names = (self._gpu or {}).get("profiles") or []
         if not names:
@@ -4907,8 +4910,8 @@ class Panel:
         variable = tk.StringVar()
         self._gpu_vars["profile"] = variable
         current = self._gpu.get("profile") or ""
-        # The default one has no name of its own in LACT, so it is given one
-        # here - a menu with a blank entry in it is a menu with a bug in it.
+        # The default profile has no name in LACT, so this code gives it one.
+        # A menu with an empty entry looks like a menu with a fault.
         choices = [("Default", "")] + [(name, name) for name in names]
         self._field(row, "gpu-profile", variable, choices, current,
                     width=BRANCH_WIDTH).pack(side="left")
@@ -4945,9 +4948,9 @@ class Panel:
     def _build_gpu_fan(self, inner):
         """The fan: off, a fixed speed, or a curve.
 
-        Off means the card's firmware drives it, which is what it does on a
-        machine nobody has touched - so that is the state this opens in and
-        the one the rest of the block is greyed behind.
+        "Off" means that the firmware of the card drives the fan. A machine
+        with no change has that state. So this block opens in that state, and
+        that state disables the other controls of the block.
         """
         fan = lact.fan((self._gpu or {}).get("config") or {})
         holder = ttk.Frame(inner, style="OnCard.TFrame")
@@ -5001,15 +5004,15 @@ class Panel:
     def _build_gpu_firmware(self, holder):
         """The card's own fan settings, on the cards that have them.
 
-        Outside the "control the fan" switch above, deliberately: these live
-        in the firmware rather than in LACT's control loop, so they apply
-        while the card is looking after its own fan - which is the state most
-        people leave it in, and so exactly the people these are for.
+        These are outside the "control the fan" switch above, on purpose.
+        They are in the firmware and not in the control loop of LACT. So they
+        apply while the card drives its own fan. Most users keep that state,
+        and these settings are for those users.
 
-        Drawn only for what the card reports. LACT reads each of them out of
-        sysfs and reports the ones whose file exists, so anything before RDNA3
-        reports none and gets none - and this block is not there at all rather
-        than empty.
+        This block draws only the settings that the card reports. LACT reads
+        each of them from sysfs and reports each one with a file. A card
+        before RDNA3 therefore reports none and gets none. This block is then
+        absent and not empty.
         """
         offered = lact.firmware((self._gpu or {}).get("stats") or {})
         if not offered:
@@ -5060,9 +5063,10 @@ class Panel:
     def _gpu_fan_changed(self):
         """Show the half of the fan settings the chosen mode uses."""
         on = bool(self._gpu_vars["fan_enabled"].get())
-        # Through _value_for: the drop-downs in this window hold the label
-        # that is showing, not the value behind it, so comparing the variable
-        # to LACT's own word matches nothing and the wrong half is drawn.
+        # This uses _value_for. A drop-down of this window holds the label
+        # on the screen and not the value behind it. A comparison of the
+        # variable with the word of LACT therefore matches nothing, and this
+        # function draws the wrong half.
         curve = self._gpu_mode() == lact.FAN_CURVE
         for frame, wanted in ((self.gpu_fan_static, on and not curve),
                               (self.gpu_fan_curve, on and curve)):
@@ -5079,11 +5083,11 @@ class Panel:
                                self._gpu_vars["fan_mode"].get())
 
     def _gpu_profile_chosen(self):
-        """Switching profile is not a setting to apply - it happens now.
+        """Changes the profile now. This is not a setting for Apply.
 
-        LACT's profiles carry their own settings, so choosing one replaces
-        everything below it. The block is read again afterwards rather than
-        left showing what the last profile had.
+        A profile of LACT carries its own settings, so a new profile replaces
+        each setting below it. This function reads the block again at the end,
+        and it does not leave the values of the last profile on the screen.
         """
         wanted = self._value_for("gpu-profile", self._gpu_vars["profile"].get())
         if wanted == (self._gpu or {}).get("profile", ""):
@@ -5108,8 +5112,8 @@ class Panel:
                 config = lact.with_knob(config, knob["key"],
                                         round(variable.get()),
                                         knob.get("scale", 1))
-        # The firmware's own settings, which are a third place in the document
-        # and are collected whether or not LACT is driving the fan.
+        # The settings of the firmware. They are a third position in the
+        # document, and this code collects them for each fan mode.
         config = lact.with_firmware(config, {
             key[len("fw:"):]: variable.get() for key, variable
             in self._gpu_vars.items() if key.startswith("fw:")})
@@ -5136,10 +5140,10 @@ class Panel:
         try:
             lact.confirm(keep=keep)
         except lact.LactError as exc:
-            # Confirming can fail because the window already closed and the
-            # daemon put the settings back on its own - which is the outcome
-            # the dialog was offering anyway, so it is worth saying once and
-            # not worth a fault.
+            # The confirmation can fail after the window closes, because the
+            # daemon then reverses the settings itself. The dialog offers that
+            # same result. So one message is sufficient, and this is not a
+            # fault.
             self._write("LACT did not take the confirmation: %s\n" % exc)
         self._reread_gpu()
 
@@ -5148,35 +5152,35 @@ class Panel:
     def _build_cec(self, parent):
         """Talking to the television, if the toolkit for it is installed.
 
-        Two pages in one frame, and which of them you see is the machine's
-        answer rather than a mode this window is in: an offer to install, or
-        the switches. Both are built now and one is packed - see _show_cec -
-        because installing is a thing that happens while the window is open,
-        and a page that could only tell the truth at construction would need
-        the window rebuilt around it to catch up.
+        There are two pages in one frame, and the machine decides which page
+        the user sees. This window has no mode for it. The first page is an
+        offer to install, and the second page holds the switches.
 
-        Nothing here queues behind Apply. The toolkit's installer leaves a
-        sudoers rule granting exactly the helpers its own switches use, so
-        every switch on this page is an ordinary command that runs as you
-        click - see server/steamos_utility_center/cec.py. Apply exists on the settings
-        pages because writing /etc needs a password and a service restart;
-        here the machine does not ask, and inventing the ceremony anyway would
-        be this window being formal about nothing.
+        This code builds both pages now and packs one of them. See _show_cec. A
+        user can install the toolkit while the window is open. A page with the
+        state of the build step therefore needs a rebuild of the window.
+
+        Nothing here waits for Apply. The installer of the toolkit leaves a
+        sudoers rule for the helpers of its own switches. Each switch on this
+        page is therefore a normal command that runs at the click. See
+        server/steamos_utility_center/cec.py. The settings pages have an Apply
+        button, because a write to /etc needs a password and a restart of the
+        service. Here the machine asks for nothing, and an Apply button adds a
+        step with no purpose.
         """
         outer = ttk.Frame(parent, style="Page.TFrame")
         self._cec = None                    # the last status read, or None
-        self._cec_asked = False             # whether we have looked yet
+        self._cec_asked = False             # True after the first read
         self._cec_vars = {}
         self._cec_rows = {}
         self._cec_entries = {}
-        # The settings that are a choice rather than a typed value.
-        # Kept apart from the boxes because what a drop-down of ours
-        # holds is the label, and the file wants the value - see
-        # _value_for.
+        # The settings with a menu and not with a typed value. These are
+        # separate from the text boxes, because a drop-down of this window
+        # holds the label and the file needs the value. See _value_for.
         self._cec_menus = {}
-        # Set while the switches are being put back in line with a status
-        # read. Without it, writing a variable fires the same handler a click
-        # does, and a refresh after a toggle would toggle everything again.
+        # True while this code sets the switches from a status read. Without
+        # it, a write to a variable starts the same handler as a click, and a
+        # refresh after one change changes each switch again.
         self._cec_settling = False
 
         self.cec_missing = self._build_cec_offer(outer)
@@ -5232,8 +5236,8 @@ class Panel:
         """The page once it is installed: what works, what is on, and a try."""
         holder = ttk.Frame(parent, style="Page.TFrame")
 
-        # The adapter first. Every switch below is worthless without it, and
-        # when nothing is happening this is the line that says why.
+        # The adapter first. Each switch below needs it. When nothing works,
+        # this line gives the reason.
         card = self._card(holder)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
         inner = ttk.Frame(card, style="OnCard.TFrame")
@@ -5290,11 +5294,11 @@ class Panel:
             block.pack(fill="x", pady=(0 if index == 0 else GROUP_GAP, 0))
             block.columnconfigure(1, weight=1)
             variable = tk.BooleanVar(value=False)
-            # The name is a label of its own rather than the switch's text.
-            # ttk leaves no gap between the switch picture and its own label -
-            # measured, the two touched - and that gap is not the switch's to
-            # set: every other switch in this window has its name in the
-            # column beside it, which is what this matches.
+            # The name is a label of its own and not the text of the switch.
+            # ttk leaves no space between the picture of a switch and its own
+            # label. A measurement showed that the two touched. The switch
+            # also must not set that space. Each other switch in this window
+            # has its name in the column beside it, and this matches them.
             switch = ttk.Checkbutton(
                 block, variable=variable,
                 command=lambda n=name: self._cec_toggled(n))
@@ -5316,19 +5320,19 @@ class Panel:
             self._cec_vars[name] = variable
             self._cec_rows[name] = (switch, named, explain)
 
-        # Collected and sent together rather than each switch going off as it
-        # is clicked. Every one of these starts or stops a unit and half of
-        # them are about whether the machine goes to sleep, so a row of them
-        # set in one pass is a row of decisions somebody made together - and a
-        # slip of the finger is undone by clicking back rather than by waiting
-        # for a service to start and stop again. The settings below already
-        # work this way.
+        # This collects the switches and sends them together. One switch does
+        # not act at its click. Each of these switches starts or stops a unit,
+        # and one half of them control the suspend behaviour of the machine. A
+        # row of switches in one pass is therefore a set of decisions that the
+        # user made together. The user also corrects an accidental click with
+        # a second click, and does not wait for a service to stop and start.
+        # The settings below already work in this way.
         self.cec_apply = ttk.Button(inner, text="Apply", style="Tonal.TButton",
                                     command=self._apply_cec_features)
         self.cec_apply.pack(anchor="w", pady=(GROUP_GAP, 0))
-        # What leaving these on costs once the adapter has gone. Shown only
-        # when it is true, and here rather than only on the status page
-        # because this is where the switches are - see adapter_gone_cost.
+        # The cost of these switches after the adapter goes away. This line
+        # comes only for that condition. It is here and not on the status page
+        # alone, because the switches are here. See adapter_gone_cost.
         #
         # In the error colour rather than the muted one every other
         # explanation on this page wears: those describe what a switch does
@@ -5372,10 +5376,10 @@ class Panel:
     def _build_cec_config(self, parent):
         """The three settings whose wrong value stops all of it working.
 
-        Three of about forty. The rest are timings and report bytes for
-        particular televisions and controllers, and they belong in the file
-        with the paragraph of explanation each of them has - copied onto a
-        page here they would be forty rows nobody can judge.
+        These are three of approximately forty settings. The other settings
+        are timings and report bytes for one television or one controller.
+        They belong in the file, where each of them has its own paragraph of
+        explanation. On a page here they are forty rows with no context.
         """
         card = self._card(parent)
         card.pack(fill="x", padx=SIDE_MARGIN, pady=(GROUP_GAP, GROUP_GAP))
@@ -5391,10 +5395,9 @@ class Panel:
                 row=row * 2, column=0, sticky="w",
                 padx=(0, GROUP_GAP), pady=(0 if row == 0 else ROW_GAP, 0))
             if choices:
-                # A field of ours rather than a combobox, for the reasons in
-                # _field - and it takes a value the file already holds that
-                # the list does not offer, which a set of radio buttons could
-                # not have done.
+                # A field of this file and not a combobox, for the reasons in
+                # _field. It also accepts a value from the file that the list
+                # does not offer. A set of radio buttons cannot do that.
                 variable = tk.StringVar()
                 widget = self._field(grid, key, variable, choices,
                                      choices[0][1])
@@ -5446,7 +5449,7 @@ class Panel:
         # The foot of the window reports the same adapter from every page, so
         # it is redrawn by whatever redrew this one.
         self._say_cec_link()
-        # And the page it is on has just changed height - see _refit_page.
+        # The height of its page also changed. See _refit_page.
         self._refit_page()
 
     def _say_cec_needs(self):
@@ -5485,12 +5488,13 @@ class Panel:
             text=said, style=style)
 
     def _settle_cec_switches(self):
-        """Put every switch and box where the machine says it should be.
+        """Sets each switch and box to the value that the machine reports.
 
-        Set from the status rather than left where the click put them. A
-        toggle can be refused - a helper that is not there, a unit that will
-        not start - and a switch that stayed where it was clicked would be
-        this window's opinion rather than the machine's.
+        This function sets them from the status and does not leave them at the
+        position of the click. The machine can refuse a change. An absent
+        helper does that, and a unit that does not start does that. A switch
+        that stays at the position of the click then reports the opinion of
+        this window and not the state of the machine.
         """
         self._cec_settling = True
         try:
@@ -5502,9 +5506,9 @@ class Panel:
         for key, entry in self._cec_entries.items():
             entry.delete(0, "end")
             entry.insert(0, values.get(key, ""))
-        # A setting the file does not carry is the toolkit's own default,
-        # which is the first answer offered - so the field opens on what the
-        # machine actually does rather than on nothing.
+        # A setting that is not in the file has the default value of the
+        # toolkit, and that value is the first entry of the list. The field
+        # then opens on the behaviour of the machine and not on nothing.
         fallbacks = dict((key, choices[0][1])
                          for key, _l, _s, choices in cec.SHOWN if choices)
         for key, variable in self._cec_menus.items():
@@ -5523,16 +5527,15 @@ class Panel:
             self._write("The CEC toolkit could not be read: %s\n\n" % exc)
         self._cec_asked = True
         self._show_cec()
-        # The status page and the line under the title read this same answer,
-        # through _read_parts - so the moment it changes here is the moment
-        # they are out of date. Done from here rather than from each caller
-        # because the first read is booked for after the window is up, which
-        # is after the headline has already been drawn from a status of None:
-        # a toolkit nobody has asked yet reads as "installed, but it will not
-        # say how it is", and that is counted as a problem on every page,
-        # beside a foot light that says HDMI CEC is ready. Every caller wanted
-        # this and none of them said so; one place cannot be forgotten by the
-        # next one.
+        # The status page and the line below the title read this same answer,
+        # through _read_parts. A change here therefore makes both of them old.
+        #
+        # This call is here and not in each caller. The first read runs after
+        # the window opens, and the headline comes before it, from a status of
+        # None. A toolkit with no read then reads as "installed, but it will
+        # not say how it is". Each page counts that as a problem, beside a
+        # light at the foot that reports HDMI CEC as ready. Each caller needs
+        # this call, and no caller made it. One place cannot forget it.
         self.refresh_status()
         if then is not None:
             then()
@@ -5540,9 +5543,10 @@ class Panel:
     def _catch_up_cec(self):
         """Read the status the first time the section is opened, not before.
 
-        Every section's page is built when the window is, so reading here at
-        construction would put a subprocess on the path of every window open
-        and every theme change - for a page most people never visit.
+        This code builds the page of each section with the window. A read at
+        the build step therefore starts a subprocess at each start of the
+        window and at each change of the theme. Most users never open this
+        page.
         """
         if not self._cec_asked:
             self._reread_cec()
@@ -5560,9 +5564,9 @@ class Panel:
         switch turned on and off again is no change at all rather than two.
         """
         if self._cec is None:
-            # Nothing has been read yet - at construction, and on a machine
-            # whose toolkit will not answer. There is nothing to compare a
-            # switch against, so there is nothing to apply.
+            # There is no status yet. This occurs at the build step, and on a
+            # machine with a toolkit that does not answer. There is no value
+            # for a comparison, so there is nothing to apply.
             return []
         return [(name, bool(variable.get()))
                 for name, variable in self._cec_vars.items()
@@ -5581,10 +5585,10 @@ class Panel:
     def _run_cec_toggles(self, left):
         """One switch at a time, because the runner holds one command.
 
-        Chained rather than started together: each of these is a systemctl
-        call through a helper, and two at once is the second one refused - see
-        Runner.start - which would leave half a page applied and no way to
-        tell which half.
+        This function runs them in a chain and does not start them together.
+        Each of them is a systemctl call through a helper. With two at the
+        same time, the Runner refuses the second one. See Runner.start. One
+        half of the page is then applied, with no report of which half.
         """
         if not left:
             self._reread_cec()
@@ -5596,14 +5600,15 @@ class Panel:
             cec.toggle_command(name, wanted, source_dir=SOURCE_DIR),
             lambda _code, rest=left[1:]: self._run_cec_toggles(rest))
         if not started:
-            # Refused because something else is running. Nothing was applied,
-            # so the switches go back to what the machine says rather than
-            # standing as this window's opinion.
+            # The Runner refused it, because another command runs. This
+            # function applied nothing, so the switches take the values of
+            # the machine again. They must not keep the values of this window.
             self._settle_cec_switches()
 
     def _cec_action(self, key):
-        # The settings, because one of these asks the television a question
-        # and has to ask the device the settings name - see cec.AUDIO_PROBE.
+        # The settings go with it, because one of these actions asks the
+        # television a question. That action needs the device from the
+        # settings. See cec.AUDIO_PROBE.
         if not self.runner.start(
                 cec.action_command(key, settings=cec.config(self._cec)),
                 lambda _code: self._reread_cec()):
@@ -5612,9 +5617,9 @@ class Panel:
     def _save_cec_config(self):
         """Write the three boxes back, through the toolkit's own writer.
 
-        Which writes a *user* config that shadows /etc - so this needs no
-        password either, and a value set here survives the toolkit being
-        installed over the top.
+        That writer writes a *user* configuration file, and that file has
+        priority over /etc. So this needs no password. A value from here also
+        survives a new install of the toolkit.
         """
         values = {key: entry.get().strip()
                   for key, entry in self._cec_entries.items()}
@@ -5634,14 +5639,15 @@ class Panel:
                           lambda _code: self._reread_cec())
 
     def _ask_wake_radios(self):
-        """Which radios the toolkit found, and whether they may wake.
+        """Asks which radios the toolkit found, and which of them can wake.
 
-        "Let a controller wake the machine" is on and it still does not is a
-        state with nowhere to look: the toolkit switches wakeup on for the
-        radios it matches and says so nowhere the page can read. This asks it,
-        and puts the answer on the page as a sentence: there is no log pane in
-        this window, so the JSON the helper prints goes to stderr with every
-        other command's output and nobody reading the window would see it.
+        A machine with "Let a controller wake the machine" on, and no wake,
+        gives the user no place to look. The toolkit turns wakeup on for each
+        radio that it matches, and it reports that list nowhere. This function
+        asks for the list and puts the answer on the page as a sentence. This
+        window has no log pane, so the JSON of the helper goes to stderr with
+        the output of each other command, and a user of the window does not
+        see it.
         """
         self.runner.start(
             ledpanel.wake_radios_command(),
@@ -5667,35 +5673,34 @@ class Panel:
     # -- status and repair ------------------------------------------------
 
     def _build_status(self, parent):
-        """How every part of the toolbox is doing, one block each.
+        """Builds one block for the condition of each part of the toolbox.
 
-        This was the LED checklist and nothing else, on a page headed "this
-        installation" - while the toolbox had grown to install four things.
-        The other three reported on their own settings pages, in their own
-        shapes, and nowhere together: a machine whose CEC adapter had gone
-        read "everything is in order" here.
+        This page held the LED checklist only, below the heading "this
+        installation". At that time the toolbox installed four parts. The
+        other three parts reported on their own settings pages, in their own
+        forms, and never together. A machine with a removed CEC adapter then
+        showed "everything is in order" here.
 
-        Each block is the same: a light, a sentence, the detail behind it, and
-        the one button that repairs *that* thing. The repairs stay here rather
-        than moving to the pages they belong to, because this is where you
-        find out something is broken and walking to another section for the
-        fix is the walk this page exists to save.
+        Each block has the same shape: a light, a sentence, the detail behind
+        it, and the one button that repairs *that* part. The repair buttons
+        stay here and do not move to their own pages. The user finds a fault
+        here, and a walk to another section is the walk that this page saves.
         """
         outer = ttk.Frame(parent, style="Page.TFrame")
         # Which blocks are unfolded, by part key. Kept out here because
         # refreshing rebuilds them and a fold that closed itself every time
         # the page was re-read would be a fold nobody could use.
         self._open_parts = set()
-        # The fold buttons currently on the page, by widget name. Rebuilt with
-        # the blocks - see _register_buttons, which excludes them.
+        # The fold buttons on the page now, by widget name. This code builds
+        # them again with the blocks. See _register_buttons, which does not
+        # disable them.
         self._fold_buttons = set()
-        # And which have already unfolded themselves for being broken. Once
-        # each: without this, a block you deliberately folded away would open
-        # again on the next read, which is every few seconds while something
-        # is running.
+        # The blocks that opened themselves for a fault. Each block does that
+        # one time. Without this set, a block that the user closed opens again
+        # at the next read. That read runs every few seconds during a command.
         self._shown_parts = set()
-        # Handles into the blocks, so a fold can be opened without rebuilding
-        # them - see _fold_part. Refilled by every refresh_status.
+        # References into the blocks, so a fold opens with no rebuild of them.
+        # See _fold_part. Each refresh_status fills this map again.
         self._part_details = {}
         self._fold_arrows = {}
         self.parts_box = ttk.Frame(outer, style="Page.TFrame")
@@ -5771,14 +5776,14 @@ class Panel:
         self._wrap_insets[str(said)] = PART_INDENT
 
         if part.detail:
-            # Built whether or not it is open, and hidden with grid_remove.
-            # Opening one used to re-read the whole machine and rebuild every
-            # block from scratch - see _fold_part - which is a lot of work to
-            # show a paragraph that had already been worked out, and it left
-            # the one widget that survives the rebuild, the Check again
-            # button, being moved across ground that had just been destroyed
-            # and not yet redrawn. Reported as a button that came back in
-            # pieces until the pointer touched it.
+            # This code builds the detail for each block and hides a closed
+            # one with grid_remove. Before, an open fold read the complete
+            # machine again and built each block again. See _fold_part. That
+            # is much work for a paragraph that this code already made. It
+            # also moved the one widget that survives a rebuild, the Check
+            # again button, over an area that Tk destroyed and did not draw
+            # again. A user reported a button in pieces until the pointer
+            # touched it.
             holder = self._build_part_detail(inner, part)
             self._part_details[part.key] = holder
             if part.key not in self._open_parts:
@@ -5816,20 +5821,20 @@ class Panel:
     def _fold_part(self, key):
         """Show or hide one block's detail. Nothing else.
 
-        It used to call refresh_status(), which asks the machine everything
-        again - systemctl, the LACT socket, and a KDE Connect probe with a
-        two-second timeout - and then destroys and rebuilds every block on
-        the page. All to show a paragraph that had already been worked out
-        by the time the button was drawn.
+        Before, this function called refresh_status(). That function reads the
+        complete machine again: systemctl, the LACT socket, and a KDE Connect
+        probe with a two-second timeout. It then destroys and builds each block
+        on the page. All that work shows a paragraph that this code already
+        made before the draw step of the button.
 
-        It also left an artefact. The Check again button lives outside the
-        blocks, so it survives the rebuild, and the growing page moves it -
-        across ground that had just been destroyed and not yet redrawn. X
-        copies a moved window's pixels rather than repainting them, so it
-        arrived carrying the wreckage: half the label, and arcs of whatever
-        had been underneath. It came back on its own as soon as the pointer
-        touched it, which is what says "drawn wrong" rather than "laid out
-        wrong".
+        It also left an artefact on the screen. The Check again button is
+        outside the blocks, so it survives the rebuild. The taller page then
+        moves it, over an area that Tk destroyed and did not draw again. X
+        copies the pixels of a window that moves, and it does not paint them
+        again. So the button arrived with those pixels: one half of its label,
+        and parts of the elements below it. The button came back at the next
+        movement of the pointer, and that says "drawn incorrectly" and not
+        "laid out incorrectly".
         """
         self._open_parts.symmetric_difference_update({key})
         holder = self._part_details.get(key)
@@ -5867,14 +5872,14 @@ class Panel:
     def _refit(self):
         """Set the height outright; asking nicely does not work.
 
-        Tk grows a toplevel to fit its content, but once the window manager
-        has sized the window that size stays. Clearing the geometry is
-        documented to cancel a *user-specified* size, and measured here it
-        changed nothing, because this one came from the window manager. The
-        width is left alone: that one is genuinely the user's.
+        Tk makes a toplevel larger for its content. But the size from the
+        window manager stays. The documentation says that a clear of the
+        geometry cancels a size from the *user*. A measurement here showed no
+        change, because this size came from the window manager. This function
+        does not change the width, because the user sets the width.
         """
-        # Cleared as it runs: what was booked has now fired, and cancelling it
-        # afterwards would be cancelling somebody else's booking.
+        # Cleared at the start of the run. The scheduled call now runs, and a
+        # cancel after this point cancels a later call.
         self._refit_job = None
         try:
             self.root.update_idletasks()
@@ -5925,11 +5930,12 @@ class Panel:
     def _build_app(self, where, table, note):
         """App Settings, which is now everything about this program itself.
 
-        Its own look, and its own updating. Updating used to be on the status
-        page, which put "fetch a branch and install it" beside a checklist of
-        what is broken - two different questions, and the second is not a
-        setting at all. Here it sits with the other thing that is about the
-        panel rather than about the machine.
+        This page holds the look of the panel and its update controls. The
+        update controls were on the status page before. That page then held
+        "fetch a branch and install it" beside a list of faults. Those are two
+        different questions, and a fault list is not a setting. Here the update
+        controls stand with the other settings of the panel, and not with the
+        settings of the machine.
         """
         outer = self._build_settings(where, table, note)
         self.update_box = self._build_update(outer)
@@ -5938,12 +5944,12 @@ class Panel:
     def _build_update(self, parent):
         """Fetch a branch and install it: the two halves of "get the new one".
 
-        On a card, like every other group of settings on this page. It used to
-        be a bare frame, which was right where it lived: the old status page
-        was itself card-coloured, so a plain frame on it matched. Moved onto a
-        page, that frame became a band of the wrong shade the width of the
-        content - which is a thing this window has now done in two ways, so
-        the live tests check both.
+        This block is on a card, as each other group of settings on this page
+        is. It was a plain frame before, and that was correct at its old
+        position. The old status page had the colour of a card, so a plain
+        frame on it had the correct colour. On a page, that frame became a band
+        of the wrong colour at the width of the content. This window has now
+        had that fault in two forms, so the live tests check both.
         """
         holder = ttk.Frame(parent, style="Page.TFrame")
         holder.pack(fill="x")
@@ -5982,9 +5988,9 @@ class Panel:
                                         style="Filled.TButton",
                                         command=self.update_now)
         self.update_button.pack(side="left")
-        # What the last check found, where it can be read without unfolding
-        # the log - which is folded nearly always now, and was the only place
-        # the answer ever appeared.
+        # The result of the last check, in a place with no fold. The log is
+        # almost always folded now, and it was the one place with this
+        # answer.
         self.update_state = ttk.Label(frame)
         self.update_state.pack(anchor="w", pady=(ROW_GAP, 0))
         # Under the card rather than in it, the way every other explanation on
@@ -6028,9 +6034,9 @@ class Panel:
         """Fill the list from what the clone knows, keeping the selection."""
         branches = ledpanel.known_branches(SOURCE_DIR)
         current = self.branch.get()
-        # A branch the clone does not list - the detached head a fetch can
-        # leave, say - stays on rather than vanishing from under the
-        # selection.
+        # A branch that the clone does not list stays in the menu. The
+        # detached head after a fetch is such a branch. Without this code,
+        # the current entry goes away below the pointer.
         if current and current not in branches:
             branches = sorted(branches + [current])
         self._menus["branch"] = [(name, name) for name in branches]
@@ -6125,17 +6131,17 @@ class Panel:
         # The blocks' buttons are new widgets every time, so the list of what
         # to grey while a command runs has to be taken again.
         self._register_buttons()
-        # One place says how it is, under the title, where every section can
-        # see it. Counted across every part rather than over the LED
-        # checklist alone, which is what it used to be - so the LED bar's own
-        # problem count was printed over the HDMI CEC page, and a machine
-        # whose adapter had gone read "everything is in order".
+        # One line below the title gives the condition, and each section
+        # shows it. This counts each part. Before, it counted the LED
+        # checklist only. The problem count of the LED bar then stood over
+        # the HDMI CEC page, and a machine with a removed adapter read
+        # "everything is in order".
         broken = [part for part in parts if part.ok is False]
-        # About the page you are standing on when that page has anything to
-        # say - see ledpanel.summary_for. Neither good news nor bad for a part
-        # that is only absent: "Not installed." in green is a contradiction,
-        # in red it is a machine told it has a fault for not wanting a
-        # feature.
+        # The line reports the open page when that page has something to
+        # report. See ledpanel.summary_for. A part that is only absent gets
+        # neither a good nor a bad colour. "Not installed." in green is a
+        # contradiction. In red it reports a fault on a machine that does
+        # not want the function.
         section = getattr(self, "section", "") or ""
         mine = next((part for part in parts
                      if part.key == ledpanel.SECTION_PARTS.get(section,
@@ -6161,11 +6167,11 @@ class Panel:
     def _forget_dead_labels(self):
         """Drop wrapped labels whose widgets have gone.
 
-        This page destroys and rebuilds its blocks on every read, and every
-        block's sentence had been added to the list of things to re-wrap on a
-        resize. Left in it, the next resize configures a widget that no longer
-        exists - which Tk reports as an invalid command name - and the list
-        grows for as long as the window is open.
+        This page destroys and builds its blocks again at each read. The
+        sentence of each block goes into the list of labels for the wrap step
+        of a resize. Without this function, the next resize configures a widget
+        that no longer exists, and Tk reports that as an invalid command name.
+        The list also grows for the complete time of the window.
         """
         alive = []
         for label in self._wrapped:
@@ -6181,9 +6187,9 @@ class Panel:
     def _rewrap_parts(self):
         """Give the blocks' sentences the width the page has.
 
-        They are built after the last resize, so nothing has told them how
-        wide the page is - and _rewrap only fires when the width changes,
-        which it has not.
+        This code builds them after the last resize, so they have no width
+        from the page. _rewrap runs only after a change of the width, and the
+        width did not change.
         """
         self._set_wrapping()
 
@@ -6203,10 +6209,11 @@ class Panel:
 
 
 def main():
-    # Without a class of its own the window says WM_CLASS "Tk", which matches
-    # no menu entry, so the task bar falls back to reading "python3". It has
-    # to be passed at creation, and must stay equal to StartupWMClass in the
-    # .desktop file - that is how the desktop ties the window to its icon.
+    # Without its own class, the window reports the WM_CLASS "Tk". That name
+    # matches no menu entry, and the task bar then reads "python3". The
+    # caller must pass the class at the build step. It must also stay equal to
+    # StartupWMClass in the .desktop file. The desktop uses those two names to
+    # connect the window to its icon.
     root = tk.Tk(className=WM_CLASS)
     try:
         ttk.Style().theme_use("clam")

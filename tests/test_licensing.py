@@ -3,11 +3,10 @@
 
 """Every file we wrote says which licence it is under.
 
-Per-file headers exist because files travel: one gets copied into a gist, a
-forum post, somebody else's project, and arrives with no idea what it is. The
-headers only do that job while they are complete, and the way they stop being
-complete is that somebody adds a file and does not think about it - which is
-exactly what a test is for.
+A header in each file is necessary because a file moves. A user copies one
+into a gist, a forum message, or another project, and the copy carries no
+other context. The headers do that work only while each file has one. A new
+file with no header stops that, and a test finds such a file.
 """
 
 import os
@@ -19,16 +18,18 @@ REPO = os.path.abspath(os.path.join(HERE, ".."))
 
 LICENCE = "GPL-3.0-or-later"
 
-# What counts as ours to license. Suffixes plus the executables whose language
-# is not in their name - a script called steamos-utility-center is source too.
+# The files of this project. These are the suffixes, and also the programs
+# with no language in their name. A script with the name
+# steamos-utility-center is source code.
 SUFFIXES = (".py", ".sh", ".cpp", ".h")
 SCRIPTS = ("server/steamos-utility-center", "gui/steamos-utility-center-panel",
            "systemd-sleep/steamos-utility-center")
 
-# Code under somebody else's licence, which this project does not get to
-# relabel. The kernel shim carries its own SPDX line saying GPL-2.0+;
-# cec-toolkit/ is a fork of an MIT project, kept MIT with its own LICENSE file
-# beside its own ORIGIN - see the tests below for what is checked instead.
+# Code under the licence of another project. This project cannot change that
+# licence. The kernel shim carries its own SPDX line with GPL-2.0+. The
+# directory cec-toolkit/ is a fork of an MIT project. It stays MIT, with its
+# own LICENSE file beside its own ORIGIN. The tests below give the checks for
+# those two directories.
 #
 # A fork is still somebody else's copyright. Ours is a second line in that
 # LICENSE, not a licence change, and not a GPL-3 header on every file in it.
@@ -87,7 +88,8 @@ class SpdxHeaderTest(unittest.TestCase):
                                 "%s: shebang is not on line 1" % name)
 
     def test_the_vendored_module_keeps_its_own_licence(self):
-        # GPL-2.0+, not ours to change - see leds-valve-shim/PROVENANCE.md.
+        # GPL-2.0+, and this project cannot change it. See
+        # leds-valve-shim/PROVENANCE.md.
         path = os.path.join(REPO, "leds-valve-shim", "leds-valve-shim.c")
         with open(path) as handle:
             self.assertIn("SPDX-License-Identifier: GPL-2.0+",

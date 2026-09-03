@@ -3,10 +3,10 @@
 
 """The firmware flasher's refusals.
 
-Flashing itself needs a board on the other end of a USB cable, so what is
-tested here is everything that happens before one is touched: being told a
-name that does not exist, or asked to flash on a machine with no PlatformIO,
-has to cost nothing at all - in particular it must not stop the service.
+A flash needs a board at the other end of a USB cable. So this file tests
+each step before the board. Two conditions must cost nothing: a name that does
+not exist, and a machine with no PlatformIO. In particular, neither condition
+must stop the service.
 """
 
 import os
@@ -73,11 +73,11 @@ class FlashScriptTest(unittest.TestCase):
 class WorkingDirectoryTest(unittest.TestCase):
     """Where the flasher stands while it runs.
 
-    pkexec starts the script in root's home, and the flashing itself runs as
-    the caller, who cannot get back into /root. PlatformIO restores the
-    directory it started in on the way out, so a flash that had already
-    written and verified the board ended with "PermissionError: [Errno 13]
-    Permission denied: '/root'" and an exit code claiming it had failed.
+    pkexec starts the script in the home directory of root. The flash runs as
+    the caller, and the caller cannot enter /root. PlatformIO returns to its
+    start directory at the end. A flash that wrote the board and verified it
+    therefore ended with "PermissionError: [Errno 13] Permission denied:
+    '/root'", and with an exit code for a failure.
     """
 
     def setUp(self):
@@ -97,11 +97,11 @@ class WorkingDirectoryTest(unittest.TestCase):
     def _pretend_home(self):
         """A home with a PlatformIO in it, and a getent that points there.
 
-        The script looks for pio in the *invoking user's* home, which it asks
-        getent for - so a machine without PlatformIO could not reach the line
-        this is about, and the test skipped itself there. Which meant a check
-        on a reported bug ran only where somebody happened to have flashed
-        firmware before, and silently nowhere else.
+        The script looks for pio in the home directory of the *calling user*, and
+        it asks getent for that directory. A machine without PlatformIO therefore
+        did not reach the line of this test, and the test skipped itself there. A
+        test for a reported fault then ran only on a machine with an earlier
+        firmware flash, and it ran nowhere else with no message.
         """
         home = os.path.join(self.repo, "home")
         binaries = os.path.join(home, ".local", "bin")

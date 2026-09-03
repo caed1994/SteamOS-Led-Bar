@@ -3,13 +3,13 @@
 
 """Reading a value out of the shell scripts, for tests to check against.
 
-install.sh and uninstall.sh agree through scripts/user-unit.sh - which unit
-names, which link, which directory. Tests that check those agreements have to
-read the same file rather than repeat what it says, or they only prove that
-two copies of a mistake match.
+install.sh and uninstall.sh agree through scripts/user-unit.sh. That file
+gives the unit names, the link and the directory. A test of those agreements
+must read the same file, and it must not repeat the values. Two copies of one
+error also match each other.
 
-Bash does the reading, because bash is what will read it in the end: a
-half-parser here would be one more thing that can disagree with the script.
+Bash reads the file, because bash reads it on the machine. A parser here is
+one more program that can disagree with the script.
 """
 
 import os

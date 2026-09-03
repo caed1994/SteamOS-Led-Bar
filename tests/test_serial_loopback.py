@@ -76,8 +76,10 @@ class SerialLoopbackTest(unittest.TestCase):
         self.addCleanup(self._teardown)
 
     def start_esp(self):
-        """Attach the fake ESP. Only for tests that do not read the master
-        themselves - the reader thread would otherwise swallow their bytes."""
+        """Attaches the fake ESP, for a test that does not read the master.
+
+                The reader thread takes the bytes of a test that reads the master.
+                """
         # The slave fd stays open on purpose: with no process on that end,
         # reads on the master fail with EIO.
         self.esp = FakeEsp(self.master)
@@ -142,8 +144,8 @@ class SerialLoopbackTest(unittest.TestCase):
             self.assertIn(rate, candidates)
 
     def test_every_shipped_firmware_rate_is_settable_on_linux(self):
-        # 250000 baud, an obvious choice for WS2812 work, has no termios
-        # constant - a firmware built for it could never be talked to.
+        # 250000 baud is a common rate for WS2812 work, and it has no termios
+        # constant. No program can talk to a firmware that uses that rate.
         from steamos_utility_center.serialport import BAUD_CONSTANTS
         for rate in link.FALLBACK_BAUD_RATES:
             self.assertIn(rate, BAUD_CONSTANTS,
@@ -189,9 +191,10 @@ class SerialLoopbackTest(unittest.TestCase):
                          [BAUD])
 
     def test_a_later_rate_answering_does_not_leak_the_first_port(self):
-        # The first candidate is held open in case nothing answers and we have
-        # to stream blind. Once a later rate does answer, that port is dead
-        # weight - and leaking one fd per reconnect adds up over a long login.
+        # The link keeps the first candidate open, in case no rate answers and
+        # it must send with no answer. After a later rate answers, that port
+        # has no use. One file descriptor for each reconnect is also many file
+        # descriptors over a long session.
         self.start_esp()
         bridge = link.EspLink(port=self.device, baudrate=BAUD, led_count=17)
         bridge.BOOT_DELAY = 0.0
@@ -212,10 +215,10 @@ class SerialLoopbackTest(unittest.TestCase):
                                  "a rejected candidate was left open")
 
     def test_a_port_that_is_not_a_tty_is_refused_not_fatal(self):
-        # SERIAL_PORT accepts any path that exists, but only a tty can be
-        # configured as one. termios raises its own error type, which is not
-        # an OSError - so an unconfigured one escapes every handler on the way
-        # up and takes the service down, over and over under Restart=always.
+        # SERIAL_PORT accepts each path that exists, but only a tty accepts the
+        # serial settings. termios raises an error type of its own, and that
+        # type is not an OSError. Such an error therefore passes each handler
+        # and stops the service. Under Restart=always that repeats.
         with self.assertRaises(SerialError):
             SerialPort("/dev/null", BAUD)
 

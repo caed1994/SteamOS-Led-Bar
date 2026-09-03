@@ -53,8 +53,8 @@ class UpdateScriptTest(unittest.TestCase):
         self.clone = os.path.join(self.root, "clone")
         git(self.root, "clone", self.origin, self.clone)
         self._init(self.clone)
-        # The script finds the clone from its own location, so it has to be
-        # run from a copy inside the clone - which is how it is installed.
+        # The script finds the clone from its own path, so this test must run
+        # a copy inside the clone. The installer puts it there.
         os.makedirs(os.path.join(self.clone, "scripts"), exist_ok=True)
         shutil.copy(UPDATE, os.path.join(self.clone, "scripts", "update.sh"))
 
@@ -227,8 +227,9 @@ class UpdateScriptTest(unittest.TestCase):
 class PanelUpdateHelpersTest(UpdateScriptTest):
     """What the panel needs to know about the clone before and after.
 
-    Same repositories as above, because these read a real one - a mock of git
-    would only prove that the mock agrees with itself.
+    These tests use the same repositories as the tests above, because they read
+    a real repository. A mock of git proves only that the mock agrees with
+    itself.
     """
 
     def test_it_recognises_a_clone(self):

@@ -23,10 +23,13 @@ to data.
 
 from __future__ import annotations
 
+import ast
+import io
 import os
 import re
 import subprocess
 import sys
+import tokenize
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, ".."))
@@ -113,38 +116,99 @@ LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+\.)\s")
 
 
 def prose_of_code(text):
-    """The comments and the docstrings of a program, without its code."""
-    out, in_doc, quote = [], False, ""
-    for number, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
-        if in_doc:
-            if quote in stripped:
-                in_doc = False
-                stripped = stripped.split(quote)[0]
-            if stripped:
-                out.append((number, stripped))
+    """The comments and the docstrings of a program, without its code.
+
+    A Python file is read with tokenize and ast, because a scan of the lines
+    cannot tell a docstring from a triple-quoted string of test data. A shell
+    script has no docstrings, so a scan of the lines is sufficient there.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return _comment_lines(text)
+    out = _python_comments(text)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)):
             continue
-        found = re.match(r'^[a-zA-Z]?("""|\'\'\')', stripped)
-        if found:
-            quote = found.group(1)
-            rest = stripped[found.end():]
-            if quote not in rest:
-                in_doc = True
-            else:
-                rest = rest.split(quote)[0]
-            if rest.strip():
-                out.append((number, rest.strip()))
+        body = node.body
+        if not (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
             continue
-        if stripped.startswith("#"):
-            body = stripped[1:]
-            # A comment line that is indented against its own margin is a
-            # block: a log extract, a table, a command. docs/STYLE.md permits
-            # those and calls them data, so the sentence rules do not apply.
+        out.extend(_docstring_lines(text, body[0].value))
+    return sorted(out)
+
+
+def _python_comments(text):
+    """Every comment of a Python file, as (line, text)."""
+    out = []
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        found = [(token.start[0], token.line, token.string)
+                 for token in tokens if token.type == tokenize.COMMENT]
+    except (tokenize.TokenError, IndentationError):        # pragma: no cover
+        return _comment_lines(text)
+    for number, whole, said in found:
+        if whole.strip().startswith("#"):
+            body = said[1:]
+            # An indented comment line is a block: a log extract, a table, a
+            # command. docs/STYLE.md permits those and calls them data.
             if body[:2] in ("  ", "\t "):
                 continue
-            said = body.strip()
-            if said and not said.startswith(("!", "SPDX", "-*-")):
-                out.append((number, said))
+        else:
+            body = said[1:]                     # a comment after code
+        body = body.strip()
+        if body and not body.startswith(("!", "SPDX", "-*-")):
+            out.append((number, body))
+    return out
+
+
+def _docstring_lines(text, node):
+    """The prose lines of one docstring, as (line, text).
+
+    A line indented against the first line of the docstring is data, the same
+    way an indented comment line is.
+    """
+    lines = text.splitlines()
+    first = node.lineno
+    last = node.end_lineno or first
+    said = lines[first - 1:last]
+    if not said:                                            # pragma: no cover
+        return []
+    said[0] = re.sub(r'^\s*[a-zA-Z]?("""|\'\'\')', "", said[0])
+    if said:
+        said[-1] = re.sub(r'("""|\'\'\')\s*$', "", said[-1])
+    margin = None
+    out = []
+    for step, line in enumerate(said):
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if step == 0:
+            out.append((first, line.strip()))
+            continue
+        if margin is None:
+            margin = indent
+        if indent > margin:
+            continue                            # a block of data
+        out.append((first + step, line.strip()))
+    return out
+
+
+def _comment_lines(text):
+    """Every `#` comment of a file that is not Python."""
+    out = []
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped.startswith("#"):
+            continue
+        body = stripped[1:]
+        if body[:2] in ("  ", "\t "):
+            continue
+        said = body.strip()
+        if said and not said.startswith(("!", "SPDX", "-*-")):
+            out.append((number, said))
     return out
 
 

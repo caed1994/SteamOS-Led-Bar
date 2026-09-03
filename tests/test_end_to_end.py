@@ -196,7 +196,7 @@ class EndToEndTest(unittest.TestCase):
         lit = [index for index, frame in enumerate(frames) if is_flash(frame)]
         self.assertTrue(lit, "the bar never flashed:\n%s" % stderr)
 
-        # Steam's own colour was green (10, 200, 30) - it has to come back.
+        # The colour of Steam was green (10, 200, 30), and it must come back.
         after = frames[lit[-1] + 1:]
         self.assertTrue(after, "flash ran to the end of the test, cannot tell")
         self.assertEqual(tuple(after[-1][2:5]), (10, 200, 30),

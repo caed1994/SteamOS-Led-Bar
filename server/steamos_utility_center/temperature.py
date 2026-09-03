@@ -299,7 +299,7 @@ class OverheatWatch:
         self.interval = interval
         self.watched = None         # [(sensor, threshold)], resolved once
         self._hot_since = {}        # path -> when it first went over
-        self._armed = {}            # path -> may warn again
+        self._armed = {}            # path -> a warning is permitted
         self._next_read = None
         self._quiet_until = 0.0
 

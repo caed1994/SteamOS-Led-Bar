@@ -3,10 +3,10 @@
 
 """Checks shim.py and render.py against the vendored kernel module source.
 
-The Python side hardcodes the snapshot layout and the meaning of the tuning
-fields. Now that the module lives in this repository, that agreement can be
-verified instead of trusted - if a future update of leds-valve-shim.c changes
-the ABI, this fails instead of quietly mis-decoding pixels.
+The Python code holds the layout of the snapshot and the meaning of the
+tuning fields. The module is now in this repository, so a test can prove that
+agreement. A later change to the ABI in leds-valve-shim.c then fails here. It
+does not decode the pixels incorrectly with no message.
 """
 
 import os

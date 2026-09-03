@@ -3,12 +3,12 @@
 
 """The route probe has to survive a child that dies badly.
 
-Picking the wrong Steamworks interface version does not raise - it segfaults,
-because the flat wrappers call through a vtable that does not match. So the
-probe runs each candidate in a forked child, and this checks that a crashing
-child is reported rather than taking the process with it. It drives
-steamworks._run_in_child directly - the supervisor probe_route itself uses, so
-a regression in that branch cannot pass unnoticed.
+An incorrect version of a Steamworks interface raises no exception. It gives
+a segmentation fault, because the flat wrappers call through a vtable that
+does not match. So the probe runs each candidate in a forked child. This file
+proves that the probe reports a child that stops, and that the child does not
+stop the process. It calls steamworks._run_in_child directly, and probe_route
+uses that same function. A fault in that code therefore cannot pass this test.
 """
 
 import ctypes

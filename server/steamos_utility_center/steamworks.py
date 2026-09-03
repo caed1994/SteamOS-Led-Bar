@@ -1067,7 +1067,7 @@ def probe_route(app_id, library, route, timeout=15.0):
             stats = UserStats(app_id, library, route=route)
             stats.open()
             os.write(write_fd, b"OK %d" % len(stats.achievements()))
-        except BaseException as exc:                # noqa: BLE001 - report all
+        except BaseException as exc:                # noqa: BLE001 (report all)
             os.write(write_fd,
                      ("ERR %s" % exc).encode("utf-8", "replace")[:400])
 

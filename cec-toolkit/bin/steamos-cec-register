@@ -334,7 +334,7 @@ def register(wait: float, devices=None, run=run, sleep=time.sleep,
                     done += 1           # something was put right
                     continue            # give it a moment, then read again
             if not address:
-                continue                # no picture yet - come back to it
+                continue                # no picture yet, so try again
             waiting.remove(device)
             result = run([CEC_CTL, "-d", device, "--playback",
                           "--osd-name", REGISTERED_NAME])
