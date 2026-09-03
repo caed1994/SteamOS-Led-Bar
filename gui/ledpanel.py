@@ -27,11 +27,11 @@ CONFIG_PATH = "/etc/steamos-utility-center.conf"
 UNIT_PATH = "/etc/systemd/system/steamos-utility-center.service"
 UDEV_PATH = "/etc/udev/rules.d/99-steamos-utility-center.rules"
 
-# Not something that should be installed - something that should not be left
-# behind. scripts/install-cec.sh lends the desktop user a sudo rule for the
-# length of a CEC install and removes it in a trap; the one way out that trap
-# cannot cover is the signal it cannot see. Nothing else in the window would
-# ever mention it, so the checklist is where it belongs.
+# This file must not stay on disk. The checklist does not report it as an
+# installed item. scripts/install-cec.sh gives the desktop user a sudo rule
+# for the time of a CEC install, and a trap removes the rule. A signal that
+# the trap cannot see is the one exit that the trap does not cover. No other
+# part of the window reports this file, so the checklist reports it.
 CEC_INSTALL_RULE = "/etc/sudoers.d/zz-steamos-utility-center-cec-install"
 SHIM_DEVICE = "/dev/valve-leds-shim"
 MODULE_NAME = "leds-valve-shim"
@@ -39,10 +39,11 @@ SERVICE = "steamos-utility-center.service"
 WATCHER = "steamos-utility-center-achievements.service"
 PHONE_BRIDGE = "steamos-utility-center-phone.service"
 
-# How long to let KDE Connect answer before calling it silent. Shorter than
-# the service's own wait, because the panel asks this on the thread that draws
-# the window. Both usual answers - it is there, or the bus has no such name -
-# come back in milliseconds; the wait is only for a machine where it hangs.
+# The time to wait for an answer from KDE Connect. After this time, the panel
+# reports no answer. This time is shorter than the wait of the service,
+# because the panel asks on the thread that draws the window. The two normal
+# answers come back in some milliseconds: the name is on the bus, or the bus
+# has no such name. The wait is only for a machine where the call stops.
 PHONE_ASK_SECONDS = 2.0
 
 
@@ -110,17 +111,17 @@ class Probe:
             return False
 
     def lingering(self, user=None):
-        """Whether this user's systemd keeps running with no session open.
+        """Reports whether the systemd of this user runs with no open session.
 
-        Without it, switching to Game Mode ends the session and every user
-        service goes with it - including the two this project installs, both
-        of which are written to survive exactly that.
+                Without this setting, a change to Game Mode ends the session and stops
+                each user service. The two services of this project stop also, and
+                both must stay alive across that change.
 
-        Asked about a *particular* user, by number. Without one loginctl
-        answers about something else entirely and never mentions Linger at
-        all - so this reported "no" on a machine where the same question,
-        asked with the user named, said yes.
-        """
+                This function asks about one *given* user, by number. Without a user,
+                loginctl answers about a different subject and does not give Linger.
+                Then this function reported "no" on a machine that answered "yes" to
+                the same question with the user in it.
+                """
         who = str(os.getuid() if user is None else user)
         command = ["loginctl", "show-user", who, "--property=Linger"]
         try:
@@ -131,16 +132,16 @@ class Probe:
         return "Linger=yes" in done.stdout
 
     def phones(self):
-        """The phones KDE Connect names, or None when it says nothing at all.
+        """Returns the phones that KDE Connect gives, or None for no answer.
 
-        Those are two different problems wearing the same face - a bar that
-        never flashes - so they are worth telling apart: nothing running to
-        forward the notifications, against something running that no phone is
-        talking to.
+                The two conditions give the same symptom: the bar never flashes. But
+                they are two different faults, so this function separates them. In the
+                first fault no program forwards the notifications. In the second fault
+                a program runs, but no phone is connected to it.
 
-        Asked without reviving it, because a status check reports what is
-        there and does not quietly start things.
-        """
+                This function does not start KDE Connect. A status check reports the
+                condition and starts no program.
+                """
         return phone.wake_kdeconnect(revive=False, timeout=PHONE_ASK_SECONDS)
 
     def kernel_release(self):
@@ -225,10 +226,10 @@ def run_checks(probe=None, config=None):
             # here can do.
             repairable=False))
 
-    # Only when it is there, and it never should be. Listed unconditionally it
-    # would be a green line about HDMI CEC on every machine that has never
-    # installed it, which is a checklist reporting on something that is not
-    # part of the installation it is checking.
+    # Report this only when the file is on disk, and it must never be on
+        # disk. A line that is always in the list gives a green line about HDMI
+        # CEC on each machine without HDMI CEC. The checklist then reports on a
+        # part that is not in the installation that it examines.
     if probe.exists(CEC_INSTALL_RULE):
         checks.append(Check(
             "No sudo rule left over from a CEC install", False,
@@ -256,18 +257,19 @@ def broken(checks):
 
 
 def bar_is_live(checks):
-    """Whether the bar is actually being driven, as far as the checks see.
+    """Reports whether a program drives the bar, from these checks only.
 
-    A narrower question than repair_summary answers, and deliberately so. The
-    summary is about the installation being whole - a missing menu entry
-    counts against it - and the foot of the window is about whether anything
-    is driving the strip at all. The two disagree often and both are right:
-    an installation with a stale menu entry is imperfect and lit.
+        This question is narrower than the question that repair_summary answers,
+        and that is on purpose. The summary reports whether the installation is
+        complete, and an absent menu entry makes it incomplete. The foot of the
+        window reports whether a program drives the strip. The two answers are
+        often different, and both are correct. An installation with an old menu
+        entry is incomplete, and the strip is lit.
 
-    None when nothing in the list can answer, which is not the same as a fault:
-    a caller can then say it is still looking rather than report a failure it
-    has not established.
-    """
+        The result is None when no check in the list can answer. That is not a
+        fault. The caller can then report that the answer is not yet available,
+        and not report a failure without proof.
+        """
     found = [check.ok for check in checks if check.live]
     return all(found) if found else None
 
@@ -286,38 +288,38 @@ def repair_summary(checks):
 
 # -- the state of every part -----------------------------------------------
 #
-# This toolbox installs four things now - the LED service, a CPU power unit, a
-# whole HDMI CEC toolkit and a line in somebody's environment.d - and until
-# this layer existed it reported on exactly one of them while calling that
-# page "this installation". The others said their piece on their own settings
-# pages, in their own shapes, and nowhere together.
+# This toolbox now installs four parts: the LED service, a CPU power unit, a
+# complete HDMI CEC toolkit, and a line in the environment.d of the user.
+# Before this layer, the page reported on one part only, and it still had the
+# name "this installation". The other parts reported on their own settings
+# pages, in their own forms, and never together.
 #
-# So every part is described the same way here and read from one place: the
-# status page draws these, the headline counts them, and neither knows how any
-# particular part is checked.
+# So this layer describes each part in the same form, and one place holds
+# them. The status page draws them, and the headline counts them. Neither of
+# the two knows the method that examines one part.
 
 
 class Part:
-    """One installable thing, and how it is doing.
+    """Holds one part that a user can install, and its condition.
 
-    `ok` has three values on purpose. True and False are what you expect;
-    None is "not installed", which is not a fault - a machine that never
-    wanted HDMI CEC is not a machine with a problem, and counting it as one
-    would put a permanent red number over every page.
-    """
+        `ok` has three values on purpose. True and False have the normal meaning.
+        None means "not installed", and that is not a fault. A machine without
+        HDMI CEC has no problem. A count of it as a problem puts a permanent red
+        number on each page.
+        """
 
     def __init__(self, key, name, ok, verdict, detail=(), repair=""):
         self.key = key
         self.name = name
         self.ok = ok
-        # One line, for the block's own heading. What is wrong rather than
-        # that something is: "no adapter" beats "not working".
+        # One line, for the heading of the block. Give the fault and not the
+                # fact of a fault: "no adapter" is better than "not working".
         self.verdict = verdict
         # The Checks or lines behind it, shown when the block is unfolded.
         self.detail = list(detail)
-        # Which repair belongs to this part, if any. Named rather than a
-        # callable so this module stays free of the window - see the panel's
-        # PART_REPAIRS for what each name does.
+        # The repair for this part, if there is one. This is a name and not a
+                # function, so that this module needs no part of the window. See
+                # PART_REPAIRS in the panel for the action of each name.
         self.repair = repair
 
     @property
@@ -355,12 +357,13 @@ def led_part(checks):
 
 
 def power_part(current, available):
-    """The CPU governor, if this machine is being told what to do at all.
+    """Returns the CPU governor, if this project controls this machine.
 
-    Not installed rather than broken when nothing is set: leaving the CPU as
-    SteamOS had it is this project's default and the ordinary state, so a
-    machine that never touched it has nothing to report.
-    """
+        With no setting, the result is "not installed" and not "broken". This
+        project keeps the CPU as SteamOS set it, and that is the default and the
+        normal condition. A machine with no change to the CPU has nothing to
+        report.
+        """
     governor = (current or {}).get("CPU_GOVERNOR", "")
     if not governor:
         return Part("power", "CPU power", None, "Left as SteamOS set it.")
@@ -383,19 +386,19 @@ def features_on(status):
 
 
 def adapter_gone_cost(status):
-    """What leaving the features on costs once the adapter is not there.
+    """Returns the cost of the features that stay on with no adapter.
 
-    Reported by somebody who unplugged his adapter and went back to a plain
-    monitor: the machine took a minute and a half longer to start, and
-    nothing said why. Every feature is still on, and the toolkit's wake
-    service does not know the adapter has gone - it waits eight seconds for
-    the device, then twelve for a logical address, four times over, before
-    giving up and letting the session finish.
+        A user removed the adapter and connected a normal monitor. The machine
+        then needed one and a half minutes more to start, and no message gave the
+        reason. Each feature was still on, and the wake service of the toolkit
+        did not know about the removed adapter. That service waits eight seconds
+        for the device and then twelve seconds for a logical address. It repeats
+        this four times before it stops and lets the session start.
 
-    "" when there is nothing to say, which is every case but the one: the
-    adapter unreachable *and* something still switched on. An adapter that is
-    out with every feature off costs nothing and is nobody's problem.
-    """
+        The result is "" for each condition but one: the adapter does not answer
+        *and* a feature is on. An adapter that is out, with each feature off,
+        costs nothing.
+        """
     if status is None or cec_module.usable(status):
         return ""
     on = features_on(status)
@@ -423,9 +426,9 @@ def cec_part(status, installed):
     detail = ["Adapter: %s" % (device.get("device") or "none configured"),
               "Features on: %s" % (", ".join(on) if on else "none")]
     if not cec_module.usable(status):
-        # The cost of leaving it like this goes in the detail rather than the
-        # verdict: the verdict is one line in a headline, and this is the
-        # paragraph you want once you have opened the block.
+        # The cost of this condition goes into the detail and not into the
+                # verdict. The verdict is one line in a headline. This text is the
+                # paragraph to read after the user opens the block.
         cost = adapter_gone_cost(status)
         return Part("cec", "HDMI CEC", False,
                     "%s cannot be reached, so nothing can be sent."
@@ -437,12 +440,13 @@ def cec_part(status, installed):
 
 
 def gpu_part(state, error=""):
-    """The graphics card, when there is a daemon that owns it.
+    """Returns the graphics card, when a daemon controls it.
 
-    Not installed when LACT is not running, which is most machines - it is
-    somebody else's tool and nothing here installs it, so its absence is not a
-    fault and is not counted as one.
-    """
+        The result is "not installed" when LACT does not run, and that is the
+        condition of most machines. LACT is the tool of another project, and
+        nothing here installs it. Its absence is not a fault, and this function
+        does not count it as one.
+        """
     if error:
         return Part("gpu", "Graphics card", False, error)
     if state is None:
@@ -464,39 +468,39 @@ def gpu_part(state, error=""):
 
 
 def layout_part(layout, labels=None):
-    """The keyboard layout, which is a setting rather than an installation.
+    """Returns the keyboard layout, which is a setting and not an install.
 
-    Never False. There is nothing here that can be broken - a line is in a
-    file or it is not - so it reports set or unset and never counts against
-    the window's summary.
-    """
+        The result is never False. Nothing here can be broken, because a line is
+        in a file or it is not in a file. So this function reports set or unset,
+        and it never counts against the summary of the window.
+        """
     if not layout:
         return Part("keyboard", "Keyboard layout", None,
                     "Left to the system.")
     named = (labels or {}).get(layout, layout)
-    # In the line itself rather than behind a fold. There is one sentence to
-    # say about a keyboard layout, and hiding one sentence behind a Details
-    # button that has to be found and clicked is a worse deal than the line
-    # being a little longer.
+    # This text is in the line and not behind a fold. There is one sentence
+        # to say about a keyboard layout. To put one sentence behind a Details
+        # button, which the user must find and click, is worse than a line that
+        # is a little longer.
     return Part("keyboard", "Keyboard layout", True,
                 "%s. Applies to Game Mode at the next login." % named)
 
 
 def panel_part(version, update_state=None, update_said="", behind="",
                installed=None, head=""):
-    """The program itself. Always installed - you are looking at it.
+    """Returns the program itself. It is always installed and on the screen.
 
-    `behind` is install_is_behind()'s sentence, and it is the one thing here
-    that counts as a fault. Pulling and installing are two steps, the window
-    only ever showed the first, and a clone several commits ahead of the
-    running copy looked exactly like a machine that was up to date - so a fix
-    that had been written, pushed and pulled sat there not running while
-    everybody read logs from the old one.
-    """
-    # Both commits, because the question this block gets asked is which
-    # code is actually running - and a version number does not answer it: it
-    # changes when somebody remembers to change it, and never between two
-    # commits on the same afternoon.
+        `behind` is the sentence of install_is_behind(), and it is the one item
+        here that counts as a fault. A pull and an install are two steps, and the
+        window showed the first step only. A clone some commits in front of the
+        running copy then looked the same as a machine at the current version. So
+        a correction in the clone did not run, and each user read the log of the
+        old copy.
+        """
+    # Show both commits. The question for this block is which code runs now.
+        # A version number does not answer that question. It changes when a
+        # person changes it, and it never changes between two commits on the
+        # same day.
     installed = installed_commit() if installed is None else installed
     detail = []
     if installed:
@@ -529,19 +533,18 @@ SECTION_PARTS = {"strip": "led", "cec": "cec", "keyboard": "layout"}
 
 
 def summary_for(parts, section=""):
-    """The sentence over one page, not always the one over all of them.
+    """Returns the sentence for one page, and not always the global one.
 
-    Reported: the HDMI CEC page said "Everything is in order." directly under
-    its own title, above a card reading "Not installed yet". Both were true.
-    The sentence is counted across every part and a part that is not
-    installed is not a problem - a machine that never wanted CEC is not a
-    broken machine - but a global answer printed under a section's heading
-    reads as an answer about that section.
+        A user reported this: the HDMI CEC page said "Everything is in order."
+        below its own title, and above a card with the text "Not installed yet".
+        Both texts were correct. The sentence counts each part, and a part that is
+        not installed is not a problem. A machine without CEC is not a broken
+        machine. But a global answer below the heading of a section reads as an
+        answer about that section.
 
-    So the page's own part speaks first whenever it has anything but good
-    news, and the sweep across all of them is what a page without a part of
-    its own still gets.
-    """
+        So the part of the page gives the sentence when its condition is not good.
+        A page with no part of its own gets the count across all parts.
+        """
     key = SECTION_PARTS.get(section, section)
     mine = next((part for part in parts if part.key == key), None)
     if mine is not None and mine.ok is not True:
@@ -550,23 +553,23 @@ def summary_for(parts, section=""):
 
 
 def parts_summary(parts):
-    """One sentence for the top of the window, over every part.
+    """Returns one sentence for the top of the window, over each part.
 
-    Counted across all of them rather than over the LED checklist alone,
-    which is what it used to say - so a machine whose CEC adapter had gone
-    read "Everything is in order" while the CEC page said otherwise, and the
-    LED bar's own count was printed over pages that have nothing to do with
-    it.
+        This counts each part. Before, it counted the LED checklist only. A
+        machine with a removed CEC adapter then showed "Everything is in order",
+        and the CEC page showed the opposite. The count of the LED bar also stood
+        over pages with no connection to the LED bar.
 
-    Parts that are not installed are not counted. A machine that never wanted
-    HDMI CEC is not a machine with a problem.
-    """
+        This function does not count a part that is not installed. A machine
+        without HDMI CEC is not a machine with a problem.
+        """
     problems = [part for part in parts if part.ok is False]
     if not problems:
         return "Everything is in order."
     if len(problems) == 1:
-        # One thing wrong is worth naming; the sentence is then the same one
-        # its own block shows, which is where you are about to look.
+        # Give the name of one fault. The sentence is then the same sentence
+                # that the block of the part shows, and the user opens that block
+                # next.
         return "%s: %s" % (problems[0].name, problems[0].verdict)
     return "%d problems: %s." % (len(problems),
                                  ", ".join(part.name for part in problems))
@@ -574,15 +577,15 @@ def parts_summary(parts):
 
 # -- settings profiles -----------------------------------------------------
 #
-# A profile is the same KEY=value file as the configuration, which is what
-# makes this cheap: the parser, the validator and the formatter all already
-# exist. It holds exactly what the panel can set, so the machine-specific
-# lines the panel does not show - serial port, baud rate, device - are never
-# in one and cannot arrive from somebody else's machine.
+# A profile is the same KEY=value file as the configuration. That makes this
+# function small, because the parser, the validator and the formatter are
+# already available. A profile holds only the settings that the panel can set.
+# The lines for one machine are not in it: the serial port, the baud rate and
+# the device. So those lines cannot come from the machine of another user.
 #
-# In the clone rather than under ~/.config, because that is where you already
-# go for this project, and because it needs no privileges: the panel writes it
-# as you, unlike the configuration in /etc.
+# A profile is in the clone and not under ~/.config. The user goes to the
+# clone for this project. The clone also needs no rights: the panel writes it
+# as the user, and the configuration in /etc needs root.
 PROFILE_DIR = "profiles"
 PROFILE_SUFFIX = ".conf"
 
@@ -607,11 +610,12 @@ def profiles(directory):
 
 
 def profile_path(directory, name):
-    """Where a profile of that name goes, whatever the user typed.
+    """Returns the path of a profile with that name, for each input.
 
-    The suffix is not the user's business - they name a profile, they do not
-    name a file - so it is added when it is missing and never twice.
-    """
+        The suffix is not a subject for the user. The user gives the name of a
+        profile and not the name of a file. So this function adds the suffix when
+        the name has none, and it never adds the suffix twice.
+        """
     name = name.strip()
     if not name:
         return None
@@ -646,19 +650,19 @@ def read_profile(path):
 # What Steam's Game Mode session looks like from inside a program it started.
 GAME_MODE_MARKERS = ("GAMESCOPE_WAYLAND_DISPLAY", "STEAM_GAMESCOPE_VRR_ENABLED")
 
-# Phrases only pkexec's own complaint uses. "/dev/tty" was in here once and
-# matched the serial port a firmware flash prints - /dev/ttyUSB0 - so a
-# perfectly good flash came with advice about Game Mode under it.
+# Text that only the error message of pkexec holds. "/dev/tty" was in this
+# list before, and it matched the serial port of a firmware flash, which is
+# /dev/ttyUSB0. A correct flash then showed advice about Game Mode below it.
 NO_AGENT_SIGNS = ("authentication agent", "polkit-agent-helper",
                   "controlling terminal")
 
 
 def in_game_mode(environ=None):
-    """Whether this is running inside Steam's Game Mode session.
+    """Reports whether this program runs in the Game Mode session of Steam.
 
-    Told apart by gamescope's own variables: it is the compositor Game Mode
-    runs under, and what makes the difference that matters here.
-    """
+        The variables of gamescope give the answer. gamescope is the compositor of
+        Game Mode, and it makes the difference that is important here.
+        """
     environ = os.environ if environ is None else environ
     if any(marker in environ for marker in GAME_MODE_MARKERS):
         return True
@@ -666,12 +670,13 @@ def in_game_mode(environ=None):
 
 
 def looks_like_no_auth_agent(output, exit_code):
-    """Whether a privileged command failed for want of a password prompt.
+    """Reports whether a command failed because no program asked for a password.
 
-    pkexec needs a polkit agent to ask with. Game Mode runs none, and pkexec's
-    fallback wants a controlling terminal that a Steam-launched program has
-    not got - so it exits 127 complaining about /dev/tty.
-    """
+        pkexec needs a polkit agent for the question. Game Mode runs no such
+        agent. The fallback of pkexec needs a controlling terminal, and a program
+        that Steam starts has no terminal. pkexec then exits with 127 and an
+        error about /dev/tty.
+        """
     if exit_code == 0:
         return False
     lowered = (output or "").lower()
@@ -741,9 +746,9 @@ def update_verdict(text, code=0):
     script is the thing that knows, and running it twice to be told the same
     thing is how the two answers start to disagree.
 
-    A run that failed says nothing either way - the log has the reason, and
-    guessing over it would be worse than admitting the answer is not known.
-    """
+    A run that failed gives no answer. The log holds the reason. A guess is
+        worse than a clear report that the answer is not known.
+        """
     if code != 0:
         return UPDATE_UNKNOWN, ""
     if _ALREADY.search(text) or _UPDATED.search(text):
@@ -762,7 +767,10 @@ def update_verdict(text, code=0):
 
 
 def _git(source_dir, *args):
-    """git's output, or "" if it fails - including "this is not a clone"."""
+    """Returns the output of git, or "" for each failure.
+
+        A directory that is not a clone is one such failure.
+        """
     try:
         result = subprocess.run(("git", "-C", source_dir) + args,
                                 capture_output=True, text=True)
@@ -781,11 +789,11 @@ def current_branch(source_dir):
 
 
 def known_branches(source_dir, remote="origin"):
-    """Branches this clone has heard of, without asking the network.
+    """Returns the branches that this clone knows, with no network access.
 
-    Enough to fill a menu at startup; a branch made since the last fetch turns
-    up once the update itself has fetched.
-    """
+        This is sufficient to fill a menu at start. A branch from after the last
+        fetch comes into the menu after the next update fetches it.
+        """
     return parse_branches(_git(source_dir, "for-each-ref",
                                "--format=%(refname:strip=3)",
                                "refs/remotes/%s" % remote))
@@ -801,19 +809,20 @@ def head_commit(source_dir):
     return _git(source_dir, "rev-parse", "HEAD")
 
 
-# Where the installer records the commit it installed from - the same path
-# scripts/user-unit.sh names for it, spelled here because this side has no
-# shell to source.
+# The file where the installer records the commit of the install. This is the
+# same path that scripts/user-unit.sh gives. It is written again here, because
+# this side cannot source a shell file.
 STAMP_PATH = os.path.join(INSTALL_DIR, "installed-from")
 
 
 def installed_commit():
-    """The commit the running files came from, or "" if nothing recorded one.
+    """Returns the commit of the running files, or "" when there is no record.
 
-    "" is not "old": an install from before this was written, or from a clone
-    git would not talk about, leaves no stamp - and answering "out of date" to
-    a question nobody asked is worse than answering "not recorded".
-    """
+        "" does not mean "old". Two installs leave no record: an install from
+        before this function, and an install from a directory that git does not
+        read. An answer of "out of date" to a question that nobody asked is worse
+        than an answer of "not recorded".
+        """
     try:
         with open(STAMP_PATH, encoding="utf-8", errors="replace") as handle:
             return handle.read().strip().split()[0]
@@ -822,11 +831,11 @@ def installed_commit():
 
 
 def install_is_behind(source_dir, installed=None, head=None):
-    """The sentence to show when the clone has moved on without the install.
+    """Returns the sentence for a clone that is in front of the install.
 
-    "" when there is nothing to say, which is every case but the one: both
-    commits known and different. Not knowing either is not evidence, and this
-    is read by a status line that has no business guessing.
+        The result is "" for each condition but one: both commits are known and
+        they are different. An unknown commit is not proof. A status line reads
+        this result, and a status line must not guess.
 
     Written because "pulled" and "installed" are two steps and the window
     showed only the first. A clone three commits ahead of the running copy
@@ -880,29 +889,31 @@ FIRMWARE_ENVS = (
 
 
 def flash_firmware_command(source_dir, environment):
-    """Flash the ESP with one of the shipped firmware builds.
+    """Returns the command that flashes the ESP with a firmware build.
 
-    Privileged for one reason only: the service holds the serial port and has
-    to let go of it. PlatformIO itself runs back as the caller, since the
-    toolchains live in their home - see the script.
-    """
+        The command needs root for one reason: the service holds the serial port
+        and must release it. PlatformIO runs again as the caller, because the
+        toolchains are in the home directory of the caller. See the script.
+        """
     return ["pkexec", os.path.join(source_dir, "scripts", "flash-firmware.sh"),
             environment]
 
 
 def restart_watchers_command():
-    """Restart both user units so they re-read the configuration.
+    """Returns the command that restarts both user units.
 
-    Unprivileged and separate on purpose: they are *user* units, out of the
-    privileged helper's reach - but the panel already runs as that user.
+        The two units then read the configuration again. The command needs no
+        root, and it is separate on purpose. The two are *user* units, and the
+        privileged helper cannot reach them. But the panel runs as that user.
 
-    Both of them, not just the achievement watcher. The phone bridge reads
-    the same file and was never restarted here, so the panel's own switch did
-    not take: turning the phone flashes off left the bridge running until the
-    next reboot, and turning them back on left it stopped where it had exited
-    on the old setting - which is exactly what the new status check then
-    reported, correctly, as a problem the panel had caused.
-    """
+        The command restarts both units, and not the achievement watcher alone.
+        The phone bridge reads the same file, and this command did not restart it.
+        The switch in the panel therefore had no result. With the phone flashes
+        off, the bridge continued until the next boot. With the phone flashes on
+        again, the bridge stayed stopped, because it exited on the old setting.
+        The new status check then reported that condition, correctly, as a
+        problem from the panel.
+        """
     return ["systemctl", "--user", "restart", WATCHER, PHONE_BRIDGE]
 
 
@@ -911,9 +922,10 @@ def notify_command(kind):
     return [BINARY, "--notify", kind]
 
 
-# What the shape buttons flash. Steam's own blue: the point of that row is the
-# shape, so the colour should be the same for all of them and belong to none
-# of the notifications - otherwise you are comparing two things at once.
+# The colour that the shape buttons flash. It is the blue of Steam. That row
+# shows the shape, so each button must use the same colour, and that colour
+# must belong to no notification. A different colour for each button makes
+# the user compare two properties at the same time.
 SHAPE_TEST_COLOUR = "#1a9fff"
 
 
@@ -958,19 +970,21 @@ def load_command():
 
 # -- notification colours --------------------------------------------------
 #
-# (label, value) pairs; the value goes in the config file, which takes any
-# colour. These are the offered ones, not the possible ones - first is the
-# default the service ships with.
+# (label, value) pairs. The value goes into the configuration file, and that
+# file accepts each colour. This list holds the colours that the panel offers,
+# and not each colour that is possible. The first colour is the default of
+# the service.
 
-# One list for every notification, and a short one: eight hues round the wheel
-# and white. It used to be a handful per kind - gold and bronze for an
-# achievement, a teal for a friend - which read well in the source and came out
-# of the menu as eighteen near-neighbours you had to compare swatch by swatch.
+# One short list for each notification: eight hues from the colour wheel and
+# white. Before, each type of notification had some colours of its own. An
+# achievement had gold and bronze, and a friend had a teal. That list was
+# clear in the source. In the menu it became eighteen colours that the user
+# had to compare one against the other.
 #
-# These are the offered colours, not the possible ones. The config file takes
-# any colour at all, and so does the trigger; a strip is also not a screen, and
-# the difference between a bronze and a gold on one is not the difference it is
-# in a paint chart.
+# This list holds the colours that the panel offers, and not each colour that
+# is possible. The configuration file accepts each colour, and the trigger
+# does the same. A strip is also not a screen. On a strip, a bronze and a gold
+# are almost the same colour.
 NOTIFICATION_COLOURS = (
     ("Red", "#ff0000"),
     ("Orange", "#ff8000"),
@@ -983,9 +997,10 @@ NOTIFICATION_COLOURS = (
     ("White", "#ffffff"),
 )
 
-# Offered when a colour is picked outright rather than set - the Test page's
-# "flash a colour", where trying an odd one is the whole point. The wheel
-# first, then the ones worth having a name for.
+# The panel offers these when the user selects a colour directly and does not
+# set one. The "flash a colour" control on the Test page does this, and there
+# an unusual colour is the purpose. The colour wheel comes first. Then come
+# the colours that are worth a name.
 EXTRA_COLOURS = (
     ("Steam blue", SHAPE_TEST_COLOUR),
     ("WhatsApp green", "#25d366"),
@@ -995,12 +1010,12 @@ EXTRA_COLOURS = (
 )
 
 
-# The two the load gauge ships with. Offered beside the wheel because they are
-# not on it: they were picked to sit about as far apart as two colours on a
-# strip can, which is what makes the two halves read as two - so without them
-# here, putting back what you started with would mean typing six hex digits.
-# Named apart from the amber in EXTRA_COLOURS, which is a different shade for a
-# different picker.
+# The two default colours of the load gauge. The panel offers them beside the
+# wheel, because they are not on the wheel. They have almost the maximum
+# distance that two colours on a strip can have, and that distance makes the
+# two halves separate. Without them here, a user who wants the first setting
+# again must type six hex digits. This list is separate from the amber in
+# EXTRA_COLOURS, which is a different shade for a different control.
 LOAD_DEFAULT_COLOURS = (
     ("Deep amber", "#ff6e00"),
     ("Steam blue", SHAPE_TEST_COLOUR),
@@ -1008,12 +1023,13 @@ LOAD_DEFAULT_COLOURS = (
 
 
 def load_colours():
-    """Colours to offer for the load gauge's two halves, best answers first.
+    """Returns the colours for the two halves of the load gauge.
 
-    The shipped pair leads - one of them is what each row is already set to,
-    and a menu opening on six hex digits reads as a setting nobody chose -
-    then the wheel the notifications use.
-    """
+        The best answers come first. The default pair leads, because each row
+        already holds one of the two. A menu that opens on six hex digits looks
+        like a setting that no person selected. Then comes the colour wheel of
+        the notifications.
+        """
     offered = []
     for label, value in LOAD_DEFAULT_COLOURS + NOTIFICATION_COLOURS:
         if value.lower() not in {had.lower() for _name, had in offered}:
@@ -1022,13 +1038,13 @@ def load_colours():
 
 
 def palette():
-    """Colours to offer when one is being picked outright, in a sensible order.
+    """Returns the colours for a direct selection, in a useful order.
 
-    The ones a notification can be set to come first - they are the wheel, and
-    what somebody reaching for "make it go red" wants - then the few worth
-    having a name for. Anything else is typed in: the config file takes any
-    colour and so does the trigger.
-    """
+        The colours of a notification come first. They are the colour wheel, and
+        a user who wants a red bar finds red there. Then come the few colours
+        that are worth a name. The user types each other colour. The
+        configuration file accepts each colour, and the trigger does the same.
+        """
     offered = []
     for label, value in NOTIFICATION_COLOURS + EXTRA_COLOURS:
         if value.lower() not in {had.lower() for _name, had in offered}:
@@ -1060,19 +1076,19 @@ def rainbow_choices(names):
 
 
 def desktop_choices(names):
-    """Menu entries for what the bar shows in Desktop Mode.
+    """Returns the menu entries for the bar in Desktop Mode.
 
-    Same arrangement as the two above: the service owns the list and only the
-    wording is here. "steam" needs the most of it - what it stands for is the
-    bar carrying on with whatever the last Game Mode session left, which is
-    what it did before this page existed.
+        This has the same arrangement as the two functions above. The service
+        holds the list, and only the text is here. "steam" needs the most text.
+        It means that the bar keeps the effect of the last Game Mode session.
+        The bar did that before this page existed.
 
-    The four this project added are worded as the rainbow slot words them, and
-    "rainbow" is Steam's own for the same reason it is up there: here they are
-    five separate scenes rather than one slot with a tenant, and a menu
-    offering "Rainbow" next to "Fire" should not leave anybody wondering
-    whether the first of them is the second in disguise.
-    """
+        The four effects of this project use the words of the rainbow slot.
+        "rainbow" is the name of Steam, for the same reason as in the slot. Here
+        the five are separate scenes and not one slot with one effect in it. A
+        menu with "Rainbow" beside "Fire" must not make the user ask whether the
+        first entry is the second entry with another name.
+        """
     labels = {
         "steam": "Leave it to Steam",
         "off": "Off",
@@ -1098,8 +1114,9 @@ def style_choices(styles, inherit=None):
 
 # -- menus whose entries are not what gets written -------------------------
 #
-# A sensor is a path into /sys and a colour is six hex digits - neither is
-# something to show someone. These two translate between label and value.
+# A sensor is a path into /sys, and a colour is six hex digits. The panel must
+# show neither of the two to a user. These two functions convert between the
+# label and the value.
 
 
 def menu_label(choices, value):
@@ -1114,11 +1131,11 @@ def menu_label(choices, value):
 
 
 def menu_value(choices, label):
-    """Back from an entry to what the config file wants.
+    """Converts an entry back to the value for the configuration file.
 
-    An entry nobody put there is its own value - that is how a hand-written
-    setting the menu does not offer stays what it was.
-    """
+        An entry that no person added is its own value. That is the method that
+        keeps a manual setting which the menu does not offer.
+        """
     for known, value in choices:
         if known == label:
             return value
@@ -1163,9 +1180,10 @@ def sensor_choices(sensors, chosen=None, current="auto"):
         choices.append((sensor_label(sensor), sensor["path"]))
 
     if current and current not in [value for _label, value in choices]:
-        # Configured by hand and not there any more - an eGPU unplugged, a
-        # driver unloaded, a typo. Showing it says what the service is set to;
-        # dropping it would look like the setting had changed by itself.
+        # This value came from a manual edit and the machine does not have it
+                # now. A removed eGPU, an unloaded driver or a spelling error causes
+                # this. The entry shows the setting of the service. Without the
+                # entry, the setting looks different for no reason.
         choices.append(("%s (not found)" % current, current))
     return _uniquify(choices)
 
@@ -1218,22 +1236,23 @@ def apply_power_command(source_dir, staged_path):
 
 
 def power_choices(offered, current="", labels=None, unset=True):
-    """(label, value) pairs for a CPU setting, from what the machine offers.
+    """Returns (label, value) pairs for a CPU setting that the machine offers.
 
-    Never from a list here. Which governors and which preferences exist
-    depends on the cpufreq driver and the mode it is in - see power.py - so a
-    menu written down would be a menu that is wrong on somebody's machine.
+        This function never uses a list in this file. The available governors and
+        preferences depend on the cpufreq driver and on its mode. See power.py. A
+        menu in this file is therefore incorrect on some machines.
 
-    "Leave it alone" leads, because it is the default and because it is the
-    entry that undoes the others. A value set in the config file that this
-    machine does not offer is kept and marked, the same way a missing sensor
-    is: dropping it would look like the setting had changed by itself.
-    """
+        "Leave it alone" comes first, because it is the default and because it
+        reverses the other entries. This function keeps and marks a value from the
+        configuration file that this machine does not offer. It does the same for
+        an absent sensor. Without the entry, the setting looks different for no
+        reason.
+        """
     labels = labels or {}
-    # `unset` is False for the preference, which has no such entry: it is only
-    # ever written alongside a governor, so "leave the file alone" is not
-    # something it can mean - either the CPU is being managed here or it is
-    # not, and the governor is where that is said.
+    # `unset` is False for the preference, which has no such entry. The
+        # panel writes the preference only with a governor. So "leave the file
+        # alone" has no meaning for it. This project controls the CPU or it does
+        # not control it, and the governor gives that answer.
     choices = [("Leave it to SteamOS", "")] if unset else []
     for value in offered:
         choices.append((labels.get(value, value), value))
@@ -1243,11 +1262,12 @@ def power_choices(offered, current="", labels=None, unset=True):
 
 
 def _uniquify(choices):
-    """Pull apart labels that would otherwise be the same line twice.
+    """Makes each label different, where two labels are the same text.
 
-    Two inputs on one chip can describe themselves identically, and the menu
-    is keyed on what it shows - so a repeated line makes one unreachable.
-    """
+        Two inputs on one chip can give the same description. The key of the menu
+        is the text that it shows. A text that occurs twice therefore makes one
+        of the two entries unreachable.
+        """
     counts = {}
     for label, _value in choices:
         counts[label] = counts.get(label, 0) + 1
@@ -1263,32 +1283,34 @@ def _where(path):
 
 # -- HDMI CEC ----------------------------------------------------------------
 #
-# The CEC work itself is the SteamOS CEC Toolkit under cec-toolkit/ and the
-# reading of it is server/steamos_utility_center/cec.py. What belongs here is the same thing the
-# rest of this file holds: the commands the window runs, in one place, so a
-# window that is hard to drive under a test is not also the only record of
-# what it would have executed.
+# The SteamOS CEC Toolkit under cec-toolkit/ does the CEC work, and
+# server/steamos_utility_center/cec.py reads it. This file holds the same
+# items as the rest of this module: the commands that the window runs, in one
+# place. A window is difficult to drive under a test, and it must not also be
+# the one record of the commands that it runs.
 
 
 def install_cec_command(source_dir, remove=False):
-    """Install or remove the CEC toolkit, in one prompt.
+    """Returns the command that installs or removes the CEC toolkit.
 
-    Through a script of ours rather than straight at the toolkit's installer,
-    because that installer refuses to run as root and wants sudo about forty
-    times - see scripts/install-cec.sh for what stands between the two.
-    """
+        The command asks for a password one time. It calls a script of this
+        project and not the installer of the toolkit. That installer refuses to
+        run as root, and it calls sudo approximately forty times. See
+        scripts/install-cec.sh for the steps between the two.
+        """
     return ["pkexec", os.path.join(source_dir, "scripts", "install-cec.sh"),
             "remove" if remove else "install",
             cec_module.source_dir(source_dir)]
 
 
 def wake_radios_command():
-    """Ask which radios the toolkit found, and whether they may wake.
+    """Returns the command that lists the radios that the toolkit found.
 
-    A question rather than a repair: the toolkit switches wakeup on for the
-    radios it matches, and this is the only way to find out which ones those
-    were - see cec.wake_radios_command.
-    """
+        The command also reports whether each radio can wake the machine. It is a
+        question and not a repair. The toolkit turns wakeup on for each radio that
+        it matches, and this command is the one method to read that list. See
+        cec.wake_radios_command.
+        """
     return cec_module.wake_radios_command()
 
 
@@ -1316,12 +1338,13 @@ def cec_status(home=None, run=None):
 
 
 def _run_quietly(command):
-    """Run something short and hand back its output, or None if it would not.
+    """Runs a short command and returns its output, or None after a failure.
 
-    Used for the status read, which happens on every visit to the page and on
-    a timer - so it is the one command here that must not put a line in the
-    log or a warning in the status bar each time the toolkit is mid-restart.
-    """
+        The status read uses this function. That read occurs at each visit to the
+        page and also on a timer. So this is the one command here that must write
+        no line in the log and no warning in the status bar during a restart of
+        the toolkit.
+        """
     try:
         done = subprocess.run(command, capture_output=True, text=True,
                               timeout=20)
@@ -1339,13 +1362,13 @@ def _run_quietly(command):
 
 
 def gpu_state(path=None, ask=None):
-    """Everything the GPU block needs, or None when there is no daemon.
+    """Returns the data for the GPU block, or None when no daemon runs.
 
-    None rather than an empty document, and the difference is the whole of
-    what the page does with it: no daemon means the block is not drawn at all,
-    where an empty document would mean a card that reports nothing - which is
-    a page of empty sliders.
-    """
+        The result is None and not an empty document. That difference decides the
+        action of the page. With no daemon, the page does not draw the block. An
+        empty document means a card that reports no value, and the page then
+        draws a set of empty sliders.
+        """
     where = path or lact_module.SOCKET_PATH
     if not lact_module.available(where):
         return None
@@ -1356,9 +1379,9 @@ def gpu_state(path=None, ask=None):
     found = talk("list_devices")
     devices = list(found) if isinstance(found, list) else []
     if not devices:
-        # A daemon with no card is a daemon with nothing to configure -
-        # reported as a state of its own so the page can say so rather than
-        # showing an empty card picker.
+        # A daemon with no card has nothing to configure. This is a state of
+                # its own, so the page can report it. Without the state, the page
+                # shows an empty card selector.
         return {"gpu": "", "name": "", "devices": []}
     gpu = devices[0].get("id", "")
     state = {
@@ -1369,8 +1392,9 @@ def gpu_state(path=None, ask=None):
         "stats": talk("device_stats", {"id": gpu}) or {},
         "clocks": talk("device_clocks_info", {"id": gpu}) or {},
     }
-    # Profiles on their own: an older daemon that does not have them should
-    # cost the page its profile picker, not the whole block.
+    # Read the profiles separately. An older daemon does not have them, and
+        # then the page must lose its profile selector only, and not the
+        # complete block.
     try:
         state["profiles"], state["profile"] = lact_module.profiles(where)
     except lact_module.LactError:
