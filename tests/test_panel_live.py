@@ -4157,6 +4157,27 @@ class DrivesPageTest(unittest.TestCase):
         with open(self.ran[-1][2]) as handle:
             return json.load(handle)
 
+    GAMES = {"uuid": "12345678-1234-1234-1234-123456789abc",
+             "where": "/mnt/games", "type": "ext4",
+             "options": "defaults,noatime", "timeout": "5s"}
+    SHARED = {"uuid": "A1B2-C3D4", "where": "/mnt/shared", "type": "exfat",
+              "options": "defaults,noatime,uid=1000,gid=1000",
+              "timeout": "5s"}
+
+    def _draw(self, *records):
+        """Puts a record on the page, and returns the box that holds it."""
+        self.record = list(records)
+        self.panel._drives = list(records)
+        self.panel._show_drives()
+        self.root.geometry("%dx820" % self.NARROW)
+        self.root.update()
+        return self.panel.drives_box
+
+    def _named(self, name):
+        return [widget for widget in self._every_widget()
+                if isinstance(widget, ttk.Button)
+                and str(widget.cget("text")) == name]
+
     def _add(self, where, which=0):
         offered = self.panel._menus["drive-partition"]
         self.panel._drive_choice.set(offered[which][0])
@@ -4270,6 +4291,53 @@ class DrivesPageTest(unittest.TestCase):
         self.panel._drives = [entry]
         self.panel.remove_drive(entry)
         self.assertEqual(self._staged(), [])
+
+    # Two widths, both above the smallest window this panel allows. What is
+    # under test is what the page does with the width between them.
+    NARROW = 1160
+    WIDE = 1400
+
+    def test_the_buttons_stay_beside_the_drive_in_a_wide_window(self):
+        """The extra width of the window belongs to the empty column.
+
+        The first version of this card put Remove on the right of a row that
+        filled the card. The button then followed the edge of the window, and
+        a wide window left a hand of white space between the name of a drive
+        and the button that takes it away. This measures that: the button must
+        not move when the window gets wider.
+        """
+        self._draw(self.GAMES)
+        remove = self._named("Remove")[0]
+        was = remove.winfo_x()
+        self.root.geometry("%dx820" % self.WIDE)
+        self.root.update()
+        self.assertGreater(self.panel.drives_box.winfo_width(), 0)
+        self.assertEqual(remove.winfo_x(), was,
+                         "the button followed the edge of the window")
+
+    def test_the_buttons_of_two_drives_stand_in_one_column(self):
+        """One grid for every drive, and not one row each.
+
+        The second drive here is exfat, which offers no "Give it to me". That
+        column stays empty on its row rather than closing up, so Remove stands
+        under Remove.
+        """
+        self._draw(self.GAMES, self.SHARED)
+        found = self._named("Remove")
+        self.assertEqual(len(found), 2)
+        self.assertEqual(found[0].winfo_x(), found[1].winfo_x())
+        self.assertNotEqual(found[0].winfo_y(), found[1].winfo_y())
+
+    def test_a_filesystem_with_no_owner_is_not_offered_a_chown(self):
+        """exfat records no owner, so chown on it fails.
+
+        The mount options carry the owner for such a drive, and the page
+        writes them when the drive is added.
+        """
+        self._draw(self.SHARED)
+        self.assertEqual(self._named("Give it to me"), [])
+        self._draw(self.GAMES)
+        self.assertEqual(len(self._named("Give it to me")), 1)
 
     def test_the_explanation_is_on_the_page(self):
         """A label that nothing packs exists and is never drawn.
