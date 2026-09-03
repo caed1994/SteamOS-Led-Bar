@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Service entry point: shim -> renderer -> USB serial -> ESP."""
+"""The entry point of the service: shim, renderer, USB serial, ESP."""
 
 from __future__ import annotations
 
@@ -27,86 +27,99 @@ LOG = logging.getLogger("steamos-utility-center")
 PROGRAM = "steamos-utility-center"
 DEVICE_RETRY_DELAY = 5.0
 
-# A configuration the service will not accept. Restarting cannot rewrite a
-# file, so the unit names this code in RestartPreventExitStatus rather than
-# retrying every RestartSec and burying the one line that says what is wrong.
+# The exit code for a configuration that the service refuses. A restart cannot
+# change a file, so the unit names this code in RestartPreventExitStatus.
+#
+# Without that, the service retries at each RestartSec, and the one line with
+# the reason is lost in the log.
 CONFIG_REFUSED_EXIT = 2
 
-# What the strip does while the machine is asleep. Fixed on purpose - it is
-# not a notification and not an effect, it is what "the machine is off but
-# alive" looks like, and it should look the same on every machine.
+# What the strip shows while the machine is in suspend. It is fixed, and that
+# is deliberate. It is not a notification and not an effect. It is the
+# appearance of "the machine is off and alive", and it must look the same on
+# each machine.
 #
-# Here rather than in the firmware all the same: the ESP has to draw it,
-# because during a suspend there is no host to render anything, but changing
-# how it looks should not mean reflashing every board.
+# It is here and not in the firmware. The ESP must draw it, because during a
+# suspend there is no host to render anything. But a change to its appearance
+# must not need a new flash of each board.
 #
-# Barely there on purpose: a dark room at night, not a night light. With the
-# breath's 5% floor this sweeps roughly 2..30 of 255. Not lower - a WS2812
-# quantises badly in the bottom few steps, and white starts to tint.
+# It is deliberately dim: a dark room at night, and not a night light. With the
+# 5% minimum of the breath, this covers approximately 2 to 30 of 255.
+#
+# It is not lower. A WS2812 has large steps at the low end, and white there
+# takes a colour.
 STANDBY_COLOR = (30, 30, 30)
 STANDBY_PERIOD_MS = 6000            # one slow breath, calmer than the waiting one
 
-# Steam has not touched the LEDs since the module loaded - see shim. Rendering
-# that faithfully is a black strip, and the ESP's own startup breath dies at
-# the handshake to make way for it.
+# Steam did not write to the LEDs after the load of the module. See shim. A
+# correct render of that state is a black strip, and the start-up breath of the
+# ESP stops at the handshake for it.
 UNTOUCHED_SEQ = shim.UNTOUCHED_SEQ
 
-# So the bar keeps breathing instead, in the firmware's own startup amber and
-# at its rhythm. Sent from here rather than left to the firmware because the
-# link is already up by then: connecting later would reset the board at
-# exactly the moment Steam takes over.
+# The bar thus continues the breath, in the amber colour and at the rate of the
+# firmware.
+#
+# This module sends it and does not leave it to the firmware, because the link
+# is already open. A later connection resets the board at the moment when Steam
+# takes the bar.
 STARTUP_COLOR = (40, 16, 0)
 STARTUP_PERIOD_MS = 3000
 
-# Words on the trigger pipe that are not flashes. The pipe is already read in
-# the main loop and is world-writable, so the sleep hook has somewhere to say
-# this without a second channel to keep alive.
+# The words on the trigger pipe that are not flashes. The main loop already
+# reads the pipe, and each user can write to it. The sleep hook thus has a
+# place to report this, and this project needs no second channel.
 STANDBY_WORD = "standby"
 RESUME_WORD = "resume"
 
-# How long standby may last while the process is actually running. The point
-# is the clock: time.monotonic() does not advance across a suspend, so this
-# only counts seconds the machine spent awake. If the resume hook never fires
-# the bar puts itself right within half a minute; a machine asleep for three
-# days still comes back to a breathing strip.
+# The maximum length of the standby state while this process runs.
+#
+# The clock is the important part. time.monotonic() does not advance during a
+# suspend, so this counts only the seconds in which the machine was awake.
+#
+# If the resume hook does not run, the bar thus repairs itself in 30 seconds. A
+# machine in suspend for three days still returns to a breathing strip.
 STANDBY_MAX_AWAKE = 30.0
 
 
 class _Stopped(Exception):
-    """Raised internally when a signal asks us to shut down."""
+    """A signal asked this process to stop."""
 
 
 def anything_shows(config, shows):
-    """Whether either mode puts `shows` on the bar on this machine.
+    """Returns whether either mode puts `shows` on the bar on this machine.
 
-    Two settings can ask for the same effect, independently. RAINBOW_SHOWS is
-    which of them holds Steam's rainbow slot in Game Mode; DESKTOP_SCENE names
-    one outright on the desktop, where there is no menu to share. So a gauge
-    is wanted here if *either* asks for it - and the sources below are what a
-    gauge has to read.
+    Two settings can ask for the same effect, and they are independent.
+    RAINBOW_SHOWS selects the effect in the rainbow slot of Steam in Game Mode.
+    DESKTOP_SCENE names an effect directly on the desktop, where there is no
+    menu to share.
 
-    Reported, and this is the whole of it: with DESKTOP_SCENE=load and
-    RAINBOW_SHOWS left at the rainbow, nothing built the counters, the load
-    gauge had nothing to read, and render._substitute handed the slot back to
-    Steam's rainbow. So picking the load gauge on the desktop showed a
-    rainbow - the one effect it was chosen instead of. Same for the
-    temperature gauge, by the same two lines.
+    A gauge is thus necessary here if *either* setting asks for it. The sources
+    below are what a gauge reads.
 
-    Only the two that read hardware need asking about. Fire and the aurora
-    are arithmetic and draw wherever they are named.
+    A user reported the defect. With DESKTOP_SCENE=load and RAINBOW_SHOWS at
+    the rainbow, nothing built the counters. The load gauge thus had nothing to
+    read, and render._substitute gave the slot back to the rainbow of Steam.
+
+    A selection of the load gauge on the desktop thus showed a rainbow, which
+    is the one effect that it replaced. The temperature gauge had the same
+    defect, from the same two lines.
+
+    Only the two effects that read hardware need this question. Fire and the
+    aurora are arithmetic, and they draw wherever a setting names them.
     """
     return (config["RAINBOW_SHOWS"] == shows
             or desktop.scene_shows(config["DESKTOP_SCENE"]) == shows)
 
 
 def shown_where(config, shows, name):
-    """Two lines saying which of the modes puts `name` on the bar here.
+    """Returns two lines about which mode puts `name` on the bar here.
 
-    Both, always. What the two diagnostics said before was "the rainbow slot
-    shows %r, set RAINBOW_SHOWS=load to put this there" - true, and half the
-    answer: it names the Game Mode setting to someone who may well be asking
-    because their *desktop* is showing the wrong thing, and following it puts
-    the gauge in the one mode they were not looking at.
+    It always returns both lines. The two reports said "the rainbow slot shows
+    %r, set RAINBOW_SHOWS=load to put this there".
+
+    That was correct and it was half of the answer. It names the Game Mode
+    setting to a person who asks because the *desktop* shows the wrong effect.
+    That person then puts the gauge in the one mode that they did not look at.
     """
     lines = []
     if config["RAINBOW_SHOWS"] == shows:
@@ -127,24 +140,25 @@ def shown_where(config, shows, name):
 
 
 def build_temperature_source(config):
-    """A sensor to read, or None unless something on this machine shows it."""
+    """Returns a sensor to read, or None if no mode shows it here."""
     if not anything_shows(config, render.SHOWS_TEMPERATURE):
         return None
     return temperature.TemperatureSource(path=config["TEMPERATURE_SENSOR"])
 
 
 def build_load_source(config):
-    """Counters to read, or None unless something on this machine shows them."""
+    """Returns counters to read, or None if no mode shows them here."""
     if not anything_shows(config, render.SHOWS_LOAD):
         return None
     return load.LoadSource()
 
 
 def build_overheat_watch(config):
-    """A watch over every sensor, or None when warnings are switched off.
+    """Returns a watch over each sensor, or None when the warnings are off.
 
-    Nothing to do with the gauge: that shows one sensor you picked, this looks
-    at all of them, and either works with the other switched off.
+    This is separate from the gauge. The gauge shows one sensor that a person
+    selected. This reads each sensor. Each of the two operates with the other
+    one off.
     """
     if not (config["NOTIFY"] and config["NOTIFY_WARNING"]):
         return None
@@ -166,8 +180,9 @@ def build_renderer(config):
                            config["TEMPERATURE_MAX"]),
         load=build_load_source(config),
         rainbow_shows=config["RAINBOW_SHOWS"],
-        # Parsed here rather than in the renderer: notify owns the spelling of
-        # a colour, and it imports from render, so render cannot ask it.
+        # This module parses the colour and the renderer does not. notify owns
+        # the form of a colour, and notify imports from render. render thus
+        # cannot ask notify.
         load_cpu_colour=notify.parse_color(config["LOAD_CPU_COLOR"]),
         load_gpu_colour=notify.parse_color(config["LOAD_GPU_COLOR"]),
         load_swap=config["LOAD_SWAP"],
@@ -175,7 +190,7 @@ def build_renderer(config):
 
 
 def build_scene(config):
-    """The snapshot to show in Desktop Mode, or None to leave the bar alone."""
+    """Returns the snapshot for Desktop Mode, or None to leave the bar."""
     return desktop.scene_snapshot(config["DESKTOP_SCENE"],
                                   config["DESKTOP_COLOR"],
                                   config["DESKTOP_BRIGHTNESS"],
@@ -183,17 +198,23 @@ def build_scene(config):
 
 
 def warn_scene_split(config):
-    """Say so once if a config file used to mean something else here.
+    """Reports one time when a configuration file had a different meaning.
 
-    Desktop Mode's rainbow scene used to be the same slot as Game Mode's, so
-    DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire put fire on the desktop. Now
-    that the desktop has a fire scene of its own, that pair means the rainbow
-    - which is what it says, but not what the bar was doing yesterday.
+    The rainbow scene of Desktop Mode was the same slot as the slot of Game
+    Mode. DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire thus put fire on the
+    desktop.
 
-    Not migrated silently. Either reading of that file is defensible and only
-    the person who wrote it knows which they meant, and a setting that changes
-    itself is worse than one that says what it now means. Logged rather than
-    refused for the same reason: nothing here is broken.
+    The desktop now has a fire scene of its own. That pair of settings thus
+    means the rainbow, which is what it says. It is not what the bar did
+    before.
+
+    This function does not migrate the file. Both readings of that file are
+    correct, and only the person who wrote it knows which one they meant. A
+    setting that changes itself is worse than a setting that reports its
+    meaning.
+
+    It writes a line to the log and does not refuse the file, for the same
+    reason: nothing here is defective.
     """
     if (config["DESKTOP_SCENE"] != desktop.SCENE_RAINBOW
             or config["RAINBOW_SHOWS"] == render.SHOWS_RAINBOW):
@@ -205,17 +226,17 @@ def warn_scene_split(config):
 
 
 def notification_colors(config):
-    """The named triggers whose colour the configuration can change."""
+    """Returns the named triggers whose colour the configuration changes."""
     return {kind: notify.parse_color(config[prefix + "_COLOR"])
             for kind, prefix in config_module.CONFIGURABLE_KINDS}
 
 
 def notification_styles(config):
-    """The triggers that flash in a shape of their own.
+    """Returns the triggers that flash in a shape of their own.
 
-    Anything left out follows NOTIFY_STYLE, which is what the default means -
-    so the general setting stays the one knob for "all of them look like
-    this", and a kind only leaves it when someone says so.
+    Each trigger that this omits uses NOTIFY_STYLE, and that is the meaning of
+    the default. The general setting thus stays the one control for "each
+    trigger looks like this". A kind leaves it only when a person says so.
     """
     return {kind: config[prefix + "_STYLE"]
             for kind, prefix in config_module.CONFIGURABLE_KINDS
@@ -250,24 +271,25 @@ class Runner:
             repeat_gap=config["NOTIFY_REPEAT_GAP"],
         )
         self.overheat = build_overheat_watch(config)
-        # What to show while Steam is not driving the bar, and who decides
-        # whether it is. Both None when DESKTOP_SCENE says to leave it alone,
-        # which is what keeps the loop's ordinary path exactly as it was.
+        # What to show while Steam does not drive the bar, and what decides
+        # whether Steam drives it. Both are None when DESKTOP_SCENE says to
+        # leave the bar to Steam. The normal path of the loop is thus
+        # unchanged.
         self.scene = build_scene(config)
-        # And, for the scenes drawn out of the renderer's substitutable slot,
-        # which of them this one is. Game Mode's answer is a setting on the
-        # renderer; the desktop's is the scene itself, so it travels with the
-        # snapshot - see _shows.
+        # And, for a scene from the slot of the renderer, which effect this
+        # one is. In Game Mode a setting on the renderer answers. On the
+        # desktop the scene answers, so the answer travels with the snapshot.
+        # See _shows.
         self.scene_shows = desktop.scene_shows(config["DESKTOP_SCENE"])
         warn_scene_split(config)
         self.ownership = None if self.scene is None else desktop.Ownership()
         self.trigger = None
         self.source = None
-        # Set while the machine is going to sleep: the ESP is breathing on its
-        # own and the loop must stay quiet, or the next rendered frame would
-        # end the standby a millisecond after it started.
+        # This is set while the machine goes into suspend. The ESP breathes by
+        # itself, and the loop must stay quiet. Without that, the next frame
+        # ends the standby one millisecond after its start.
         self.standby_since = None
-        # Whether the ESP has been told to keep breathing until Steam turns up.
+        # Whether this told the ESP to breathe until Steam writes.
         self._breathing_for_steam = False
 
     def stop(self, *_args):
@@ -280,7 +302,7 @@ class Runner:
     # -- shim device ------------------------------------------------------
 
     def _open_source(self):
-        """Open the shim device, waiting for it to appear if necessary."""
+        """Opens the shim device. It waits for the device if it is not there."""
         device = self.config["DEVICE"]
         warned = False
         while self.running:
@@ -311,13 +333,14 @@ class Runner:
         raise _Stopped()
 
     def _recover(self, message, *args):
-        """Wait, then reopen the device after it stopped making sense.
+        """Waits, then opens the device again after its answers stopped.
 
-        The pause is the point. Every way this device can misbehave leaves it
-        readable, so poll() keeps returning at once and the loop would reopen
-        and re-read as fast as the CPU allows - a burnt core, and a warning per
-        turn. Backing off makes a misconfigured DEVICE one message every few
-        seconds instead.
+        The wait is the important part. Each fault of this device leaves it
+        readable, so poll() returns immediately.
+
+        Without the wait, the loop thus opens and reads again at the speed of the
+        CPU. That uses one core fully and writes one warning at each turn. With the
+        wait, a wrong DEVICE gives one message in some seconds.
         """
         LOG.warning(message, *args)
         self._sleep(DEVICE_RETRY_DELAY)
@@ -350,17 +373,17 @@ class Runner:
         try:
             trigger.open()
         except OSError as exc:
-            # Not fatal: without the pipe the bar simply never flashes.
+            # This is not a failure. With no pipe, the bar does not flash.
             LOG.warning("notifications disabled, cannot use %s: %s",
                         self.config["NOTIFY_FIFO"], exc)
             return
         self.trigger = trigger
 
     def _wait(self, interval):
-        """Block until the LED state changes, a trigger arrives, or timeout.
+        """Waits for a change of the LED state, a trigger, or the timeout.
 
-        Returns (state changed, trigger ready). Waiting on both at once keeps a
-        notification from sitting in the pipe while the bar is idle.
+        It returns (state changed, trigger ready). It waits for both at the same
+        time. A notification thus does not stay in the pipe while the bar is idle.
         """
         sources = [self.source.fd]
         if self.trigger is not None and self.trigger.fd >= 0:
@@ -400,11 +423,11 @@ class Runner:
             LOG.warning("could not hand the strip over for standby")
 
     def _hold_for_steam(self):
-        """Leave the strip to the ESP while Steam has still said nothing.
+        """Gives the strip to the ESP while Steam writes nothing.
 
-        Once told, it keeps breathing on its own until the next frame - so
-        this only has to speak up again after something interrupted it, which
-        a notification flash does.
+        After the message, the ESP breathes until the next frame. This method
+        thus sends the message again only after an interruption. A notification
+        flash is such an interruption.
         """
         if not self.link.connected:
             self._breathing_for_steam = False
@@ -423,23 +446,25 @@ class Runner:
         LOG.info("standby over (%s)", why)
 
     def _showing(self, snapshot, now):
-        """Which snapshot to draw: Steam's, or the desktop scene.
+        """Returns the snapshot to draw: the snapshot of Steam, or the scene.
 
-        Steam's whenever Steam has any claim on the bar, which is the safe way
-        round: a scene that held the bar through a Game Mode session would be
-        this ignoring the LED settings somebody just changed, where a scene
-        that gives way too readily is only a scene you do not see.
+        It returns the snapshot of Steam whenever Steam has a claim on the bar,
+        and that is the safe direction.
+
+        A scene that held the bar through a Game Mode session ignores the LED
+        settings that a person set a moment before. A scene that gives the bar up
+        too easily is only a scene that a person does not see.
         """
         if self.scene is None or self.ownership.steam_has_it(snapshot, now):
             return snapshot
         return self.scene
 
     def _shows(self, showing):
-        """What the frame about to be drawn puts in the rainbow's slot.
+        """Returns what the next frame puts in the slot of the rainbow.
 
-        None whenever Steam has the bar, which is what leaves the renderer on
-        RAINBOW_SHOWS: that setting is Steam's menu's, and Steam's menu is
-        still what a Game Mode rainbow was picked from.
+        It returns None whenever Steam has the bar. The renderer then uses
+        RAINBOW_SHOWS. That setting belongs to the menu of Steam, and a person
+        selected a Game Mode rainbow from that menu.
         """
         return None if showing is not self.scene else self.scene_shows
 
@@ -448,19 +473,25 @@ class Runner:
         snapshot = None
         showing = None
         last_key = None
-        # The soonest the next frame may go out. FPS is meant to be a ceiling
-        # and was only ever a timeout: the loop wakes on every write to the
-        # device, so the frame rate was Steam's write rate rather than the one
-        # asked for. Measured on a Steam Machine: during a download Steam
-        # writes the progress bar four hundred times a second, and every one
-        # of them was rendered and pushed down a link that carries about
-        # sixty. The state is still read every time; only the drawing and the
-        # sending are held to the rate in the config file.
+        # The earliest time of the next frame.
+        #
+        # FPS is a limit, and it was only a timeout. The loop wakes at each write
+        # to the device, so the frame rate was the write rate of Steam and not the
+        # rate in the configuration.
+        #
+        # The measurement on a Steam Machine: during a download, Steam writes the
+        # progress bar four hundred times each second. This service rendered each
+        # write and sent it down a link that carries approximately sixty.
+        #
+        # This service still reads the state at each write. The limit applies to
+        # the render and to the send only.
         due = 0.0
-        # Whether a frame is being held back, which is the only time the wait
-        # below has to be cut short. Without it the loop woke at the frame
-        # rate even when nothing was changing, and the idle heartbeat - the
-        # whole of IDLE_FPS - stopped happening.
+        # Whether this holds a frame. That is the one case in which the wait
+        # below must be shorter.
+        #
+        # Without this value, the loop woke at the frame rate while nothing
+        # changed. The idle frames, which are the purpose of IDLE_FPS, thus
+        # stopped.
         pending = False
 
         while self.running:
@@ -468,18 +499,21 @@ class Runner:
             self.link.poll()
 
             interval = 1.0 / self.config["FPS"]
-            # The renderer decides, not the snapshot: the temperature gauge
-            # occupies the rainbow's slot, and Steam still calls that animated.
-            # Asked about what is on the bar rather than about what Steam last
-            # said, which are not the same thing while a scene is up.
+            # The renderer decides this and the snapshot does not. The
+            # temperature gauge is in the slot of the rainbow, and Steam still
+            # calls that effect animated.
+            #
+            # This asks about the effect on the bar and not about the last write
+            # of Steam. The two are different while a scene is on the bar.
             if (showing is not None
                     and not self.renderer.is_animated(showing,
                                                       self._shows(showing))
                     and not self.overlay.active):
                 interval = 1.0 / self.config["IDLE_FPS"]
-            # Never wait past the moment a frame is due. Without this the wait
-            # would run to the idle heartbeat and the frame rate would halve
-            # whenever Steam writes a little faster than the frames go out.
+            # Never wait past the time of the next frame. Without this, the wait
+            # runs to the idle interval, and the frame rate is half of the
+            # correct rate whenever Steam writes faster than the frames go
+            # out.
             if pending:
                 waiting = time.monotonic()
                 if waiting < due:
@@ -496,8 +530,8 @@ class Runner:
                 self._poll_trigger(time.monotonic())
 
             if self.overheat is not None:
-                # Cheap on most turns - it reads nothing until its own
-                # interval is up - so it can sit in the loop unguarded.
+                # This costs little at most turns: it reads nothing until
+                # its own interval ends. It thus needs no guard here.
                 reason = self.overheat.poll(time.monotonic())
                 if reason is not None:
                     LOG.warning("overheating: %s", reason)
@@ -512,9 +546,10 @@ class Runner:
                                   self.config["DEVICE"], exc)
                     continue
                 if new_snapshot is None:
-                    # Readable but empty. The shim answers every read with a
-                    # whole snapshot or an error, so this is a different
-                    # device - and one that would spin the loop in silence.
+                    # The device is readable and empty. The shim answers each
+                    # read with a full snapshot or with an error. This is thus
+                    # a different device, and it makes the loop turn with no
+                    # message.
                     snapshot = None
                     self._recover("%s is readable but returns no snapshot - "
                                   "is DEVICE pointing at the shim?",
@@ -531,20 +566,21 @@ class Runner:
 
             now = time.monotonic()
             if self.standby_since is not None:
-                # Silence is the point: the ESP is breathing on its own, and
-                # one frame from here would end it. The machine is about to
-                # suspend, so this loop is about to stop turning anyway.
+                # Silence is correct here. The ESP breathes by itself, and
+                # one frame from this loop ends the breath. The machine goes
+                # into suspend, so this loop also stops.
                 if now - self.standby_since > STANDBY_MAX_AWAKE:
-                    # Half a minute of running time means we never went to
-                    # sleep, or came back without being told. Take the strip
-                    # back rather than leave it breathing at an awake machine.
+                    # 30 seconds of run time means that the machine did not go
+                    # into suspend, or that it returned with no message. Take
+                    # the strip back. Do not leave it breathing at an awake
+                    # machine.
                     self._leave_standby("still awake")
                 else:
                     continue
 
-            # Read every write, draw at the rate that was asked for. Skipping
-            # here rather than earlier keeps the trigger pipe and the overheat
-            # watch above answering at whatever rate the loop turns.
+            # Read each write, and draw at the rate in the configuration. The
+            # skip is here and not earlier, so that the trigger pipe and the
+            # temperature watch above answer at the rate of the loop.
             if now < due:
                 pending = True
                 continue
@@ -552,17 +588,20 @@ class Runner:
 
             showing = self._showing(snapshot, now)
 
-            # A flash covers the whole bar; nothing underneath is worth drawing.
+            # A flash covers the full bar. A frame below it is discarded.
             payload = self.overlay.frame(now)
             if (payload is None and showing is snapshot
                     and snapshot.seq <= UNTOUCHED_SEQ):
-                # Nothing to show yet, and black is not an improvement on the
-                # breath the ESP is already running. A flash still gets
-                # through - it is the branch above - and lands us back here
-                # afterwards, which is when the breath is asked for again.
-                # A scene is something to show, so it comes up on a machine
-                # that has not been in Game Mode since it booted rather than
-                # waiting for a session that may never happen.
+                # There is nothing to show, and black is not better than the
+                # breath that the ESP runs.
+                #
+                # A flash still reaches the bar: it is the branch above. It
+                # returns to this branch, and this branch asks for the breath
+                # again.
+                #
+                # A scene is something to show. It thus appears on a machine
+                # with no Game Mode session after the boot, and it does not
+                # wait for a session that can never start.
                 self._hold_for_steam()
                 continue
             if payload is None:
@@ -573,13 +612,15 @@ class Runner:
                          "Steam set the LEDs" if showing is snapshot
                          else "there is a desktop scene to show")
                 self._breathing_for_steam = False
-            # Idle heartbeat too: the firmware blanks the strip if we go quiet.
+            # The idle frames also: the firmware makes the strip dark when
+            # this service is quiet.
             self.link.send_frame(payload, self.config["LED_COUNT"])
-            # From FPS rather than from the interval above: that one is how
-            # long to wait before resending an unchanged frame, which is a
-            # different question from how fast a changing one may go out. A
-            # download's progress bar is a static effect that changes every
-            # write, and holding it to the idle rate would make it a slideshow.
+            # This uses FPS and not the interval above. That interval is the
+            # wait before this sends an unchanged frame again. This is the
+            # maximum rate of a frame that changes.
+            #
+            # The progress bar of a download is a static effect that changes
+            # at each write. At the idle rate it thus moves in large steps.
             due = now + 1.0 / self.config["FPS"]
 
 
@@ -594,23 +635,23 @@ def _interrupt_on_sigterm():
 
 
 def run_desktop(config):
-    """Report the desktop scene, and who has the bar - a Desktop Mode command.
+    """Reports the desktop scene and the owner of the bar. A desktop command.
 
-    Which is not a limitation to work around but the shape of the thing: there
-    is no terminal in Game Mode, so this can only ever be run on one side of
-    the question it is about. What it finds live is therefore always the
-    desktop half.
+    That is not a limit to remove. It is the shape of the question. Game Mode
+    has no terminal, so a person can run this on one side of the question only.
+    What it reads live is thus always the desktop half.
 
-    The other half is what the service *recorded* while nobody could watch.
-    It logs which mode it saw at startup and on every change, so the journal
-    is where a Game Mode session can be looked at afterwards - and this reads
-    it rather than printing a journalctl line to be typed, because the answer
-    to "was Game Mode ever recognised on this machine" should not be two more
-    steps away.
+    The other half is what the service *recorded* while nobody could watch. The
+    service writes the mode to the log at its start and at each change. The
+    journal is thus where a person reads a Game Mode session afterwards.
 
-    Got wrong in the direction that matters, a scene would sit on the bar
-    through a game and ignore everything Steam asked for, with nothing on
-    screen to say why. That is the failure this exists to make visible.
+    This function reads the journal. It does not print a journalctl line for a
+    person to type. The answer to "did this machine ever recognise Game Mode"
+    must not be two steps away.
+
+    The important failure is a scene that stays on the bar through a game and
+    ignores each write of Steam, with nothing on the screen to give the reason.
+    This function makes that failure visible.
     """
     scene = build_scene(config)
     print("DESKTOP_SCENE=%s" % config["DESKTOP_SCENE"])
@@ -644,9 +685,9 @@ def run_desktop(config):
               % ("never since the module loaded" if ago is None
                  else "%.0f seconds ago (%s)" % (ago, snapshot.effect_name)))
 
-    # The rule the service goes by, spelled out from the two answers above
-    # rather than asked of an Ownership: that one would scan /proc a second
-    # time and log its own version of this into the middle of the report.
+    # The rule of the service, from the two answers above. This does not
+    # ask an Ownership: that class reads /proc a second time and writes its
+    # own version of this into the middle of the report.
     steams = bool(found) or (ago is not None and ago < desktop.GRACE_SECONDS)
     print("So the bar is %s."
           % ("Steam's" if scene is None or steams
@@ -654,7 +695,7 @@ def run_desktop(config):
     if scene is None:
         return 0
 
-    # And the Game Mode half, which cannot be looked at while it is happening.
+    # And the Game Mode half, which nobody can watch while it occurs.
     print("")
     lines, why_not = desktop.journal_ownership()
     if why_not:
@@ -674,10 +715,12 @@ def run_desktop(config):
             print("  %s" % line)
         if not any(desktop.GAME_MODE_MARK + " is running" in line
                    for line in lines):
-            # The whole point of reading this. Every line saying "desktop"
-            # and none saying Game Mode, on a machine that has been in one,
-            # is detection that is not working - and the symptom without this
-            # is a bar that quietly ignores Steam during a game.
+            # This is the purpose of the report. Each line says "desktop" and
+            # no line says Game Mode, on a machine with a Game Mode session.
+            # That is a detection that fails.
+            #
+            # Without this report, the symptom is a bar that ignores Steam
+            # during a game and reports nothing.
             print("  Nothing there recognised a Game Mode session. If you "
                   "have been in one since the last restart, that is the bug "
                   "to report - the bar would be keeping your scene through "
@@ -694,17 +737,18 @@ ROUTE_MARKS = {"ok": "WORKS ", "crashed": "CRASH ", "failed": "no    "}
 
 
 def _report_route(route, status, detail):
-    """One probed route per line, as select_route() works through them."""
+    """Prints one route on each line, as select_route() tries them."""
     print("  [%s] %-52s %s" % (ROUTE_MARKS[status], route, detail), flush=True)
 
 
 def run_check_config(config):
-    """Report the settings this configuration adds up to.
+    """Reports the settings of this configuration.
 
-    Reaching here at all means the file parsed and passed validate(), because
-    main() loads it before dispatching - so this is also the answer to "would
-    the service accept this file?", which is what anything replacing a working
-    config wants to know before it does.
+    A call to this function means that the file parsed and passed validate(),
+    because main() loads the file before it dispatches.
+
+    This is thus also the answer to "does the service accept this file". A
+    program that replaces a working configuration needs that answer first.
     """
     for key in sorted(config):
         print("%-18s %s" % (key, config[key]))
@@ -712,11 +756,11 @@ def run_check_config(config):
 
 
 def run_temperature(config):
-    """List the machine's temperature sensors and show what the gauge does.
+    """Lists the temperature sensors and reports what the gauge does.
 
-    Which one is right is a per-machine question, so all of them are listed
-    with their readings and the chosen one marked - which is what writing a
-    TEMPERATURE_SENSOR line by hand needs.
+    The correct sensor is different on each machine. This function thus lists
+    each sensor with its reading and marks the selected one. That is what a
+    person needs to write a TEMPERATURE_SENSOR line.
     """
     sensors = temperature.find_sensors()
     if not sensors:
@@ -726,14 +770,14 @@ def run_temperature(config):
         return 1
 
     chosen = temperature.pick_sensor(sensors)
-    # What the overheat warning would do here, whether or not it is on: the
-    # thresholds come from the machine, so this is the only place anyone can
-    # see them before switching it on.
+    # What the temperature warning does here, whether or not it is on. The
+    # thresholds come from the machine, so this is the one place where a
+    # person can see them before the decision.
     watch = temperature.OverheatWatch()
     watched = {sensor["path"]: threshold for sensor, threshold in watch.resolve()}
 
     print("Temperature sensors on this machine:")
-    # Nine spaces, which is what "  [use ] " takes on the rows below.
+    # Nine spaces, which is the width of "  [use ] " on the rows below.
     print("         %-12s %-12s %6s  %-24s %-10s %s"
           % ("chip", "label", "now", "limits it publishes", "warns at",
              "path"))
@@ -752,9 +796,10 @@ def run_temperature(config):
                  "%.1f C" % threshold if threshold is not None else "-",
                  sensor["path"]))
         if alarms:
-            # The driver's own opinion. Not what the warning acts on - a
-            # latched flag would then warn about weather from an hour ago -
-            # but worth seeing when you are looking for trouble.
+            # The statement of the driver. The warning does not use it: a
+            # flag that stays set warns about a temperature from one hour
+            # before. It is still worth a report during a search for a
+            # fault.
             print("        ^ the driver reports %s raised" % ", ".join(alarms))
 
     print()
@@ -819,11 +864,13 @@ def run_temperature(config):
 
 
 def run_load(config):
-    """Show what the load gauge can read here, and what it would draw.
+    """Reports what the load gauge reads here, and what it draws.
 
-    Whether the GPU half works at all is a driver question - amdgpu answers,
-    most others do not - so this says which counters were found before anyone
-    wonders why half the bar is mirrored.
+    The driver decides whether the GPU half operates. amdgpu answers and most
+    other drivers do not.
+
+    This function thus names the counters that it found. Without it, a person
+    asks why one half of the bar is a copy of the other.
     """
     source = load.LoadSource()
     gpu_path = source.resolve()
@@ -840,8 +887,8 @@ def run_load(config):
               "rainbow.")
         return 1
 
-    # One interval, so the CPU has two readings to subtract - the first can
-    # only ever be a baseline.
+    # One interval, so that the CPU has two readings to subtract. The first
+    # reading is always a baseline.
     source.fractions()
     time.sleep(source.interval * 2)
     cpu, gpu = source.fractions()
@@ -866,7 +913,7 @@ def run_load(config):
 
 
 def run_steam_check(config):
-    """Report what the Steamworks path can and cannot find on this machine."""
+    """Reports what the Steamworks path finds and does not find here."""
     print("Steam directory:   %s" % (steamworks.steam_root() or "NOT FOUND"),
           flush=True)
 
@@ -890,8 +937,8 @@ def run_steam_check(config):
         library = None
 
     if library:
-        # The route into ISteamUserStats differs most between SDK generations,
-        # so show it up front.
+        # The route into ISteamUserStats is the value that is most different
+        # between SDK generations, so this reports it first.
         try:
             symbols = elf.exported_symbols(library)
         except (OSError, elf.ElfError) as exc:
@@ -961,16 +1008,19 @@ def run_steam_check(config):
 
 
 def run_probe_messages(config, seconds=None):
-    """Find out whether Steam will forward friend messages to us, and how.
+    """Reports whether Steam forwards a friend message here, and how.
 
-    Two unknowns: whether the borrowed library can deliver callbacks to a
-    ctypes binding at all (manual dispatch is SDK 1.51+), and which callback
-    number carries a chat message. So every callback that arrives is printed
-    rather than only the expected one.
+    There are two unknown values. The first is whether the library can deliver
+    a callback to a ctypes binding: that needs manual dispatch, which is SDK
+    1.51 or newer. The second is the callback number of a chat message.
+
+    This function thus prints each callback that arrives, and not the expected
+    one only.
     """
     _interrupt_on_sigterm()
 
-    # A configured library may sit outside the search, so survey it too.
+    # A library in the configuration can be outside the search, so this
+    # also reads that one.
     candidates = list(steamworks.find_libraries())
     explicit = config["STEAM_LIBRARY"]
     if explicit and explicit != "auto" and explicit not in candidates:
@@ -1005,9 +1055,9 @@ def run_probe_messages(config, seconds=None):
     print()
     if not usable:
         if arrivals:
-            # The two are not the same test: chat needs the client's
-            # permission on top, and this is exactly the machine where the
-            # difference decides whether anything flashes at all.
+            # The two are different tests. Chat also needs the permission
+            # of the client. On this machine, that difference decides
+            # whether the bar flashes.
             print("No library here can be told to forward chat, but %d can"
                   % len(arrivals))
             print("still report friends coming online. Leave")
@@ -1090,28 +1140,31 @@ def run_probe_messages(config, seconds=None):
     return 0
 
 
-# How often to scan every process while still searching for a game: the scan is
-# expensive and there is no hurry to notice one.
+# How often to read each process during the search for a game. The read is
+# expensive, and a fast answer is not necessary.
 PROCESS_SCAN_EVERY = 5          # ticks
 
-# Told to watch for nothing at all. The watcher normally exits 0 after one
-# game and is restarted, so this needs an exit systemd can tell apart or the
-# unit respawns forever. RestartPreventExitStatus names it.
+# The exit code for "each switch is off". The watcher normally exits 0 after
+# one game, and systemd starts it again.
+#
+# This state thus needs an exit code that systemd can separate from that one.
+# Without it, the unit starts again without a limit. RestartPreventExitStatus
+# names this code.
 NOTHING_TO_WATCH_EXIT = 3
 
 
 def _should_scan_processes(tick, attached):
-    """Whether this tick should pay for the full process scan.
+    """Returns whether this turn does the full read of the processes.
 
-    Always yes while attached: on some machines registry.vdf never names the
-    running app, so a skipped scan would read as "no game" and detach a game
-    that is still running.
+    It returns True while this is attached to a game. On some machines,
+    registry.vdf never names the running app. A turn with no read thus reads as
+    "no game", and this detaches from a game that still runs.
     """
     return attached or tick % PROCESS_SCAN_EVERY == 0
 
 
 def _flash(fifo, kind):
-    """Trigger the bar, and keep going if the service is not listening."""
+    """Writes a trigger, and continues when the service does not read it."""
     try:
         notify.send(fifo, kind)
     except OSError as exc:
@@ -1119,22 +1172,24 @@ def _flash(fifo, kind):
 
 
 def _open_friend_listener(stats, want_messages):
-    """Start listening for friend activity, or None if Steam will not have it."""
+    """Starts a read of the friend activity, or None if Steam refuses."""
     try:
         listener = steamworks.FriendListener(stats, want_messages=want_messages)
         listener.open()
         return listener
     except steamworks.SteamworksError as exc:
-        # Not fatal: achievements are the main event and still work.
+        # This is not a failure. The achievements are the main feature and
+        # they still operate.
         LOG.warning("friend activity unavailable: %s", exc)
         return None
 
 
 def run_watch_achievements(config, interval=1.0):
-    """Flash the bar on achievements and friend activity in the running game.
+    """Flashes the bar for an achievement and for friend activity in a game.
 
-    Runs as your normal user next to Steam, not as the sandboxed service, and
-    only writes trigger words into the notification pipe.
+    It runs as the normal user, beside Steam. It does not run as the service in
+    its sandbox. It writes trigger words into the notification pipe and does
+    nothing else.
     """
     _interrupt_on_sigterm()
 
@@ -1142,8 +1197,8 @@ def run_watch_achievements(config, interval=1.0):
     messages_on = config["NOTIFY_MESSAGES"]
     friends_on = config["NOTIFY_FRIEND_ONLINE"]
     if not (achievements_on or messages_on or friends_on):
-        # Attaching would open a Steamworks session as the running game for
-        # nothing - and that registration is what keeps Steam on "Stopping".
+        # To attach opens a Steamworks session as the running game for no
+        # reason. That registration is what keeps Steam at "Stopping".
         print("NOTIFY_ACHIEVEMENTS, NOTIFY_MESSAGES and NOTIFY_FRIEND_ONLINE "
               "are all off, so there is nothing to watch for.", flush=True)
         return NOTHING_TO_WATCH_EXIT
@@ -1154,9 +1209,10 @@ def run_watch_achievements(config, interval=1.0):
     current_app = None
     stats = None
 
-    # flush, because this runs as a service: Python block-buffers a piped
-    # stdout, so these lines would sit there until the process stopped and
-    # then land in the journal describing a run that is already over.
+    # flush, because this runs as a service. Python buffers a stdout that
+    # goes to a pipe. These lines thus stay in the buffer until the
+    # process stops, and they then reach the journal and describe a run
+    # that is finished.
     print("Watching for %s; flashes go to %s"
           % (" and ".join(filter(None, [
               "achievements" if achievements_on else "",
@@ -1177,10 +1233,10 @@ def run_watch_achievements(config, interval=1.0):
                         listener.close()
                         listener = None
                     stats.close()
-                    # And then go away entirely: this process is registered
-                    # with Steam as an instance of the game, and only exiting
-                    # clears that - SteamAPI_Shutdown does not. systemd starts
-                    # the next watcher (Restart=always).
+                    # And then exit. Steam has this process registered as an
+                    # instance of the game, and only an exit clears that
+                    # registration. SteamAPI_Shutdown does not clear it. systemd
+                    # starts the next watcher, because it has Restart=always.
                     LOG.info("game ended - exiting so Steam can finish "
                              "stopping it; systemd restarts the watcher")
                     return 0
@@ -1189,10 +1245,11 @@ def run_watch_achievements(config, interval=1.0):
                     try:
                         library = steamworks.find_library(
                             config["STEAM_LIBRARY"])
-                        # Friend activity needs a manual-dispatch session, and
-                        # only a new enough library can open one. Chat needs
-                        # more of it than "who came online" does: that one
-                        # arrives without asking Steam to forward anything.
+                        # Friend activity needs a session with manual dispatch,
+                        # and only a new library can open one.
+                        #
+                        # Chat needs more than "who came online". That signal
+                        # arrives with no request to Steam.
                         support = steamworks.message_support(library)
                         chat = messages_on and steamworks.usable_for_messages(
                             support)
@@ -1206,11 +1263,13 @@ def run_watch_achievements(config, interval=1.0):
                             LOG.info("%s cannot deliver friend state changes",
                                      library)
                         if not achievements_on and not manual:
-                            # Decided before opening anything, because a
-                            # session is not free: it registers this process
-                            # as the game, and only the process ending clears
-                            # that. Attaching to poll nothing would hold the
-                            # game on "Stopping" for no flash at all.
+                            # This decides before it opens a session,
+                            # because a session has a cost: it registers
+                            # this process as the game, and only an exit of
+                            # the process clears that.
+                            #
+                            # To attach and read nothing holds the game at
+                            # "Stopping" and gives no flash.
                             print("Achievements are switched off and %s cannot "
                                   "deliver friend activity, so there is "
                                   "nothing to watch for." % library, flush=True)
@@ -1218,7 +1277,8 @@ def run_watch_achievements(config, interval=1.0):
 
                         route = config["STEAM_ROUTE"]
                         if not route or route == "auto":
-                            # Probes in child processes; a bad route segfaults.
+                            # It probes in a child process. A wrong route stops
+                            # that process.
                             route, _count = steamworks.select_route(
                                 app_id, library)
                             if route is None:
@@ -1235,11 +1295,12 @@ def run_watch_achievements(config, interval=1.0):
                         listener = (_open_friend_listener(stats, chat)
                                     if manual else None)
                         if watcher is None and listener is None:
-                            # The library could have done it, but Steam
-                            # declined - and achievements are off, so this
-                            # session has nothing left to report. Ending the
-                            # process is also what releases the registration
-                            # it just took out.
+                            # The library can do it and Steam refused. The
+                            # achievements are off, so this session has
+                            # nothing to report.
+                            #
+                            # An exit of the process also releases the
+                            # registration that it took.
                             print("Steam will not forward friend activity to "
                                   "this app and achievements are switched "
                                   "off, so there is nothing to watch for.",
@@ -1247,7 +1308,8 @@ def run_watch_achievements(config, interval=1.0):
                             return NOTHING_TO_WATCH_EXIT
                         LOG.info("attached to app %d", app_id)
                     except steamworks.SteamworksError as exc:
-                        # current_app is set, so no retry until another game.
+                        # current_app is set, so this tries again at the
+                        # next game only.
                         LOG.warning("cannot attach to app %s: %s", app_id, exc)
                         stats, watcher = None, None
                 else:
@@ -1261,16 +1323,16 @@ def run_watch_achievements(config, interval=1.0):
                                      stats.display_name(name))
                             _flash(fifo, "achievement")
                     if listener is not None:
-                        # One flash however many arrived, per kind: the queue
-                        # drops a repeat of what it is already showing, so a
-                        # burst would only be told once anyway.
+                        # One flash for each kind, whatever the number that
+                        # arrived. The queue discards a repeat of the flash
+                        # that it shows, so a group gives one flash.
                         messages, online = listener.poll()
                         if messages and messages_on:
                             LOG.info("%d friend message(s)", len(messages))
                             _flash(fifo, "message")
                         if online and friends_on:
-                            # No names in the log: who you play with is
-                            # nobody's business but yours.
+                            # No names in the log. The people that a person
+                            # plays with are that person's own business.
                             LOG.info("%d friend(s) came online", len(online))
                             _flash(fifo, "friend")
                 except OSError as exc:
@@ -1303,11 +1365,12 @@ def run_watch_phone(config, print_only=False):
     can read. Like the achievement watcher, all it ever does to this project
     is write trigger words into the pipe.
 
-    `print_only` is the thing to run first. It reports every notification it
-    sees and what it would have flashed, and flashes nothing - so whether KDE
-    Connect answers on this machine, and what the apps on it are actually
-    called, are things you find out by looking rather than by guessing at a
-    rule.
+    Run `print_only` first. It reports each notification that it sees and the
+    flash that it would make, and it flashes nothing.
+
+    A person thus finds two answers by a look, and not by a guess in a rule.
+    The first is whether KDE Connect answers on this machine. The second is the
+    names of the apps on it.
     """
     _interrupt_on_sigterm()
 
@@ -1319,12 +1382,13 @@ def run_watch_phone(config, print_only=False):
     rules = phone.parse_rules(config["PHONE_APPS"])
     fifo = config["NOTIFY_FIFO"]
 
-    # Ask for KDE Connect before listening to it. A monitor attaches to a name
-    # rather than asking for it, so with nothing behind that name it waits in
-    # silence - which is what Game Mode looks like, there being no desktop
-    # session there to have started it.
-    # Never started from a dry run: --print reports on the machine, and a
-    # report that starts a daemon has changed the thing it was describing.
+    # Ask for KDE Connect before this reads it. A monitor attaches to a name
+    # and does not request it. With nothing behind that name, it thus waits
+    # with no message. Game Mode is such a state: it has no desktop session to
+    # start the daemon.
+    #
+    # A dry run never starts it. --print reports on the machine, and a report
+    # that starts a daemon changes what it describes.
     woken = phone.wake_kdeconnect(revive=not print_only)
 
     def report(sighting, trigger):
@@ -1387,35 +1451,36 @@ def run_watch_phone(config, print_only=False):
     try:
         monitor = phone.open_monitor()
     except OSError as exc:
-        # gdbus comes with glib, so this is a machine with no desktop stack at
-        # all - which no amount of restarting will change.
+        # gdbus is part of glib. This is thus a machine with no desktop
+        # software, and a restart does not change that.
         print("cannot start gdbus: %s" % exc, file=sys.stderr, flush=True)
         return MONITOR_MISSING_EXIT
 
     known = [woken]
 
     def look_again():
-        """Every so often: is KDE Connect still there, and still paired?
+        """Asks at intervals whether KDE Connect runs and is still paired.
 
-        Because this process is built to outlive the session it started in.
-        Checking once at startup says nothing about what happens twenty
-        minutes later in Game Mode - and asking is also what starts KDE
-        Connect again if it has gone away, the bus activating it exactly as
-        it did the first time.
+        This process outlives the session that started it. A check at the start
+        thus says nothing about the state twenty minutes later in Game Mode.
+
+        The question also starts KDE Connect again after it stops. The bus
+        activates it as it did the first time.
         """
         now = phone.wake_kdeconnect()
         if now == known[0]:
             return
         was, known[0] = known[0], now
         if was is None and now is not None and not print_only:
-            # KDE Connect has come back, which means the phone is about to
-            # reconnect - and the first thing it does is hand over everything
-            # already on it. The same pile as at boot, and the same answer.
+            # KDE Connect returned. The phone thus connects again, and the
+            # first data on that connection is each notification that the
+            # phone holds. That is the group from the boot, and it needs the
+            # same answer.
             bridge.expect_backlog()
         if now is None:
-            # Whether there was anything to start it with, said here rather
-            # than nowhere: without it, "cannot find kdeconnectd" and "started
-            # it and it still will not answer" read identically - as silence.
+            # Whether there was a program to start. This reports it. Without
+            # the report, two states read as one silence: "kdeconnectd is not
+            # here" and "this started it and it does not answer".
             found = phone.kdeconnectd_path()
             LOG.warning("KDE Connect has stopped answering; %s",
                         "started %s, giving it until the next check" % found
@@ -1429,12 +1494,13 @@ def run_watch_phone(config, print_only=False):
             LOG.info("KDE Connect is paired with: %s", ", ".join(now))
 
     def how_soon():
-        """Often while KDE Connect is missing, seldom while it is not.
+        """Returns a short interval while KDE Connect is absent, else a long one.
 
-        The minute that is right for looking in on something healthy is a
-        long time to sit with the phone trying to reconnect - and checking
-        every few seconds all day, to catch the few minutes a week when it
-        matters, is the other way to get it wrong.
+        One minute is correct for a check on a program that operates. It is a
+        long time to wait while the phone tries to connect again.
+
+        A check every few seconds for the full day, to find the few minutes each
+        week that need it, is the other mistake.
         """
         return (phone.EAGER_SECONDS if known[0] is None
                 else phone.TICK_SECONDS)
@@ -1449,15 +1515,15 @@ def run_watch_phone(config, print_only=False):
             monitor.wait(timeout=5)
         except subprocess.TimeoutExpired:               # pragma: no cover
             monitor.kill()
-    # Getting here means the monitor ended by itself - the bus went away with
-    # the session, most likely. systemd starts the next one.
+    # The monitor stopped by itself. The bus most probably stopped with the
+    # session. systemd starts the next monitor.
     LOG.info("the notification bus stopped talking (%d seen, %d flashed)",
              bridge.seen, bridge.flashed)
     return 0
 
 
 def run_notify(config, kind):
-    """Fire a notification on a running service."""
+    """Sends a notification to a service that runs."""
     try:
         notify.send(config["NOTIFY_FIFO"], kind)
     except OSError as exc:
@@ -1481,18 +1547,21 @@ def run_list_ports():
 
 
 def dump_line(snapshot, written, seen):
-    """One state change, with how long since Steam's previous one.
+    """Returns one state change, with the time from the previous one.
 
-    The gap is measured between the module's own stamps rather than between
-    the moments this noticed them: the module stamps every write, and this
-    loop can be a moment behind one. So the column answers "how often does
-    Steam write?" - which is the question a download raises, and one nothing
-    in this project can answer from the outside.
+    The interval is between the marks of the module and not between the
+    moments at which this loop saw them. The module marks each write, and this
+    loop can be a moment behind one.
 
-    And it says when the answer is short of writes. The shim hands out the
-    current state rather than a queue, so two writes inside one wait are seen
-    as one - the counter is what gives that away, and a gap measured across a
-    write nobody saw is not the gap anybody wanted.
+    The column thus answers "how often does Steam write". A download raises
+    that question, and nothing in this project can answer it from outside.
+
+    It also reports when the answer omits a write. The shim gives the current
+    state and not a queue, so this loop reads two writes inside one wait as
+    one write.
+
+    The counter reports that. An interval that covers a write that nobody saw
+    is not the interval that a person wants.
     """
     gap = ("" if written is None
            else "+%.2fs" % ((snapshot.monotonic_ns - written) / 1e9))
@@ -1502,7 +1571,7 @@ def dump_line(snapshot, written, seen):
 
 
 def run_dump(config):
-    """Print decoded snapshots without touching the serial port."""
+    """Prints the decoded snapshots. It does not open the serial port."""
     _interrupt_on_sigterm()
     with shim.ShimSource(config["DEVICE"]) as source:
         last = written = seen = None
@@ -1517,7 +1586,7 @@ def run_dump(config):
 
 
 def run_self_test(config, duration=None):
-    """Drive test patterns without Steam or the kernel module."""
+    """Draws test patterns. It uses neither Steam nor the kernel module."""
     _interrupt_on_sigterm()
     renderer = build_renderer(config)
     link = build_link(config)
@@ -1563,7 +1632,7 @@ def run_self_test(config, duration=None):
 
 
 def run_simulate(config, effect_name):
-    """Feed a synthetic snapshot to the ESP, as if Steam had set it."""
+    """Sends a made snapshot to the ESP, as a snapshot from Steam."""
     effects = {name: value for value, name in shim.EFFECT_NAMES.items()}
     if effect_name not in effects:
         LOG.error("unknown effect %r (known: %s)",
@@ -1629,8 +1698,8 @@ def build_parser():
                         choices=("debug", "info", "warning", "error"))
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="shorthand for --log-level debug")
-    # Not a mode of its own: it changes what --watch-phone does with what it
-    # finds, which is why it sits with the options rather than below.
+    # This is not a mode of its own. It changes what --watch-phone does with
+    # what it finds. It is thus with the options and not below them.
     parser.add_argument("--print", action="store_true", dest="print_only",
                         help="with --watch-phone: report what it sees and "
                              "what it would flash, without flashing. Run this "
