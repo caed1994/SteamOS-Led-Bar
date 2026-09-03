@@ -6,8 +6,9 @@
 #
 #   self-test.sh [seconds]
 #
-# The service holds the port exclusively, so it has to step aside and come
-# back afterwards - including when the test fails or is interrupted.
+# The service opens the port exclusively. It must thus stop and start again
+# afterwards. That includes a test that fails and a test that a person
+# interrupts.
 
 set -euo pipefail
 

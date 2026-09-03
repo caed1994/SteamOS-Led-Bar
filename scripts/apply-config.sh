@@ -6,9 +6,9 @@
 #
 #   apply-config.sh <staged-file>
 #
-# Split out of the control panel so the privileged step is one short script
-# that can be read in full, rather than a shell command line assembled by a
-# GUI. Run through pkexec; the panel itself stays unprivileged.
+# This is separate from the control panel, so that the step with root is one
+# short script that a person can read. It is not a command line that a GUI
+# builds. It runs through pkexec, and the panel itself has no rights.
 
 set -euo pipefail
 
@@ -19,14 +19,16 @@ STAGED="${1:-}"
 [[ -n "$STAGED" ]] || { echo "usage: apply-config.sh <staged-file>" >&2; exit 2; }
 [[ -f "$STAGED" ]] || { echo "no such file: $STAGED" >&2; exit 2; }
 
-# Refuse anything the service itself would refuse, before it replaces a
-# working file - a rejected config would leave the service dead on restart.
+# Refuse each file that the service refuses, before this replaces a file that
+# operates. A file that the service refuses stops the service at its next
+# start.
 INSTALL_DIR="/var/lib/steamos-utility-center"
 if [[ -x "$INSTALL_DIR/steamos-utility-center" ]]; then
-    # Ask the service itself whether it would accept the file. Anything else
-    # would be a second copy of the validation rules, and getting that subtly
-    # wrong means overwriting a working config with one the service refuses -
-    # leaving it dead on restart.
+    # Ask the service whether it accepts the file. Each other method is a second
+    # copy of the validation rules.
+    #
+    # A small mistake in that copy replaces a configuration that operates with one
+    # that the service refuses. The service then does not start.
     if ! rejection="$("$INSTALL_DIR/steamos-utility-center" --config "$STAGED" \
                       --check-config 2>&1 1>/dev/null)"; then
         echo "the new configuration was rejected, keeping the old one:" >&2

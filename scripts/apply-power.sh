@@ -6,9 +6,9 @@
 #
 #   apply-power.sh <staged-file>
 #
-# Split out of the control panel the same way apply-config.sh is, and for the
-# same reason: the privileged step should be one short script that can be read
-# in full rather than a command line assembled by a GUI.
+# This is separate from the control panel, as apply-config.sh is, and for the
+# same reason. The step with root must be one short script that a person can
+# read. It must not be a command line that a GUI builds.
 
 set -euo pipefail
 
@@ -21,9 +21,12 @@ STAGED="${1:-}"
 [[ -n "$STAGED" ]] || { echo "usage: apply-power.sh <staged-file>" >&2; exit 2; }
 [[ -f "$STAGED" ]] || { echo "no such file: $STAGED" >&2; exit 2; }
 
-# Refuse a value this machine does not offer before it replaces a working
-# file. The applier itself is what knows the answer - asking it here rather
-# than repeating the rules means the check and the write cannot disagree.
+# Refuse a value that this machine does not offer, before this replaces a file
+# that operates.
+#
+# The program that applies the value knows the answer. A question to that
+# program keeps the check and the write equal. A second copy of the rules does
+# not.
 if [[ -x "$APPLIER" ]]; then
     if ! rejection="$("$APPLIER" --apply --config "$STAGED" 2>&1)"; then
         echo "the new settings were rejected, keeping the old ones:" >&2
@@ -35,9 +38,12 @@ fi
 
 install -m 0644 "$STAGED" "$CONFIG_PATH"
 
-# Enabled rather than started: the settings are already in effect - the applier
-# above did that - and what the unit is for is putting them back after a
-# reboot. Enabling it is idempotent, so pressing Apply twice is not an error.
+# This enables the unit and does not start it. The settings are already in
+# effect: the program above applied them. The purpose of the unit is to apply
+# them again after a reboot.
+#
+# To enable a unit two times has the same result as one time, so two presses of
+# Apply are not an error.
 if [[ -f "/etc/systemd/system/$SERVICE" ]]; then
     systemctl enable "$SERVICE" >/dev/null 2>&1 \
         || echo "could not enable $SERVICE - the settings will not survive a reboot" >&2

@@ -2,17 +2,20 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Draw the README's effect previews, straight from the renderer.
+"""Draws the effect previews of the README, from the renderer.
 
-GitHub runs no JavaScript in a README, so the previews have to be images.
-They are animated PNGs rather than GIFs: a GIF has 256 colours to spend and
-these are all gradients, which is exactly what a palette cannot do. APNG is
-plain PNG chunks plus three more, so zlib out of the standard library is the
-whole dependency.
+GitHub runs no JavaScript in a README, so the previews must be images.
 
-Nothing here reimplements an effect. The two gauges read a scripted sensor -
-a machine does not warm from 25 to 95 degrees on cue - but every frame is
-drawn by render.py and notify.py as the service uses them.
+They are animated PNG files and not GIF files. A GIF has 256 colours, and
+these images are gradients. A palette cannot show a gradient.
+
+An APNG is PNG chunks and three more chunks, so zlib from the standard
+library is the one package that this needs.
+
+Nothing here writes an effect a second time. The two gauges read a sensor
+from a script, because a machine does not go from 25 to 95 degrees on
+request. render.py and notify.py draw each frame, as the service uses
+them.
 
     python3 tools/make-previews.py [--out docs/previews]
 """
@@ -77,9 +80,9 @@ def raster(pixels):
         row = rows[top + offset]
         for x in range(WIDTH):
             red, green, blue = spread[x]
-            # Rounded to steps of four: invisible on a band this faint, and
-            # it turns a gradient full of near-misses into runs a compressor
-            # can actually use.
+            # This rounds to steps of four. The step is invisible on a band
+            # this dim, and it changes a gradient of almost equal values
+            # into runs that a compressor can use.
             row[x] = tuple(
                 int(BACKDROP[axis] + (channel - BACKDROP[axis]) * fade) & 0xFC
                 for axis, channel in enumerate((red, green, blue)))
@@ -87,12 +90,13 @@ def raster(pixels):
 
 
 def scanlines(rows):
-    """Rows as PNG's filter-byte-then-pixels bytes, ready for zlib.
+    """Returns the rows as PNG bytes: a filter byte and then the pixels.
 
-    Every row but the first is stored as its difference from the row above.
-    The bar is twenty identical rows and the backdrop is flat, so almost the
-    whole image becomes runs of zero - which is the difference between a
-    preview that belongs in a repository and one that does not.
+    Each row except the first is the difference from the row above it. The bar
+    is twenty equal rows and the background is one colour.
+
+    Almost all of the image thus becomes runs of zero. That is the difference
+    between a preview that belongs in a repository and one that does not.
     """
     out = bytearray()
     previous = None
@@ -214,11 +218,11 @@ def firmware_breath(colour, period_ms):
 
 
 def scripted():
-    """A sensor, and the two runs the gauges are shown going through.
+    """Returns a sensor and the two sequences that the gauges show.
 
-    Neither gauge has anything to show standing still, and a machine does not
-    warm from 25 to 95 degrees on cue. Both walks end where they started, so
-    the clip loops without a jump.
+    A gauge that does not move has nothing to show, and a machine does not go
+    from 25 to 95 degrees on request. Each sequence ends at its start value, so
+    the clip repeats with no step.
     """
     sensor = Scripted()
 
@@ -226,7 +230,7 @@ def scripted():
         walk = fraction * 2.0
         sensor.temperature = 25.0 + (walk if walk <= 1.0 else 2.0 - walk) * 70.0
 
-    # Idle, a menu, a game, and back - the GPU spikier than the CPU.
+    # Idle, a menu, a game, and back. The GPU changes more than the CPU.
     steps = ((0.05, 0.02), (0.22, 0.10), (0.35, 0.62), (0.78, 0.96),
              (0.55, 0.88), (0.18, 0.09), (0.05, 0.02))
 
@@ -242,7 +246,7 @@ def scripted():
 
 
 def build_previews(out):
-    """The README's animations: a curated few, short, and small enough."""
+    """Returns the animations of the README: some short and small clips."""
     sensor, warm, busy = scripted()
     previews = {
         "rainbow": lambda: steam_effect(shim.EFFECT_RAINBOW,
@@ -282,9 +286,11 @@ def build_previews(out):
 
 # -- the same effects, for the page that can animate them properly ---------
 #
-# docs/index.html plays these instead of a picture per effect: it can switch
-# clips, run them slowly and retint a flash shape, none of which an image in a
-# README can do. Same frames underneath, so the two can never disagree.
+# docs/index.html plays these clips and does not show one image for each
+# effect. It can change clips, run them slowly, and change the colour of a
+# flash shape. An image in a README can do none of the three.
+#
+# The frames below are the same frames, so the two cannot become different.
 
 PAGE_FPS = 25
 
@@ -298,11 +304,11 @@ def page_pixels(seconds, produce):
 
 
 def page_levels(shape, duration=3.5, tail=0.5):
-    """One flash as brightness only, one byte an LED.
+    """Returns one flash as brightness only, with one byte for each LED.
 
-    A shape is brightness over time and its colour is a multiplier on top, so
-    the page can offer the colour as a choice instead of the capture having to
-    guess which one anyone wants to see.
+    A shape is a brightness over time, and its colour is a multiplier on that
+    brightness. The page can thus offer the colour as a choice, and this
+    capture does not have to select one.
     """
     overlay = notify.NotificationOverlay(duration=duration, led_count=LEDS,
                                          style=shape)

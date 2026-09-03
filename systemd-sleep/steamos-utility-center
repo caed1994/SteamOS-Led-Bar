@@ -5,11 +5,12 @@
 # Hand the LED strip over to the ESP while the machine sleeps, and take it
 # back on the way out.
 #
-# Installed to /usr/lib/systemd/system-sleep/. systemd runs everything here
-# with "pre <action>" before suspending and "post <action>" after waking, and
-# waits for it to finish - which is what makes this the right place: the strip
-# has to be told *before* the service is frozen, and nothing else in the
-# system knows that moment.
+# This is installed to /usr/lib/systemd/system-sleep/. systemd runs each
+# program there with "pre <action>" before a suspend and "post <action>" after
+# a wake, and it waits for each one to finish.
+#
+# That is why this is the correct place. The strip must get the message
+# *before* systemd freezes the service, and nothing else knows that moment.
 #
 # It writes a word into the service's trigger pipe rather than talking to the
 # serial port, because the service holds that port exclusively. The pipe is
@@ -20,10 +21,11 @@ DEFAULT_FIFO="/run/steamos-utility-center/notify"
 
 # Where the service is actually listening.
 #
-# NOTIFY_FIFO is a setting, and this used to know only the default - so a
-# machine that had moved the pipe got a hook writing into a path nothing was
-# reading, and the strip just went dark on suspend with nothing anywhere
-# connecting the two.
+# NOTIFY_FIFO is a setting, and this script knew the default only.
+#
+# On a machine with a different pipe, this hook thus wrote into a path that
+# nothing read. The strip went dark at a suspend, and nothing connected the
+# two events.
 #
 # Read in the order the service reads its own settings: the environment
 # outranks the file, and the last of two lines naming the same option wins.
@@ -37,15 +39,19 @@ if [ -z "$FIFO" ] && [ -r "$CONFIG" ]; then
 fi
 [ -n "$FIFO" ] || FIFO="$DEFAULT_FIFO"
 
-# Nobody listening is not a failure: the service may be stopped, or
-# notifications switched off. Either way there is nothing to hand over.
+# A pipe with no reader is not a failure. The service can be stopped, or
+# the notifications can be off. In both cases there is nothing to give.
 [ -p "$FIFO" ] || exit 0
 
-# Opened read-write, and that is the whole of it. A FIFO opened for writing
-# alone blocks until somebody opens the other end - so a pipe left behind by a
-# service that died would hang this script, and systemd waits here before it
-# suspends: a machine that will not go to sleep, for a strip. Read-write never
-# blocks. The word is simply dropped if nothing is reading.
+# This opens the pipe for read and write, and that is the important part.
+#
+# A FIFO that a program opens for write only blocks until another program opens
+# the other end. A pipe from a service that stopped thus stops this script, and
+# systemd waits here before the suspend. The machine then does not go into
+# suspend, because of a strip.
+#
+# An open for read and write never blocks. The word goes nowhere if nothing
+# reads it.
 tell() {
     printf '%s\n' "$1" 1<> "$FIFO" 2>/dev/null || return 0
 }
@@ -53,10 +59,12 @@ tell() {
 case "$1" in
   pre)
     tell standby
-    # systemd suspends as soon as this script returns, so give the service a
-    # moment to read the word and get the message out of the serial port.
-    # Without this the machine can be asleep before the ESP has been told, and
-    # the strip just goes dark.
+    # systemd suspends the machine when this script returns. This wait thus gives
+    # the service the time to read the word and send the message to the serial
+    # port.
+    #
+    # Without the wait, the machine can suspend before the ESP gets the message,
+    # and the strip goes dark.
     sleep 0.5
     ;;
   post)

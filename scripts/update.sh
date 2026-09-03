@@ -6,10 +6,12 @@
 #
 #   update.sh [--check] [branch]
 #
-# Unprivileged on purpose: the clone belongs to whoever made it, and only
-# installing what it brings needs rights - which is a separate step, run
-# afterwards. Split out of the control panel so the whole of it can be read in
-# one go rather than assembled by a GUI.
+# This has no rights, and that is deliberate. The clone belongs to the person
+# who made it. Only the installation of what it brings needs rights, and that
+# is a separate step after this one.
+#
+# It is separate from the control panel, so that a person can read all of it. A
+# GUI does not build it.
 #
 # It refuses rather than resolves. Local edits and local commits are somebody's
 # work, and an updater that throws them away to succeed is worse than one that
@@ -124,14 +126,19 @@ git log --oneline --no-decorate -20 "$BEFORE..$AFTER" | sed 's/^/  /'
 COUNT="$(git rev-list --count "$BEFORE..$AFTER")"
 [[ "$COUNT" -gt 20 ]] && echo "  ... and $((COUNT - 20)) more"
 
-# Said out loud, because it is the half everybody forgets. This changes the
-# clone and nothing else: the files that actually run live in /var/lib and
-# are put there by the installer. Two people have now read logs from the old
-# copy while looking at the new commits, which is a mistake this script
-# invited by stopping here without a word. The panel's own button runs the
-# installer straight after and does not need telling; somebody at a terminal
-# does. (The panel's status page says so too, from the commit the installer
-# stamps - see install_is_behind.)
+# This message is necessary, because people forget this half.
+#
+# This script changes the clone and nothing else. The files that run are in
+# /var/lib, and the installer puts them there.
+#
+# Two people read a log from the old copy while they looked at the new commits.
+# This script caused that mistake: it stopped here with no message.
+#
+# The button in the panel runs the installer immediately after this, and it
+# needs no message. A person at a terminal needs one.
+#
+# The status page of the panel also reports this. It uses the commit that the
+# installer records. See install_is_behind.
 echo
 echo "That was the clone. The files that run are installed separately:"
 echo "  sudo $SOURCE_DIR/install.sh"

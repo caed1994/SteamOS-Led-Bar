@@ -6,13 +6,18 @@
 #
 #   flash-firmware.sh <environment>
 #
-# Run through pkexec, but only half of this wants to be root: the service
-# holds the port exclusively and has to step aside, which is privileged, while
-# PlatformIO must run as whoever owns ~/.platformio - as root it would either
-# not find pio at all or download a few hundred megabytes of toolchain into a
-# root-owned home that breaks every later run. So it stops the service, hands
-# the flashing back to the caller, and puts the service back afterwards -
-# including when the flash fails or is interrupted.
+# This runs through pkexec, and one half of it needs root.
+#
+# The service opens the port exclusively and must stop, and that step needs
+# root. PlatformIO must run as the owner of ~/.platformio.
+#
+# As root, PlatformIO does one of two things: it does not find pio, or it
+# downloads some hundred megabytes of tools into a home directory that belongs
+# to root. The second result stops each later run.
+#
+# This script thus stops the service, gives the flash back to the caller, and
+# starts the service again. It does that also when the flash fails and when a
+# person interrupts it.
 
 set -euo pipefail
 
@@ -24,16 +29,16 @@ ENVIRONMENT="${1:-}"
 [[ -n "$ENVIRONMENT" ]] \
     || { echo "usage: flash-firmware.sh <environment>" >&2; exit 2; }
 
-# Everything that can be checked without touching the board or the service is
-# checked first: being told a wrong name should cost nothing at all.
+# This checks each value that it can check with no change to the board and no
+# change to the service. A wrong name thus costs nothing.
 if ! grep -q "^\[env:$ENVIRONMENT\]" "$INI" 2>/dev/null; then
     echo "no firmware environment called '$ENVIRONMENT'. $INI has:" >&2
     sed -n 's/^\[env:\(.*\)\]$/  \1/p' "$INI" >&2
     exit 2
 fi
 
-# pkexec says who asked; sudo says it differently; running it directly means
-# the caller is already the right person.
+# pkexec gives the caller in one variable. sudo gives it in another. A direct
+# run means that the caller is already the correct person.
 TARGET_UID="${PKEXEC_UID:-}"
 if [[ -z "$TARGET_UID" && -n "${SUDO_UID:-}" ]]; then
     TARGET_UID="$SUDO_UID"
@@ -64,11 +69,13 @@ find_pio() {
 }
 
 if ! PIO="$(find_pio)"; then
-    # The installer is the answer rather than a pip line: on SteamOS the
-    # rootfs is read-only, so a system-wide pip install cannot write at all,
-    # and "pip install --user" lands in a directory the next system update
-    # resets - which is a flash that works today and stops working after an
-    # update, for no reason anybody would connect back to here.
+    # The installer is the correct answer and a pip line is not. The root
+    # filesystem of SteamOS is read-only, so a pip install for the system
+    # cannot write.
+    #
+    # "pip install --user" writes into a directory that the next system update
+    # erases. The flash thus operates today and fails after an update, and
+    # nobody connects that failure to this line.
     echo "PlatformIO (pio) not found for $TARGET_USER. Install it with:" >&2
     echo "    sudo $SOURCE_DIR/install.sh" >&2
     echo "which offers it, or by hand with PlatformIO's own installer:" >&2
@@ -94,11 +101,14 @@ restore() {
 }
 trap restore EXIT
 
-# pkexec starts us in root's home, and the flashing runs as the caller - who
-# cannot get back into /root afterwards. PlatformIO restores the directory it
-# started in on the way out, so it ended a successful flash with
-# "PermissionError: [Errno 13] Permission denied: '/root'" and an exit code
-# that said the whole thing had failed. Stand somewhere they can both reach.
+# pkexec starts this script in the home directory of root, and the flash runs
+# as the caller. That caller cannot return into /root.
+#
+# PlatformIO changes back to its start directory at its exit. A successful
+# flash thus ended with "PermissionError: [Errno 13] Permission denied:
+# '/root'" and an exit code that reported a full failure.
+#
+# This script thus changes to a directory that both users can reach.
 cd "$SOURCE_DIR"
 
 echo "Flashing '$ENVIRONMENT' as $TARGET_USER ($PIO)"
