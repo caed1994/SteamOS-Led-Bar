@@ -1124,6 +1124,7 @@ server/steamos-utility-center.conf       example configuration
 gui/                      the control panel
 firmware/led-client/      PlatformIO project for ESP8266/ESP32
 tools/make-previews.py    rebuilds the animations on this page
+tools/ste-check.py        checks the text against docs/STYLE.md
 udev/                     rule for /dev/steamos-led-esp
 docs/PROTOCOL.md          frame format and message types
 docs/STYLE.md             how to write the text in this project

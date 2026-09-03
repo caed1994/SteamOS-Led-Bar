@@ -17,6 +17,17 @@ also makes text easy to translate.
 This page is the subset of the specification that applies here. Use it when you
 write new text, and when you review a change.
 
+`tools/ste-check.py` checks the rules that a program can count: the length of a
+sentence, the length of a paragraph, the verb forms, and the punctuation. Run it
+over the files that you changed, or over all of them:
+
+```bash
+python3 tools/ste-check.py README.md      # one file
+python3 tools/ste-check.py                # each file the rules apply to
+```
+
+It cannot check the vocabulary. That part needs a person.
+
 ## Words
 
 Use one word for one meaning. If you call it an adapter in one place, do not

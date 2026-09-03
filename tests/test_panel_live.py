@@ -99,12 +99,12 @@ class LiveWindowTest(unittest.TestCase):
                          self._pages())
 
     def test_the_rail_says_which_page_is_open(self):
-        # The bug this is here for: the rail was set once when it was built,
-        # so anything that changed the page in code left the pill behind on
-        # whatever had been open first.
+        # The fault of this test: the code set the rail one time, at the build
+        # step. A page change in the code therefore left the mark on the first
+        # open page.
         #
-        # update() rather than update_idletasks() throughout: selecting a page
-        # posts a virtual event, and only the full one delivers it.
+        # Each call here is update() and not update_idletasks(). A page
+        # selection posts a virtual event, and only the full call delivers it.
         for page in self._pages():
             self.panel.notebook.select(page)
             self.root.update()
@@ -119,9 +119,9 @@ class LiveWindowTest(unittest.TestCase):
                              entry.cget("value"))
 
     def test_the_notebook_draws_no_tab_row_of_its_own(self):
-        # Both at once would be two lists of the same six pages. An emptied
-        # layout is not reported back as empty - Tk puts a "null" element in
-        # its place - so what is checked is that nothing in it draws a label.
+        # Both at the same time give two lists of the same six pages. Tk does
+        # not report an empty layout as empty. It puts a "null" element there.
+        # So this test proves that no element in it draws a label.
         layout = str(self.root.tk.call("ttk::style", "layout",
                                        "TNotebook.Tab"))
         self.assertNotIn("label", layout)
@@ -166,27 +166,27 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(len(set(heights.values())), 1, heights)
 
     def test_a_row_that_governs_others_has_the_same_room_either_side_of_it(self):
-        # A row that opens a block stands clear of both what is above it and
-        # what it governs; the rows it governs sit close together under it.
-        # Equal gaps either side are what stop it reading as glued to the row
-        # beneath it.
+        # A row that opens a block has space above it and below it. The rows of
+        # that block are close together below it. Equal space on both sides
+        # keeps the row separate from the row below it.
         #
-        # Measured on the Strip page, where the pattern still is one: the
-        # notification blocks used to be the example and are now one line each
-        # - see the flash rows - so the rainbow choice with the temperature
-        # marks stepped in under it is what is left of the shape.
+        # The measurement uses the Strip page, where this pattern is still
+        # present. The notification blocks were the example before, and each of
+        # them is one line now. See the flash rows. So the rainbow choice, with
+        # the temperature marks indented below it, is the last example.
         self.panel.notebook.select(self._page_named("Strip"))
-        # The block has to be on the page to be measured, and which block is
-        # on it is now a choice - see the note above DEPENDS_ON.
+        # The block must be on the page for the measurement, and a choice now
+        # decides which block is there. See the note above DEPENDS_ON.
         self.panel.vars["RAINBOW_SHOWS"][0].set("Temperature")
         self.root.update()
         rows = ("STANDBY_PULSE", "RAINBOW_SHOWS", "TEMPERATURE_MIN",
                 "TEMPERATURE_MAX")
-        # Measured on the name labels rather than on the controls. All of them
-        # are plain labels of one height, where a switch, a menu and a slider
-        # are three heights - and a control shorter than its row sits centred
-        # in it, so control to control reports the widgets as much as the
-        # spacing. The rows are what this is about.
+        # The measurement uses the name labels and not the controls. Each label
+        # is a plain label of one height. A switch, a menu and a slider have
+        # three different heights. A control that is shorter than its row also
+        # stands in the centre of it. A measurement from control to control
+        # therefore reports the widgets and the spacing together. This test is
+        # about the rows.
         tops = [self.panel._rows[key][0][0].winfo_rooty() for key in rows]
         above, below, tight = (tops[index + 1] - tops[index]
                                for index in range(3))
@@ -239,10 +239,10 @@ class LiveWindowTest(unittest.TestCase):
     def _shown(self, key):
         """Whether the row is on the page at all.
 
-        The other half of the answer: a row waiting on a switch is greyed and
-        stays, a row waiting on a choice is taken away - see the note above
-        DEPENDS_ON. grid_info() empties when a widget is grid_remove'd, and
-        fills again with the place it had.
+        This is the second half of the answer. A row that depends on a switch
+        becomes grey and keeps its position. A row that depends on a choice goes
+        away. See the note above DEPENDS_ON. grid_info() returns nothing after a
+        grid_remove, and it returns the old position again after a grid.
         """
         labels, controls = self.panel._rows[key]
         return bool((labels + controls)[0].grid_info())
@@ -250,11 +250,12 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_slot_reaches_only_the_rows_its_own_choice_needs(self):
         """One menu, and two sets of rows waiting on two different answers.
 
-        Greyed rather than hidden, like everything else here - but greyed by
-        the choice, not by the page: the temperature marks mean nothing while
-        the slot is showing the load, and the gauge's two colours mean nothing
-        while it is showing the temperature. Both wrong at once would be four
-        settings out of reach with nothing on the page to say why.
+        These rows become grey and do not go away, as each other row here does.
+        But the choice makes them grey, and not the page. The temperature marks
+        have no meaning while the slot shows the load. The two colours of the
+        gauge have no meaning while the slot shows the temperature. Two incorrect
+        answers together give four settings that no user can reach, and no text on
+        the page gives the reason.
         """
         self.panel.notebook.select(self._page_named("Strip"))
         self.root.update()
@@ -279,13 +280,12 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_desktop_scene_brings_the_same_rows_back(self):
         """Two places ask for these gauges, and either one puts them in play.
 
-        The rainbow slot is Game Mode's, and since the desktop's scenes came
-        off that slot there is a second way to ask for the temperature gauge:
-        pick it as the scene. Its marks and its sensor are what that scene
-        reads, so hiding them because the *other* mode is showing something
-        else would be hiding the settings the bar is actually using - on a
-        different page from the one that was changed, where nobody would think
-        to look for them.
+        The rainbow slot belongs to Game Mode. The desktop scenes no longer use
+        that slot, so there is a second way to select the temperature gauge: the
+        scene. That scene reads the marks and the sensor. A rule that hides them
+        because the *other* mode shows another effect hides the settings that the
+        bar uses. It also hides them on a different page from the changed page,
+        and no user looks for them there.
         """
         self.panel.notebook.select(self._page_named("Strip"))
         self.root.update()
@@ -315,9 +315,9 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_row_taken_away_comes_back_where_it_was(self):
         """grid_remove rather than grid_forget, and the difference matters.
 
-        forget throws the placement away, so the row would come back at
-        whatever position the grid handed out next - which on this page means
-        underneath everything, in the wrong group.
+        forget removes the position, so the row returns at the next free
+        position of the grid. On this page that position is below each other
+        row, in the incorrect group.
         """
         self.panel.notebook.select(self._page_named("Strip"))
         slot = self.panel.vars["RAINBOW_SHOWS"][0]
@@ -336,10 +336,10 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_page_closes_up_behind_a_row_it_took_away(self):
         """The whole point of taking it away rather than greying it.
 
-        An empty grid row still has the floor every row is given, so that a
-        column of switches, menus and sliders keeps one rhythm - and a floor
-        under a row that is gone is the gap the row used to fill. Three of
-        those below the slot is a page that looks like it failed to draw.
+        An empty grid row keeps the minimum height of each row, and that height
+        keeps one spacing for a column of switches, menus and sliders. A minimum
+        height below a row that is gone is the space of that row. Three such
+        spaces below the slot give a page that looks like a draw fault.
         """
         self.panel.notebook.select(self._page_named("Strip"))
         slot = self.panel.vars["RAINBOW_SHOWS"][0]
@@ -368,13 +368,14 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_scene_with_no_colour_takes_the_colour_away(self):
         """The entry that means several values, which DEPENDS_ON could not say.
 
-        Three of the five scenes take the colour and two do not, and a rule
-        per scene would be three rules that all have to hold at once - which
-        is a colour gone forever. Checked here rather than by reading the
-        table, because what people see is the control.
+        Three of the five scenes take the colour, and two do not. One rule for
+        each scene gives three rules that must all be true, and the colour then
+        never appears. This test reads the window and not the table, because a
+        user sees the control.
 
-        Taken away rather than greyed: a scene is a choice, and the colour
-        belongs to the scenes that have one - see the note above DEPENDS_ON.
+        The row goes away and does not become grey. A scene is a choice, and the
+        colour belongs to the scenes with a colour. See the note above
+        DEPENDS_ON.
         """
         self.panel.notebook.select(self._page_named("Desktop mode"))
         self.root.update()
@@ -422,10 +423,10 @@ class LiveWindowTest(unittest.TestCase):
     def _corner(self, widget):
         """The very corner pixel of the swatch this widget wears.
 
-        Which is all ground: a swatch is a rounded square, so the pixel
-        outside its curve is whatever the swatch was baked against. That is
-        the whole of the fault being tested - if it does not match what the
-        widget is painted with, it shows as a box behind the colour.
+        That pixel is background. A colour sample is a square with round
+        corners, so the pixel outside a corner holds the background colour of
+        the sample. That is the fault of this test: a background that is
+        different from the colour of the widget shows a box behind the colour.
         """
         image = widget.cget("image")
         self.assertTrue(image, "the widget wears no swatch")
@@ -444,10 +445,10 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_greyed_field_carries_a_swatch_baked_for_being_greyed(self):
         """Reported, and only visible in the dark theme.
 
-        A swatch has no alpha - a quarter of its pixels are a blend with
-        whatever is behind it - so one baked against the ordinary shade sits
-        on a greyed field as a box. In the light theme the two shades are
-        near enough that nothing shows, which is why this went out.
+        A colour sample has no alpha channel, and one quarter of its pixels is a
+        mix with the background. A sample with the normal shade therefore shows a
+        box on a grey field. In the light theme the two shades are almost equal
+        and nothing is visible, and that is why this fault reached a release.
         """
         # On a row a *switch* governs: those are the ones still greyed, and
         # greying is what this is about. A row waiting on a choice is taken
@@ -473,17 +474,16 @@ class LiveWindowTest(unittest.TestCase):
     def test_what_shows_through_the_stipple_is_the_shade_around_it(self):
         """The other half of that fault, and the half the image cannot show.
 
-        Tk draws an image on a disabled widget through a fifty per cent
-        stipple - that is the hatching over a greyed colour - and what shows
-        through the holes is the style's own background option, not the shade
-        the field element paints. Left disagreeing, every other pixel under
-        the swatch came out the ordinary shade while the field around them
-        was the greyed one: a box, in exactly the place a swatch baked
-        against the wrong ground would put one.
+        Tk draws an image on a disabled widget through a stipple of fifty per
+        cent, and that stipple is the pattern over a grey colour. The background
+        option of the style gives the colour in the holes, and the field element
+        does not. With two different colours, each second pixel below the sample
+        had the normal shade, and the field around them had the grey shade. That
+        gives a box at the position of a sample with an incorrect background.
 
-        Which is why this is not checked on the swatch. A test that read the
-        image passed while the screen was still wrong - measured, on a dark
-        theme, before this was found.
+        For that reason this test does not read the sample. A test of the image
+        passed while the screen was still incorrect. A measurement on a dark
+        theme showed that before this correction.
         """
         field = self.panel._widgets["DESKTOP_COLOR"]
         field.state(["disabled"])
@@ -509,11 +509,11 @@ class LiveWindowTest(unittest.TestCase):
     def test_applying_does_not_wake_a_setting_a_switch_holds_shut(self):
         """Reported: Apply ungreyed the colour under a rainbow scene.
 
-        Every button in the window is greyed while a command runs, and the
-        drop-down fields are buttons - so letting them all go again at the
-        end handed back settings that DEPENDS_ON is meant to be holding.
-        Until the window was closed and opened, which is what made it look
-        like a drawing fault rather than a logic one.
+        Each button in the window becomes disabled during a command, and a
+        drop-down field is a button. A call that enables each of them at the end
+        therefore returned settings that DEPENDS_ON must hold closed. A close and
+        a new start of the window corrected it, and that made it look like a draw
+        fault and not a logic fault.
         """
         self.panel.vars["NOTIFY_ACHIEVEMENTS"][0].set(False)
         self.root.update()
@@ -533,11 +533,11 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_colour_button_is_rebaked_under_the_pointer(self):
         """The same fault on the Test page's colour dialog.
 
-        An outlined button blends its own fill under the pointer, so a swatch
-        baked against the plain shade shows as a box on the hovered one.
-        Driven by the states themselves rather than by moving a real pointer:
-        what the fix has to do is redraw when the state moves, and a test
-        that needed the mouse would be testing X.
+        An outlined button mixes its own fill below the pointer. A colour sample
+        with the plain shade therefore shows a box on the hover shade. This test
+        sets the states directly and does not move a pointer. The correction must
+        draw the sample again at a state change, and a test with a real mouse
+        examines X.
         """
         seen = []
 
@@ -572,17 +572,16 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_slider_that_governs_nothing_reconfigures_nothing(self):
         """Reported: dragging a slider put the CPU and the GPU up.
 
-        Every moved control asks every dependent row whether it should still
-        be greyed, and a drag delivers one of those per pixel the pointer
-        travels. Almost none of the answers ever change - measured, eleven
-        hundred asked and none changed over fifty steps - but each was being
-        applied anyway: thirty-odd widget reconfigures and five colour chips
-        redrawn from scratch, nine milliseconds a step, and the window
-        repainted as fast as the events arrived.
+        Each moved control asks each dependent row for its new state, and a drag
+        sends one such event for each pixel of the movement. Almost no answer
+        changes. A measurement gave eleven hundred questions and no change over
+        fifty steps. But the code applied each answer: approximately thirty widget
+        calls and five new colour samples, nine milliseconds for each step. The
+        window also painted itself at the rate of the events.
 
-        Counted rather than timed. A stopwatch on a build machine says
-        nothing anybody can act on; "it stopped touching the widgets" is the
-        thing that made it cheap.
+        This test counts the calls and does not measure the time. A time on a
+        build machine gives no useful number. The number of widget calls is the
+        value that fell.
         """
         touched = []
         for key, (_labels, controls) in self.panel._rows.items():
@@ -636,11 +635,11 @@ class LiveWindowTest(unittest.TestCase):
                             "a switch does not take its setting away")
 
     def test_explanations_wrap_to_the_page_and_not_to_the_window(self):
-        # The rail takes a sixth of the width, so wrapping to the window laid
-        # the text out wider than the page it sits in - and a label whose text
-        # is wider than its slot is not wrapped, it is cut off. Asking the
-        # notebook its width while handling the window's own Configure gives
-        # the width before the resize, so the sizes are walked here.
+        # The rail takes one sixth of the width. A wrap at the width of the
+        # window therefore made the text wider than its page. A label with text
+        # wider than its space is not wrapped, and the page cuts it. A read of
+        # the notebook width during the Configure event of the window also
+        # gives the width before the change. So this test reads the sizes here.
         for width in (1200, 860, 1400, 820):
             self.root.geometry("%dx900" % width)
             for _ in range(6):
@@ -651,9 +650,9 @@ class LiveWindowTest(unittest.TestCase):
                 # before its width is the one it will keep.
                 for _ in range(4):
                     self.root.update()
-                # Only this page's own labels: a page that has been shown once
-                # still reports itself mapped after the notebook moves on, and
-                # keeps whatever width it had when it was last laid out.
+                # The labels of this page only. A page after its first display
+                # still reports itself as mapped after a change of the page, and
+                # it keeps the width of its last layout.
                 belongs = str(self.root.nametowidget(page)) + "."
                 for label in self.panel._wrapped:
                     if not str(label).startswith(belongs):
@@ -694,13 +693,13 @@ class LiveWindowTest(unittest.TestCase):
                     if child.winfo_class() == "TScrollbar")
 
     def test_a_page_too_long_for_the_window_can_be_scrolled_to_its_end(self):
-        # The settings pages are longer than a 1080p screen can hold at a
-        # large desktop font, so the foot of one has to be reachable.
+        # The settings pages are longer than a 1080p screen at a large desktop
+        # font, so a user must reach the foot of such a page.
         #
-        # At the smallest the window may be, which is the worst case and is
-        # also the only size this can be asked at: a geometry under the
-        # minimum is refused outright, so the 1100x520 that used to be here
-        # left the window at its minimum and the page fitting comfortably.
+        # This test uses the minimum size of the window. That is the worst case,
+        # and it is also the one size for this test. Tk refuses a geometry below
+        # the minimum. The value 1100x520 of an earlier version therefore left
+        # the window at its minimum, and the page fitted there.
         self.root.geometry("%dx%d" % (self.panel_module.MIN_WIDTH,
                                       self.panel_module.MIN_HEIGHT))
         page = self._page_named("Notifications")        # the longest
@@ -735,11 +734,11 @@ class LiveWindowTest(unittest.TestCase):
         return page
 
     def test_the_scrollbar_is_ours_and_carries_no_arrow_buttons(self):
-        # clam's scrollbar is a bevelled arrow button at each end of a sunken
-        # box, with grip lines down the thumb - the one widget left in this
-        # window from another decade. What replaces it is a pill in the
-        # margin, so what has to hold is that the parts on screen are the
-        # ones dress() drew and that neither end is a button.
+        # The scrollbar of clam has a bevelled arrow button at each end of a
+        # sunken box, and grip lines on the thumb. It is the one widget of this
+        # window with a very old look. A bar with round ends in the margin
+        # replaces it. So two things must hold: dress() drew the parts on the
+        # screen, and neither end is a button.
         page = self._long_page()
         bar = self._bar(page)
         self.assertTrue(bar.winfo_ismapped())
@@ -754,10 +753,10 @@ class LiveWindowTest(unittest.TestCase):
                           "an unexpected part at y=%d" % y)
 
     def test_the_scrollbar_thumb_can_still_be_dragged(self):
-        # ttk finds the part it has to move, and its bindings tell a drag from
-        # a page-jump, by matching the *end* of the element's name: *thumb,
-        # *trough, *uparrow. Named anything else - Material.Scroll.bar, say -
-        # the new bar draws perfectly and does nothing at all when pulled.
+        # ttk finds the part to move by the *end* of the element name: *thumb,
+        # *trough and *uparrow. Its bindings also use that end to tell a drag
+        # from a page jump. With another name, such as Material.Scroll.bar, the
+        # new bar draws correctly and does nothing under a drag.
         page = self._long_page()
         bar, canvas = self._bar(page), self.panel._scrollers[page]
         canvas.yview_moveto(0)
@@ -775,19 +774,18 @@ class LiveWindowTest(unittest.TestCase):
                            "dragging the thumb moved nothing")
 
     def test_the_scrollbar_fits_the_room_the_pages_reserve_for_it(self):
-        # _rewrap wraps a page's paragraphs to the width left over once the
-        # bar has taken its side. Reserve less than the bar actually takes and
-        # the last word of a sentence goes under it.
+        # _rewrap wraps the paragraphs of a page to the width after the bar
+        # takes its side. A reserve below the real width of the bar puts the
+        # last word of a sentence below the bar.
         page = self._long_page()
         self.assertLessEqual(self._bar(page).winfo_width(),
                              self.panel_module.SCROLLBAR_ROOM,
                              "the scrollbar is wider than the room kept free")
 
     def test_the_foot_of_the_window_keeps_its_place_on_a_short_screen(self):
-        # Pack hands out room in the order it was asked for it. With the pages
-        # asking first and taking the lot, a window too short for them had no
-        # Apply row and no status bar at all - both were packed later and there
-        # was nothing left to give them.
+        # pack gives out the space in the order of the calls. With the pages
+        # first, and with all the space, a short window had no Apply row and no
+        # status bar. Both came later, and no space was available.
         self.root.geometry("1100x520")
         self.panel.notebook.select(self._page_named("Notifications"))
         for _ in range(6):
@@ -802,10 +800,10 @@ class LiveWindowTest(unittest.TestCase):
                         "the status bar went missing")
 
     def test_a_page_asks_for_the_width_its_content_needs(self):
-        # A canvas does not pass on the size of what it holds - it asks for its
-        # own default width. Without saying otherwise the window opened at that
-        # default and every page came out squeezed into it, drop-downs cut off
-        # mid-word and sliders with no travel.
+        # A canvas does not pass on the size of its content. It asks for its
+        # own default width. Without a value here, the window opened at that
+        # default, and each page went into it. The drop-downs were cut in the
+        # middle of a word, and the sliders had no movement.
         for page in self._pages():
             canvas = self.panel._scrollers[page]
             inner = canvas.nametowidget(canvas.winfo_children()[0])
@@ -820,8 +818,8 @@ class LiveWindowTest(unittest.TestCase):
         for _ in range(6):
             self.root.update()
         self.panel.notebook.select(self._page_named("Strip"))
-        # The sensor menu is the widest control on the page, and it is only
-        # on the page while the slot is showing the temperature.
+        # The sensor menu is the widest control of the page, and it is on the
+        # page only while the slot shows the temperature.
         self.panel.vars["RAINBOW_SHOWS"][0].set("Temperature")
         for _ in range(4):
             self.root.update()
@@ -845,9 +843,9 @@ class LiveWindowTest(unittest.TestCase):
         return "disabled" in self._apply_button().state()
 
     def test_apply_is_dead_while_the_window_and_the_file_agree(self):
-        # A button that is always pressable says nothing about whether
-        # pressing it would do anything - which is also the answer to "did I
-        # already apply that?", the question the window could not answer.
+        # A button that is always active reports nothing about the result of a
+        # press. That state is also the answer to the question "did the last
+        # Apply write this", and the window could not answer that question.
         self.assertTrue(self._is_dead())
         self.assertEqual(self.panel.unsaved.cget("text"), "")
 
@@ -877,12 +875,13 @@ class LiveWindowTest(unittest.TestCase):
         self.assertIn("GAMMA", self.panel._differences())
 
     def test_a_colour_the_file_spells_in_capitals_is_not_a_change(self):
-        # The menus hold what a value looks like, and the file may hold the
-        # same colour in another case. Comparing the raw strings made the
-        # window claim an unsaved change nobody had made.
-        # The colour the window is holding, spelled the other way: written out
-        # as a literal this stopped being the same colour the moment the
-        # default moved, and then tested nothing at all.
+        # The menus hold the display form of a value, and the file can hold the
+        # same colour in another case. A comparison of the raw strings made the
+        # window report an unsaved change that no user made.
+        #
+        # The colour of the window, in the other case. As a literal here, this
+        # value stopped being the same colour at the next change of the
+        # default, and the test then proved nothing.
         holding = self.panel._value_for(
             "ACHIEVEMENT_COLOR", self.panel.vars["ACHIEVEMENT_COLOR"][0].get())
         self.assertRegex(holding, r"^#[0-9a-f]{6}$")
@@ -892,8 +891,8 @@ class LiveWindowTest(unittest.TestCase):
         self.assertNotIn("ACHIEVEMENT_COLOR", self.panel._differences())
 
     def test_a_colour_menu_shows_the_colour_it_holds(self):
-        # A list of colours that shows only their names is the one place in a
-        # window about light where you cannot see what you are choosing.
+        # A list of colours with the names only is the one control in a window
+        # about light with no view of the colours.
         button = self.panel._widgets["ACHIEVEMENT_COLOR"]
         self.assertTrue(button.cget("image"),
                         "the chosen colour has no swatch on it")
@@ -922,9 +921,10 @@ class LiveWindowTest(unittest.TestCase):
         self.assertTrue(self.panel._widgets["MESSAGE_COLOR"].cget("image"))
 
     def test_the_preview_follows_the_strip_length(self):
-        # The canvas is built once per length and only moved afterwards, so
-        # changing the setting has to rebuild it - otherwise the page draws a
-        # seventeen LED strip and calls it yours.
+        # The code builds the canvas one time for each length and then moves
+        # its items. A change of the setting must therefore build it again.
+        # Without that, the page draws a strip of seventeen LEDs for each
+        # machine.
         self.panel.notebook.select(self.panel.preview_tab)
         for _ in range(6):
             self.root.update()
@@ -946,11 +946,11 @@ class LiveWindowTest(unittest.TestCase):
     def _drop(self, key):
         """Open one drop-down and hand back the list it dropped.
 
-        With the pointer moved out of the way first. A row under the pointer
-        fills as a hover the moment the list maps, so a test asking which row
-        is filled would otherwise be asking where the mouse happens to be -
-        and on a bare X server that is the middle of the screen, which is
-        roughly where these lists open.
+        This moves the pointer away first. A row below the pointer takes the
+        hover fill at the moment the list opens. A test of the filled row then
+        reads the position of the mouse. On an X server with no window manager
+        that position is the middle of the screen, and these lists open at
+        approximately that position.
         """
         self.root.event_generate(
             "<Motion>", warp=True,
@@ -1059,9 +1059,9 @@ class LiveWindowTest(unittest.TestCase):
         self.assertIsNone(self.panel._popup, "the list stayed open")
 
     def test_a_drop_down_can_be_taken_down_from_outside(self):
-        # Measured on a real desktop: a tk.Menu went on floating over a file
-        # manager that had taken the focus, and Tk gave it no say in that.
-        # This one is ours, so it can simply be told.
+        # A measurement on a real desktop gave this: a tk.Menu stayed above a
+        # file manager that took the focus, and Tk gave the menu no control of
+        # that. This list belongs to this project, so this code closes it.
         popup = self._drop("ACHIEVEMENT_COLOR")
         self.assertTrue(popup.window.winfo_ismapped())
         self.panel._dismiss_menus()
@@ -1069,12 +1069,12 @@ class LiveWindowTest(unittest.TestCase):
         self.assertIsNone(self.panel._popup)
 
     def test_nothing_grabs_while_a_list_is_open(self):
-        # Measured under a window manager, with another application raised
-        # over the panel: with a grab of either kind the list stayed up,
-        # without one it goes. A grab swallows the focus change that says this
-        # application is no longer the one being used, and for an
-        # override-redirect window - which is what an undecorated list has to
-        # be - that notice is the only thing it ever gets.
+        # A measurement under a window manager, with another application above
+        # the panel, gave this: with a grab of each type the list stayed on the
+        # screen, and without a grab it closed. A grab takes the focus event
+        # that reports the change to another application. An override-redirect
+        # window gets that event only, and a list with no decoration must be
+        # such a window.
         popup = self._drop("ACHIEVEMENT_COLOR")
         self.assertIsNone(self.root.grab_current(),
                           "a grab would swallow the notice that closes it")
@@ -1166,7 +1166,7 @@ class LiveWindowTest(unittest.TestCase):
             popup.close()
 
     def test_the_firmware_field_still_names_the_build_to_flash(self):
-        # It shows "ESP8266 - GPIO2"; the flasher is given "esp8266_gpio2".
+        # The menu shows "ESP8266 (GPIO2)". The flasher gets "esp8266_gpio2".
         for label, environment in self.panel_module.ledpanel.FIRMWARE_ENVS:
             self.panel.firmware.set(label)
             self.assertEqual(self.panel._value_for("firmware", label),
@@ -1201,8 +1201,8 @@ class LiveWindowTest(unittest.TestCase):
         self.assertNotIn("disabled", self.panel.update_button.state())
 
     def test_never_having_asked_is_not_the_same_as_nothing_waiting(self):
-        # A button dead before anyone has looked would be the window refusing
-        # to do something it can perfectly well do.
+        # A disabled button before the first read is the window that refuses an
+        # action that it can complete.
         self.assertEqual(self.panel._update_state,
                          self.panel_module.ledpanel.UPDATE_UNKNOWN)
         self.assertNotIn("disabled", self.panel.update_button.state())
@@ -1256,11 +1256,11 @@ class LiveWindowTest(unittest.TestCase):
     def test_it_says_the_same_thing_whatever_failed(self):
         """Deliberately, and this is the test for the decision.
 
-        It used to show the failing command's own last line. That line shares
-        a bar with two indicators, so a real error had to be cut to fit - and
-        what got cut was the end, which is the half that says what went wrong.
-        A pointer that is always whole beats a reason that is sometimes
-        truncated, and the reason is still on stderr.
+        The bar showed the last line of the failed command before. That line
+        shares a bar with two indicators, so the bar cut a real error to the
+        available width. The cut removed the end of the line, and the end gives
+        the fault. A short text that is always complete is better than a reason
+        that the bar sometimes cuts. The reason is still on stderr.
         """
         seen = set()
         for output in ("cp: cannot create regular file: Permission denied\n",
@@ -1282,11 +1282,11 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_line_fits_the_narrowest_window_with_both_lights_showing(self):
         """Measured, because nothing trims it any more.
 
-        It used to be cut to the room the bar had. A fixed sentence needs no
-        cutting - but only while it fits, and the room is what is left after
-        the two indicators. Measured at the narrowest window this panel opens
-        to, which is thin enough to be worth failing here rather than in
-        somebody's window.
+        The bar cut this text to its width before. A fixed sentence needs no
+        cut, but only while it fits. The space is the width after the two
+        indicators. This test measures at the minimum width of the panel. That
+        width is small enough for a failure, and this test must find it before a
+        user does.
         """
         self.panel._set_busy(False, 1)
         self.root.geometry("%dx900" % self.panel_module.MIN_WIDTH)
@@ -1303,11 +1303,11 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_foot_reports_and_does_not_label(self):
         """The version used to sit at the right-hand end of this bar.
 
-        Asked for, and it is the right call: the foot of every page is for
-        the things that change while you are looking at them - is the bar
-        plugged in, did the last command fail. A version number is neither,
-        and it is still on the About page and on the status page, which is
-        where you go to look one up.
+        A user asked for that change, and it is correct. The foot of each page
+        holds the values that change during a session: the connection of the bar,
+        and the result of the last command. A version number is neither of the
+        two. It is still on the About page and on the status page, and a user
+        reads it there.
         """
         said = " ".join(child.cget("text")
                         for child in self.panel.statusbar.winfo_children()
@@ -1316,8 +1316,8 @@ class LiveWindowTest(unittest.TestCase):
         self.assertNotIn("SteamOS Utility Center", said, said)
 
     def test_but_the_version_is_still_somewhere_to_be_found(self):
-        # Removing the label must not be removing the number: it is the first
-        # thing anybody is asked for when they report something.
+        # The removal of the label must not remove the number. A user gives the
+        # version first in each report.
         self.panel._open_section("app")
         for _ in range(4):
             self.root.update()
@@ -1332,9 +1332,9 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_terminal_that_went_away_does_not_break_the_window(self):
         """The README tells people to start this from a terminal.
 
-        Closing that terminal with the window still open leaves a broken pipe
-        on the other end of stderr, and writing to it raises - which without
-        this would come out of the middle of an install.
+        A close of that terminal, with the window open, leaves a broken pipe at
+        the other end of stderr. A write to it raises an exception. Without this
+        code, that exception comes out of the middle of an install.
         """
         class Gone:
             def write(self, _text):
@@ -1376,9 +1376,9 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_window_animates_nothing_while_a_command_runs(self):
         """The rule is gone, and nothing was left booking frames for it.
 
-        A timer that outlives the thing it was drawing is not visible and not
-        harmless: it fires at a canvas that no longer exists, which Tk reports
-        as an invalid command name from somewhere with no stack to speak of.
+        A timer for a canvas that no longer exists is not visible and not
+        harmless. It calls that canvas, and Tk reports an invalid command name
+        with almost no stack.
         """
         self.assertFalse(hasattr(self.panel, "progress"))
         source = self.panel_module.__file__ or ""
@@ -1387,8 +1387,8 @@ class LiveWindowTest(unittest.TestCase):
             self.assertNotIn("Progress", handle.read())
 
     def test_apply_keeps_its_own_reason_to_be_dead_afterwards(self):
-        # Everything comes back when a command ends - except Apply, which has
-        # a reason of its own that outlives it.
+        # Each control becomes active again at the end of a command. Apply is
+        # the exception, because it has a reason of its own to stay disabled.
         self.panel._set_busy(True)
         self.root.update()
         self.panel._set_busy(False, 0)
@@ -1408,9 +1408,9 @@ class LiveWindowTest(unittest.TestCase):
                          sorted(self._sections()))
 
     def test_the_sidebar_says_which_section_is_open(self):
-        # One selected, always, and never two. The pill is the only thing on
-        # screen that says where you are, so a stale one is the window lying
-        # about what it is showing.
+        # One entry is always selected, and never two. The mark is the one
+        # element on the screen that gives the open page. An old mark
+        # therefore gives an incorrect page.
         for key in self._sections():
             self.panel._open_section(key)
             self.root.update()
@@ -1473,13 +1473,13 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_installation_and_the_board_are_on_different_pages(self):
         """Where the three blocks of the old Status & repair page went.
 
-        Checking the installation and updating it are about the whole toolbox
-        and are a section now. Flashing the ESP is the one block that was only
-        ever about the strip, and it is on the Test page - beside the
-        self-test, which is what tells you the board needs reflashing.
+        The install check and the update are about the complete toolbox, and they
+        are a section now. The ESP flash is the one block about the strip only, and
+        it is on the Test page. It stands beside the self-test, and that test
+        reports a board that needs a new firmware.
 
-        Read off the built window rather than off the source, because what
-        this is about is which page a person finds the button on.
+        This reads the built window and not the source, because the subject is the
+        page where a user finds the button.
         """
         self.panel._open_section("status")
         self.root.update()
@@ -1508,9 +1508,9 @@ class LiveWindowTest(unittest.TestCase):
         block per part of the toolbox, so a fold that opened all of them would
         be the old page again with more in it.
         """
-        # Arranged rather than assumed: on a machine with nothing configured
-        # only the LED bar has any detail, and a test that needs two blocks
-        # would then be testing whatever this machine happens to be.
+        # This test builds the condition and does not assume it. On a machine
+        # with no settings, only the LED bar has a detail block. A test that
+        # needs two blocks then reads the state of the test machine.
         self.panel.power = {"CPU_GOVERNOR": "powersave"}
         self.panel.system = {syssettings.LAYOUT: "de"}
         self.panel._open_section("status")
@@ -1532,9 +1532,9 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_broken_part_unfolds_itself_once_and_stays_where_it_is_put(self):
         """Opening itself is right; opening again after you shut it is not.
 
-        The page is re-read every time a command finishes, which while an
-        install runs is every few seconds - so a block that reopened on each
-        read would be one nobody could fold away.
+        The panel reads the page again at the end of each command, and during an
+        install that is every few seconds. A block that opens at each read is a
+        block that no user can close.
         """
         self.panel._open_section("status")
         for _ in range(6):
@@ -1573,9 +1573,10 @@ class LiveWindowTest(unittest.TestCase):
         self.assertEqual(self.panel._open_page(), self.panel.notebook.select())
 
     def test_the_foot_of_the_window_says_whether_the_bar_is_there(self):
-        # Three states and three colours: unknown before anything has been
-        # read, and then good or bad. Grey saying "looking" is honest where a
-        # red one would be a fault report about an unanswered question.
+        # Three states and three colours. The state is unknown before the first
+        # read, and then it is good or bad. A grey dot with "looking" is
+        # correct there. A red dot reports a fault for a question with no
+        # answer.
         seen = {}
         for connected in (None, True, False):
             self.panel._say_link(connected)
@@ -1604,9 +1605,9 @@ class LiveWindowTest(unittest.TestCase):
     def test_the_cpu_menus_are_built_from_the_machine(self):
         """Not from a list in the panel, which is the whole point of them.
 
-        This build machine has no cpufreq at all, so the governor menu comes
-        out with nothing but "leave it alone" - the case a hardcoded list
-        would get wrong by offering governors that do not exist here.
+        This build machine has no cpufreq, so the governor menu holds only
+        "leave it alone". A list in the code gets that case wrong, because it
+        offers governors that this machine does not have.
         """
         self.panel._open_section("power")
         self.root.update()
@@ -1618,10 +1619,10 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_machine_with_no_preference_file_gets_no_row_for_one(self):
         """Never built, rather than built and greyed.
 
-        A driver in passive mode has no energy_performance_preference at all,
-        and this machine has no cpufreq whatever - a menu with nothing in it
-        is a row about a setting that does not exist. Left out of self.vars
-        too, so nothing collects it and nothing compares it.
+        A driver in passive mode has no energy_performance_preference, and this
+        machine has no cpufreq. A menu with no entry is a row for a setting that
+        does not exist. The row is also not in self.vars, so no code collects it
+        and no code compares it.
         """
         self.panel._open_section("power")
         self.root.update()
@@ -1703,26 +1704,25 @@ class LiveWindowTest(unittest.TestCase):
     def test_no_label_is_drawn_on_a_ground_it_does_not_stand_on(self):
         """The same bug one layer up from the pictures, and a fifth instance.
 
-        The test above walks nine-slices. This walks the other half of the
-        same rule: a label's background, however it got one. There are two
-        ways to get it wrong and this catches both - passing a colour by hand
-        that is not the parent's, and wearing a style whose ground is the
-        page while standing on a card.
+        The test above reads the nine-slice images. This test reads the second
+        half of the same rule: the background of a label, from each source. There
+        are two incorrect methods, and this test finds both. The first is a manual
+        colour that is not the colour of the parent. The second is a style with the
+        colour of the page on a widget that stands on a card.
 
-        Found by measuring rather than by looking: the About page, both
-        placeholder pages and the new CEC page all passed
-        surface_container_low to labels sitting on a card whose colour is
-        surface_container_lowest, so every explanation on those pages had a
-        band of a third colour behind it. Three pages wrong the same way is
-        not three mistakes but one habit, which is why it is checked here
-        instead of fixed and remembered.
+        A measurement found this, and not a look at the screen. The About page,
+        both placeholder pages and the new CEC page each gave surface_container_low
+        to labels on a card with the colour surface_container_lowest. Each
+        explanation on those pages therefore had a band of a third colour behind
+        it. Three pages with one fault are one habit and not three errors, and for
+        that reason a test checks it.
         """
         style = ttk.Style(self.root)
 
         def ground(widget):
-            # A tk widget has no style to fall back on and is meant to be told
-            # its colour; a themed one takes its style's unless it was given
-            # one, which is the case this is looking for.
+            # A tk widget has no style, and the caller must give it a colour. A
+            # themed widget takes the colour of its style, and a caller can give
+            # it another colour. This test finds that second case.
             if isinstance(widget, (tk.Canvas, tk.Text, tk.Listbox)):
                 return ""
             try:
@@ -1738,9 +1738,9 @@ class LiveWindowTest(unittest.TestCase):
                                        "background"))
             return own.lower()
 
-        # Keyed by widget, because _every_widget walks the whole window
-        # rather than the open section - so one bad label would otherwise be
-        # reported once for each section visited.
+        # The key is the widget, because _every_widget reads the complete
+        # window and not the open section. Without that key, this test reports
+        # one incorrect label one time for each visited section.
         checked, wrong = 0, {}
         for section, _t, _s, _i in self.panel_module.SECTIONS + (
                 self.panel_module.ABOUT,):
@@ -1755,10 +1755,10 @@ class LiveWindowTest(unittest.TestCase):
                     continue
                 checked += 1
                 if mine != theirs:
-                    # Every one, not the first. They come in habits rather
-                    # than singly - six of them turned up the day this was
-                    # written - and a test that stops at one turns a sweep
-                    # into six runs.
+                    # Each of them, and not the first one. They occur in
+                    # groups: six of them came on the day of this test. A
+                    # test that stops at the first one makes one pass into
+                    # six runs.
                     wrong[str(widget)] = (
                         "%r drawn on %s, stands on %s"
                         % (str(widget.cget("text"))[:48], mine, theirs))
@@ -1767,17 +1767,17 @@ class LiveWindowTest(unittest.TestCase):
         self.assertGreater(checked, 20, "hardly any label was checked")
 
     def test_no_frame_is_a_band_of_a_colour_its_parent_is_not(self):
-        """The same rule as the labels, one layer up - and the gap it left.
+        """The same rule as the labels, one level up, and the gap that it left.
 
-        The Update group was a bare ttk.Frame, which is card-coloured. On the
-        old status page that was right, because the page itself was a card. It
-        moved onto App Settings, kept the colour, and became a band of the
-        wrong shade the width of the content - and the label test above passed
-        the whole time, because every label in that band correctly matched the
+        The Update group was a plain ttk.Frame, and such a frame has the colour of
+        a card. On the old status page that was correct, because that page was a
+        card. The group moved to App Settings, it kept the colour, and it became a
+        band of the wrong colour at the width of the content. The label test above
+        passed for that complete time, because each label in the band matched the
         band.
 
-        A card is the one frame allowed to differ from what it stands on: that
-        contrast is what a card *is*. Everything else has to match.
+        A card is the one frame with a colour that is different from its parent.
+        That contrast makes a card. Each other frame must match its parent.
         """
         style = ttk.Style(self.root)
         surfaces = {"Card.TFrame"}
@@ -1845,15 +1845,14 @@ class LiveWindowTest(unittest.TestCase):
                              % (inside, card))
 
     def test_the_window_is_dark_whatever_the_desktop_is(self):
-        """Forced, and nothing about the desktop may talk it out of it.
+        """The window is always dark, and no desktop setting changes that.
 
-        This build machine reports Breeze *light* - kdetheme.read() falls back
-        to it when there is no Plasma to ask - so a window that followed the
-        desktop would come up light right here. That it does not is the whole
-        assertion.
+        This build machine reports Breeze *light*, because kdetheme.read() uses
+        that scheme with no Plasma. A window that follows the desktop is therefore
+        light here. This test proves that the window is dark.
 
-        The preview is why: a page of lit LEDs judged against a white window
-        is a page of washed-out LEDs.
+        The preview is the reason. A page of lit LEDs against a white window shows
+        weak LEDs.
         """
         self.assertFalse(kdetheme.is_dark(kdetheme.read()),
                          "this machine reports a dark desktop, so this test "
@@ -1917,8 +1916,8 @@ class SystemPageTest(unittest.TestCase):
             self.root.destroy()
         self.root = tk.Tk()
         self.panel = self.panel_module.Panel(self.root)
-        # Nothing in a test may actually run pkexec. Recorded instead, which
-        # is also the assertion: whether the privileged half ran at all.
+        # No test must run pkexec. This code records the call instead, and
+        # that record is also the assertion of the test.
         self.ran = []
         self.panel.runner.start = lambda command, done=None: (
             self.ran.append(command), True)[1]
@@ -1974,10 +1973,10 @@ class SystemPageTest(unittest.TestCase):
     def test_applying_a_layout_asks_for_no_password_and_restarts_nothing(self):
         """The reason the two files are kept apart at all.
 
-        A keyboard layout is written by the panel, as you, into your own home.
-        Sending it through the helper that installs /etc would be a password
-        prompt for a file that needs none - and would bounce the LED service
-        for a setting it does not read.
+        The panel writes a keyboard layout as the user, into the home directory
+        of that user. A call to the helper that writes /etc gives a password
+        question for a file that needs no password. It also restarts the LED
+        service for a setting that the service does not read.
         """
         self._layout().set(self._label("de"))
         self.root.update()
@@ -1986,8 +1985,8 @@ class SystemPageTest(unittest.TestCase):
         self.assertEqual(self.ran, [], "it went through pkexec anyway")
 
     def test_a_service_setting_still_goes_through_the_helper(self):
-        # The other half: the split must not have taken the privileged path
-        # away from the settings that do need it.
+        # The second half: the split must keep the privileged path for the
+        # settings that need it.
         self.panel.vars["LED_COUNT"][0].set(42)
         self.root.update()
         self.panel.apply_settings()
@@ -2058,9 +2057,10 @@ class SystemPageTest(unittest.TestCase):
     def test_a_layout_the_menu_does_not_list_still_shows_up(self):
         """Editing the file by hand is a supported way to use this.
 
-        The menu cannot be ninety-nine entries long - it does not scroll - so
-        the way to an unlisted layout is the file. Opening the window must not
-        then quietly replace it with the first entry that does fit.
+        The menu cannot hold ninety-nine entries, because it does not scroll. So
+        the file is the method for a layout that the menu does not list. The
+        window must then keep that value, and it must not write the first entry
+        of the menu over it.
         """
         syssettings.write({syssettings.LAYOUT: "kz"}, self.home)
         self._build()
@@ -2071,10 +2071,11 @@ class SystemPageTest(unittest.TestCase):
     def test_the_whole_menu_fits_on_the_screen(self):
         """Measured on the window, which is the only place it shows.
 
-        The drop-down sizes itself to its entries and is then clamped to the
-        screen: entries past the bottom edge are drawn nowhere and cannot be
-        clicked. At twenty-eight entries this overflowed a 1280x800 display -
-        a Steam Machine's own - by 126 pixels, and the suite was green.
+        The drop-down takes the size of its entries, and the screen then limits
+        it. Tk draws no entry below the bottom edge, and a click cannot reach one.
+        At twenty-eight entries the menu was 126 pixels longer than a 1280x800
+        display, which is the display of a Steam Machine. The suite passed at that
+        time.
         """
         self.panel._open_section("keyboard")
         self.root.update()
@@ -2094,8 +2095,8 @@ class CecPageTest(unittest.TestCase):
     is needed: the page reads a status document and runs commands, so the
     document is handed to it and the commands are recorded instead of run.
 
-    What is being tested is the one thing a page of live switches gets wrong -
-    whether it shows the machine or shows the last click.
+    These tests examine the one property that a page of live switches gets
+    wrong: does it show the machine, or does it show the last click.
     """
 
     @classmethod
@@ -2104,9 +2105,9 @@ class CecPageTest(unittest.TestCase):
 
     def setUp(self):
         self.said = self._status()
-        # There is no toolkit on this machine, and the window asks before it
-        # shows the indicator at the foot - so the answer has to be arranged
-        # before the window is built, not after.
+        # This machine has no toolkit, and the window asks before it shows the
+        # indicator at the foot. So this code must give the answer before the
+        # build step of the window.
         was = cec.installed
         cec.installed = lambda home=None: True
         self.addCleanup(lambda: setattr(cec, "installed", was))
@@ -2186,9 +2187,9 @@ class CecPageTest(unittest.TestCase):
     def test_installing_while_the_window_is_open_swaps_the_halves(self):
         """Installing is a thing that happens with the page in front of you.
 
-        Built both ways up front and packed one at a time, so the page can
-        catch up on its own - a page that could only tell the truth at
-        construction would need the whole window rebuilt around it.
+        This code builds both pages first and packs one of them, so the page can
+        change itself. A page with the state of its build step needs a rebuild of
+        the complete window.
         """
         self.panel_module.ledpanel.cec_status = lambda home=None, run=None: None
         self.panel._reread_cec()
@@ -2203,12 +2204,12 @@ class CecPageTest(unittest.TestCase):
     def test_reading_the_status_takes_the_headline_with_it(self):
         """The line under the title is drawn from this answer, and drawn first.
 
-        The first read is booked for a moment after the window opens, so the
-        headline is built while the status is still None - which cec_part
-        reports as a toolkit that will not say how it is, a problem counted
-        on every page. Left standing, the foot of the window says HDMI CEC is
-        ready an inch below a title bar that says it is broken, and the page's
-        own "look again" does not clear it either.
+        The first read runs a moment after the window opens, so the headline
+        comes from a status of None. cec_part reports that as a toolkit that
+        gives no answer, and each page counts it as a problem. Without a
+        correction, the foot of the window reports HDMI CEC as ready below a
+        title that reports a fault. The "look again" button of the page also does
+        not clear it.
         """
         # The state the window opens in: the toolkit is there, nobody has
         # asked it anything yet.
@@ -2239,11 +2240,10 @@ class CecPageTest(unittest.TestCase):
     def test_a_click_on_its_own_reaches_nothing(self):
         """What the Apply button is for.
 
-        Every switch here starts or stops a unit, and half of them decide
-        whether the machine goes to sleep. Clicking one is a decision made,
-        not a decision applied - and a slip of the finger is undone by
-        clicking back rather than by waiting for a service to start and stop
-        again.
+        Each switch here starts or stops a unit, and one half of them control the
+        suspend behaviour of the machine. A click is a decision and not an
+        applied change. A user also corrects an accidental click with a second
+        click, and does not wait for a service to stop and start.
         """
         self.panel._cec_vars["tv-standby"].set(True)
         self.panel._cec_toggled("tv-standby")
@@ -2301,9 +2301,9 @@ class CecPageTest(unittest.TestCase):
     def test_settling_the_switches_does_not_set_them_all_going(self):
         """Writing a variable fires the same handler a click does.
 
-        Without the guard, reading the status back after one toggle would
-        toggle every other switch on the page - and each of those would read
-        the status again. This is the test for the loop, not for the guard.
+        Without the guard, a status read after one change moves each other
+        switch on the page. Each of those changes then reads the status again.
+        This test examines that loop and not the guard itself.
         """
         self.panel._reread_cec()
         self.root.update()
@@ -2312,9 +2312,10 @@ class CecPageTest(unittest.TestCase):
     def test_a_switch_that_did_not_take_goes_back_where_it_was(self):
         """The machine's answer wins over the click.
 
-        A toggle can be refused - a helper that is not there, a unit that will
-        not start - and the toolkit reports the state either way. A switch
-        left where the pointer put it would be this window's opinion.
+        The machine can refuse a change. An absent helper does that, and a unit
+        that does not start does that. The toolkit reports the state in both
+        cases. A switch at the position of the click reports the opinion of this
+        window.
         """
         self.panel._cec_vars["tv-standby"].set(True)
         self.panel._cec_toggled("tv-standby")
@@ -2344,9 +2345,9 @@ class CecPageTest(unittest.TestCase):
     def test_an_adapter_that_is_there_but_shut_says_which_of_the_two_it_is(self):
         """Not the same problem as having no adapter, and not the same fix.
 
-        The toolkit ships a helper and a udev rule for exactly this, and it is
-        what a suspend or a SteamOS update leaves behind - so "reinstall" is
-        the answer here and "buy an adapter" is the answer to the other.
+        The toolkit has a helper and a udev rule for this condition, and a
+        suspend or a SteamOS update causes it. So "reinstall" is the answer
+        here, and "connect an adapter" is the answer to the other condition.
         """
         self.said["cec_device"]["writable"] = False
         self.panel._reread_cec()
@@ -2385,9 +2386,9 @@ class CecPageTest(unittest.TestCase):
     def test_the_sleep_action_is_a_choice_and_not_a_typed_word(self):
         """Two answers, one of them spelled inactive-source.
 
-        Typed into a box that is a setting which does nothing at all when the
-        hyphen is missed, with the page reporting it saved - and there is no
-        third answer for anybody to want.
+        A user types this into a box. Without the hyphen the setting has no
+        result, and the page still reports a success. There is also no third
+        value that a user wants.
         """
         self.assertIn("CEC_SLEEP_TV_ACTION", self.panel._cec_menus)
         self.assertEqual(
@@ -2448,9 +2449,9 @@ class CecPageTest(unittest.TestCase):
     def test_the_page_reads_the_machine_again_after_anything_it_ran(self):
         """Every command here can change what the page shows.
 
-        A toggle obviously; an action less so - discover-cec writes the
-        adapter into the config, and the boxes above would still be showing
-        the old one.
+        A change of a switch clearly changes the page. An action also changes
+        it: discover-cec writes the adapter into the configuration, and the
+        boxes above then hold the old value.
         """
         for start in (lambda: self.panel._cec_action("discover-cec"),
                       lambda: self.panel._save_cec_config(),
@@ -2513,9 +2514,9 @@ class CecPageTest(unittest.TestCase):
     def test_a_machine_with_no_cec_toolkit_gets_no_second_indicator(self):
         """Nothing to indicate, so nothing in the bar.
 
-        A permanent grey "HDMI CEC not installed" would be the foot of the
-        window reporting an absence nobody asked about - and it would say it
-        on every page, forever, on every machine that only wants the LEDs.
+        A permanent grey "HDMI CEC not installed" makes the foot of the window
+        report an absence that no user asked about. It also reports it on each
+        page, for each session, on each machine that needs the LEDs only.
         """
         with self._not_installed():
             self.panel._reread_cec()
@@ -2548,9 +2549,9 @@ class CecPageTest(unittest.TestCase):
     def test_it_comes_after_the_led_light_however_late_it_arrives(self):
         """Packed with an anchor rather than at the end of the row.
 
-        A window that has already reported a failure has that line packed to
-        the left, so an indicator shown afterwards would land on the far side
-        of it - the two lights split by the sentence about one of them.
+        A window with a failure message holds that line at the left. An
+        indicator that comes later therefore goes to the other side of it. The
+        sentence about one light then stands between the two lights.
         """
         with self._not_installed():
             self.panel._reread_cec()
@@ -2587,10 +2588,10 @@ class CecPageTest(unittest.TestCase):
             lambda home=None, run=None: (asked.append(1), self.said)[1])
         self.root = tk.Tk()
         panel = self.panel_module.Panel(self.root)
-        # Before any update, so what is being asked is whether construction
-        # itself did it. Building this window takes longer than the delay, so
-        # by the first update the timer is due anyway - checking after one
-        # would be checking the clock rather than the code.
+        # Before an update call, so this test asks whether the build step made
+        # the call. The build of this window takes longer than the delay, so
+        # the timer is due at the first update. A check after that update reads
+        # the clock and not the code.
         self.assertEqual(asked, [], "the machine was asked while the window "
                                     "was being built")
         self.assertIsNotNone(panel._cec_first, "and nothing was booked to ask")
@@ -2614,9 +2615,10 @@ class CecPageTest(unittest.TestCase):
 class GpuBlockTest(unittest.TestCase):
     """The graphics card block, against a fake lactd on a real socket.
 
-    The daemon is not mocked out - the fixture is a unix socket answering the
-    same protocol - so what is tested is the page's use of the whole path:
-    read five things, draw from them, collect what is on screen, send it back.
+    These tests use no mock of the daemon. The fixture is a unix socket with
+    the same protocol. So they examine the complete path of the page: it reads
+    five documents, it draws from them, it collects the values on the screen,
+    and it sends them back.
     """
 
     @classmethod
@@ -2630,10 +2632,10 @@ class GpuBlockTest(unittest.TestCase):
         self.root = tk.Tk()
         self.addCleanup(self._destroy)
         self.panel = self.panel_module.Panel(self.root)
-        # Recorded rather than shown. A modal dialog in a test has nobody to
-        # close it, so the suite hangs instead of failing - which is how the
-        # frozen socket path below was found, and it took a stack dump to see
-        # rather than a failure to read.
+        # This records the message and does not show it. A modal dialog in a
+        # test has no user to close it, so the suite waits and does not fail. A
+        # stack dump found the fixed socket path below in that way, and no
+        # failure message reported it.
         self.said = []
         self.panel._say = lambda title, message: self.said.append(message)
         self.root.update()
@@ -2675,10 +2677,9 @@ class GpuBlockTest(unittest.TestCase):
     def test_a_machine_without_lact_gets_no_block(self):
         """Not an empty one, and not a message. Nothing.
 
-        Most machines will never run LACT, and a permanent "LACT is not
-        installed" under the CPU settings would be the page reporting an
-        absence nobody asked about - the same rule the second status light
-        follows.
+        Most machines never run LACT. A permanent "LACT is not installed" below
+        the CPU settings makes the page report an absence that no user asked
+        about. The second status light follows the same rule.
         """
         self._point_at("/nonexistent/lactd.sock")
         self.panel._reread_gpu()
@@ -2704,9 +2705,9 @@ class GpuBlockTest(unittest.TestCase):
         self.assertEqual(self.panel._gpu["name"], DEVICES[0]["name"])
 
     def test_it_does_not_ask_until_the_section_is_opened(self):
-        # Five round trips on the construction path would be five on every
-        # window open and every theme change, for a page most people never
-        # visit - the same reason the CEC read is deferred.
+        # Five socket calls on the build path give five calls at each start of
+        # the window and at each change of the theme. Most users never open
+        # this page. The CEC read is later for the same reason.
         self._destroy()
         self.root = tk.Tk()
         panel = self.panel_module.Panel(self.root)
@@ -2717,21 +2718,20 @@ class GpuBlockTest(unittest.TestCase):
     # -- the knobs ---------------------------------------------------------
 
     def test_every_knob_the_card_reported_gets_a_slider(self):
-        # What this card reported, not the whole table: two of the knobs are
-        # alternatives - a card reports an absolute core clock or an offset
-        # from one, never both - so KNOBS is what could be offered and this
-        # is what was.
+        # The values of this card, and not the complete table. Two of the
+        # controls are alternatives, because a card reports an absolute core
+        # clock or an offset from one, and never both. KNOBS holds each
+        # possible control, and this list holds the controls of this card.
         reported = self.panel_module.ledpanel.gpu_knobs(self.panel._gpu)
         self.assertTrue(reported, "the card in this fixture reported none")
         for knob in reported:
             self.assertIn(knob["key"], self.panel._gpu_vars, knob["key"])
 
     def test_a_card_with_no_clocks_table_gets_only_the_power_slider(self):
-        """Which is most integrated graphics, and may be this machine.
+        """Most integrated graphics, and this machine can be one.
 
-        Four sliders that write nowhere would be worse than one that works:
-        somebody would set a clock, see it accepted, and wonder why nothing
-        changed.
+        Four sliders that write nothing are worse than one slider that works. A
+        user sets a clock, the page accepts it, and nothing changes.
         """
         bare = FakeDaemon(answers=dict(self._answers(clocks={})))
         self.addCleanup(bare.close)
@@ -2775,10 +2775,10 @@ class GpuBlockTest(unittest.TestCase):
                 not curve_shown, mode)
 
     def test_the_mode_is_read_as_lact_spells_it_not_as_the_menu_shows_it(self):
-        """The drop-downs here hold the label that is showing.
+        """A drop-down here holds the label on the screen.
 
-        Compared against LACT's own word, that matches nothing - and the page
-        drew the fixed-speed slider while the menu said Curve.
+        A comparison of that label with the word of LACT matches nothing. The
+        page then drew the fixed-speed slider, and the menu showed Curve.
         """
         self.panel._gpu_vars["fan_mode"].set("Curve")
         self.assertEqual(self.panel._gpu_mode(), lact.FAN_CURVE)
@@ -2800,10 +2800,9 @@ class GpuBlockTest(unittest.TestCase):
     def test_the_curve_canvas_gets_the_height_it_asks_for(self):
         """Measured, because it did not.
 
-        A page's inner frame is a canvas window item pinned to the size the
-        scroller last gave it, so packing the curve into it does not make it
-        grow - the graph asked for 200 pixels, was given 120, and was drawn
-        with its bottom half missing. See _refit_page.
+        The inner frame of a page is a canvas window item with the size from the
+        scroller. A new widget in it does not make it larger. The graph asked for
+        200 pixels, it got 120, and it lost its lower half. See _refit_page.
         """
         self.panel._gpu_vars["fan_enabled"].set(True)
         self.panel._gpu_fan_changed()
@@ -2828,9 +2827,9 @@ class GpuBlockTest(unittest.TestCase):
     def test_an_older_card_gets_none_of_the_firmware_settings(self):
         """The 6000-series case, and the whole point of the detection.
 
-        LACT reads each of these out of sysfs and reports the ones whose file
-        exists, so an older card reports none - and the block is absent rather
-        than a row of controls that write nowhere.
+        LACT reads each of these from sysfs and reports each one with a file. An
+        older card therefore reports none of them, and the page draws no block. It
+        does not draw a row of controls that write nothing.
         """
         firmware = [key for key in self.panel._gpu_vars
                     if key.startswith("fw:")]
@@ -2853,9 +2852,9 @@ class GpuBlockTest(unittest.TestCase):
     def test_they_are_written_under_the_names_the_daemon_accepts(self):
         """Four of the six are reported under one name and set under another.
 
-        A page that sent back what it read would write `zero_rpm_enable`,
-        which the daemon does not know - and would accept the document, since
-        it is an unknown key rather than a bad one.
+        A page that returns the value that it read writes `zero_rpm_enable`. The
+        daemon does not know that key. It also accepts the document, because an
+        unknown key is not a bad key.
         """
         self._with_firmware()
         made = self.panel._collect_gpu()
@@ -2915,9 +2914,10 @@ class GpuBlockTest(unittest.TestCase):
     def test_applying_asks_whether_to_keep_it(self):
         """The daemon reverts unless confirmed, so the window has to ask.
 
-        Not asking would mean either sending a confirmation nobody agreed to -
-        which is the safety feature thrown away - or never confirming, which
-        makes every setting undo itself five seconds later.
+        Without the question there are two results. The window sends a
+        confirmation that no user gave, and that removes the safety function. Or
+        the window never confirms, and each setting reverses itself after five
+        seconds.
         """
         asked = []
         self.panel_module.CountdownDialog = (
@@ -2931,8 +2931,8 @@ class GpuBlockTest(unittest.TestCase):
         self.assertEqual(sent[-1]["args"], {"command": "confirm"})
 
     def test_saying_no_puts_the_settings_back_at_once(self):
-        # Rather than waiting the clock out: somebody who has decided should
-        # not have to watch a countdown finish.
+        # And not a wait for the end of the clock. A user with an answer must
+        # not watch a countdown to its end.
         self.panel_module.CountdownDialog = (
             lambda parent, seconds: type("A", (), {"answer": False})())
         self.panel._apply_gpu()
@@ -2979,13 +2979,12 @@ class GpuBlockTest(unittest.TestCase):
 class WrappingTest(unittest.TestCase):
     """No line of explanation laid out wider than the card it is in.
 
-    A ttk label is not shortened when it does not fit and it does not wrap on
-    its own: it is drawn to whatever wraplength says and cut off at the edge
-    of what is holding it. The wraplengths here are the page's width less how
-    far in each line starts, and that second number used to be a constant -
-    one written for the width of a switch and then borrowed for a column of
-    setting names, which is a good deal wider. Every long explanation on the
-    CEC page ran off the side of its card.
+    A ttk label does not become shorter, and it does not wrap itself. Tk draws
+    it at the value of wraplength, and its parent cuts it at the edge. The
+    wraplength here is the width of the page less the indent of each line. That
+    indent was a constant before. That constant came from the width of a
+    switch, and a column of setting names is much wider. Each long explanation
+    on the CEC page therefore went past the side of its card.
     """
 
     @classmethod
@@ -3068,19 +3067,21 @@ class WrappingTest(unittest.TestCase):
     def test_each_page_is_laid_out_to_its_own_width(self):
         """Two notebooks, one number, and whichever spoke last won.
 
-        The sections run down the left, so the strip's tabs have the rail's
-        width less than a section that is a page of its own - 180 px less on
-        the machine this was found on. Both fed the same wraplength, so every
-        page was laid out to the width of whichever notebook had resized most
-        recently, and the same window did it both ways. With the narrow number
-        winning, the CEC page's explanations wrapped 180 px short of the card
-        they are in and the right third of it stood empty; with the wide one,
-        the strip's are laid out 180 px past the edge of theirs - and a label
-        wider than its slot is not wrapped but cut off.
+        The sections are at the left, so the tabs of the strip have the width of
+        the rail less than a section with one page. On the machine of this report
+        that is 180 px. Both notebooks wrote the same wraplength, so each page took
+        the width of the last notebook with a size change. The same window did it
+        in both directions.
 
-        Checked as two halves, because only the second catches the order that
-        was shipped: nothing may be laid out wider than the page it is on, and
-        a page that has more room than the narrow one must be using it.
+        With the narrow value, the explanations of the CEC page wrapped 180 px
+        before the edge of their card, and the right third of the card was empty.
+        With the wide value, the explanations of the strip went 180 px past the
+        edge of their card. A label that is wider than its space is not wrapped,
+        and the card cuts it.
+
+        This test has two halves, because the second half finds the order of the
+        release. No text must be wider than its page, and a page with more space
+        than the narrow page must use that space.
         """
         seen, roomy = 0, 0
         for key in ("strip", "cec", "status", "strip", "cec"):
@@ -3110,17 +3111,18 @@ class WrappingTest(unittest.TestCase):
 class FoldTest(unittest.TestCase):
     """Opening a block's Details shows a paragraph. That is the whole job.
 
-    Reported: the Check again button under the blocks came back in pieces -
-    half its label, arcs of whatever had been behind it - whenever the CPU or
-    graphics details were unfolded, and put itself right the moment the
-    pointer touched it. Drawn wrong rather than laid out wrong: measured, it
-    kept its size and its place throughout.
+    A user reported this: the Check again button below the blocks came back in
+    pieces at each open of the CPU details or the graphics details. It showed
+    one half of its label and parts of the elements behind it. It became
+    correct at the next movement of the pointer. The fault was in the draw step
+    and not in the layout: a measurement showed the same size and the same
+    position for the complete time.
 
-    The cause was that a fold called refresh_status(), which asks the machine
-    everything again and then destroys and rebuilds every block. The button
-    lives outside the blocks, so it survives that and is moved by the growing
-    page - across ground that had just been destroyed and not yet redrawn,
-    and X copies a moved window's pixels rather than repainting them.
+    The cause was a call to refresh_status() from the fold. That function reads
+    the complete machine again, and it then destroys and builds each block. The
+    button is outside the blocks, so it survives that step, and the taller page
+    moves it. It moves over an area that Tk destroyed and did not draw again,
+    and X copies the pixels of a window that moves.
     """
 
     @classmethod
@@ -3425,8 +3427,8 @@ class HeadlineTest(unittest.TestCase):
     def test_it_is_not_painted_as_a_fault_for_being_absent(self):
         """A machine that never wanted CEC has nothing wrong with it.
 
-        Green would contradict the card; red would be telling somebody they
-        have a problem because they did not install an optional thing.
+        Green contradicts the card. Red reports a fault to a user who did not
+        install an optional part.
         """
         self._headline("cec")
         self.assertEqual(str(self.panel.headline.cget("style")),
@@ -3440,12 +3442,12 @@ class HeadlineTest(unittest.TestCase):
 class CardTest(unittest.TestCase):
     """A card is not one picture stretched behind it, and here is why.
 
-    ttk can only fill a frame with an image by scaling it, and it rescales on
-    every redraw - so the cost is the card's area, and a card is the largest
-    thing in this window. The CEC page's four cards, one of them 828x1071,
-    cost 149 ms of a single wheel notch between them: the page moved twice a
-    second on the machine this was reported from. The same page with the
-    corners drawn as four small pictures instead moved in 3.7 ms.
+    ttk fills a frame with an image by a scale step, and it scales again at
+    each redraw. The cost is therefore the area of the card, and a card is the
+    largest element in this window. The four cards of the CEC page, and one of
+    them is 828x1071, cost 149 ms of one wheel step together. The page moved
+    two times each second on the machine of that report. The same page, with
+    the corners as four small pictures, moved in 3.7 ms.
 
     Checked structurally rather than by the clock, because a timing test on a
     build machine says more about the build machine than about the window.
@@ -3493,7 +3495,7 @@ class CardTest(unittest.TestCase):
                          self.panel.roles["surface"])
 
     def test_every_card_carries_its_four_corners(self):
-        """Four, and at the four corners - the padded one included.
+        """Four pictures, at the four corners, and also on the padded card.
 
         One card is built with a padding of its own, and place() measures
         against a ttk frame's outer size rather than its padded one. Asserted
@@ -3537,9 +3539,9 @@ class CardTest(unittest.TestCase):
     def test_a_corner_carries_the_page_s_colour_outside_the_shape(self):
         """Which is what makes a card have to stand on the page.
 
-        The corners are the only part of a card that knows what it is sitting
-        on - so the ground recorded for Card.TFrame is about these four
-        pictures, and the walking test that reads it still means something.
+        The corners are the one part of a card with the colour of its parent. The
+        recorded background of Card.TFrame therefore applies to these four
+        pictures, and the test that reads that record still has a subject.
         """
         photo, _where = self.panel._card_corners()[0]      # the top left one
         page = self.panel.roles["_page"]
@@ -3552,11 +3554,11 @@ class CardTest(unittest.TestCase):
 class GroundTest(unittest.TestCase):
     """Nothing draws its own background in the wrong colour.
 
-    A ttk radio paints two things itself: a label with a -background, and an
-    indicator that is a picture with its ground baked into it. Both are
-    decided when the style is made, so one made for a card and packed onto a
-    page leaves a block of the card's colour behind every name - which is what
-    stood behind the effect names on the preview page.
+    A ttk radio button paints two elements itself: a label with a -background,
+    and an indicator that is a picture with its background in it. The style
+    gives both colours at its build step. A radio button for a card, packed
+    onto a page, therefore leaves a block of the colour of the card behind each
+    name. The effect names on the preview page had that fault.
     """
 
     @classmethod
@@ -3601,11 +3603,12 @@ class GroundTest(unittest.TestCase):
 class ButtonRowTest(unittest.TestCase):
     """No button squeezed narrower than the name on it.
 
-    The rows are equal stretched columns, so four of them hold four names of
-    the same width whatever they say - and a name wider than its quarter is
-    cut off rather than wrapped. How wide a name draws is the desktop's font,
-    which is why this builds the window at a size this machine does not use:
-    at its own, four fit and the case cannot be seen.
+    The rows are equal columns that stretch, so four of them hold four names
+    of one width, for each text. A name that is wider than its quarter is not
+    wrapped, and the row cuts it. The font of the desktop gives the width of a
+    name. For that reason this test builds the window at a size that this
+    machine does not use. At its own size, four names fit and the fault is not
+    visible.
     """
 
     @classmethod
@@ -3660,10 +3663,10 @@ class ButtonRowTest(unittest.TestCase):
 class SidebarWidthTest(unittest.TestCase):
     """The rail is as wide as the names in it need.
 
-    Its two lines are canvas text, which neither wraps nor shortens - it is
-    cut at the edge of the canvas - and how wide they draw is the desktop's
-    font. The fixed width was enough for Plasma's default and took the ends
-    off every subtitle at once on anything larger.
+    Its two lines are canvas text. Canvas text does not wrap and does not
+    become shorter, and the canvas cuts it at its edge. The font of the desktop
+    gives the width. The fixed width was sufficient for the default of Plasma,
+    and it removed the end of each subtitle at a larger font.
     """
 
     @classmethod
@@ -3736,12 +3739,12 @@ class SidebarWidthTest(unittest.TestCase):
 class NewerCardBlockTest(unittest.TestCase):
     """The same block against the newer card, through the whole path.
 
-    A fake daemon answering with an RX 9070 XT's own documents, so what is
-    tested is the window: read what the card reports, draw sliders from it,
-    collect them and send them back. This card gets none of that right by
-    accident - it reports no absolute core clock, a voltage window of its
-    own, and a memory clock that is shown at twice what is written - and the
-    panel showed two sliders where LACT showed five, one of them by a factor
+    A fake daemon answers with the documents of an RX 9070 XT, so these tests
+    examine the window: it reads the report of the card, it draws sliders from
+    it, it collects them, and it sends them back. This card needs correct code
+    for each of those steps. It reports no absolute core clock, a voltage
+    window of its own, and a memory clock at twice the written value. The panel
+    showed two sliders where LACT showed five, and one of the two by a factor
     of two.
     """
 
@@ -3797,10 +3800,10 @@ class NewerCardBlockTest(unittest.TestCase):
     def test_the_sliders_open_on_the_numbers_the_other_window_shows(self):
         """Against LACT, reading the same card at the same moment.
 
-        Somebody with both windows open is looking at one machine. These are
-        the numbers LACT put beside this card: a panel that disagrees with it
-        by a factor of two is one they have to translate, and a panel that
-        starts at the ceiling says the card is clocked where it is not.
+        A user with both windows open reads one machine. These are the numbers of
+        LACT for this card. A panel with a factor of two needs a conversion from
+        that user. A panel that starts at the maximum also reports a clock that the
+        card does not run.
         """
         opened = dict((key, round(variable.get())) for key, variable
                       in self.panel._gpu_vars.items()
@@ -3815,10 +3818,10 @@ class NewerCardBlockTest(unittest.TestCase):
     def test_applying_sends_what_lact_itself_would_have_written(self):
         """The end of it: the document that reaches the daemon.
 
-        The same three settings, made here instead of in LACT's window. What
-        arrives has to be what LACT stores for them - halved memory clocks
-        and an offset in its table - or the sliders move, the apply reports
-        success, and the card goes on as it was.
+        These are the same three settings, from this window and not from the
+        window of LACT. The document must hold the values that LACT stores: a
+        memory clock at one half, and an offset in its table. Without that, the
+        sliders move, the Apply reports a success, and the card does not change.
         """
         self._keep()
         self.panel._gpu_vars["gpu_clock_offset"].set(15)
@@ -3862,10 +3865,10 @@ class CountdownTest(unittest.TestCase):
     def test_nobody_answering_is_answered_as_no(self):
         """Which is the case the daemon's own timer exists for.
 
-        A clock the card cannot hold makes the screen go black, and then
-        nobody is going to press anything. The dialog closing itself with "put
-        them back" is what makes that survivable - and it has to agree with
-        what the daemon has already done.
+        A clock that the card cannot hold makes the screen black, and no user
+        can press a button there. The dialog then closes itself with the answer
+        "put them back", and that answer makes the fault recoverable. It must
+        also agree with the action of the daemon.
         """
         made = self.panel_module.CountdownDialog(self.root, 1)
         self.assertFalse(made.answer)
@@ -3889,8 +3892,9 @@ class CountdownTest(unittest.TestCase):
 class AppearanceTest(unittest.TestCase):
     """Switching the window's colours, which rebuilds it.
 
-    In a home of its own, because the preference is saved the moment it is
-    picked and the real one belongs to whoever is running the suite.
+    These tests use a home directory of their own. The panel writes the
+    preference at the moment of the selection, and the real home directory
+    belongs to the user of the suite.
     """
 
     @classmethod
@@ -3938,10 +3942,10 @@ class AppearanceTest(unittest.TestCase):
     def test_and_back_again(self):
         """Twice over, which is what the theme names are counted for.
 
-        ttk element names live in a theme and cannot be redefined within one.
-        A second dressing that reused the theme would raise Duplicate element
-        for every picture, and dress() swallows what it cannot draw - so the
-        window would have kept the old colours and said nothing.
+        An element name of ttk belongs to one theme, and a second definition in
+        that theme is not possible. A second style pass in the same theme raises
+        Duplicate element for each picture. dress() does not report a picture that
+        it cannot draw, so the window keeps the old colours and gives no message.
         """
         self._pick(appsettings.THEME_LIGHT)
         self.assertFalse(self._dark())
@@ -3949,8 +3953,8 @@ class AppearanceTest(unittest.TestCase):
         self.assertTrue(self._dark(), "the second switch did not take")
 
     def test_following_the_desktop_is_the_third_answer(self):
-        # This machine reports Breeze light - kdetheme falls back to it when
-        # there is no Plasma - so following it means a light window here.
+        # This machine reports Breeze light, because kdetheme uses that scheme
+        # with no Plasma. This setting therefore gives a light window here.
         self.assertFalse(kdetheme.is_dark(kdetheme.read()))
         self._pick(appsettings.THEME_SYSTEM)
         self.assertFalse(self._dark())
@@ -3961,8 +3965,8 @@ class AppearanceTest(unittest.TestCase):
                          appsettings.THEME_LIGHT)
 
     def test_it_needs_no_apply(self):
-        # A look you have to press a button to see is a look you are choosing
-        # blind, so the row is not offered on this page at all.
+        # A user who must press a button to see a look selects that look with
+        # no view of it. So this page has no Apply row.
         self.panel._open_section("app")
         self.root.update()
         self.assertFalse(self.panel._apply_shown)
@@ -3976,10 +3980,9 @@ class AppearanceTest(unittest.TestCase):
     def test_an_unapplied_edit_survives_it(self):
         """The one thing the new window cannot read back off disk.
 
-        Everything else comes from the files again. An edit that had not been
-        applied is only in the widgets, so throwing the widgets away would
-        throw it away - and a look setting that quietly discards your unsaved
-        work is a trap.
+        Each other value comes from the files again. An edit with no Apply is in
+        the widgets only, so a rebuild of the widgets removes it. A look setting
+        that removes the unsaved work of a user, with no message, is a fault.
         """
         self.panel._open_section("strip")
         self.root.update()
@@ -3992,12 +3995,11 @@ class AppearanceTest(unittest.TestCase):
     def test_the_rebuild_does_not_reprint_the_session(self):
         """The window keeps no log to carry across, and must not invent one.
 
-        It used to hold a copy so the status bar could quote the last line of
-        it. The bar says one fixed sentence now, so the copy went - and with
-        it the way this could go wrong, which was replaying the copy through
-        _write and printing the whole session to stderr again for every theme
-        change. Still checked, because "nothing is kept" is a thing that gets
-        undone by accident.
+        The window held a copy before, so the status bar could show the last
+        line. The bar now shows one fixed sentence, so the copy is gone. The
+        fault of that copy is also gone: a rebuild sent the copy through _write
+        and printed the complete session to stderr again, at each change of the
+        theme. This test stays, because a later change can bring the copy back.
         """
         self.panel._write("something already said\n")
         said = io.StringIO()
@@ -4006,18 +4008,18 @@ class AppearanceTest(unittest.TestCase):
             self._pick(appsettings.THEME_LIGHT)
         finally:
             sys.stderr = was
-        # Nothing at all, rather than "not the line above". Rebuilding is the
-        # window replacing its own widgets; it runs no command, so anything it
-        # prints is something it decided to say on its own - and the only
-        # reason it ever did was a replayed log.
+        # No output at all, and not only "not the line above". A rebuild
+        # replaces the widgets of the window and runs no command. So each line
+        # from it comes from the window itself, and the one source of such a
+        # line was the copy of the log.
         self.assertEqual(said.getvalue(), "", "the rebuild printed something")
 
     def test_a_failure_showing_at_the_foot_is_still_showing_afterwards(self):
         """The one thing in the status bar that a rebuild could silently drop.
 
-        The dot re-reads the link a moment later on its own, and the version
-        is a constant - the blip is the only part of that line whose reason to
-        be there lives nowhere but in the window that is being thrown away.
+        The dot reads the link again a moment later, and the version is a
+        constant. The failure message is the one part of that line with a reason
+        that exists only in the old window.
         """
         self.panel._set_busy(False, 1)
         self.root.update()
@@ -4031,9 +4033,9 @@ class AppearanceTest(unittest.TestCase):
     def test_the_wheel_is_not_bound_twice(self):
         """bind_all is on the interpreter, not on a widget.
 
-        Left alone, every rebuild would add another handler pointing at a
-        window that no longer exists - so the wheel would scroll a destroyed
-        page, and Tk would report an invalid command name for each one.
+        Without a cleanup step, each rebuild adds one more handler for a window
+        that no longer exists. The wheel then scrolls a destroyed page, and Tk
+        reports an invalid command name for each handler.
         """
         # By how many there are, not by what they say: each rebuild binds a
         # method of a freshly built window, so the script differs every time
