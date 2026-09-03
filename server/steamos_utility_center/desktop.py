@@ -1,33 +1,38 @@
 # SPDX-FileCopyrightText: 2026 caed1994
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""What the bar shows while Steam is not looking.
+"""What the bar shows while Steam does not control it.
 
-Steam writes the LED state in Game Mode and nowhere else, so on the desktop
-the shim keeps handing out whatever the last Game Mode session left behind -
-or, on a machine that has not been in one since it booted, nothing at all.
-Either way the bar is stuck showing a decision somebody made somewhere else.
+Steam writes the LED state in Game Mode only. On the desktop, the shim thus
+returns what the last Game Mode session left. On a machine with no Game Mode
+session after the boot, it returns nothing.
 
-So this lets you make that decision: pick an effect, a colour and a
-brightness for Desktop Mode, and the bar shows them until Game Mode comes
-back. Then it is Steam's again, unchanged - the whole point is that the two
-do not have to agree.
+In both cases the bar shows a decision from another place.
 
-Nothing new is drawn here. A scene is a *snapshot*, built the way the shim
-would have built one, and handed to the same renderer that draws Steam's:
-"breath in this colour" is the same eight lines of maths whoever asked for
-it, and an effect that looked one way in a game and another on the desktop
-would be a bug nobody could explain. That is also why the scenes are exactly
-the effects the bar already has: Steam's own - see shim.EFFECT_* - and this
-project's four, which the desktop offers one apiece because it is not picking
-them out of Steam's menu and so is not held to its one free slot.
+This module gives that decision to the person at the machine. Select an
+effect, a colour and a brightness for Desktop Mode. The bar shows them until
+Game Mode returns. The bar is then Steam's again, with no change. The two
+modes do not have to agree, and that is the purpose.
 
-The one genuinely hard part is knowing which mode the machine is in. The
-service is a *system* service: it has no session of its own to ask, and the
-one you are logged into is not readable from here - so the question is put
-to the process table instead, and answered by gamescope, the compositor Game
-Mode runs under. `steamos-utility-center --desktop` reports what it found, on
-the machine where it matters.
+This module draws nothing new. A scene is a *snapshot*. It is built as the
+shim builds one, and it goes to the renderer that draws Steam's snapshots.
+
+"Breath in this colour" is thus the same arithmetic for each caller. An effect
+that looked different in a game and on the desktop is a defect that nobody can
+explain.
+
+For the same reason, the scenes are the effects that the bar has: Steam's own
+effects (see shim.EFFECT_*) and this project's four. The desktop gives each of
+the four its own scene. It does not select from Steam's menu, so it has no
+limit of one slot.
+
+The difficult part is the mode of the machine. The service is a *system*
+service. It has no session of its own, and it cannot read the session that a
+person is logged in to.
+
+It thus asks the process table. gamescope answers: it is the compositor of Game
+Mode. `steamos-utility-center --desktop` reports what it found, on the machine
+where the answer matters.
 """
 
 from __future__ import annotations
@@ -42,38 +47,39 @@ from . import shim
 
 LOG = logging.getLogger(__name__)
 
-# Leave the bar to Steam, which is what it did before this existed and what
-# it still does unless somebody asks for something else.
+# Leave the bar to Steam. That is what this service did before this module
+# existed, and what it still does until a person asks for a scene.
 SCENE_STEAM = "steam"
 
-# The rest are the shim's own effects under names that say what they look
-# like. "color" rather than "manual" because manual is what the *protocol*
-# calls it; what you are picking is one colour, all the way along.
+# The other values are the shim's own effects, under names that describe the
+# appearance. This module uses "color" and not "manual": manual is the name in
+# the *protocol*, and what a person selects is one colour on the full strip.
 SCENE_OFF = "off"
 SCENE_COLOR = "color"
 SCENE_BREATH = "breath"
 SCENE_PATROL = "patrol"
 SCENE_RAINBOW = "rainbow"
 
-# And this project's own four, which in Game Mode have to share one slot.
+# And this project's own four effects. In Game Mode they share one slot.
 #
-# That sharing is a limit of Steam's menu, not of the effects: the entries in
-# it are built into the client, so a new one has to take over the rainbow, and
-# RAINBOW_SHOWS is which of the four gets it. Nothing on the desktop is
-# choosing from that menu, so nothing here has to share - each of the four is
-# a scene of its own, and "rainbow" here means the rainbow.
+# That limit belongs to Steam's menu and not to the effects. The entries of the
+# menu are in the client, so a new effect must replace the rainbow.
+# RAINBOW_SHOWS selects which of the four takes it.
+#
+# The desktop does not select from that menu, so nothing here shares a slot.
+# Each of the four is a scene of its own, and "rainbow" here is the rainbow.
 SCENE_FIRE = "fire"
 SCENE_AURORA = "aurora"
 SCENE_TEMPERATURE = "temperature"
 SCENE_LOAD = "load"
 
-# Which effect each scene draws with. The renderer is handed a snapshot, so
-# this table is the whole of the translation - and a scene that is not in it
-# is not a scene, which is what the validator says.
+# The effect that each scene draws with. The renderer takes a snapshot, so this
+# table is the full translation. A scene that is not in this table is not a
+# scene, and that is what the validator reports.
 #
-# The last five share an effect because they share the slot the renderer
-# substitutes into: what tells those five apart is SCENE_SHOWS below, handed
-# to the renderer alongside the snapshot.
+# The last five scenes share an effect, because they share the slot that the
+# renderer replaces. SCENE_SHOWS below separates those five. It goes to the
+# renderer with the snapshot.
 SCENE_EFFECTS = {
     SCENE_OFF: shim.EFFECT_OFF,
     SCENE_COLOR: shim.EFFECT_MANUAL,
@@ -86,9 +92,9 @@ SCENE_EFFECTS = {
     SCENE_LOAD: shim.EFFECT_RAINBOW,
 }
 
-# What each of those five puts in the slot. A scene that names one is saying
-# so outright, which is the whole difference from Game Mode: there the slot's
-# tenant is a setting somewhere else, and here it is the scene you picked.
+# What each of those five puts in the slot. A scene that names one says so
+# directly, and that is the difference from Game Mode. In Game Mode, a setting
+# elsewhere decides the content of the slot. Here it is the selected scene.
 SCENE_SHOWS = {
     SCENE_RAINBOW: render.SHOWS_RAINBOW,
     SCENE_FIRE: render.SHOWS_FIRE,
@@ -99,125 +105,141 @@ SCENE_SHOWS = {
 
 SCENES = (SCENE_STEAM,) + tuple(SCENE_EFFECTS)
 
-# Scenes whose colour is the colour you set. The four that make their own and
-# "off", which has none, are left out: offering the picker against those would
-# be offering a setting that does nothing.
+# The scenes whose colour is the colour that a person sets. This list does not
+# have the four that make their own colours, and it does not have "off", which
+# has no colour. To offer the colour control for those is to offer a setting
+# that does nothing.
 SCENES_WITH_COLOUR = (SCENE_COLOR, SCENE_BREATH, SCENE_PATROL)
 
 
 def _scenes_taking(what):
-    """The slot scenes that answer to one of the bar's two sliders.
+    """Returns the slot scenes that use one of the two controls of the bar.
 
-    Read off render.rainbow_takes rather than listed, so the answer here and
-    the answer in Game Mode cannot drift apart: the load gauge ignores both
-    sliders wherever it is drawn, and a page that greyed them in one mode and
-    not the other would be the page lying in one of them.
+    This comes from render.rainbow_takes and is not a list here. The answer
+    here and the answer in Game Mode thus cannot become different.
+
+    The load gauge ignores both controls in each mode. A page that made them
+    grey in one mode and not in the other is wrong in one of the two.
     """
     return tuple(scene for scene, shows in SCENE_SHOWS.items()
                  if what in render.rainbow_takes(shows))
 
 
-# Scenes that light the strip at all, which is what brightness is about - the
-# four included, since they have a brightness even though they pick their own
-# colours. All but the load gauge, whose brightness is what it is saying.
+# The scenes that light the strip, because that is what the brightness
+# controls. The four effects are here: they have a brightness, although they
+# select their own colours. The load gauge is not here: its brightness is its
+# reading.
 SCENES_LIT = SCENES_WITH_COLOUR + _scenes_taking(render.TAKES_BRIGHTNESS)
 
-# And the ones that move, which is what speed is about. One colour standing
-# still has a speed the way a photograph has a frame rate.
+# And the scenes that move, because that is what the speed controls. A speed
+# for one static colour has no meaning.
 SCENES_THAT_MOVE = ((SCENE_BREATH, SCENE_PATROL)
                     + _scenes_taking(render.TAKES_SPEED))
 
-# How often to ask whether Game Mode is running. Cheap - one directory
-# listing and a short read per process - but not free, and nothing here
-# changes faster than somebody can switch sessions.
+# How often to ask whether Game Mode runs. The question is cheap: one directory
+# listing and one short read for each process. It is not free, and nothing here
+# changes faster than a person changes sessions.
 CHECK_SECONDS = 2.0
 
-# How long after Steam's last write to go on treating the bar as Steam's.
+# The time after the last write by Steam in which the bar is still Steam's.
 #
-# Belt and braces for the switch itself. Leaving Game Mode, the compositor
-# and the LED write both stop within a moment of each other, and which of the
-# two this notices first is not worth depending on - so the scene waits out
-# a moment either way rather than flickering between the two owners at the
-# handover. It is not a substitute for finding gamescope: in a Game Mode
-# session where that failed, this would only hold the bar until the grace ran
-# out. That is what --desktop is for.
+# This is protection for the change of mode. At the exit from Game Mode, the
+# compositor and the LED write both stop in the same moment. Which of the two
+# this module sees first is not a value to depend on.
 #
-# It also turned out to be what shows a download's progress bar on the
-# desktop, which nothing here set out to do: Steam writes the bar as it fills
-# and every write pushes the grace out again. Worth keeping, so this is now
-# short enough that the tail after the last write is not something you sit
-# and watch - and see at_rest for how the tail was got rid of rather than
-# merely shortened.
+# The scene thus waits a moment in each direction. It does not change between
+# the two owners at the handover.
+#
+# It is not a replacement for the search for gamescope. In a Game Mode session
+# where that search failed, this would hold the bar for this time only.
+# --desktop is the report for that fault.
+#
+# It is also what shows the progress bar of a download on the desktop, and this
+# module did not intend that. Steam writes the bar as it fills, and each write
+# extends this time again.
+#
+# That behaviour is worth a keep, so this time is now short. The part after the
+# last write is thus not a delay that a person watches. See at_rest for how
+# that part was removed and not only made shorter.
 GRACE_SECONDS = 2.0
 
-# And how long while Steam is showing something that is not the state it rests
-# at, which on the desktop means a download's progress bar.
+# And the time while Steam shows something that is not its rest state. On the
+# desktop, that is the progress bar of a download.
 #
-# Far longer, because Steam writes that bar once per step it can show and no
-# oftener. Measured on a 100 GB download over a fast line: about seven seconds
-# between writes - and the gap grows in proportion on a slower one, there being
-# the same number of steps whatever the speed. Two seconds of patience meant
-# the desktop's own effect broke through in every one of those gaps, and the
-# bar swapped back and forth for the whole download. Which is what was
-# reported: two seconds of the download, five of the desktop, over and over.
+# This time is much longer, because Steam writes that bar one time for each
+# step that it can show, and not more often.
 #
-# Long costs nothing here, because it is only a backstop. What really ends a
-# download is Steam putting back the state it was resting at, and that is
-# recognised exactly - see steam_has_it. This covers the machine that has no
-# such state to recognise, and bounds how long one stray write can hold the
-# bar.
+# The measurement, on a 100 GB download over a fast line: approximately seven
+# seconds between two writes. On a slower line the interval is longer, because
+# the number of steps is the same at each speed.
+#
+# With two seconds of patience, the desktop effect appeared in each of those
+# intervals. The bar thus changed between the two effects for the full
+# download. A user reported that: two seconds of the download, five seconds of
+# the desktop, and again.
+#
+# A long time costs nothing here, because this is only a limit. What ends a
+# download is the write in which Steam puts its rest state back, and this
+# module recognises that write exactly. See steam_has_it.
+#
+# This time covers a machine that has no such state to recognise. It also
+# limits how long one write can hold the bar.
 BUSY_SECONDS = 120.0
 
-# And how long a machine that has only just booted may go with neither a Game
-# Mode session nor a write from Steam before the scene takes the bar.
+# And the time that a machine after a boot can have with no Game Mode session
+# and no write from Steam, before the scene takes the bar.
 #
-# The service is a system service - After=multi-user.target - so it is up and
-# talking to the strip well before the session that decides which mode this is.
-# In between, a machine booting into Game Mode looks exactly like a desktop:
-# gamescope has not started, Steam has written nothing. So the scene came up in
-# the middle of the boot and the startup breath resumed when gamescope finally
-# appeared, which is what was reported: the boot effect, then the desktop's,
-# then the boot effect again, then Steam.
+# The service is a system service, with After=multi-user.target. It thus runs
+# and drives the strip before the session that decides the mode.
 #
-# It costs nothing on that boot, the startup breath being what it holds. What
-# it costs is on a machine booting straight into Desktop Mode, where the scene
-# now waits this out - so it wants to be long enough to outlast a boot into
-# Game Mode and no longer.
+# In that interval, a machine that boots into Game Mode looks the same as a
+# desktop: gamescope did not start, and Steam wrote nothing.
 #
-# Measured against the machine's uptime rather than this process's, so it is
-# the boot that is waited out and not a restart: Apply restarts the service on
-# a machine that has been up for hours, and the scene should come up at once.
+# The scene thus appeared in the middle of the boot, and the start-up breath
+# returned when gamescope started. A user reported that sequence: the boot
+# effect, the desktop effect, the boot effect again, then Steam.
+#
+# This time costs nothing on that boot, because the start-up breath continues.
+# It costs on a machine that boots into Desktop Mode, where the scene now waits
+# for it. It must thus be longer than a boot into Game Mode and no longer.
+#
+# The measurement uses the uptime of the machine and not the age of this
+# process. It thus waits for a boot and not for a restart. Apply restarts the
+# service on a machine that has run for hours, and the scene must appear
+# immediately there.
 BOOT_SETTLE = 45.0
 
-# Where that is read from. The first field is the seconds since boot.
+# The file with that value. Its first field is the seconds from the boot.
 UPTIME = "/proc/uptime"
 
 # What a Game Mode session looks like from outside it.
 #
-# gamescope is the compositor Steam's Game Mode runs under, and the one
-# process that is there for the whole of it. Matched on the front of the name
-# rather than in full: the session is started through a wrapper that has been
-# spelled "gamescope-session" and "gamescope-session-plus" in different
-# SteamOS releases, and a list that had to name every spelling would be a
-# list that goes stale on somebody's machine.
+# gamescope is the compositor of Steam's Game Mode. It is the one process that
+# runs for the full session.
+#
+# The match uses the start of the name and not the full name. A wrapper starts
+# the session, and different SteamOS releases name that wrapper
+# "gamescope-session" and "gamescope-session-plus". A list of each name becomes
+# old on somebody's machine.
 GAME_MODE_PROCESSES = ("gamescope",)
 
-# Where to look for them. A parameter rather than a constant in the function
-# so a test can hand over a directory it built itself.
+# Where to look for them. It is a parameter and not a constant in the
+# function, so that a test can give a directory that it built.
 PROC = "/proc"
 
 
 def delay_for(speed):
-    """The module's `delay` field for a speed multiplier.
+    """Returns the `delay` field of the module for a speed multiplier.
 
-    Steam's own speed slider sets that field, and a scene's sets it the same
-    way - so "twice as fast" means the same thing in a game and on the
-    desktop, and neither needs a special case in the renderer.
+    Steam's own speed control sets that field, and the control of a scene sets
+    it in the same way. "Twice as fast" thus means the same thing in a game
+    and on the desktop, and the renderer needs no special case.
 
-    delay is not a duration but a position on a slider: the cycle scales
-    linearly with it from DELAY_DEFAULT, so a multiplier is simply that the
-    other way up. SPEED on the Strip page then scales this the way it scales
-    a game's, which is what keeps it one knob for "everything a bit slower".
+    delay is not a duration. It is a position on a control. The cycle scales
+    linearly with it from DELAY_DEFAULT, so a multiplier is the inverse of it.
+
+    SPEED on the Strip page then scales this value as it scales the value of a
+    game. It thus stays one control for "each effect a little slower".
     """
     if speed <= 0:
         return render.DELAY_DEFAULT
@@ -226,10 +248,10 @@ def delay_for(speed):
 
 
 def scene_snapshot(scene, color, brightness, speed=1.0):
-    """One scene as a snapshot, or None for "leave it to Steam".
+    """Returns one scene as a snapshot, or None for "leave it to Steam".
 
-    Everything the renderer reads is set here, including the fields Steam
-    would have set for an effect it was animating itself.
+    This function sets each field that the renderer reads. That includes the
+    fields that Steam sets for an effect that it animates itself.
     """
     if scene == SCENE_STEAM:
         return None
@@ -244,36 +266,40 @@ def scene_snapshot(scene, color, brightness, speed=1.0):
 
 
 def scene_shows(scene):
-    """What this scene puts in the renderer's substitutable slot, or None.
+    """Returns what this scene puts in the renderer's slot, or None.
 
-    None for the scenes that are not drawn out of that slot at all, where the
-    renderer's own setting is moot: it only ever substitutes into a rainbow
-    snapshot, so there is nothing for an answer here to change.
+    It returns None for a scene that the renderer does not draw from that slot.
+    The renderer's own setting then has no effect: the renderer replaces the
+    content of a rainbow snapshot only, so an answer here changes nothing.
 
-    Handed to the renderer a frame at a time rather than built into one. There
-    is a single renderer, and it is Steam's as much as the desktop's - the two
-    modes disagreeing about what the rainbow slot holds is the point, and a
-    renderer can only hold one answer.
+    The value goes to the renderer for each frame and is not built into the
+    renderer. There is one renderer, and it belongs to Steam and to the desktop
+    equally.
+
+    The two modes disagree about the content of the rainbow slot, and that is
+    the purpose. A renderer can hold one answer only.
     """
     return SCENE_SHOWS.get(scene)
 
 
 def describe(scene, color, brightness, speed):
-    """One scene in a line, naming every setting that is doing something.
+    """Returns one scene in one line, with each setting that has an effect.
 
-    And only those. A report that left one out reads as a setting that is not
-    in play - which is what the brightness looked like under a rainbow, the
-    one lit scene that has no colour of yours, and "the slider does nothing"
-    is what came back.
+    It names those settings only. A report that omits one reads as a setting
+    with no effect.
 
-    Which is also why the four that draw themselves have a say. A load gauge
-    answers to neither brightness nor speed: what it draws is a reading, and
-    both would change what it says rather than how it looks - see
+    That was the appearance of the brightness under a rainbow. A rainbow is the
+    one lit scene with no colour of the person's, and a user reported that "the
+    control does nothing".
+
+    The four effects that draw themselves thus also have an answer here. A load
+    gauge uses neither the brightness nor the speed: it draws a reading, and
+    both settings would change the reading and not the appearance. See
     render.rainbow_takes.
 
-    Named as the settings name it rather than as the protocol does: "color" is
-    what you picked and "manual" is what the shim calls the effect it becomes,
-    and only one of the two is a word you can go and look up.
+    The names are the names of the settings and not the names of the protocol.
+    "color" is what a person selects. "manual" is the shim's name for the
+    effect that it becomes. Only the first name is one that a person can find.
     """
     if scene == SCENE_STEAM:
         return scene
@@ -288,11 +314,12 @@ def describe(scene, color, brightness, speed):
 
 
 def running_game_mode(root=PROC):
-    """The name of a Game Mode process that is running, or "" if none is.
+    """Returns the name of a Game Mode process that runs, or "".
 
-    The name rather than a yes: it is the difference between "this machine
-    has no Game Mode session" and "it has one and it is called something this
-    did not expect", and only the second of those is ours to fix.
+    It returns the name and not a boolean. The name separates two states:
+    "this machine has no Game Mode session" and "it has one with a name that
+    this module did not expect". Only the second state is a fault to repair
+    here.
     """
     try:
         entries = os.listdir(root)
@@ -312,12 +339,14 @@ def running_game_mode(root=PROC):
 
 
 def machine_uptime(path=UPTIME):
-    """Seconds since the machine booted, or None if that cannot be read.
+    """Returns the seconds from the boot, or None if it cannot read them.
 
-    None rather than nought, because the two mean opposite things here: one is
-    a machine that has just started and the other is a question this cannot
-    answer, and guessing "just started" at it would hold the scene off on every
-    machine without a /proc/uptime to read.
+    It returns None and not zero. The two values have opposite meanings here.
+    Zero is a machine that started now. None is a question that this cannot
+    answer.
+
+    A guess of "started now" holds the scene off on each machine with no
+    /proc/uptime.
     """
     try:
         with open(path) as handle:
@@ -327,41 +356,42 @@ def machine_uptime(path=UPTIME):
 
 
 def resting_key(snapshot):
-    """What makes two snapshots the same thing Steam is resting at.
+    """Returns what makes two snapshots the same rest state of Steam.
 
-    Everything the shim reports except the brightness, because Steam dims its
-    own effect on the way into a download and brings it back up on the way
-    out - see Ownership.steam_has_it. Half a lit rainbow is the same rainbow.
+    It uses each field that the shim reports except the brightness. Steam makes
+    its own effect dim at the start of a download and bright again at the end.
+    See Ownership.steam_has_it. A dim rainbow is the same rainbow.
     """
     return None if snapshot is None else snapshot.key(brightness=False)
 
 
 def steam_wrote_ago(snapshot, now):
-    """Seconds since Steam last set the LEDs, or None if it never has.
+    """Returns the seconds from the last write by Steam, or None.
 
-    The shim stamps every write with ktime_get_ns(), which is the same clock
-    time.monotonic() reads - so the two subtract without conversion. The
-    counter is what says whether there was a write at all: the module starts
-    it at UNTOUCHED_SEQ and stamps the time at load, so an untouched device
-    carries a timestamp that means "when the module loaded" and would
-    otherwise read as a write that just happened.
+    The shim marks each write with ktime_get_ns(). time.monotonic() reads the
+    same clock, so a subtraction of the two needs no conversion.
+
+    The counter says whether a write occurred. The module sets the counter to
+    UNTOUCHED_SEQ and marks the time at its load. A device with no write thus
+    carries a time that means "the load of the module". Without the counter,
+    that time reads as a write that occurred now.
     """
     if snapshot is None or snapshot.seq <= shim.UNTOUCHED_SEQ:
         return None
     return now - snapshot.monotonic_ns / 1e9
 
 
-# The phrase both of the lines below carry, and what finds them again. One
-# string in both places: a report that searched for wording the log had
-# stopped using would answer "nothing here" forever, which reads exactly like
-# a machine whose Game Mode was never recognised.
+# The words in both of the lines below, and what finds them again. It is one
+# string in both places. A report that looked for words that the log no longer
+# writes answers "nothing here" always, and that reads as a machine whose Game
+# Mode this service never recognised.
 GAME_MODE_MARK = "Game Mode"
 IN_GAME_MODE = GAME_MODE_MARK + " is running (%s) - the bar is Steam's"
 ON_THE_DESKTOP = "no " + GAME_MODE_MARK + " session - the bar is the desktop's"
 
 JOURNAL_UNIT = "steamos-utility-center.service"
 JOURNAL_SINCE = "-2 days"
-# Enough to show the last few switches without pasting a day of boots.
+# Sufficient for the last changes, and not for a full day of boots.
 JOURNAL_LINES = 6
 
 
@@ -371,23 +401,26 @@ def journal_command(unit=JOURNAL_UNIT, since=JOURNAL_SINCE):
 
 
 def read_journal(text):
-    """The ownership lines out of a journal dump, most recent last."""
+    """Returns the ownership lines from a journal dump, the newest last."""
     return [line.strip() for line in (text or "").splitlines()
             if GAME_MODE_MARK in line][-JOURNAL_LINES:]
 
 
 def journal_ownership(command=None):
-    """What the service recorded about which mode it was in: (lines, why not).
+    """Returns what the service recorded about the mode: (lines, why not).
 
-    Read here rather than left as a command for somebody to type, because it
-    is the only way to see the Game Mode half at all. There is no terminal in
-    Game Mode, so what the service decided during a session can only be looked
-    at afterwards - and an instruction to pipe journalctl through grep is a
-    step at which most people stop.
+    This function reads the journal, and this project does not leave the read
+    to a command that a person types. It is the only way to see the Game Mode
+    half.
 
-    A complaint instead of lines when the journal could not be read, which is
-    a different answer from "it has nothing to say": one means look again with
-    sudo, the other means this machine's Game Mode was never recognised.
+    Game Mode has no terminal. A person can thus read the decisions of the
+    service only after the session. An instruction to send journalctl through
+    grep is a step at which most people stop.
+
+    It returns a message in place of the lines when it cannot read the journal.
+    That is a different answer from "the journal has nothing". The first means
+    "try again with sudo". The second means "this machine never recognised Game
+    Mode".
     """
     try:
         done = subprocess.run(command or journal_command(),
@@ -405,12 +438,14 @@ def journal_ownership(command=None):
 
 
 class Ownership:
-    """Whose the bar is at this moment, asked as often as the loop likes.
+    """The owner of the bar now. The loop can ask at each frame.
 
-    Steam's while Game Mode is running, and for a few seconds after the last
-    thing Steam wrote; the desktop's otherwise. The process table is only
-    read every CHECK_SECONDS - the answer cannot change faster than somebody
-    can switch sessions, and the loop asks sixty times a second.
+    The bar is Steam's while Game Mode runs, and for some seconds after the
+    last write by Steam. It is the desktop's at each other time.
+
+    This class reads the process table one time in each CHECK_SECONDS. The
+    answer cannot change faster than a person changes sessions, and the loop
+    asks sixty times each second.
     """
 
     def __init__(self, grace=GRACE_SECONDS, interval=CHECK_SECONDS, look=None,
@@ -419,45 +454,46 @@ class Ownership:
         self.busy = busy
         self.interval = interval
         self.boot_settle = boot_settle
-        # Given rather than called for, which is what lets a test drive this
-        # without a process table of its own - and the same for the clock the
-        # boot is measured against.
+        # The caller gives this function and does not call it here. A test can
+        # thus drive this class with no process table. The clock for the boot
+        # is a parameter for the same reason.
         self.look = running_game_mode if look is None else look
         self.uptime = machine_uptime if uptime is None else uptime
         self.found = ""
         self._asked = None
         self._booted_at = None
-        # What was on the shim while the scene had the bar - Steam's state at
-        # rest. See steam_has_it.
+        # What the shim held while the scene had the bar. It is the rest state
+        # of Steam. See steam_has_it.
         self.at_rest = None
 
     def game_mode(self, now):
-        """The Game Mode process running now, "" if none - from the cache."""
+        """Returns the Game Mode process that runs now, or "". From the cache."""
         first = self._asked is None
         if first or now - self._asked >= self.interval:
             found = self.look()
             if first or found != self.found:
-                # The journal is the only way to see this happen, because the
-                # only place you can watch it from is Game Mode and there is
-                # no terminal there. So: once when the service starts, and
-                # once on every change after it.
+                # The journal is the only way to see this change, because the
+                # only place to watch it from is Game Mode, and Game Mode has
+                # no terminal. This thus writes one line at the start of the
+                # service and one line at each change after it.
                 #
-                # It is the answer to both "why is my scene not showing" and
-                # "why is the bar ignoring Steam", and those two look
-                # identical from in front of the bar.
+                # It is the answer to two questions: "why does my scene not
+                # appear" and "why does the bar ignore Steam". The two look
+                # the same to a person in front of the bar.
                 LOG.info(IN_GAME_MODE % found if found else ON_THE_DESKTOP)
             self.found = found
             self._asked = now
         return self.found
 
     def still_booting(self, now):
-        """Whether the machine is too young to have decided which mode it is.
+        """Returns whether the machine is too new to know its own mode.
 
-        Read once and kept as a moment on the loop's own clock: the answer
-        only ever goes one way, and this is asked sixty times a second.
+        It reads the uptime one time and keeps a moment on the clock of the
+        loop. The answer changes in one direction only, and the loop asks
+        sixty times each second.
 
-        A machine that will not say how long it has been up is taken as up
-        already, which is what this did before the question was asked at all.
+        A machine that does not report its uptime counts as an old machine.
+        That is the behaviour of this class before this question existed.
         """
         if self._booted_at is None:
             up = self.uptime()
@@ -465,71 +501,84 @@ class Ownership:
         return now - self._booted_at < self.boot_settle
 
     def steam_has_it(self, snapshot, now):
-        """Whether to leave the bar alone because Steam is driving it.
+        """Returns whether to leave the bar alone because Steam drives it.
 
-        Game Mode outright, and on the desktop for as long as Steam keeps
-        writing. That second half is what puts a download's progress bar on
-        the bar: every write pushes the grace out again, so the bar stays
-        Steam's for as long as the download is filling it.
+        The answer is True in Game Mode. On the desktop it is True while Steam
+        continues to write.
 
-        And then there is the write that ends it. When the download finishes,
-        Steam puts back the effect that was set in Game Mode - so the last
-        thing it writes is the state it was resting at before any of this
-        started, and the grace would go on showing that for its full length.
-        Reported, and it is a strange few seconds: a Game Mode effect nobody
-        asked for, between the download and the desktop's own.
+        That second part is what puts the progress bar of a download on the
+        bar. Each write extends the time again, so the bar stays Steam's while
+        the download fills it.
 
-        So a write that restores what Steam left behind ends the grace
-        instead of extending it. Steam putting back what was already there is
-        Steam letting go, not Steam taking over - and it is exact rather than
-        a guess about how often Steam writes, which is a thing this cannot
-        know. If the restored state is not the one remembered, nothing is
-        lost: the grace runs out the way it always did.
+        Then there is the write that ends it. At the end of a download, Steam
+        puts back the effect from Game Mode. Its last write is thus the rest
+        state from before the download, and the grace time would show that
+        state for its full length.
+
+        A user reported those seconds: a Game Mode effect that nobody asked
+        for, between the download and the desktop effect.
+
+        A write that puts back the remembered state thus ends the grace time
+        and does not extend it. Steam that puts back what was already there is
+        Steam that gives up the bar, and not Steam that takes it.
+
+        This test is exact. It is not a guess about the interval between two
+        writes by Steam, which this class cannot know. If the restored state
+        is not the remembered state, nothing is lost: the grace time ends as
+        before.
 
         "What was already there" ignores the brightness, and that is the
-        whole of the second half of this. Measured on a Steam Machine: Steam
-        brackets a download with a fade of its own effect, dimming the
-        rainbow to nothing before the progress bar appears and bringing it
-        back up afterwards, a step every thirty milliseconds. Every step of
-        both fades differs from the state at rest in the brightness and in
-        nothing else - so compared on the whole snapshot each one read as
-        Steam taking the bar, and the Game Mode effect flashed at both ends
-        of every download. It is the same effect, dimmed; it is not Steam
-        showing something else.
+        second half of this method.
 
-        Which leaves how long to wait between Steam's writes, and there are
-        two answers to that. While Steam is resting it is the short grace,
-        which is for the handover. While it is showing something of its own it
-        is BUSY_SECONDS, because a download's progress bar is written once per
-        step it can show - seven seconds apart on a fast line, further on a
-        slow one - and the bar is Steam's for the whole of that gap and not
-        for the first two seconds of it. Waiting only the grace there had the
-        two effects trading the bar back and forth for a whole download.
+        The measurement, on a Steam Machine: Steam puts a fade of its own
+        effect at each end of a download. It makes the rainbow dim before the
+        progress bar and bright again after it, one step in each thirty
+        milliseconds.
 
-        And before either of those there is the boot, where the honest answer
-        is neither: see still_booting.
+        Each step of both fades is different from the rest state in the
+        brightness and in nothing else. A comparison of the full snapshot thus
+        read each step as Steam that takes the bar, and the Game Mode effect
+        appeared at both ends of each download. It is the same effect, dim. It
+        is not Steam that shows something else.
+
+        The last question is the time to wait between two writes by Steam, and
+        there are two answers.
+
+        While Steam rests, it is the short grace time, which is for the
+        handover.
+
+        While Steam shows something of its own, it is BUSY_SECONDS. Steam
+        writes a progress bar one time for each step that it can show: seven
+        seconds apart on a fast line, and more on a slow line. The bar is
+        Steam's for that full interval and not for its first two seconds. With
+        the grace time only, the two effects took the bar from each other for
+        the full download.
+
+        Before both of those there is the boot, where the answer is neither.
+        See still_booting.
         """
         if self.game_mode(now):
-            # Nothing worked out on the desktop outlives a Game Mode session:
-            # what Steam rests at afterwards is whatever this session leaves
-            # behind, and the handover below works that out for itself. Kept,
-            # a stale one would read as Steam showing something of its own and
-            # hold the bar for the whole of the patience below.
+            # No value from the desktop stays valid after a Game Mode session.
+            # The rest state of Steam after such a session is what that session
+            # leaves, and the handover below finds that state itself.
+            #
+            # An old value reads as Steam that shows something of its own, and
+            # it holds the bar for the full time below.
             self.at_rest = None
             return True
         ago = steam_wrote_ago(snapshot, now)
         if ago is None and self.still_booting(now):
-            # Neither mode has had its say: no Game Mode session, and nothing
-            # ever written to the LEDs. On a machine this young that is the
-            # boot itself and not an answer, and the startup breath is what
-            # belongs on the bar until one of the two turns up.
+            # Neither mode gives an answer: there is no Game Mode session, and
+            # nothing wrote to the LEDs. On a machine this new, that is the
+            # boot and not an answer. The start-up breath thus belongs on the
+            # bar until one of the two appears.
             return True
         resting = resting_key(snapshot)
         if ago is not None:
             busy = self.at_rest is not None and resting != self.at_rest
             if ago < (self.busy if busy else self.grace):
                 return busy or self.at_rest is None
-        # The scene has the bar. Whatever is on the shim while that is true is
-        # what Steam will put back when it has finished.
+        # The scene has the bar. What the shim holds while that is true is
+        # what Steam puts back at the end of a download.
         self.at_rest = resting
         return False
