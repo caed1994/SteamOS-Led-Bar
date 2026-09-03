@@ -470,6 +470,10 @@ PROJECT_FILES = (
     "/etc/systemd/system/multi-user.target.wants/"
     "steamos-utility-center-mounts.service",
     "/etc/udev/rules.d/99-steamos-utility-center.rules",
+    # The rule that lets the control command apply a change with no password.
+    # Without it in this list, a SteamOS update leaves a machine on which the
+    # panel operates and Game Mode does not. See ctl.sudoers_text.
+    "/etc/sudoers.d/zz-steamos-utility-center",
 )
 
 

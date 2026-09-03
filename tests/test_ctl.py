@@ -25,6 +25,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -310,11 +312,16 @@ class DrivesTest(unittest.TestCase):
             ctl.set_values("drives", {"drives": "/mnt/games"},
                            run=Recorder())
 
-    def test_repairing_runs_the_applier_on_the_record(self):
+    def test_repairing_stages_the_record_rather_than_naming_it(self):
+        """One rule for each applier, and the repair needs none of its own.
+
+        A rule that also named the record would be a second file that a
+        program with root reads on the word of the caller.
+        """
         runner = Recorder()
         ctl.action("repair-drives", run=runner)
-        self.assertEqual(runner.commands[0][-2:],
-                         [ctl.APPLY_MOUNTS, mounts.STATE_PATH])
+        self.assertEqual(runner.commands[0][-2], ctl.APPLY_MOUNTS)
+        self.assertNotEqual(runner.commands[0][-1], mounts.STATE_PATH)
 
 
 class ActionTest(unittest.TestCase):
@@ -387,6 +394,209 @@ class InstallerTest(unittest.TestCase):
         with open(os.path.join(HERE, "..", "uninstall.sh"),
                   encoding="utf-8") as handle:
             self.assertIn("CTL_COMMAND_LINK", handle.read())
+
+
+class SudoersTest(unittest.TestCase):
+    """The rule that makes a password unnecessary, and its limits."""
+
+    def test_there_is_no_wildcard_in_it(self):
+        """A rule with a `*` permits every argument.
+
+        The argument of these programs is a file that they read as root, so a
+        rule with a wildcard is a rule that lets a caller name any file.
+        """
+        for line in ctl.sudoers_text("deck").splitlines():
+            if line.startswith("deck"):
+                self.assertNotIn("*", line, line)
+
+    def test_each_line_names_one_program_and_one_file(self):
+        rules = [line for line in ctl.sudoers_text("deck").splitlines()
+                 if line.startswith("deck")]
+        self.assertEqual(len(rules), 3)
+        for line in rules:
+            after = line.split("NOPASSWD:")[1].split()
+            self.assertEqual(len(after), 2, line)
+            self.assertTrue(after[0].startswith(ctl.INSTALL_DIR), line)
+            self.assertTrue(after[1].startswith(ctl.STAGED_DIR), line)
+
+    def test_it_permits_exactly_the_files_the_command_stages(self):
+        """A rule for a file the command never writes is a rule with no use."""
+        rules = ctl.sudoers_text("deck")
+        for path in ctl.STAGED.values():
+            self.assertIn(path, rules)
+
+    def test_no_rule_permits_the_chown(self):
+        """It walks a whole drive as root, so a person answers for it.
+
+        The comments name it, because a reader of the file must know why it is
+        not there. This looks at the rules and not at the comments.
+        """
+        rules = [line for line in ctl.sudoers_text("deck").splitlines()
+                 if not line.startswith("#") and line.strip()]
+        self.assertTrue(rules)
+        for line in rules:
+            self.assertNotIn("chown", line)
+            # The applier takes the directory to give away as a second
+            # argument. A rule of two words after NOPASSWD cannot carry one.
+            self.assertEqual(len(line.split("NOPASSWD:")[1].split()), 2, line)
+
+    def test_a_user_name_that_could_add_a_line_is_refused(self):
+        for name in ("deck ALL=(root) NOPASSWD: /bin/sh", "a\nroot", "",
+                     "../root", "deck ALL"):
+            with self.assertRaises(ctl.CtlError, msg=name):
+                ctl.sudoers_text(name)
+
+    def test_the_rule_is_read_by_visudo_before_it_is_installed(self):
+        """A sudoers file that does not parse takes sudo away from a machine."""
+        runner = Recorder()
+        ctl.permit("deck", run=runner)
+        self.assertEqual(runner.commands[0][0], "visudo")
+        self.assertIn("-c", runner.commands[0])
+
+    def test_a_rule_that_visudo_refuses_is_never_installed(self):
+        class Refuse(Recorder):
+            def __call__(self, command, timeout=120):
+                self.commands.append(list(command))
+                if command[0] == "visudo":
+                    return 1, ">>> syntax error"
+                return 0, ""
+
+        runner = Refuse()
+        with self.assertRaises(ctl.CtlError):
+            ctl.permit("deck", run=runner)
+        self.assertEqual(len(runner.commands), 1, "it went on after visudo")
+
+    def test_the_staging_directory_belongs_to_that_user(self):
+        runner = Recorder()
+        ctl.permit("deck", run=runner)
+        made = [one for one in runner.commands if one[:2] == ["install", "-d"]]
+        self.assertEqual(len(made), 1)
+        self.assertIn("deck", made[0])
+        self.assertIn(ctl.STAGED_DIR, made[0])
+
+    def test_visudo_itself_parses_the_rule(self):
+        """The one check that a test in this file cannot do by reading.
+
+        A rule that this project believes in and sudo does not is a machine
+        where nothing works and the reason is in a file nobody opens.
+        """
+        if not shutil.which("visudo"):
+            self.skipTest("no visudo on this machine")
+        staged = tempfile.NamedTemporaryFile("w", suffix=".sudoers",
+                                             delete=False)
+        with staged:
+            staged.write(ctl.sudoers_text("deck"))
+        self.addCleanup(os.unlink, staged.name)
+        done = subprocess.run(["visudo", "-c", "-f", staged.name],
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
+    def test_the_keep_list_carries_the_rule_across_an_update(self):
+        """Without it, an update leaves Game Mode unable to change a setting."""
+        self.assertIn(ctl.SUDO_RULE, mounts.PROJECT_FILES)
+
+    def test_the_uninstaller_removes_the_same_file(self):
+        sys.path.insert(0, HERE)
+        from shellvalues import shell_value
+        self.assertEqual(shell_value("SUDO_RULE_PATH"), ctl.SUDO_RULE)
+
+
+class StagedFileTest(unittest.TestCase):
+    """What each applier does with the file it is given.
+
+    The staged file is in a directory that the desktop user can write, and the
+    applier reads it as root. That is the one place where a caller with no
+    rights reaches a program that has them.
+    """
+
+    APPLIERS = ("apply-config.sh", "apply-power.sh", "apply-mounts.sh")
+
+    def _text(self, name):
+        with open(os.path.join(HERE, "..", "scripts", name),
+                  encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_every_applier_refuses_a_symlink(self):
+        """install(1) as root follows one, and copies a file nobody can read.
+
+        /etc/shadow into /etc/steamos-utility-center.conf, which is 0644.
+        """
+        for name in self.APPLIERS:
+            self.assertIn('[[ ! -L "$STAGED" ]]', self._text(name), name)
+
+    def test_every_applier_refuses_a_file_of_another_user(self):
+        for name in self.APPLIERS:
+            self.assertIn("STAGED_OWNER", self._text(name), name)
+
+    def test_the_check_is_before_the_file_is_used(self):
+        """A check after the read is a check that never ran in time."""
+        for name in self.APPLIERS:
+            text = self._text(name)
+            self.assertLess(text.index("STAGED_OWNER"), text.index("install "),
+                            name)
+
+    def test_the_command_stages_where_the_appliers_are_permitted(self):
+        for area, path in ctl.STAGED.items():
+            self.assertEqual(os.path.dirname(path), ctl.STAGED_DIR, area)
+
+    def _refusal(self, name, path, **environment):
+        """Runs one applier and returns (exit status, what it printed).
+
+        Only the refusals are run here. Each of them exits before the applier
+        writes anything, so no test touches /etc.
+        """
+        where = dict(os.environ)
+        where.pop("PKEXEC_UID", None)
+        where.pop("SUDO_UID", None)
+        where.update(environment)
+        done = subprocess.run(
+            ["bash", os.path.join(HERE, "..", "scripts", name), path],
+            capture_output=True, text=True, env=where)
+        return done.returncode, done.stdout + done.stderr
+
+    def test_a_symlink_is_refused_by_every_applier(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        link = os.path.join(holder.name, "staged.conf")
+        os.symlink("/etc/shadow", link)
+        for name in self.APPLIERS:
+            code, said = self._refusal(name, link)
+            self.assertEqual(code, 2, "%s: %s" % (name, said))
+            self.assertIn("symlink", said, name)
+
+    def test_a_file_of_another_user_is_refused(self):
+        """The staging directory belongs to one user. A file of another one
+        in it is a file that this program has no reason to read as root.
+        """
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        path = os.path.join(holder.name, "staged.conf")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("NOTIFY=1\n")
+        mine = os.stat(path).st_uid
+        for name in self.APPLIERS:
+            # Whoever runs the suite made that file, so any other uid is a
+            # different user. The suite runs as root on some machines, and
+            # root is not exempt: only a call with no user at all is, which is
+            # the boot-time unit.
+            code, said = self._refusal(name, path, SUDO_UID=str(mine + 1))
+            self.assertEqual(code, 2, "%s: %s" % (name, said))
+            self.assertIn("does not belong", said, name)
+
+    def test_a_file_that_is_not_there_is_refused(self):
+        for name in self.APPLIERS:
+            code, said = self._refusal(name, "/no/such/staged.conf")
+            self.assertEqual(code, 2, "%s: %s" % (name, said))
+
+    def test_a_directory_it_cannot_write_falls_back_to_a_temporary_file(self):
+        """An installation with no staging directory still answers.
+
+        `sudo -n` then refuses the argument, and that refusal names the rule
+        that is missing. That is a better answer than a failure to write.
+        """
+        path = ctl._stage("HELLO=1\n", "/proc/no/such/place/strip.conf")
+        self.addCleanup(os.unlink, path)
+        self.assertTrue(os.path.exists(path))
 
 
 class DiscoveryTest(unittest.TestCase):

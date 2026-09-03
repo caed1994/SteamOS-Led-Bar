@@ -1106,13 +1106,45 @@ because a front end asks for it again and again while a person looks at a
 page. `status --full` adds the answers that need `systemctl`, `lsblk` and the
 CEC toolkit. Ask for that one time when a page opens.
 
-**Nothing asks for a password.** Game Mode runs no polkit agent and gives no
-terminal, so a question there has nobody to answer it. This command uses
-`sudo -n`, which either works or refuses immediately. The installer writes
-`/etc/sudoers.d/zz-steamos-utility-center` to permit the three programs that
-apply a change, each by its full path in `/var/lib/steamos-utility-center/`.
-`status` reports whether that file is there. Give `--may-prompt` where a person
-can answer a question, which is a desktop.
+### Why it needs no password
+
+Game Mode runs no polkit agent and gives no terminal, so a `pkexec` question
+there has nobody to answer it. This command uses `sudo -n` instead, which
+either works or refuses immediately. `--may-prompt` gives you `pkexec` where a
+person can answer, which is a desktop.
+
+The installer writes `/etc/sudoers.d/zz-steamos-utility-center` for that.
+`--no-sudoers` leaves it out, and every setting is then a setting for the
+desktop only. `status` reports whether the file is there, and a refusal names
+it.
+
+The rule is as small as a rule can be. There is **no wildcard in it**: each
+line names one program by its full path in `/var/lib/steamos-utility-center/`,
+and the one file that program is permitted to read.
+
+```
+deck ALL=(root) NOPASSWD: /var/lib/steamos-utility-center/steamos-utility-center-config-apply /var/lib/steamos-utility-center/staged/strip.conf
+```
+
+A change waits in `staged/` under a name that is fixed. A temporary file with a
+name that nobody knows in advance needs a `*` in the rule, and a rule with a
+`*` permits every argument to a program that runs as root. The directory
+belongs to you, and its parent belongs to root, so nobody can put a symlink in
+the place of it.
+
+Each of the three programs makes two more checks before it reads the file. It
+refuses a symlink, because `install` as root would follow one and copy, for
+example, `/etc/shadow` into a file that everybody can read. And it refuses a
+file that belongs to another user. A call with no user at all is the boot-time
+repair unit, and that one is permitted.
+
+**Take ownership is deliberately not in the rule.** That `chown` walks a whole
+drive as root. It is a rare and deliberate act, and it stays in the panel where
+a person answers for it.
+
+The keep-list carries the rule across a SteamOS update with the rest of this
+project. Without that, an update would leave a machine where the panel operates
+and Game Mode does not.
 
 Every answer holds `ok`, and the exit status agrees with it. A refusal is JSON
 also:

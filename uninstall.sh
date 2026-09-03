@@ -270,6 +270,12 @@ if [[ -L "$CTL_COMMAND_LINK" \
     rm -f "$CTL_COMMAND_LINK"
 fi
 
+# The rule that let the control command apply a change with no password. It
+# names programs in $INSTALL_DIR, which the next line removes. A rule that
+# stayed would name programs that are not there, which is not a fault and is
+# not tidy either.
+rm -f "$SUDO_RULE_PATH"
+
 rm -rf "${INSTALL_DIR:?}"
 
 if [[ $PURGE -eq 1 ]]; then

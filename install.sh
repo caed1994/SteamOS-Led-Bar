@@ -33,6 +33,7 @@ ASSUME_YES=0
 SKIP_MODULE=0
 REBUILD_MODULE=0
 SKIP_WATCHER=0
+SKIP_SUDOERS=0
 FLASH_ENV=""
 
 # The firmware builds, in the order of the menu.
@@ -65,6 +66,8 @@ Options:
   --skip-module   do not touch the leds-valve-shim kernel module
   --rebuild-module  rebuild and reinstall the module even if it is loaded
   --skip-watcher  do not install the desktop-session user services
+  --no-sudoers    do not permit a change with no password. Game Mode then
+                  reads every setting and changes none of them.
   --flash ENV     also flash the ESP firmware (e.g. nodemcuv2, esp32dev),
                   or a number from the menu; omit to be asked, 0 to skip
   -y, --yes       accept defaults, no prompts
@@ -80,6 +83,7 @@ while [[ $# -gt 0 ]]; do
         --skip-module) SKIP_MODULE=1; shift ;;
         --rebuild-module) REBUILD_MODULE=1; shift ;;
         --skip-watcher) SKIP_WATCHER=1; shift ;;
+        --no-sudoers) SKIP_SUDOERS=1; shift ;;
         --flash) FLASH_ENV="${2:-}"; shift 2 ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -318,6 +322,34 @@ if ! keep_said="$("$INSTALL_DIR/steamos-utility-center" --write-mounts \
     warn "could not write the keep-list, so a SteamOS update can take this"
     warn "installation away again:"
     warn "  $keep_said"
+fi
+
+# Let the control command apply a change with no password.
+#
+# Game Mode runs no polkit agent and gives no terminal, so pkexec there has
+# nobody to ask. Without this rule every setting of this project is a setting
+# for the desktop only, and a plugin in Game Mode can read them and change
+# none of them.
+#
+# The command writes its own rule. The paths in the rule must be the paths it
+# runs, and a copy of them in this script is a second answer to one question.
+# It reads the file with visudo before it installs it: a sudoers file that
+# does not parse takes sudo away from the machine.
+#
+# --no-sudoers leaves it out, for a person who uses the panel only.
+if [[ "$SKIP_SUDOERS" -eq 1 ]]; then
+    say "Leaving out the sudoers rule, so settings are the desktop's only"
+elif ! watcher_user_dirs; then
+    warn "cannot tell which desktop user to permit, so Game Mode cannot"
+    warn "change a setting. Run the installer with sudo from your account."
+else
+    say "Permitting $WATCHER_USER to apply a change with no password"
+    if ! permit_said="$("$INSTALL_DIR/steamos-utility-centerctl" \
+                       permit "$WATCHER_USER" 2>&1)"; then
+        warn "could not write the sudoers rule, so Game Mode cannot change a"
+        warn "setting:"
+        warn "  $permit_said"
+    fi
 fi
 
 if [[ -f "$POWER_CONFIG_PATH" ]]; then

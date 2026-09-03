@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,18 @@ APPLY_POWER = os.path.join(INSTALL_DIR, "steamos-utility-center-power-apply")
 APPLY_MOUNTS = os.path.join(INSTALL_DIR, "steamos-utility-center-mounts-apply")
 
 CONFIG_PATH = "/etc/steamos-utility-center.conf"
+
+# Where a change waits while the applier reads it, and one fixed name for each.
+#
+# A temporary file with a name that nobody knows in advance needs a `*` in the
+# sudoers rule, and a rule with a `*` in it permits every argument. These
+# names are fixed, so each rule names exactly one file and permits nothing
+# else. The installer makes this directory and gives it to the desktop user.
+# Its parent belongs to root, so nobody can put a symlink in the place of it.
+STAGED_DIR = os.path.join(INSTALL_DIR, "staged")
+STAGED = {"strip": os.path.join(STAGED_DIR, "strip.conf"),
+          "power": os.path.join(STAGED_DIR, "power.conf"),
+          "drives": os.path.join(STAGED_DIR, "mounts.conf")}
 
 # The rule that lets the three programs above run with no password. The
 # installer writes it. Its absence is the usual reason a `set` fails, so the
@@ -137,13 +150,23 @@ def privileged(command, may_prompt=False, run=None):
     return said.strip()
 
 
-def _stage(text):
-    """Writes text to a file that the applier can read, and returns its path.
+def _stage(text, path):
+    """Writes text where the applier reads it, and returns the path it used.
 
-    Mode 0644, because the applier runs as root and reads it. A file that only
-    this user can read is a file that root can read too, but the applier also
-    runs from the boot-time unit, which is a different user again.
+    `path` is the fixed name that a sudoers rule permits. An installation that
+    has no such directory gets a temporary file instead: `sudo -n` then refuses
+    the argument, and the refusal names the rule that is missing. That is the
+    correct answer, and it is better than a failure to write.
+
+    Mode 0644, because the applier runs as root and reads it.
     """
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.chmod(path, 0o644)
+        return path
+    except OSError:
+        pass
     staged = tempfile.NamedTemporaryFile(
         "w", suffix=".conf", prefix="steamos-utility-center-ctl-", delete=False)
     with staged:
@@ -190,7 +213,7 @@ def strip_write(updates, may_prompt=False, run=None, home=None):
             was = handle.read()
     except OSError:
         was = ""
-    staged = _stage(config_module.update_text(was, updates))
+    staged = _stage(config_module.update_text(was, updates), STAGED["strip"])
     try:
         return privileged([APPLY_CONFIG, staged], may_prompt, run)
     finally:
@@ -214,7 +237,7 @@ def power_write(updates, may_prompt=False, run=None, home=None):
     values = power_read()
     values.update(updates)
     power.validate(values)              # raises ValueError
-    staged = _stage(power.text(values))
+    staged = _stage(power.text(values), STAGED["power"])
     try:
         return privileged([APPLY_POWER, staged], may_prompt, run)
     finally:
@@ -266,7 +289,7 @@ def drives_write(updates, may_prompt=False, run=None, home=None):
     entries = updates["drives"]
     if not isinstance(entries, list):
         raise CtlError("drives must be a list of drives")
-    staged = _stage(mounts.text(entries))   # raises MountError
+    staged = _stage(mounts.text(entries), STAGED["drives"])  # raises MountError
     try:
         return privileged([APPLY_MOUNTS, staged], may_prompt, run)
     finally:
@@ -373,8 +396,16 @@ def repair_drives(may_prompt=False, run=None, home=None):
 
     The boot-time unit does this at every start. This is the same step for a
     person who does not want to restart the machine to get a drive back.
+
+    It stages a copy of the record rather than naming the record itself. The
+    sudoers rule permits one file for each applier, and this way the repair
+    needs no rule of its own.
     """
-    return privileged([APPLY_MOUNTS, mounts.STATE_PATH], may_prompt, run)
+    staged = _stage(mounts.text(mounts.read()), STAGED["drives"])
+    try:
+        return privileged([APPLY_MOUNTS, staged], may_prompt, run)
+    finally:
+        os.unlink(staged)
 
 
 def restart_service(may_prompt=False, run=None, home=None):
@@ -401,6 +432,90 @@ def action(name, may_prompt=False, run=None, home=None):
                        % (name, ", ".join(ACTIONS)))
     said = ACTION[name](may_prompt=may_prompt, run=run, home=home)
     return {"action": name, "said": said}
+
+
+# -- the rule that makes a password unnecessary ------------------------------
+#
+# The text of the rule is here and not in install.sh. The paths in it must be
+# the paths this file runs, and two copies of a path is two answers to one
+# question. The installer asks this program to write the file.
+
+# A user name as the passwd file spells one. It goes into a sudoers file, so a
+# name with a space or a new line in it is a way to add a rule that nobody
+# asked for.
+NAME = re.compile(r"^[a-z_][a-z0-9_.-]*\$?$")
+
+
+def sudoers_text(user):
+    """The rule that lets one user apply a change with no password.
+
+    One line for each applier, and each line names the one file that applier
+    is permitted to read. There is no `*` in it. A rule with a `*` permits
+    every argument, and the argument of these programs is a file that they
+    read as root.
+    """
+    if not NAME.match(user or ""):
+        raise CtlError("%r is not a user name" % user)
+    lines = [
+        "# Written by the SteamOS Utility Center. See",
+        "# server/steamos_utility_center/ctl.py.",
+        "#",
+        "# Game Mode runs no polkit agent and gives no terminal, so pkexec",
+        "# there has nobody to ask for a password. Without these lines every",
+        "# setting of this project is a setting for the desktop only.",
+        "#",
+        "# Each line names one program and the one file it is permitted to",
+        "# read. There is no wildcard: a rule with a `*` in it permits every",
+        "# argument, and the argument of these programs is a file that they",
+        "# read as root. The file is in a directory that belongs to %s, and"
+        % user,
+        "# the parent of that directory belongs to root, so nobody can put a",
+        "# symlink in the place of it. The programs refuse a symlink also.",
+        "#",
+        "# The chown of Take ownership is deliberately not here. It",
+        "# walks a whole drive as root, and it is a rare and deliberate act.",
+        "# It stays in the panel, where a person answers for it.",
+        "",
+    ]
+    for applier, area in ((APPLY_CONFIG, "strip"), (APPLY_POWER, "power"),
+                          (APPLY_MOUNTS, "drives")):
+        lines.append("%s ALL=(root) NOPASSWD: %s %s"
+                     % (user, applier, STAGED[area]))
+    return "\n".join(lines) + "\n"
+
+
+def permit(user, run=None):
+    """Writes that rule, and makes the directory the rule names.
+
+    visudo reads the file before it is installed. A sudoers file that does not
+    parse takes sudo away from the machine, and this program must never be the
+    reason for that.
+
+    This needs root, and the installer is what runs it.
+    """
+    run = _run if run is None else run
+    text = sudoers_text(user)
+    staged = tempfile.NamedTemporaryFile("w", suffix=".sudoers", delete=False)
+    with staged:
+        staged.write(text)
+    try:
+        code, said = run(["visudo", "-c", "-f", staged.name])
+        if code != 0:
+            raise CtlError("the rule does not parse, so it is not installed: "
+                           "%s" % said.strip())
+        code, said = run(["install", "-m", "0440", staged.name, SUDO_RULE])
+        if code != 0:
+            raise CtlError(said.strip() or "could not write %s" % SUDO_RULE)
+    finally:
+        os.unlink(staged.name)
+
+    # The directory the rule names, and the user it belongs to. Its parent
+    # belongs to root, so this is the whole of what that user can write here.
+    code, said = run(["install", "-d", "-m", "0755", "-o", user,
+                      STAGED_DIR])
+    if code != 0:
+        raise CtlError(said.strip() or "could not make %s" % STAGED_DIR)
+    return {"rule": SUDO_RULE, "staged": STAGED_DIR, "user": user}
 
 
 # -- the status --------------------------------------------------------------
@@ -491,6 +606,10 @@ def _parser():
     said.add_argument("name", choices=ACTIONS)
 
     where.add_parser("areas", help="the areas and the actions of this build")
+
+    said = where.add_parser(
+        "permit", help="write the sudoers rule. The installer runs this.")
+    said.add_argument("user", help="the desktop user the rule is for")
     return parser
 
 
@@ -509,6 +628,8 @@ def run_command(argv=None):
         return set_values(parsed.area, updates, may_prompt=parsed.may_prompt)
     if parsed.command == "action":
         return action(parsed.name, may_prompt=parsed.may_prompt)
+    if parsed.command == "permit":
+        return permit(parsed.user)
     return {"areas": list(AREAS), "actions": list(ACTIONS)}
 
 

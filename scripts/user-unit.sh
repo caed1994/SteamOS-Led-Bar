@@ -144,6 +144,10 @@ POWER_COMMAND_LINK="$ROOT/usr/local/bin/$NAME-power"
 # The control surface that speaks JSON, for a caller that is not this panel: a
 # Decky plugin in Game Mode, or a script. See server/steamos_utility_center/ctl.py.
 CTL_COMMAND_LINK="$ROOT/usr/local/bin/${NAME}ctl"
+# The rule that lets that command apply a change with no password. The command
+# writes it, and the uninstaller removes it. See ctl.sudoers_text, which is
+# where the text of it is.
+SUDO_RULE_PATH="$ROOT/etc/sudoers.d/zz-$NAME"
 
 WATCHER_UNIT="$NAME-achievements.service"
 PHONE_UNIT="$NAME-phone.service"
