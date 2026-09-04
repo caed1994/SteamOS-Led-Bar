@@ -281,30 +281,38 @@ function Content() {
 
       <PanelSection title="LED bar">
         {/*
-          The key is on the row, and it holds the value.
+          renderButtonValue draws the closed box, and it draws it from the
+          state of this page.
 
-          A DropdownItem keeps the option it was built with, and a new value
-          in its props does not move it. A key inside the row did not replace
-          it either. The key is thus on the whole row: React builds a new row,
-          and with it a box that has no old value to hold.
+          The Dropdown of Steam is a class with SetSelectedOption on its
+          prototype: it takes the option when it is built and keeps it, and a
+          new value in its props does not move it. A key that built a new one
+          did not help either, and it would take the focus away from a person
+          with a controller at the moment they pick something.
+
+          This prop is the way that @decky/ui offers for exactly this. What
+          the box says is now what this page holds, and the memory of the
+          class is not asked.
         */}
-        <PanelSectionRow key={"rainbow-" + rainbow}>
+        <PanelSectionRow>
           <DropdownItem
             label="Rainbow slot"
             description="What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode."
             rgOptions={rainbowOptions}
             selectedOption={rainbow}
+            renderButtonValue={() => words(rainbow)}
             disabled={busy || !strip?.ok}
             onChange={(option) =>
               pick("strip", "RAINBOW_SHOWS", String(option.data))}
           />
         </PanelSectionRow>
-        <PanelSectionRow key={"scene-" + scene}>
+        <PanelSectionRow>
           <DropdownItem
             label="Desktop scene"
             description="What the bar shows on the desktop. Game Mode belongs to Steam."
             rgOptions={sceneOptions}
             selectedOption={scene}
+            renderButtonValue={() => words(scene)}
             disabled={busy || !strip?.ok}
             onChange={(option) =>
               pick("strip", "DESKTOP_SCENE", String(option.data))}
@@ -330,24 +338,26 @@ function Content() {
           </PanelSectionRow>
         ) : (
           <>
-            <PanelSectionRow key={"governor-" + governor}>
+            <PanelSectionRow>
               <DropdownItem
                 label="Governor"
                 description="How the clock is chosen."
                 rgOptions={governorOptions}
                 selectedOption={governor}
+                renderButtonValue={() => words(governor)}
                 disabled={busy || !power?.ok}
                 onChange={(option) =>
                   pick("power", "CPU_GOVERNOR", String(option.data))}
               />
             </PanelSectionRow>
             {Array.isArray(offered.epp) && offered.epp.length > 0 && (
-              <PanelSectionRow key={"epp-" + preference}>
+              <PanelSectionRow>
                 <DropdownItem
                   label="Energy preference"
                   description="A hint to the firmware about where in its range to sit. The performance governor pins it."
                   rgOptions={eppOptions}
                   selectedOption={preference}
+                  renderButtonValue={() => words(preference)}
                   disabled={busy || !power?.ok}
                   onChange={(option) =>
                     pick("power", "CPU_EPP", String(option.data))}

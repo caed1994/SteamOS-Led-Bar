@@ -285,19 +285,32 @@ class PageTest(unittest.TestCase):
         # the second one only after the first one.
         self.assertIn("keeping", self.text)
 
-    def test_every_row_with_a_dropdown_carries_a_key_that_holds_its_value(self):
-        """A DropdownItem keeps the option it was built with.
+    def test_every_dropdown_draws_its_own_closed_box(self):
+        """The Dropdown of Steam keeps the option it was built with.
 
-        A new value in its props does not move it, and a key on the box
-        itself did not replace it either. The key is on the row, so React
-        builds a new row and with it a box that has no old value to hold.
+        It is a class with SetSelectedOption on its prototype, so the option
+        is instance state that a new value in the props does not move. The
+        box thus named the value before the change, and a key that built a
+        new one did not help.
+
+        renderButtonValue is the prop that @decky/ui offers for this. What the
+        closed box says is then what this page holds, and the memory of the
+        class is not asked.
         """
-        rows = self.text.split("<PanelSectionRow")[1:]
-        found = [one for one in rows if "<DropdownItem" in one[:400]]
+        found = [part[:part.index("/>")]
+                 for part in self.text.split("<DropdownItem")[1:]]
         self.assertTrue(found, "there are no dropdowns to check")
         for one in found:
-            head = one[:one.index(">")]
-            self.assertIn("key=", head, head)
+            self.assertIn("renderButtonValue=", one, one[:200])
+            self.assertIn("selectedOption=", one, one[:200])
+
+    def test_the_closed_box_is_drawn_from_the_same_value_it_is_given(self):
+        """Two sources for one box is one box that can disagree with itself."""
+        for part in self.text.split("<DropdownItem")[1:]:
+            one = part[:part.index("/>")]
+            held = one.split("selectedOption={")[1].split("}")[0]
+            drawn = one.split("renderButtonValue={")[1].split("}")[0]
+            self.assertIn(held, drawn, one[:200])
 
     def test_the_option_lists_keep_their_identity(self):
         """A list rebuilt at every render is a new list of new objects.
