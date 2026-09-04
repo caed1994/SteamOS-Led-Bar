@@ -419,12 +419,57 @@ class PageTest(unittest.TestCase):
             self.assertNotIn('"%s"' % key, self.text, key)
         self.assertIn("gpu?.offers?.knobs", self.text)
 
-    def test_the_fan_and_the_firmware_are_not_on_the_page(self):
+    def test_the_fan_curve_and_the_firmware_are_not_on_the_page(self):
         """Those are for a person with the window of LACT open and a stress
         test in progress. A second and worse LACT is not what this is.
+
+        Cooling Boost is not one of them. It is one switch with two states,
+        and a person on a sofa presses it when a game makes the card work.
         """
-        for word in ("zero_rpm", "fan", "acoustic", "curve"):
+        for word in ("zero_rpm", "acoustic", "curve", "static_speed",
+                     "temperature_key"):
             self.assertNotIn(word, self.text.lower(), word)
+
+    def test_the_boost_does_not_send_the_sliders_with_it(self):
+        """It is not a setting of the card in the sense of Send to the card.
+
+        `change` clears what the sliders hold when it is done, because the
+        machine gave its answer and what a person picked is not necessary any
+        more.
+        A boost through it would thus drop a value that somebody moved and
+        did not send. So the boost has its own way, and that way asks for the
+        card alone.
+        """
+        where = self.text.index("const boostFan")
+        body = self.text[where:self.text.index("const settings", where)]
+        self.assertNotIn("change(", body)
+        self.assertNotIn("refresh()", body)
+        self.assertIn('getArea("gpu")', body)
+        self.assertIn("gpu-boost-on", body)
+        self.assertIn("gpu-boost-off", body)
+
+    def test_the_boost_waits_while_a_change_waits_to_be_kept(self):
+        """Two writes to one document, with one of them unconfirmed, is a way
+        to keep a voltage that nobody kept.
+        """
+        where = self.text.index('label="Cooling Boost"')
+        row = self.text[where:where + 400]
+        self.assertIn('held.keeping !== ""', row)
+
+    def test_the_boost_is_under_the_settings_of_the_card(self):
+        """Under them, and inside the same section: it belongs to the card."""
+        section = self.text.index('title="Graphics card"')
+        boost = self.text.index('label="Cooling Boost"')
+        television = self.text.index('title="Television"')
+        self.assertLess(section, boost)
+        self.assertLess(boost, television)
+        self.assertLess(self.text.index("Send to the card"), boost)
+
+    def test_the_boost_needs_a_card_and_not_only_a_daemon(self):
+        """A daemon with no card refuses the action, and a switch that offers
+        it is a switch that reports a failure to whoever presses it.
+        """
+        self.assertIn('card !== ""', self.text)
 
     def test_the_status_block_and_the_drives_are_off_the_page(self):
         """Both are answers to a question that nobody asked on a sofa.

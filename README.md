@@ -1264,7 +1264,7 @@ What is on the page:
 | ------- | ------------- |
 | LED bar | the rainbow slot, the desktop scene, notifications |
 | CPU power | the governor and the energy preference |
-| Graphics card | the power limit, the offsets and the clock limits |
+| Graphics card | the power limit, the offsets, the clock limits and Cooling Boost |
 | Television | each switch of the HDMI CEC toolkit |
 
 The page holds what a person changes from a sofa, and nothing else. A keyboard
@@ -1291,9 +1291,25 @@ The card decides which sliders exist. A control with no range is a control that
 the card does not publish, so a machine with integrated graphics and no power
 limit gets no power slider rather than one that writes nowhere.
 
-The fan and the settings of the firmware are not there. Those are for a person
-with the window of LACT open and a stress test in progress, and a second and
-worse LACT is not what this is.
+**Cooling Boost is one switch, and it takes one press.** While it is on, the
+fan of the card runs at its full speed. It does not go through the two buttons
+above: it does not send what the sliders hold, and a value that you moved and
+did not send stays where you put it. It also confirms itself, because a fan at
+full speed cannot hang a card. It is loud, and a switch that needs a second
+press to stay on is a switch that nobody trusts.
+
+When you turn it off, the fan goes back to what drove it before. Usually that
+is the firmware of the card, which is where most cards have it. If you set a
+fan curve in the window of LACT or in the panel, you get that curve back: the
+command writes the fan settings down before it replaces them.
+
+The switch waits while a change to the sliders waits to be kept. Two writes to
+one document, with one of them unconfirmed, is a way to keep a voltage that
+nobody kept.
+
+The fan curve and the settings of the firmware are not there. Those are for a
+person with the window of LACT open and a stress test in progress, and a second
+and worse LACT is not what this is.
 
 There is no brightness control. Each step of a slider is a change, each change
 restarts the service, and systemd refuses a service that starts more than five

@@ -709,6 +709,127 @@ class GraphicsCardTest(unittest.TestCase):
             ctl.set_values("gpu", {"power_cap": 120})
 
 
+class CoolingBoostTest(unittest.TestCase):
+    """The one switch that puts the fan of the card at its full speed.
+
+    It is not a setting in the sense of the test above it. It goes to the
+    daemon on its own, and a page that has it does not send the sliders with
+    it. Nothing here speaks to a daemon, for the reason above.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import lact
+        self.lact = lact
+        self.was = (lact.available, lact.state, lact.set_gpu_config,
+                    lact.confirm)
+        self.addCleanup(self._put_back)
+        self.sent = []
+        self.home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.home, True)
+        # A card whose fan the firmware drives, which is where most are.
+        self.config = {"power_cap": 100.0}
+        lact.available = lambda path=None: True
+        lact.state = lambda path=None, ask=None: {
+            "gpu": "1002:1234", "name": "A card",
+            "config": dict(self.config), "clocks": {},
+            "stats": {"power": {"cap_current": 100.0, "cap_min": 50.0,
+                                "cap_max": 200.0, "cap_default": 150.0}}}
+        lact.set_gpu_config = lambda gpu, config, path=None: (
+            self.sent.append((gpu, config)), 5)[1]
+        lact.confirm = lambda path=None, keep=True: self.sent.append(
+            ("confirm", keep))
+
+    def _put_back(self):
+        (self.lact.available, self.lact.state, self.lact.set_gpu_config,
+         self.lact.confirm) = self.was
+
+    def _written(self):
+        """The fan block of the last document that went to the daemon."""
+        return self.lact.fan(self.sent[0][1])
+
+    def test_on_puts_the_fan_at_full_speed(self):
+        ctl.action("gpu-boost-on", home=self.home)
+        fan = self._written()
+        self.assertTrue(fan["enabled"])
+        self.assertEqual(fan["mode"], self.lact.FAN_STATIC)
+        self.assertEqual(fan["static_speed"], 1.0)
+
+    def test_on_confirms_itself(self):
+        """A fan at full speed hangs nothing, so there is nothing to take
+        back. A switch that needed a second press to stay on is a switch that
+        nobody trusts.
+        """
+        ctl.action("gpu-boost-on", home=self.home)
+        self.assertEqual(self.sent[-1], ("confirm", True))
+
+    def test_off_gives_the_fan_back_to_the_card(self):
+        """With nothing written down, the firmware takes the fan. That is the
+        state of a card that nobody changed, and it is the safe answer.
+        """
+        ctl.action("gpu-boost-off", home=self.home)
+        self.assertFalse(self._written()["enabled"])
+
+    def test_off_puts_back_the_curve_that_was_there(self):
+        """A person with a curve set in LACT must get that curve back, and
+        not the firmware of the card.
+        """
+        self.config = {"power_cap": 100.0, "fan_control_enabled": True,
+                       "fan_control_settings": {
+                           "mode": "curve", "static_speed": 0.4,
+                           "curve": {"40": 0.2, "80": 0.9}}}
+        ctl.action("gpu-boost-on", home=self.home)
+        self.sent = []
+        ctl.action("gpu-boost-off", home=self.home)
+        fan = self._written()
+        self.assertTrue(fan["enabled"])
+        self.assertEqual(fan["mode"], "curve")
+        self.assertEqual(fan["curve"], {40: 0.2, 80: 0.9})
+
+    def test_a_second_press_does_not_write_the_boost_down(self):
+        """Without this, two presses of on make the boost the state to come
+        back to, and off then leaves the fan at full speed for ever.
+        """
+        ctl.action("gpu-boost-on", home=self.home)
+        # The daemon now reports the boost, as it would on a real machine.
+        self.config = {"power_cap": 100.0, "fan_control_enabled": True,
+                       "fan_control_settings": {"mode": "static",
+                                                "static_speed": 1.0}}
+        ctl.action("gpu-boost-on", home=self.home)
+        self.sent = []
+        ctl.action("gpu-boost-off", home=self.home)
+        self.assertFalse(self._written()["enabled"])
+
+    def test_it_carries_the_rest_of_the_document_across(self):
+        """set_gpu_config replaces the document rather than patching it, so a
+        switch that wrote the fan alone would turn off the power limit.
+        """
+        ctl.action("gpu-boost-on", home=self.home)
+        self.assertEqual(self.sent[0][1]["power_cap"], 100.0)
+
+    def test_the_switch_reads_the_card_and_not_the_file(self):
+        """Somebody can set the same speed in the window of LACT. A switch
+        that read a file of ours would then disagree with the machine.
+        """
+        self.assertFalse(ctl.gpu_offers()["boost"])
+        self.config = {"fan_control_enabled": True,
+                       "fan_control_settings": {"mode": "static",
+                                                "static_speed": 1.0}}
+        self.assertTrue(ctl.gpu_offers()["boost"])
+
+    def test_a_machine_with_no_card_says_so_and_does_not_fail(self):
+        self.lact.state = lambda path=None, ask=None: None
+        self.assertFalse(ctl.gpu_offers()["boost"])
+        with self.assertRaises(ctl.CtlError):
+            ctl.action("gpu-boost-on", home=self.home)
+
+    def test_a_home_it_cannot_write_does_not_stop_the_boost(self):
+        """The fan goes back to the card at the next off, and that is where
+        the fan of most cards is. A refusal to make it loud is worse.
+        """
+        ctl.action("gpu-boost-on", home="/proc/nowhere")
+        self.assertTrue(self._written()["enabled"])
+
+
 class DiscoveryTest(unittest.TestCase):
     """`areas` is what lets a front end be written against this build."""
 

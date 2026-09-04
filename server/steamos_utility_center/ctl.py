@@ -91,6 +91,19 @@ STAGED = {"strip": os.path.join(STAGED_DIR, "strip.conf"),
           "power": os.path.join(STAGED_DIR, "power.conf"),
           "drives": os.path.join(STAGED_DIR, "mounts.conf")}
 
+# Cooling Boost holds the fan of the card at the full speed it has. 1.0 is
+# how LACT counts a fan that runs as fast as it can.
+BOOST_SPEED = 1.0
+
+# Where the fan settings wait while Cooling Boost has the fan.
+#
+# In the state directory of the person who pressed the switch, and not in
+# /var/lib. It needs no root, and it answers "what was set before", which is
+# that person's own answer. A machine with no such file gives the fan back to
+# the card, and that is the state of a card that nobody changed.
+BOOST_MEMORY = os.path.join(".local", "state", "steamos-utility-center",
+                            "gpu-fan.json")
+
 # The rule that lets the three programs above run with no password. The
 # installer writes it. Its absence is the usual reason a `set` fails, so the
 # answer names it rather than printing what sudo said.
@@ -377,17 +390,28 @@ def gpu_offers():
     control with no range is a control that the card does not have, and to
     draw it is to offer a setting that writes nowhere. See lact.offered.
 
-    The fan and the settings of the firmware are not here. Those are for a
-    person with the window of LACT open and a stress test in progress, and a
+    The fan curve and the settings of the firmware are not here. Those are for
+    a person with the window of LACT open and a stress test in progress, and a
     second and worse LACT is not what this is.
+
+    `boost` is the one fan answer that is here, because a page has a switch
+    for it. It is read from the card and not from the file that _gpu_boost
+    writes: a person can set the same speed in the window of LACT, and a
+    switch that reported a file rather than the machine is a switch that
+    disagrees with the machine.
+
+    It is here and not in gpu_read because this function already asks the
+    daemon. gpu_read opens files only, and `status` calls it again and again
+    while somebody watches a page.
     """
     found = lact.state()
     if not found or not found.get("gpu"):
-        return {"knobs": [], "gpu": "", "name": ""}
+        return {"knobs": [], "gpu": "", "name": "", "boost": False}
     return {"knobs": lact.offered(found.get("config") or {},
                                   found.get("clocks") or {},
                                   found.get("stats") or {}),
-            "gpu": found["gpu"], "name": found.get("name", "")}
+            "gpu": found["gpu"], "name": found.get("name", ""),
+            "boost": boosting(lact.fan(found.get("config") or {}))}
 
 
 def gpu_write(updates, may_prompt=False, run=None, home=None):
@@ -516,6 +540,119 @@ def restart_service(may_prompt=False, run=None, home=None):
     return privileged(["systemctl", "restart", UNITS[0]], may_prompt, run)
 
 
+# -- Cooling Boost -----------------------------------------------------------
+#
+# One switch that puts the fan of the card at its full speed, and gives the
+# fan back when it goes off.
+#
+# It is not a setting of the card in the sense of gpu_write, and it does not
+# go through the sliders of a page. Those two send what a person moved and
+# then wait to be told to keep it. This reads the document that the daemon
+# holds, changes the fan in it, and writes it back. A person who moved a
+# slider and did not send it thus keeps what that slider holds.
+
+
+def boosting(fan):
+    """Whether these fan settings are the ones Cooling Boost writes.
+
+    A comparison of the speed, and not a flag. The card is the answer: a
+    person can set the same speed in the window of LACT, and a switch that
+    read a flag of ours is a switch that disagrees with the machine.
+    """
+    return (bool(fan.get("enabled"))
+            and fan.get("mode") == lact.FAN_STATIC
+            and float(fan.get("static_speed") or 0) >= BOOST_SPEED - 0.005)
+
+
+def _boost_memory(home=None):
+    """The file that holds the fan settings from before the boost."""
+    where = os.path.expanduser("~") if home is None else home
+    return os.path.join(where, BOOST_MEMORY)
+
+
+def _remember_fan(fan, home=None):
+    """Writes down the fan settings that the boost is about to replace.
+
+    A failure here is not a reason to refuse the boost. The switch then gives
+    the fan back to the card when it goes off, and that is where the fan of
+    most cards is.
+    """
+    path = _boost_memory(home)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"enabled": bool(fan.get("enabled")),
+                       "mode": fan.get("mode"),
+                       "static_speed": fan.get("static_speed"),
+                       "curve": {str(at): speed for at, speed
+                                 in (fan.get("curve") or {}).items()}},
+                      handle)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def _remembered_fan(home=None):
+    """The settings from before the boost, as arguments for lact.with_fan.
+
+    With no file, or with a file that says the card had its own fan, this
+    gives the fan back to the card. That is the safe answer: the firmware of
+    the card always drives the fan, and a curve out of a stale file does not.
+    """
+    try:
+        with open(_boost_memory(home), "r", encoding="utf-8") as handle:
+            found = json.load(handle)
+    except (OSError, ValueError):
+        return {"enabled": False}
+    if not isinstance(found, dict) or not found.get("enabled"):
+        return {"enabled": False}
+    return {"enabled": True,
+            "mode": found.get("mode") or lact.FAN_CURVE,
+            "static_speed": found.get("static_speed"),
+            "curve": found.get("curve") or None}
+
+
+def _forget_fan(home=None):
+    """Drops the memory, so a later boost writes down what is set then."""
+    try:
+        os.unlink(_boost_memory(home))
+    except OSError:
+        pass
+
+
+def _gpu_boost(on):
+    """Builds the action behind the switch. See the block above it.
+
+    It confirms the change itself, and gpu_write does not. The countdown of
+    LACT is there for a voltage that hangs the card, because a hang that was
+    kept comes back at every boot. A fan at full speed hangs nothing. It is
+    loud, and a switch that needs a second press to stay on is a switch that
+    nobody trusts.
+    """
+    def action(may_prompt=False, run=None, home=None):
+        found = lact.state()
+        if not found or not found.get("gpu"):
+            raise CtlError("no graphics card that LACT reports")
+        config = found.get("config") or {}
+        fan = lact.fan(config)
+        if on:
+            # Not while the boost already has the fan. A second press would
+            # write down the boost itself as the state to come back to.
+            if not boosting(fan):
+                _remember_fan(fan, home)
+            config = lact.with_fan(config, enabled=True,
+                                   mode=lact.FAN_STATIC,
+                                   static_speed=BOOST_SPEED)
+        else:
+            config = lact.with_fan(config, **_remembered_fan(home))
+        lact.set_gpu_config(found["gpu"], config)
+        lact.confirm(keep=True)
+        if not on:
+            _forget_fan(home)
+        return ("the fan is at full speed" if on
+                else "the card has its fan back")
+    return action
+
+
 def gpu_keep(may_prompt=False, run=None, home=None):
     """Tells the daemon to keep the last change to the card."""
     lact.confirm(keep=True)
@@ -529,6 +666,8 @@ def gpu_revert(may_prompt=False, run=None, home=None):
 
 
 ACTION = {
+    "gpu-boost-on": _gpu_boost(True),
+    "gpu-boost-off": _gpu_boost(False),
     "gpu-keep": gpu_keep,
     "gpu-revert": gpu_revert,
     "cec-wake": _cec_action("wake"),

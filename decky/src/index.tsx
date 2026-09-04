@@ -145,6 +145,9 @@ const held = {
   chosen: {} as Record<string, string>,
   // What the sliders of the card hold, until a button sends them.
   wanted: {} as Record<string, number>,
+  // What Cooling Boost was set to, until the machine has answered. null means
+  // that the machine is the answer.
+  boosting: null as boolean | null,
   said: "",
   keeping: "",
   busy: false,
@@ -258,6 +261,11 @@ function Content() {
     Array.isArray(held.gpu?.offers?.knobs) ? held.gpu?.offers?.knobs : []
   ) as Knob[];
 
+  // The card that LACT reports, and whether its fan is at full speed now.
+  // Empty means a daemon that runs and has no card to control.
+  const card = String((held.gpu?.offers ?? {}).gpu ?? "");
+  const boosted = held.boosting ?? Boolean((held.gpu?.offers ?? {}).boost);
+
   // Send what the sliders hold, and then wait to be told to keep it.
   //
   // The daemon puts the card back by itself if nobody says so. That is not a
@@ -298,6 +306,36 @@ function Content() {
       held.wanted = {};
       await refresh();
     } finally {
+      held.busy = false;
+      draw();
+    }
+  };
+
+  // Cooling Boost, which is not a setting of the card in the sense above.
+  //
+  // It goes to the command on its own and does not touch what the sliders
+  // hold: a person who moved one and did not send it keeps it. The command
+  // reads the document the daemon holds, changes the fan in it, and confirms
+  // it at once. A fan at full speed hangs nothing, so there is nothing to
+  // take back. See ctl._gpu_boost.
+  const boostFan = async (on: boolean) => {
+    if (held.busy) {
+      return;
+    }
+    held.boosting = on;
+    held.busy = true;
+    held.said = "";
+    draw();
+    try {
+      const answer = await doAction(on ? "gpu-boost-on" : "gpu-boost-off");
+      if (!answer.ok) {
+        held.said = answer.error ?? "The fan would not take it.";
+      }
+      // The card only, and not the whole page. Nothing else moved, and a
+      // full fetch here would drop what the sliders hold.
+      held.gpu = await getArea("gpu");
+    } finally {
+      held.boosting = null;
       held.busy = false;
       draw();
     }
@@ -417,59 +455,81 @@ function Content() {
               LACT is not running, so there is nothing to set.
             </div>
           </PanelSectionRow>
-        ) : knobs.length === 0 ? (
-          <PanelSectionRow>
-            <div style={{ fontSize: "0.8em" }}>
-              LACT reports no control for this card.
-            </div>
-          </PanelSectionRow>
         ) : (
           <>
-            {knobs.map((knob) => (
-              <PanelSectionRow key={knob.key}>
-                <SliderField
-                  label={knob.label + (knob.unit ? " (" + knob.unit + ")" : "")}
-                  value={held.wanted[knob.key] ?? knob.start}
-                  min={knob.min}
-                  max={knob.max}
-                  step={1}
-                  notchTicksVisible={false}
-                  showValue={true}
-                  disabled={held.busy}
-                  onChange={(value: number) => {
-                    held.wanted[knob.key] = value;
-                    draw();
-                  }}
-                />
-              </PanelSectionRow>
-            ))}
-            {held.keeping === "" ? (
+            {knobs.length === 0 ? (
               <PanelSectionRow>
-                <ButtonItem
-                  layout="below"
-                  disabled={held.busy || Object.keys(held.wanted).length === 0}
-                  onClick={() => void send()}
-                >
-                  Send to the card
-                </ButtonItem>
+                <div style={{ fontSize: "0.8em" }}>
+                  LACT reports no control for this card.
+                </div>
               </PanelSectionRow>
             ) : (
               <>
-                <PanelSectionRow>
-                  <div style={{ fontSize: "0.8em", color: "#d9a441" }}>
-                    {held.keeping}
-                  </div>
-                </PanelSectionRow>
-                <PanelSectionRow>
-                  <ButtonItem
-                    layout="below"
-                    disabled={held.busy}
-                    onClick={() => void keep()}
-                  >
-                    Keep it
-                  </ButtonItem>
-                </PanelSectionRow>
+                {knobs.map((knob) => (
+                  <PanelSectionRow key={knob.key}>
+                    <SliderField
+                      label={knob.label + (knob.unit ? " (" + knob.unit + ")" : "")}
+                      value={held.wanted[knob.key] ?? knob.start}
+                      min={knob.min}
+                      max={knob.max}
+                      step={1}
+                      notchTicksVisible={false}
+                      showValue={true}
+                      disabled={held.busy}
+                      onChange={(value: number) => {
+                        held.wanted[knob.key] = value;
+                        draw();
+                      }}
+                    />
+                  </PanelSectionRow>
+                ))}
+                {held.keeping === "" ? (
+                  <PanelSectionRow>
+                    <ButtonItem
+                      layout="below"
+                      disabled={held.busy || Object.keys(held.wanted).length === 0}
+                      onClick={() => void send()}
+                    >
+                      Send to the card
+                    </ButtonItem>
+                  </PanelSectionRow>
+                ) : (
+                  <>
+                    <PanelSectionRow>
+                      <div style={{ fontSize: "0.8em", color: "#d9a441" }}>
+                        {held.keeping}
+                      </div>
+                    </PanelSectionRow>
+                    <PanelSectionRow>
+                      <ButtonItem
+                        layout="below"
+                        disabled={held.busy}
+                        onClick={() => void keep()}
+                      >
+                        Keep it
+                      </ButtonItem>
+                    </PanelSectionRow>
+                  </>
+                )}
               </>
+            )}
+            {/*
+              Under the settings above, and not one of them. It writes the fan
+              on its own, so it stays on a card that offers no control at all.
+
+              A change that waits for Keep it holds it. Two writes to one
+              document, with one of them unconfirmed, is a way to keep a
+              voltage that nobody kept.
+            */}
+            {card !== "" && (
+              <PanelSectionRow>
+                <ToggleField
+                  label="Cooling Boost"
+                  checked={boosted}
+                  disabled={held.busy || held.keeping !== ""}
+                  onChange={(on: boolean) => void boostFan(on)}
+                />
+              </PanelSectionRow>
             )}
           </>
         )}

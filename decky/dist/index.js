@@ -148,6 +148,9 @@ const held = {
     chosen: {},
     // What the sliders of the card hold, until a button sends them.
     wanted: {},
+    // What Cooling Boost was set to, until the machine has answered. null means
+    // that the machine is the answer.
+    boosting: null,
     said: "",
     keeping: "",
     busy: false,
@@ -243,6 +246,10 @@ function Content() {
     const governorOptions = SP_REACT.useMemo(() => options((held.power?.offers ?? {}).governors), [held.power]);
     const eppOptions = SP_REACT.useMemo(() => options((held.power?.offers ?? {}).epp), [held.power]);
     const knobs = (Array.isArray(held.gpu?.offers?.knobs) ? held.gpu?.offers?.knobs : []);
+    // The card that LACT reports, and whether its fan is at full speed now.
+    // Empty means a daemon that runs and has no card to control.
+    const card = String((held.gpu?.offers ?? {}).gpu ?? "");
+    const boosted = held.boosting ?? Boolean((held.gpu?.offers ?? {}).boost);
     // Send what the sliders hold, and then wait to be told to keep it.
     //
     // The daemon puts the card back by itself if nobody says so. That is not a
@@ -288,6 +295,36 @@ function Content() {
             draw();
         }
     };
+    // Cooling Boost, which is not a setting of the card in the sense above.
+    //
+    // It goes to the command on its own and does not touch what the sliders
+    // hold: a person who moved one and did not send it keeps it. The command
+    // reads the document the daemon holds, changes the fan in it, and confirms
+    // it at once. A fan at full speed hangs nothing, so there is nothing to
+    // take back. See ctl._gpu_boost.
+    const boostFan = async (on) => {
+        if (held.busy) {
+            return;
+        }
+        held.boosting = on;
+        held.busy = true;
+        held.said = "";
+        draw();
+        try {
+            const answer = await doAction(on ? "gpu-boost-on" : "gpu-boost-off");
+            if (!answer.ok) {
+                held.said = answer.error ?? "The fan would not take it.";
+            }
+            // The card only, and not the whole page. Nothing else moved, and a
+            // full fetch here would drop what the sliders hold.
+            held.gpu = await getArea("gpu");
+        }
+        finally {
+            held.boosting = null;
+            held.busy = false;
+            draw();
+        }
+    };
     const settings = (held.strip?.settings ?? {});
     const cpu = (held.power?.settings ?? {});
     const offered = (held.power?.offers ?? {});
@@ -301,10 +338,10 @@ function Content() {
     const scene = shown("strip", "DESKTOP_SCENE", settings.DESKTOP_SCENE, "steam");
     const governor = shown("power", "CPU_GOVERNOR", cpu.CPU_GOVERNOR);
     const preference = shown("power", "CPU_EPP", cpu.CPU_EPP);
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [(held.said !== "" || held.status?.sudo_rule === false) && (SP_JSX.jsxs(DFL.PanelSection, { children: [held.said !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d85c5c" }, children: held.said }) })), held.status?.sudo_rule === false && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: "Nothing here can change a setting. Install the panel again in Desktop Mode to get the rule that permits it." }) }))] })), SP_JSX.jsxs(DFL.PanelSection, { title: "LED bar", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Rainbow slot", options: rainbowOptions, value: rainbow, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "RAINBOW_SHOWS", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Desktop scene", options: sceneOptions, value: scene, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "DESKTOP_SCENE", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Notifications", checked: Boolean(settings.NOTIFY), disabled: held.busy || !held.strip?.ok, onChange: (on) => write("strip", { NOTIFY: on }) }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: "CPU power", children: Number(offered.policies ?? 0) === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "This machine has no cpufreq, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Governor", options: governorOptions, value: governor, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_GOVERNOR", value) }) }), Array.isArray(offered.epp) && offered.epp.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Energy preference", options: eppOptions, value: preference, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_EPP", value) }) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Graphics card", children: !Boolean((held.gpu?.settings ?? {}).available) ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT is not running, so there is nothing to set." }) })) : knobs.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT reports no control for this card." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [knobs.map((knob) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: knob.label + (knob.unit ? " (" + knob.unit + ")" : ""), value: held.wanted[knob.key] ?? knob.start, min: knob.min, max: knob.max, step: 1, notchTicksVisible: false, showValue: true, disabled: held.busy, onChange: (value) => {
-                                    held.wanted[knob.key] = value;
-                                    draw();
-                                } }) }, knob.key))), held.keeping === "" ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy || Object.keys(held.wanted).length === 0, onClick: () => void send(), children: "Send to the card" }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: held.keeping }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy, onClick: () => void keep(), children: "Keep it" }) })] }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Television", children: !installed ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "The HDMI CEC toolkit is not installed. Install it from the panel in Desktop Mode." }) })) : (SP_JSX.jsx(SP_JSX.Fragment, { children: features.map((feature) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, checked: Boolean(switches[feature.name]), disabled: held.busy, onChange: (on) => write("cec", { [feature.name]: on }) }) }, feature.name))) })) })] }));
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [(held.said !== "" || held.status?.sudo_rule === false) && (SP_JSX.jsxs(DFL.PanelSection, { children: [held.said !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d85c5c" }, children: held.said }) })), held.status?.sudo_rule === false && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: "Nothing here can change a setting. Install the panel again in Desktop Mode to get the rule that permits it." }) }))] })), SP_JSX.jsxs(DFL.PanelSection, { title: "LED bar", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Rainbow slot", options: rainbowOptions, value: rainbow, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "RAINBOW_SHOWS", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Desktop scene", options: sceneOptions, value: scene, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "DESKTOP_SCENE", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Notifications", checked: Boolean(settings.NOTIFY), disabled: held.busy || !held.strip?.ok, onChange: (on) => write("strip", { NOTIFY: on }) }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: "CPU power", children: Number(offered.policies ?? 0) === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "This machine has no cpufreq, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Governor", options: governorOptions, value: governor, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_GOVERNOR", value) }) }), Array.isArray(offered.epp) && offered.epp.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Energy preference", options: eppOptions, value: preference, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_EPP", value) }) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Graphics card", children: !Boolean((held.gpu?.settings ?? {}).available) ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT is not running, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [knobs.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT reports no control for this card." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [knobs.map((knob) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: knob.label + (knob.unit ? " (" + knob.unit + ")" : ""), value: held.wanted[knob.key] ?? knob.start, min: knob.min, max: knob.max, step: 1, notchTicksVisible: false, showValue: true, disabled: held.busy, onChange: (value) => {
+                                            held.wanted[knob.key] = value;
+                                            draw();
+                                        } }) }, knob.key))), held.keeping === "" ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy || Object.keys(held.wanted).length === 0, onClick: () => void send(), children: "Send to the card" }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: held.keeping }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy, onClick: () => void keep(), children: "Keep it" }) })] }))] })), card !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Cooling Boost", checked: boosted, disabled: held.busy || held.keeping !== "", onChange: (on) => void boostFan(on) }) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Television", children: !installed ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "The HDMI CEC toolkit is not installed. Install it from the panel in Desktop Mode." }) })) : (SP_JSX.jsx(SP_JSX.Fragment, { children: features.map((feature) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, checked: Boolean(switches[feature.name]), disabled: held.busy, onChange: (on) => write("cec", { [feature.name]: on }) }) }, feature.name))) })) })] }));
 }
 var index = definePlugin(() => ({
     name: "SteamOS Utility Center",
