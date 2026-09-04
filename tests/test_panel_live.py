@@ -4095,6 +4095,100 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(_has_display(), "no tkinter or no display")
+class ShortWordsTest(unittest.TestCase):
+    """The paragraphs that stood below the cards, and the one that stayed.
+
+    Four sections carried a paragraph of prose under their cards. Each of them
+    said what the README says, in a place where a person came to change one
+    setting. They are gone. What a person has to know before a change is when
+    the change takes effect, and that is one line inside the card of the rows
+    it is about.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.addCleanup(self.root.destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _words(self, key):
+        self.panel._open_section(key)
+        self.root.update()
+        # The map holds the name of the page and not the widget itself.
+        page = self.root.nametowidget(self.panel._section_pages[key])
+        return " ".join(_labels_of(page))
+
+    def test_every_section_opens(self):
+        """A group carries a third element now, and code that unpacked a
+        group into two names raised on the section that has one. Nothing
+        outside a window called that code, so no test saw it.
+        """
+        for key, _title, _subtitle, _icon in self.panel_module.SECTIONS:
+            self.panel._open_section(key)
+            self.root.update()
+
+    def test_the_keyboard_says_when_the_change_takes_effect(self):
+        """A label that nothing places exists and is never drawn.
+
+        _note builds the label and the caller places it, and one page of this
+        window forgot the second half. The window opened, every test passed,
+        and the line was simply not there. Nothing but a look at the window
+        found it. So this asks the window whether the line is on the screen,
+        and not whether a widget holds the words.
+        """
+        self.panel._open_section("keyboard")
+        self.root.update()
+        found = [widget for widget in
+                 _every_label(self.root.nametowidget(
+                     self.panel._section_pages["keyboard"]))
+                 if str(widget.cget("text")).startswith("Requires a reboot")]
+        self.assertTrue(found, "the keyboard card does not say it")
+        self.assertTrue(found[0].winfo_ismapped(),
+                        "the line was built and never placed")
+
+    def test_the_paragraphs_below_the_cards_are_gone(self):
+        for key, gone in (("keyboard", "gamescope"),
+                          ("power", "the governor decides"),
+                          ("app", "washed-out"),
+                          ("keyboard", "does not survive")):
+            self.assertNotIn(gone.lower(), self._words(key).lower(), key)
+
+    def test_the_update_card_keeps_its_answer(self):
+        """The paragraph went and the line that reports the last check did
+        not. They stood beside each other, and only one of them is prose.
+        """
+        self.assertIsNotNone(self.panel.update_state)
+        self.assertNotIn("Fetches into the clone", self._words("app"))
+
+
+def _every_label(widget):
+    """Every label under a widget, however deeply nested."""
+    found = []
+    for child in widget.winfo_children():
+        if child.winfo_class() == "TLabel":
+            found.append(child)
+        found += _every_label(child)
+    return found
+
+
+def _labels_of(widget):
+    """Every piece of text under a widget, however deeply nested."""
+    found = []
+    for child in widget.winfo_children():
+        if child.winfo_class() in ("TLabel", "TButton", "Label"):
+            try:
+                found.append(str(child.cget("text")))
+            except tk.TclError:                             # pragma: no cover
+                pass
+        found += _labels_of(child)
+    return found
+
+
+@unittest.skipUnless(_has_display(), "no tkinter or no display")
 class GpuFirstLookTest(unittest.TestCase):
     """The card is read soon after the window opens, and not only on its page.
 
@@ -4600,18 +4694,3 @@ class DrivesPageTest(unittest.TestCase):
         self._apply(0, "0 drive(s) mounted, 0 did not\n")
         self.panel._apply_drives([])
         self.assertEqual(asked, [ctl.STAGED["drives"]])
-
-    def test_the_explanation_is_on_the_page(self):
-        """A label that nothing packs exists and is never drawn.
-
-        _note builds the label and the caller places it, and the first version
-        of this page forgot the second half. The window opened, every test
-        passed, and the paragraph that says why this is not /etc/fstab was
-        simply not there. Nothing but a look at the window found it.
-        """
-        found = [widget for widget in self._every_widget()
-                 if isinstance(widget, ttk.Label)
-                 and str(widget.cget("text")).startswith("A second drive")]
-        self.assertTrue(found, "the drives card has no explanation")
-        self.assertTrue(found[0].winfo_ismapped(),
-                        "the explanation was built and never placed")

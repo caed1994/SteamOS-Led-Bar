@@ -1017,6 +1017,10 @@ The systemd user manager reads that file at login. The setting thus **takes
 effect at the next login** and not immediately. It needs no password, because
 nothing outside your home directory changes.
 
+The panel says *Requires a reboot to take effect*. A logout and a login is
+sufficient. A reboot is the form of that which nobody must think about, and
+the line in the window is one line.
+
 | | |
 | --- | --- |
 | It controls | Game Mode: gamescope, its on-screen keyboard, and the games below it |

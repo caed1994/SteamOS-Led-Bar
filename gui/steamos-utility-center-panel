@@ -269,17 +269,18 @@ ADVANCED = [
 # The scene names below use the same method. The tests read this table
 # directly, and they cannot check a name that they must resolve first. The
 # tests also prove that this key is the correct one.
+#
+# The third element of a group is a line inside its card. See
+# _build_settings. This one was a paragraph below the card, and three
+# sentences under one drop-down is a page of prose about a menu. What a person
+# has to know before a change is when the change takes effect, and that is one
+# line and belongs beside the row it is about.
 SYSTEM = [
     ("Keyboard", [
         ("XKB_DEFAULT_LAYOUT", "Keyboard layout", "named",
          syssettings.layouts(), None, None),
-    ]),
+    ], "Requires a reboot to take effect."),
 ]
-
-SYSTEM_NOTE = (
-    "Takes effect at the next login, and governs Game Mode - gamescope and "
-    "its on-screen keyboard. Desktop Mode keeps its own layout in the system "
-    "settings and is not changed by this.")
 
 # The pages of the LED strip. They are the inner list, inside one section.
 # System is no longer one of them. A keyboard layout is not a setting of the
@@ -302,13 +303,6 @@ POWER = [
     ]),
 ]
 
-POWER_NOTE = (
-    "Applied now and again at every boot. The governor decides the clock; the "
-    "energy preference is a hint about where in its range the firmware should "
-    "sit, and it only has a say under a governor that lets the firmware "
-    "range - the performance governor pins it and the kernel refuses the "
-    "setting. Leaving both alone is the default and touches nothing.")
-
 # The preferences of the panel. It has its own table for the same reason it
 # has its own file: no program outside this window reads it. See appsettings.
 APP = [
@@ -317,19 +311,19 @@ APP = [
     ]),
 ]
 
-APP_NOTE = (
-    "Takes effect at once, and is remembered for next time. The preview "
-    "stage stays dark whichever you pick: it is a strip of light in a dim "
-    "room, and drawn against a pale window it would be a washed-out one.")
-
 # Sections where the complete body is one table of settings, and not a list
 # of pages. This is a table for the same reason as SETTINGS_TABS. Together
 # the two hold each settings row in the window, and the tests read both. Apply
 # does not collect a section that is absent from here.
+#
+# The second element is a line below the cards of the section. None is the
+# answer for each of them now: what those paragraphs said belongs in the
+# README, and a page of prose under two drop-downs is read by nobody. See the
+# note inside the Keyboard card for the one sentence that stayed.
 SECTION_SETTINGS = {
-    "keyboard": (SYSTEM, SYSTEM_NOTE),
-    "power": (POWER, POWER_NOTE),
-    "app": (APP, APP_NOTE),
+    "keyboard": (SYSTEM, None),
+    "power": (POWER, None),
+    "app": (APP, None),
 }
 
 # Which of the settings on those pages belong to the machine rather than to
@@ -3216,13 +3210,21 @@ class Panel:
         `note` is a line below the rows, for a page where the rows cannot give
         the time of the change. It is below and not above, because it explains
         the rows above it.
+
+        A group can carry such a line itself, as a third element beside its
+        title and its rows. That one stands inside the card, under the rows it
+        is about. A page note stands under every card of the page, and a line
+        that belongs to one group of several thus reads as a line about all of
+        them.
         """
         outer = ttk.Frame(parent, style="Page.TFrame")
         grids = []
 
         row = 0
         headed = False
-        for index, (title, entries) in enumerate(groups):
+        for index, group in enumerate(groups):
+            title, entries = group[0], group[1]
+            inside = group[2] if len(group) > 2 else ""
             # A card per group. One grid for the whole page would keep the
             # label column aligned by itself, which is why it used to be one -
             # but a page of thirty settings on one flat field is what made the
@@ -3231,7 +3233,10 @@ class Panel:
             card = self._card(outer)
             card.pack(fill="x", padx=SIDE_MARGIN,
                       pady=(ROW_GAP if index == 0 else GROUP_GAP, 0))
-            grid = ttk.Frame(card)
+            # Named as what it is: the frame on a card. The ground is the same
+            # colour under either name, and _note reads this name to give a
+            # line inside a card the width of the card and not of the page.
+            grid = ttk.Frame(card, style="OnCard.TFrame")
             grid.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
             grids.append(grid)
             # The slack goes to the last of the control columns, not the
@@ -3280,6 +3285,13 @@ class Panel:
                                                   entries[position - 1][0])))
                 self._build_row(grid, row, *entry,
                                 lead=BLOCK_GAP if position and fenced else 0)
+                row += 1
+            if inside:
+                # Across the grid, so it wraps at the width of the card and
+                # not at the width of one column.
+                self._note(grid, inside).grid(
+                    row=row, column=0, columnspan=SHAPE_COLUMN + 1,
+                    sticky="w", pady=(ROW_GAP, 0))
                 row += 1
         self._align(grids)
         if note:
@@ -4003,8 +4015,10 @@ class Panel:
             # whose one setting is already applied reports an open change, and
             # there is none.
             table, _note = SECTION_SETTINGS[self.section]
+            # group[1] and not an unpack: a group can carry a third element,
+            # which is a line inside its card. See _build_settings.
             return any(row[0] not in APP_KEYS
-                       for _title, rows in table for row in rows)
+                       for group in table for row in group[1])
         if self.section != "strip":
             return False
         return self.notebook.select() in self._settings_tabs
@@ -6056,13 +6070,6 @@ class Panel:
         server/steamos_utility_center/mounts.py.
         """
         box = self._section(parent, "Drives", card=True)
-        self._note(
-            box,
-            "A second drive for a Steam library. SteamOS rebuilds /etc at "
-            "every update, so a line in /etc/fstab does not survive one. This "
-            "writes a mount unit instead, and asks SteamOS to keep it."
-            ).pack(anchor="w", pady=(0, ROW_GAP))
-
         self.drives_box = ttk.Frame(box, style="OnCard.TFrame")
         self.drives_box.pack(fill="x", pady=(GROUP_GAP, 0))
 
@@ -6358,13 +6365,6 @@ class Panel:
         # answer.
         self.update_state = ttk.Label(frame)
         self.update_state.pack(anchor="w", pady=(ROW_GAP, 0))
-        # Under the card rather than in it, the way every other explanation on
-        # this page stands under the group it explains.
-        self._note(holder,
-                   "Fetches into the clone and installs it. Local changes or "
-                   "commits of your own stop it, with a message.",
-                   page=True).pack(anchor="w", padx=SIDE_MARGIN,
-                                   pady=(ROW_GAP, GROUP_GAP))
         self._say_update(ledpanel.UPDATE_UNKNOWN, "")
         # A different branch is a different question, and the old answer is
         # not one about it.
