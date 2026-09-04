@@ -267,9 +267,9 @@ class PageTest(unittest.TestCase):
         self.assertNotIn("MAX_BRIGHTNESS", self.text)
         for part in self.text.split("<SliderField")[1:]:
             one = part[:part.index("/>")]
-            self.assertIn("setWanted", one, one[:200])
-            self.assertNotIn("write(", one, one[:200])
-            self.assertNotIn("setArea(", one, one[:200])
+            self.assertIn("held.wanted[knob.key] = value", one, one[:300])
+            self.assertNotIn("write(", one, one[:300])
+            self.assertNotIn("setArea(", one, one[:300])
 
     def test_the_card_is_sent_by_a_button_and_kept_by_a_second_one(self):
         """LACT's own safety, and it must not be worked around.
@@ -339,6 +339,27 @@ class PageTest(unittest.TestCase):
         self.assertIn("cec_features", self.text)
         self.assertIn("get_full_status", self.text)
         self.assertNotIn('callable<[], Status>("get_status")', self.text)
+
+    def test_the_page_keeps_its_values_outside_the_component(self):
+        """Steam builds the panel again when a dropdown menu closes.
+
+        Every useState in it goes back to its first value at that moment.
+        That is the whole of the fault: a pick reached the machine, and the
+        value this page held did not survive the pick. A test dropdown with
+        three options and no backend showed it. Its state went back to "one"
+        at every pick.
+
+        So the values live outside the component, where one that is built
+        again reads the same ones.
+        """
+        self.assertIn("const held = {", self.text)
+        # useState is named in the comment that explains this and nowhere
+        # else. useReducer draws; it holds no value.
+        for line in self.text.splitlines():
+            if line.strip().startswith("//"):
+                continue
+            self.assertNotIn("useState", line, line)
+        self.assertIn("useReducer", self.text)
 
     def test_there_is_no_timer(self):
         """A page in a menu is opened, used and closed.

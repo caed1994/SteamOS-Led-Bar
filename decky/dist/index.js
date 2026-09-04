@@ -139,79 +139,97 @@ const TEST_OPTIONS = [
     { data: "two", label: "Two" },
     { data: "three", label: "Three" },
 ];
+// Everything this page holds, and it is outside the component on purpose.
+//
+// Steam takes the panel apart and builds it again when the menu of a dropdown
+// closes. Every useState inside it goes back to its first value at that
+// moment, and that is the whole of the fault that four other changes did not
+// find: the pick reached the machine, and the value this page held did not
+// survive the pick.
+//
+// A test dropdown with three options and nothing behind it showed it. Its
+// state went back to "one" at every pick, and no backend was involved.
+//
+// So the values live here, where a component that is built again reads the
+// same ones. `redraw` in the component draws them.
+const held = {
+    status: null,
+    strip: null,
+    power: null,
+    cec: null,
+    gpu: null,
+    // What a person picked, until the machine has answered.
+    chosen: {},
+    // What the sliders of the card hold, until a button sends them.
+    wanted: {},
+    said: "",
+    keeping: "",
+    busy: false,
+    test: "one",
+};
 function Content() {
-    const [status, setStatus] = SP_REACT.useState(null);
-    const [strip, setStrip] = SP_REACT.useState(null);
-    const [power, setPower] = SP_REACT.useState(null);
-    const [cec, setCec] = SP_REACT.useState(null);
-    const [gpu, setGpu] = SP_REACT.useState(null);
-    const [busy, setBusy] = SP_REACT.useState(false);
-    const [said, setSaid] = SP_REACT.useState("");
-    // What a person picked, before the machine has answered.
-    //
-    // The dropdown of Steam keeps the option it was built with, so a new value
-    // in its props does not move it. This holds the choice, and Choice draws
-    // the closed box from it, so a box says what was pressed at the moment it
-    // is pressed rather than after a command has run. A refresh takes it away
-    // again, and the machine's own answer is what stays.
-    const [chosen, setChosen] = SP_REACT.useState({});
-    // The controls of the card, and whether one is waiting to be kept.
-    //
-    // A slider here writes nothing while it moves. The daemon takes a change
-    // back after some seconds unless it is told to keep it, and a slider that
-    // sent at every step would start that clock at every step. So the sliders
-    // hold a value, one button sends them, and a second button keeps them.
-    const [wanted, setWanted] = SP_REACT.useState({});
-    const [keeping, setKeeping] = SP_REACT.useState("");
-    const [test, setTest] = SP_REACT.useState("one");
+    // The one piece of state in this component, and it holds no value. A
+    // component that is built again loses whatever it holds, so it holds
+    // nothing: this draws what is in `held`.
+    const [, redraw] = SP_REACT.useReducer((count) => count + 1, 0);
     // One fetch when the page opens, and one after every change.
     //
     // There is no timer. There was one, and it asked for the cheap status,
     // which carries no state for the switches of the CEC toolkit. Every five
     // seconds it replaced the full answer with one that had none, and every
     // switch on the page went to off by itself.
-    const refresh = SP_REACT.useCallback(async () => {
-        const [whole, one, two, three] = await Promise.all([
+    const refresh = async () => {
+        const [whole, one, two, three, four] = await Promise.all([
             getFullStatus(),
             getArea("strip"),
             getArea("power"),
             getArea("cec"),
+            getArea("gpu"),
         ]);
-        setStatus(whole);
-        setStrip(one);
-        setPower(two);
-        setCec(three);
-        setGpu(await getArea("gpu"));
-        setChosen({});
-        setWanted({});
-    }, []);
+        held.status = whole;
+        held.strip = one;
+        held.power = two;
+        held.cec = three;
+        held.gpu = four;
+        redraw();
+    };
     SP_REACT.useEffect(() => {
         void refresh();
-    }, [refresh]);
+        // Once, when this is built. It is built again at every pick, and a fetch
+        // that ran then would draw the value before the change over the value
+        // that a person just picked.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     // One place that changes something, so that every control reports a refusal
     // in the same way and nothing runs while something else does.
-    const change = SP_REACT.useCallback(async (work) => {
-        if (busy) {
+    const change = async (work) => {
+        if (held.busy) {
             return;
         }
-        setBusy(true);
-        setSaid("");
+        held.busy = true;
+        held.said = "";
+        redraw();
         try {
             const answer = await work();
-            if (!answer.ok) {
-                setSaid(answer.error ?? "That did not work.");
-            }
+            held.said = answer.ok ? "" : (answer.error ?? "That did not work.");
             await refresh();
+            // The machine has answered, so what a person picked is not needed any
+            // more. It goes whether the write worked or not: the answer of the
+            // machine is the truth in both cases.
+            held.chosen = {};
+            held.wanted = {};
         }
         finally {
-            setBusy(false);
+            held.busy = false;
+            redraw();
         }
-    }, [busy, refresh]);
+    };
     const write = (area, updates) => void change(() => setArea(area, updates));
     // The value to draw: what was pressed, or what the machine holds.
-    const shown = (area, key, held, fallback = "") => chosen[area + "." + key] ?? String(held ?? fallback);
+    const shown = (area, key, value, fallback = "") => held.chosen[area + "." + key] ?? String(value ?? fallback);
     const pick = (area, key, value) => {
-        setChosen((was) => ({ ...was, [area + "." + key]: value }));
+        held.chosen[area + "." + key] = value;
+        redraw();
         write(area, { [key]: value });
     };
     // The option lists, built one time for each answer of the command.
@@ -219,66 +237,80 @@ function Content() {
     // They were rebuilt at every render before. A Dropdown that holds the
     // option it was given then holds an object that is no longer in the list it
     // was given, which is one way for a box to name a value that is gone.
-    const rainbowOptions = SP_REACT.useMemo(() => options(strip?.offers?.RAINBOW_SHOWS), [strip]);
-    const sceneOptions = SP_REACT.useMemo(() => options(strip?.offers?.DESKTOP_SCENE), [strip]);
-    const governorOptions = SP_REACT.useMemo(() => options((power?.offers ?? {}).governors), [power]);
-    const eppOptions = SP_REACT.useMemo(() => options((power?.offers ?? {}).epp), [power]);
-    const knobs = (Array.isArray(gpu?.offers?.knobs) ? gpu?.offers?.knobs : []);
+    const rainbowOptions = SP_REACT.useMemo(() => options(held.strip?.offers?.RAINBOW_SHOWS), [held.strip]);
+    const sceneOptions = SP_REACT.useMemo(() => options(held.strip?.offers?.DESKTOP_SCENE), [held.strip]);
+    const governorOptions = SP_REACT.useMemo(() => options((held.power?.offers ?? {}).governors), [held.power]);
+    const eppOptions = SP_REACT.useMemo(() => options((held.power?.offers ?? {}).epp), [held.power]);
+    const knobs = (Array.isArray(held.gpu?.offers?.knobs) ? held.gpu?.offers?.knobs : []);
     // Send what the sliders hold, and then wait to be told to keep it.
     //
     // The daemon puts the card back by itself if nobody says so. That is not a
     // step to skip: a voltage offset that is too low hangs the card, and a hang
     // that was kept comes back at every boot.
     const send = async () => {
-        if (busy || Object.keys(wanted).length === 0) {
+        if (held.busy || Object.keys(held.wanted).length === 0) {
             return;
         }
-        setBusy(true);
-        setSaid("");
+        held.busy = true;
+        held.said = "";
+        redraw();
         try {
-            const answer = await setArea("gpu", wanted);
+            const answer = await setArea("gpu", held.wanted);
             if (!answer.ok) {
-                setSaid(answer.error ?? "The card would not take it.");
+                held.said = answer.error ?? "The card would not take it.";
                 return;
             }
-            setKeeping("The card has it. Press Keep it, or the daemon puts the "
-                + "card back by itself.");
+            held.keeping = "The card has it. Press Keep it, or the daemon puts the "
+                + "card back by itself.";
         }
         finally {
-            setBusy(false);
+            held.busy = false;
+            redraw();
         }
     };
     const keep = async () => {
-        if (busy) {
+        if (held.busy) {
             return;
         }
-        setBusy(true);
+        held.busy = true;
+        redraw();
         try {
             const answer = await doAction("gpu-keep");
             if (!answer.ok) {
-                setSaid(answer.error ?? "The daemon did not take the confirmation.");
+                held.said = answer.error ?? "The daemon did not take the confirmation.";
             }
-            setKeeping("");
+            held.keeping = "";
+            held.wanted = {};
             await refresh();
         }
         finally {
-            setBusy(false);
+            held.busy = false;
+            redraw();
         }
     };
-    const settings = (strip?.settings ?? {});
-    const cpu = (power?.settings ?? {});
-    const offered = (power?.offers ?? {});
-    const switches = status?.cec_features ?? {};
-    const installed = Boolean(status?.areas?.cec?.installed);
+    const settings = (held.strip?.settings ?? {});
+    const cpu = (held.power?.settings ?? {});
+    const offered = (held.power?.offers ?? {});
+    const switches = held.status?.cec_features ?? {};
+    const installed = Boolean(held.status?.areas?.cec?.installed);
     // The switches of the toolkit, with the words that the panel uses for them.
     // The command answers with this list, so a switch that the toolkit gains
     // appears here with its own label and needs nothing written in this file.
-    const features = (Array.isArray(cec?.offers?.features) ? cec?.offers?.features : []);
+    const features = (Array.isArray(held.cec?.offers?.features) ? held.cec?.offers?.features : []);
     const rainbow = shown("strip", "RAINBOW_SHOWS", settings.RAINBOW_SHOWS, "rainbow");
     const scene = shown("strip", "DESKTOP_SCENE", settings.DESKTOP_SCENE, "steam");
     const governor = shown("power", "CPU_GOVERNOR", cpu.CPU_GOVERNOR);
     const preference = shown("power", "CPU_EPP", cpu.CPU_EPP);
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [(said !== "" || status?.sudo_rule === false) && (SP_JSX.jsxs(DFL.PanelSection, { children: [said !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d85c5c" }, children: said }) })), status?.sudo_rule === false && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: "Nothing here can change a setting. Install the panel again in Desktop Mode to get the rule that permits it." }) }))] })), SP_JSX.jsxs(DFL.PanelSection, { title: "LED bar", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Rainbow slot", description: "What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode.", options: rainbowOptions, value: rainbow, disabled: busy || !strip?.ok, onPick: (value) => pick("strip", "RAINBOW_SHOWS", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Desktop scene", description: "What the bar shows on the desktop. Game Mode belongs to Steam.", options: sceneOptions, value: scene, disabled: busy || !strip?.ok, onPick: (value) => pick("strip", "DESKTOP_SCENE", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Notifications", description: "A flash for an achievement, a message or a friend who comes online.", checked: Boolean(settings.NOTIFY), disabled: busy || !strip?.ok, onChange: (on) => write("strip", { NOTIFY: on }) }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: "CPU power", children: Number(offered.policies ?? 0) === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "This machine has no cpufreq, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Governor", description: "How the clock is chosen.", options: governorOptions, value: governor, disabled: busy || !power?.ok, onPick: (value) => pick("power", "CPU_GOVERNOR", value) }) }), Array.isArray(offered.epp) && offered.epp.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Energy preference", description: "A hint to the firmware about where in its range to sit. The performance governor pins it.", options: eppOptions, value: preference, disabled: busy || !power?.ok, onPick: (value) => pick("power", "CPU_EPP", value) }) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Graphics card", children: !Boolean((gpu?.settings ?? {}).available) ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT is not running, so there is nothing to set." }) })) : knobs.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT reports no control for this card." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [knobs.map((knob) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: knob.label + (knob.unit ? " (" + knob.unit + ")" : ""), value: wanted[knob.key] ?? knob.start, min: knob.min, max: knob.max, step: 1, notchTicksVisible: false, showValue: true, disabled: busy, onChange: (value) => setWanted((was) => ({ ...was, [knob.key]: value })) }) }, knob.key))), keeping === "" ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || Object.keys(wanted).length === 0, onClick: () => void send(), children: "Send to the card" }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: keeping }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void keep(), children: "Keep it" }) })] }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Television", children: !installed ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "The HDMI CEC toolkit is not installed. Install it from the panel in Desktop Mode." }) })) : (SP_JSX.jsx(SP_JSX.Fragment, { children: features.map((feature) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, description: feature.explains, checked: Boolean(switches[feature.name]), disabled: busy, onChange: (on) => write("cec", { [feature.name]: on }) }) }, feature.name))) })) }), SP_JSX.jsxs(DFL.PanelSection, { title: "Dropdown test", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Steam's own row", rgOptions: TEST_OPTIONS, selectedOption: test, onChange: (option) => setTest(String(option.data)) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "This page's row", description: "", options: TEST_OPTIONS, value: test, disabled: false, onPick: setTest }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { fontSize: "0.8em" }, children: [SP_JSX.jsxs("div", { children: ["What this page holds: ", test] }), SP_JSX.jsxs("div", { children: ["Rainbow slot: ", rainbow] }), SP_JSX.jsxs("div", { children: ["Governor: ", governor === "" ? "(not set)" : governor] })] }) })] })] }));
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [(held.said !== "" || held.status?.sudo_rule === false) && (SP_JSX.jsxs(DFL.PanelSection, { children: [held.said !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d85c5c" }, children: held.said }) })), held.status?.sudo_rule === false && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: "Nothing here can change a setting. Install the panel again in Desktop Mode to get the rule that permits it." }) }))] })), SP_JSX.jsxs(DFL.PanelSection, { title: "LED bar", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Rainbow slot", description: "What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode.", options: rainbowOptions, value: rainbow, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "RAINBOW_SHOWS", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Desktop scene", description: "What the bar shows on the desktop. Game Mode belongs to Steam.", options: sceneOptions, value: scene, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "DESKTOP_SCENE", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Notifications", description: "A flash for an achievement, a message or a friend who comes online.", checked: Boolean(settings.NOTIFY), disabled: held.busy || !held.strip?.ok, onChange: (on) => write("strip", { NOTIFY: on }) }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: "CPU power", children: Number(offered.policies ?? 0) === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "This machine has no cpufreq, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Governor", description: "How the clock is chosen.", options: governorOptions, value: governor, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_GOVERNOR", value) }) }), Array.isArray(offered.epp) && offered.epp.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Energy preference", description: "A hint to the firmware about where in its range to sit. The performance governor pins it.", options: eppOptions, value: preference, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_EPP", value) }) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Graphics card", children: !Boolean((held.gpu?.settings ?? {}).available) ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT is not running, so there is nothing to set." }) })) : knobs.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT reports no control for this card." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [knobs.map((knob) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: knob.label + (knob.unit ? " (" + knob.unit + ")" : ""), value: held.wanted[knob.key] ?? knob.start, min: knob.min, max: knob.max, step: 1, notchTicksVisible: false, showValue: true, disabled: held.busy, onChange: (value) => {
+                                    held.wanted[knob.key] = value;
+                                    redraw();
+                                } }) }, knob.key))), held.keeping === "" ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy || Object.keys(held.wanted).length === 0, onClick: () => void send(), children: "Send to the card" }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: held.keeping }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy, onClick: () => void keep(), children: "Keep it" }) })] }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Television", children: !installed ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "The HDMI CEC toolkit is not installed. Install it from the panel in Desktop Mode." }) })) : (SP_JSX.jsx(SP_JSX.Fragment, { children: features.map((feature) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, description: feature.explains, checked: Boolean(switches[feature.name]), disabled: held.busy, onChange: (on) => write("cec", { [feature.name]: on }) }) }, feature.name))) })) }), SP_JSX.jsxs(DFL.PanelSection, { title: "Dropdown test", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Steam's own row", rgOptions: TEST_OPTIONS, selectedOption: held.test, onChange: (option) => {
+                                held.test = String(option.data);
+                                redraw();
+                            } }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "This page's row", description: "", options: TEST_OPTIONS, value: held.test, disabled: false, onPick: (value) => {
+                                held.test = value;
+                                redraw();
+                            } }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { fontSize: "0.8em" }, children: [SP_JSX.jsxs("div", { children: ["What this page holds: ", held.test] }), SP_JSX.jsxs("div", { children: ["Rainbow slot: ", rainbow] }), SP_JSX.jsxs("div", { children: ["Governor: ", governor === "" ? "(not set)" : governor] })] }) })] })] }));
 }
 var index = definePlugin(() => ({
     name: "SteamOS Utility Center",

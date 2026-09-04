@@ -23,7 +23,7 @@ import {
   SliderField,
   ToggleField,
 } from "@decky/ui";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useReducer } from "react";
 import { FaLightbulb } from "react-icons/fa";
 
 // -- what the command answers -----------------------------------------------
@@ -140,33 +140,40 @@ const TEST_OPTIONS: Pick[] = [
   { data: "three", label: "Three" },
 ];
 
+// Everything this page holds, and it is outside the component on purpose.
+//
+// Steam takes the panel apart and builds it again when the menu of a dropdown
+// closes. Every useState inside it goes back to its first value at that
+// moment, and that is the whole of the fault that four other changes did not
+// find: the pick reached the machine, and the value this page held did not
+// survive the pick.
+//
+// A test dropdown with three options and nothing behind it showed it. Its
+// state went back to "one" at every pick, and no backend was involved.
+//
+// So the values live here, where a component that is built again reads the
+// same ones. `redraw` in the component draws them.
+const held = {
+  status: null as Status | null,
+  strip: null as Area | null,
+  power: null as Area | null,
+  cec: null as Area | null,
+  gpu: null as Area | null,
+  // What a person picked, until the machine has answered.
+  chosen: {} as Record<string, string>,
+  // What the sliders of the card hold, until a button sends them.
+  wanted: {} as Record<string, number>,
+  said: "",
+  keeping: "",
+  busy: false,
+  test: "one",
+};
+
 function Content() {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [strip, setStrip] = useState<Area | null>(null);
-  const [power, setPower] = useState<Area | null>(null);
-  const [cec, setCec] = useState<Area | null>(null);
-  const [gpu, setGpu] = useState<Area | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [said, setSaid] = useState("");
-
-  // What a person picked, before the machine has answered.
-  //
-  // The dropdown of Steam keeps the option it was built with, so a new value
-  // in its props does not move it. This holds the choice, and Choice draws
-  // the closed box from it, so a box says what was pressed at the moment it
-  // is pressed rather than after a command has run. A refresh takes it away
-  // again, and the machine's own answer is what stays.
-  const [chosen, setChosen] = useState<Record<string, string>>({});
-
-  // The controls of the card, and whether one is waiting to be kept.
-  //
-  // A slider here writes nothing while it moves. The daemon takes a change
-  // back after some seconds unless it is told to keep it, and a slider that
-  // sent at every step would start that clock at every step. So the sliders
-  // hold a value, one button sends them, and a second button keeps them.
-  const [wanted, setWanted] = useState<Record<string, number>>({});
-  const [keeping, setKeeping] = useState("");
-  const [test, setTest] = useState("one");
+  // The one piece of state in this component, and it holds no value. A
+  // component that is built again loses whatever it holds, so it holds
+  // nothing: this draws what is in `held`.
+  const [, redraw] = useReducer((count: number) => count + 1, 0);
 
   // One fetch when the page opens, and one after every change.
   //
@@ -174,57 +181,64 @@ function Content() {
   // which carries no state for the switches of the CEC toolkit. Every five
   // seconds it replaced the full answer with one that had none, and every
   // switch on the page went to off by itself.
-  const refresh = useCallback(async () => {
-    const [whole, one, two, three] = await Promise.all([
+  const refresh = async () => {
+    const [whole, one, two, three, four] = await Promise.all([
       getFullStatus(),
       getArea("strip"),
       getArea("power"),
       getArea("cec"),
+      getArea("gpu"),
     ]);
-    setStatus(whole);
-    setStrip(one);
-    setPower(two);
-    setCec(three);
-    setGpu(await getArea("gpu"));
-    setChosen({});
-    setWanted({});
-  }, []);
+    held.status = whole;
+    held.strip = one;
+    held.power = two;
+    held.cec = three;
+    held.gpu = four;
+    redraw();
+  };
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    // Once, when this is built. It is built again at every pick, and a fetch
+    // that ran then would draw the value before the change over the value
+    // that a person just picked.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // One place that changes something, so that every control reports a refusal
   // in the same way and nothing runs while something else does.
-  const change = useCallback(
-    async (work: () => Promise<Answer>) => {
-      if (busy) {
-        return;
-      }
-      setBusy(true);
-      setSaid("");
-      try {
-        const answer = await work();
-        if (!answer.ok) {
-          setSaid(answer.error ?? "That did not work.");
-        }
-        await refresh();
-      } finally {
-        setBusy(false);
-      }
-    },
-    [busy, refresh],
-  );
+  const change = async (work: () => Promise<Answer>) => {
+    if (held.busy) {
+      return;
+    }
+    held.busy = true;
+    held.said = "";
+    redraw();
+    try {
+      const answer = await work();
+      held.said = answer.ok ? "" : (answer.error ?? "That did not work.");
+      await refresh();
+      // The machine has answered, so what a person picked is not needed any
+      // more. It goes whether the write worked or not: the answer of the
+      // machine is the truth in both cases.
+      held.chosen = {};
+      held.wanted = {};
+    } finally {
+      held.busy = false;
+      redraw();
+    }
+  };
 
   const write = (area: string, updates: Record<string, unknown>) =>
     void change(() => setArea(area, updates));
 
   // The value to draw: what was pressed, or what the machine holds.
-  const shown = (area: string, key: string, held: unknown, fallback = "") =>
-    chosen[area + "." + key] ?? String(held ?? fallback);
+  const shown = (area: string, key: string, value: unknown, fallback = "") =>
+    held.chosen[area + "." + key] ?? String(value ?? fallback);
 
   const pick = (area: string, key: string, value: string) => {
-    setChosen((was) => ({ ...was, [area + "." + key]: value }));
+    held.chosen[area + "." + key] = value;
+    redraw();
     write(area, { [key]: value });
   };
 
@@ -234,16 +248,16 @@ function Content() {
   // option it was given then holds an object that is no longer in the list it
   // was given, which is one way for a box to name a value that is gone.
   const rainbowOptions = useMemo(
-    () => options(strip?.offers?.RAINBOW_SHOWS), [strip]);
+    () => options(held.strip?.offers?.RAINBOW_SHOWS), [held.strip]);
   const sceneOptions = useMemo(
-    () => options(strip?.offers?.DESKTOP_SCENE), [strip]);
+    () => options(held.strip?.offers?.DESKTOP_SCENE), [held.strip]);
   const governorOptions = useMemo(
-    () => options((power?.offers ?? {}).governors), [power]);
+    () => options((held.power?.offers ?? {}).governors), [held.power]);
   const eppOptions = useMemo(
-    () => options((power?.offers ?? {}).epp), [power]);
+    () => options((held.power?.offers ?? {}).epp), [held.power]);
 
   const knobs = (
-    Array.isArray(gpu?.offers?.knobs) ? gpu?.offers?.knobs : []
+    Array.isArray(held.gpu?.offers?.knobs) ? held.gpu?.offers?.knobs : []
   ) as Knob[];
 
   // Send what the sliders hold, and then wait to be told to keep it.
@@ -252,52 +266,57 @@ function Content() {
   // step to skip: a voltage offset that is too low hangs the card, and a hang
   // that was kept comes back at every boot.
   const send = async () => {
-    if (busy || Object.keys(wanted).length === 0) {
+    if (held.busy || Object.keys(held.wanted).length === 0) {
       return;
     }
-    setBusy(true);
-    setSaid("");
+    held.busy = true;
+    held.said = "";
+    redraw();
     try {
-      const answer = await setArea("gpu", wanted);
+      const answer = await setArea("gpu", held.wanted);
       if (!answer.ok) {
-        setSaid(answer.error ?? "The card would not take it.");
+        held.said = answer.error ?? "The card would not take it.";
         return;
       }
-      setKeeping("The card has it. Press Keep it, or the daemon puts the "
-                 + "card back by itself.");
+      held.keeping = "The card has it. Press Keep it, or the daemon puts the "
+                     + "card back by itself.";
     } finally {
-      setBusy(false);
+      held.busy = false;
+      redraw();
     }
   };
 
   const keep = async () => {
-    if (busy) {
+    if (held.busy) {
       return;
     }
-    setBusy(true);
+    held.busy = true;
+    redraw();
     try {
       const answer = await doAction("gpu-keep");
       if (!answer.ok) {
-        setSaid(answer.error ?? "The daemon did not take the confirmation.");
+        held.said = answer.error ?? "The daemon did not take the confirmation.";
       }
-      setKeeping("");
+      held.keeping = "";
+      held.wanted = {};
       await refresh();
     } finally {
-      setBusy(false);
+      held.busy = false;
+      redraw();
     }
   };
 
-  const settings = (strip?.settings ?? {}) as Record<string, unknown>;
-  const cpu = (power?.settings ?? {}) as Record<string, unknown>;
-  const offered = (power?.offers ?? {}) as Record<string, unknown>;
-  const switches = status?.cec_features ?? {};
-  const installed = Boolean(status?.areas?.cec?.installed);
+  const settings = (held.strip?.settings ?? {}) as Record<string, unknown>;
+  const cpu = (held.power?.settings ?? {}) as Record<string, unknown>;
+  const offered = (held.power?.offers ?? {}) as Record<string, unknown>;
+  const switches = held.status?.cec_features ?? {};
+  const installed = Boolean(held.status?.areas?.cec?.installed);
 
   // The switches of the toolkit, with the words that the panel uses for them.
   // The command answers with this list, so a switch that the toolkit gains
   // appears here with its own label and needs nothing written in this file.
   const features = (
-    Array.isArray(cec?.offers?.features) ? cec?.offers?.features : []
+    Array.isArray(held.cec?.offers?.features) ? held.cec?.offers?.features : []
   ) as Feature[];
 
   const rainbow = shown("strip", "RAINBOW_SHOWS", settings.RAINBOW_SHOWS,
@@ -314,14 +333,14 @@ function Content() {
         reports its own health at the top of every visit reports it to
         somebody who came to change one setting.
       */}
-      {(said !== "" || status?.sudo_rule === false) && (
+      {(held.said !== "" || held.status?.sudo_rule === false) && (
         <PanelSection>
-          {said !== "" && (
+          {held.said !== "" && (
             <PanelSectionRow>
-              <div style={{ fontSize: "0.8em", color: "#d85c5c" }}>{said}</div>
+              <div style={{ fontSize: "0.8em", color: "#d85c5c" }}>{held.said}</div>
             </PanelSectionRow>
           )}
-          {status?.sudo_rule === false && (
+          {held.status?.sudo_rule === false && (
             <PanelSectionRow>
               <div style={{ fontSize: "0.8em", color: "#d9a441" }}>
                 Nothing here can change a setting. Install the panel again in
@@ -339,7 +358,7 @@ function Content() {
             description="What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode."
             options={rainbowOptions}
             value={rainbow}
-            disabled={busy || !strip?.ok}
+            disabled={held.busy || !held.strip?.ok}
             onPick={(value) => pick("strip", "RAINBOW_SHOWS", value)}
           />
         </PanelSectionRow>
@@ -349,7 +368,7 @@ function Content() {
             description="What the bar shows on the desktop. Game Mode belongs to Steam."
             options={sceneOptions}
             value={scene}
-            disabled={busy || !strip?.ok}
+            disabled={held.busy || !held.strip?.ok}
             onPick={(value) => pick("strip", "DESKTOP_SCENE", value)}
           />
         </PanelSectionRow>
@@ -358,7 +377,7 @@ function Content() {
             label="Notifications"
             description="A flash for an achievement, a message or a friend who comes online."
             checked={Boolean(settings.NOTIFY)}
-            disabled={busy || !strip?.ok}
+            disabled={held.busy || !held.strip?.ok}
             onChange={(on: boolean) => write("strip", { NOTIFY: on })}
           />
         </PanelSectionRow>
@@ -379,7 +398,7 @@ function Content() {
                 description="How the clock is chosen."
                 options={governorOptions}
                 value={governor}
-                disabled={busy || !power?.ok}
+                disabled={held.busy || !held.power?.ok}
                 onPick={(value) => pick("power", "CPU_GOVERNOR", value)}
               />
             </PanelSectionRow>
@@ -390,7 +409,7 @@ function Content() {
                   description="A hint to the firmware about where in its range to sit. The performance governor pins it."
                   options={eppOptions}
                   value={preference}
-                  disabled={busy || !power?.ok}
+                  disabled={held.busy || !held.power?.ok}
                   onPick={(value) => pick("power", "CPU_EPP", value)}
                 />
               </PanelSectionRow>
@@ -400,7 +419,7 @@ function Content() {
       </PanelSection>
 
       <PanelSection title="Graphics card">
-        {!Boolean((gpu?.settings ?? {}).available) ? (
+        {!Boolean((held.gpu?.settings ?? {}).available) ? (
           <PanelSectionRow>
             <div style={{ fontSize: "0.8em" }}>
               LACT is not running, so there is nothing to set.
@@ -418,23 +437,25 @@ function Content() {
               <PanelSectionRow key={knob.key}>
                 <SliderField
                   label={knob.label + (knob.unit ? " (" + knob.unit + ")" : "")}
-                  value={wanted[knob.key] ?? knob.start}
+                  value={held.wanted[knob.key] ?? knob.start}
                   min={knob.min}
                   max={knob.max}
                   step={1}
                   notchTicksVisible={false}
                   showValue={true}
-                  disabled={busy}
-                  onChange={(value: number) =>
-                    setWanted((was) => ({ ...was, [knob.key]: value }))}
+                  disabled={held.busy}
+                  onChange={(value: number) => {
+                    held.wanted[knob.key] = value;
+                    redraw();
+                  }}
                 />
               </PanelSectionRow>
             ))}
-            {keeping === "" ? (
+            {held.keeping === "" ? (
               <PanelSectionRow>
                 <ButtonItem
                   layout="below"
-                  disabled={busy || Object.keys(wanted).length === 0}
+                  disabled={held.busy || Object.keys(held.wanted).length === 0}
                   onClick={() => void send()}
                 >
                   Send to the card
@@ -444,13 +465,13 @@ function Content() {
               <>
                 <PanelSectionRow>
                   <div style={{ fontSize: "0.8em", color: "#d9a441" }}>
-                    {keeping}
+                    {held.keeping}
                   </div>
                 </PanelSectionRow>
                 <PanelSectionRow>
                   <ButtonItem
                     layout="below"
-                    disabled={busy}
+                    disabled={held.busy}
                     onClick={() => void keep()}
                   >
                     Keep it
@@ -478,7 +499,7 @@ function Content() {
                   label={feature.label}
                   description={feature.explains}
                   checked={Boolean(switches[feature.name])}
-                  disabled={busy}
+                  disabled={held.busy}
                   onChange={(on: boolean) =>
                     write("cec", { [feature.name]: on })}
                 />
@@ -492,8 +513,11 @@ function Content() {
           <DropdownItem
             label="Steam's own row"
             rgOptions={TEST_OPTIONS}
-            selectedOption={test}
-            onChange={(option) => setTest(String(option.data))}
+            selectedOption={held.test}
+            onChange={(option) => {
+              held.test = String(option.data);
+              redraw();
+            }}
           />
         </PanelSectionRow>
         <PanelSectionRow>
@@ -501,14 +525,17 @@ function Content() {
             label="This page's row"
             description=""
             options={TEST_OPTIONS}
-            value={test}
+            value={held.test}
             disabled={false}
-            onPick={setTest}
+            onPick={(value) => {
+              held.test = value;
+              redraw();
+            }}
           />
         </PanelSectionRow>
         <PanelSectionRow>
           <div style={{ fontSize: "0.8em" }}>
-            <div>What this page holds: {test}</div>
+            <div>What this page holds: {held.test}</div>
             <div>Rainbow slot: {rainbow}</div>
             <div>Governor: {governor === "" ? "(not set)" : governor}</div>
           </div>
