@@ -285,6 +285,26 @@ class PageTest(unittest.TestCase):
         # the second one only after the first one.
         self.assertIn("keeping", self.text)
 
+    def test_no_control_carries_a_paragraph_under_it(self):
+        """The page is a menu that opens over a game.
+
+        A sentence under each control is a page of prose in a space the width
+        of a thumb. The words that stay are the ones that say what to do about
+        something: a machine with no daemon, or a change that waits to be
+        kept.
+        """
+        self.assertNotIn("description=", self.text)
+
+    def test_the_dropdown_test_is_off_the_page(self):
+        """It answered its question, and then it was clutter of its own.
+
+        The comment of Choice names DropdownItem, because a reader has to know
+        which row this page does not use. This looks at what is drawn.
+        """
+        self.assertNotIn("TEST_OPTIONS", self.text)
+        self.assertNotIn("Dropdown test", self.text)
+        self.assertNotIn("<DropdownItem", self.text)
+
     def test_a_setting_uses_the_row_this_page_builds(self):
         """Field and Dropdown, and not Steam's own DropdownItem.
 
@@ -293,7 +313,9 @@ class PageTest(unittest.TestCase):
         know. renderButtonValue is declared on Dropdown, so the row here hands
         it to Dropdown and nothing passes it on the way.
         """
-        for part in self.text.split("<Choice")[1:]:
+        found = self.text.split("<Choice")[1:]
+        self.assertTrue(found, "the page builds no row of its own")
+        for part in found:
             one = part[:part.index("/>")]
             self.assertIn("value=", one, one[:200])
             self.assertIn("onPick=", one, one[:200])

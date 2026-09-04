@@ -1243,6 +1243,12 @@ There is no block that reports the health of the machine: a page that says so
 at the top of every visit says it to somebody who came to change one setting.
 What went wrong is on the page when something did.
 
+No control carries a sentence under it either. This page is a menu that opens
+over a game, in a space the width of a thumb, and a paragraph below each row is
+a page of prose there. The words in this README are where they belong. The
+words that stay on the page say what to do about something: a machine with no
+daemon, or a change to the card that waits to be kept.
+
 **The graphics card takes two presses.** Its sliders write nothing while they
 move: one button sends them to the card, and a second one keeps them. That is
 LACT's own safety and not an extra step of this project. The daemon puts the

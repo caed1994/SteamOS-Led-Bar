@@ -16,7 +16,6 @@ import { callable, definePlugin } from "@decky/api";
 import {
   ButtonItem,
   Dropdown,
-  DropdownItem,
   Field,
   PanelSection,
   PanelSectionRow,
@@ -36,7 +35,7 @@ type Status = Answer & {
   cec_features?: Record<string, boolean>;
 };
 
-type Feature = { name: string; label: string; explains: string };
+type Feature = { name: string; label: string };
 
 // One control of the graphics card, as the daemon reports it. The card
 // decides which of these exist: a control with no range is a control that the
@@ -94,7 +93,6 @@ type Pick = { data: string; label: string };
 
 function Choice(props: {
   label: string;
-  description: string;
   options: Pick[];
   value: string;
   disabled: boolean;
@@ -110,8 +108,7 @@ function Choice(props: {
   // Field is the same row that DropdownItem draws, so the page looks as it
   // did.
   return (
-    <Field label={props.label} description={props.description}
-           childrenContainerWidth="min">
+    <Field label={props.label} childrenContainerWidth="min">
       <Dropdown
         rgOptions={props.options}
         selectedOption={props.value}
@@ -124,21 +121,6 @@ function Choice(props: {
     </Field>
   );
 }
-
-// Three options and nothing behind them, for one question: does a dropdown
-// follow the state of this page at all?
-//
-// Four changes to the real controls did nothing, and each of them was a guess
-// about a component that cannot be run outside Game Mode. This answers the
-// guess. If the line below the box changes and the box does not, the box is
-// the fault. If neither changes, the fault is in this file.
-//
-// It comes off the page once the answer is in.
-const TEST_OPTIONS: Pick[] = [
-  { data: "one", label: "One" },
-  { data: "two", label: "Two" },
-  { data: "three", label: "Three" },
-];
 
 // Everything this page holds, and it is outside the component on purpose.
 //
@@ -166,7 +148,6 @@ const held = {
   said: "",
   keeping: "",
   busy: false,
-  test: "one",
 };
 
 // Draws the page, and it always draws the one that is on the screen.
@@ -295,8 +276,7 @@ function Content() {
         held.said = answer.error ?? "The card would not take it.";
         return;
       }
-      held.keeping = "The card has it. Press Keep it, or the daemon puts the "
-                     + "card back by itself.";
+      held.keeping = "Press Keep it, or the card goes back by itself.";
     } finally {
       held.busy = false;
       draw();
@@ -372,7 +352,6 @@ function Content() {
         <PanelSectionRow>
           <Choice
             label="Rainbow slot"
-            description="What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode."
             options={rainbowOptions}
             value={rainbow}
             disabled={held.busy || !held.strip?.ok}
@@ -382,7 +361,6 @@ function Content() {
         <PanelSectionRow>
           <Choice
             label="Desktop scene"
-            description="What the bar shows on the desktop. Game Mode belongs to Steam."
             options={sceneOptions}
             value={scene}
             disabled={held.busy || !held.strip?.ok}
@@ -392,7 +370,6 @@ function Content() {
         <PanelSectionRow>
           <ToggleField
             label="Notifications"
-            description="A flash for an achievement, a message or a friend who comes online."
             checked={Boolean(settings.NOTIFY)}
             disabled={held.busy || !held.strip?.ok}
             onChange={(on: boolean) => write("strip", { NOTIFY: on })}
@@ -412,7 +389,6 @@ function Content() {
             <PanelSectionRow>
               <Choice
                 label="Governor"
-                description="How the clock is chosen."
                 options={governorOptions}
                 value={governor}
                 disabled={held.busy || !held.power?.ok}
@@ -423,7 +399,6 @@ function Content() {
               <PanelSectionRow>
                 <Choice
                   label="Energy preference"
-                  description="A hint to the firmware about where in its range to sit. The performance governor pins it."
                   options={eppOptions}
                   value={preference}
                   disabled={held.busy || !held.power?.ok}
@@ -514,7 +489,6 @@ function Content() {
               <PanelSectionRow key={feature.name}>
                 <ToggleField
                   label={feature.label}
-                  description={feature.explains}
                   checked={Boolean(switches[feature.name])}
                   disabled={held.busy}
                   onChange={(on: boolean) =>
@@ -524,39 +498,6 @@ function Content() {
             ))}
           </>
         )}
-      </PanelSection>
-      <PanelSection title="Dropdown test">
-        <PanelSectionRow>
-          <DropdownItem
-            label="Steam's own row"
-            rgOptions={TEST_OPTIONS}
-            selectedOption={held.test}
-            onChange={(option) => {
-              held.test = String(option.data);
-              draw();
-            }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Choice
-            label="This page's row"
-            description=""
-            options={TEST_OPTIONS}
-            value={held.test}
-            disabled={false}
-            onPick={(value) => {
-              held.test = value;
-              draw();
-            }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ fontSize: "0.8em" }}>
-            <div>What this page holds: {held.test}</div>
-            <div>Rainbow slot: {rainbow}</div>
-            <div>Governor: {governor === "" ? "(not set)" : governor}</div>
-          </div>
-        </PanelSectionRow>
       </PanelSection>
     </>
   );
