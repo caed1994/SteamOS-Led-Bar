@@ -247,6 +247,34 @@ class PageTest(unittest.TestCase):
         for name in cec.BY_NAME:
             self.assertNotIn('"%s"' % name, self.text, name)
 
+    def test_nothing_on_the_page_writes_while_a_control_moves(self):
+        """A slider wrote at every step, and each step restarted the service.
+
+        systemd counts five starts in ten seconds and refuses the sixth, so
+        two seconds of moving one slider left the bar dark and the service
+        failed. scripts/apply-config.sh clears that counter now, and the
+        slider is gone: a control that writes at each step of a movement does
+        not belong on a page where a write restarts a service.
+        """
+        self.assertNotIn("SliderField", self.text)
+        self.assertNotIn("MAX_BRIGHTNESS", self.text)
+
+    def test_every_dropdown_carries_a_key_that_holds_its_value(self):
+        """A DropdownItem keeps the option it was built with.
+
+        A new value in the props does not move it. So the effect changed and
+        the box went on showing the effect before it. A key that changes with
+        the value makes React build a new dropdown.
+        """
+        # An attribute holds an arrow function, so a `>` is not the end of
+        # the tag. The end is the `/>` that closes it.
+        found = [part[:part.index("/>")]
+                 for part in self.text.split("<DropdownItem")[1:]]
+        self.assertTrue(found, "there are no dropdowns to check")
+        for one in found:
+            self.assertIn("key=", one, one[:160])
+            self.assertIn("selectedOption=", one, one[:160])
+
     def test_the_polled_half_is_the_cheap_one(self):
         """A fork for each answer is a cost that a game pays.
 
@@ -255,6 +283,33 @@ class PageTest(unittest.TestCase):
         """
         timer = self.text[self.text.index("setInterval"):]
         self.assertIn("refreshCheap", timer[:120])
+
+
+class RestartLimitTest(unittest.TestCase):
+    """The service must survive a person who changes a setting twice.
+
+    systemd's start limit is for a service that crashes and starts again by
+    itself. A change that a person asked for is not that, and the applier says
+    so by clearing the counter before it restarts.
+    """
+
+    def _applier(self):
+        with open(os.path.join(HERE, "..", "scripts", "apply-config.sh"),
+                  encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_counter_is_cleared_before_the_restart(self):
+        text = self._applier()
+        self.assertIn("reset-failed", text)
+        self.assertLess(text.index("reset-failed"),
+                        text.index('systemctl restart'))
+
+    def test_clearing_it_never_stops_the_applier(self):
+        """A unit that is not failed is not an error, and the script has -e."""
+        line = [one for one in self._applier().splitlines()
+                if "reset-failed" in one and one.startswith("systemctl")]
+        self.assertEqual(len(line), 1, line)
+        self.assertTrue(line[0].rstrip().endswith("|| true"), line[0])
 
 
 class BuiltTest(unittest.TestCase):

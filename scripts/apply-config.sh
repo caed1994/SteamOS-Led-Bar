@@ -58,5 +58,23 @@ if [[ -x "$INSTALL_DIR/steamos-utility-center" ]]; then
 fi
 
 install -m 0644 "$STAGED" "$CONFIG_PATH"
+
+# Clear the start counter before the restart.
+#
+# systemd counts five starts in ten seconds and then refuses the sixth:
+#
+#   Job for steamos-utility-center.service failed because start of the
+#   service was attempted too often.
+#
+# That rule is for a service that crashes and starts again by itself. A person
+# who moves a slider in Game Mode is not that: each step of the slider is a
+# change, each change is a restart, and the service was dead after two
+# seconds of moving one. The bar then stayed dark until somebody found
+# `systemctl reset-failed` in a terminal.
+#
+# The limit stays for the case it is written for. This clears the counter for
+# a change that a person asked for, which is the only kind that reaches here.
+# It does nothing on a unit that is not failed, and it exits 0 either way.
+systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE"
 echo "Configuration applied and $SERVICE restarted."

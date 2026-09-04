@@ -18,7 +18,6 @@ import {
   DropdownItem,
   PanelSection,
   PanelSectionRow,
-  SliderField,
   ToggleField,
 } from "@decky/ui";
 import { useCallback, useEffect, useState } from "react";
@@ -205,11 +204,21 @@ function Content() {
         )}
       </PanelSection>
 
+      {/*
+        Each dropdown carries a key that holds its own value.
+
+        A DropdownItem takes the selected option when it is built and keeps
+        it. A new value in the props does not move it, so the effect changed
+        and the box went on showing the effect before it. The key changes with
+        the value, so React builds a new dropdown, and the box then says what
+        the machine holds.
+      */}
       <PanelSection title="LED bar">
         <PanelSectionRow>
           <DropdownItem
             label="Rainbow slot"
             description="What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode."
+            key={"rainbow-" + String(settings.RAINBOW_SHOWS ?? "")}
             rgOptions={options(strip?.offers?.RAINBOW_SHOWS)}
             selectedOption={String(settings.RAINBOW_SHOWS ?? "rainbow")}
             disabled={busy || !strip?.ok}
@@ -220,24 +229,11 @@ function Content() {
           <DropdownItem
             label="Desktop scene"
             description="What the bar shows on the desktop. Game Mode belongs to Steam."
+            key={"scene-" + String(settings.DESKTOP_SCENE ?? "")}
             rgOptions={options(strip?.offers?.DESKTOP_SCENE)}
             selectedOption={String(settings.DESKTOP_SCENE ?? "steam")}
             disabled={busy || !strip?.ok}
             onChange={(option) => write("strip", { DESKTOP_SCENE: String(option.data) })}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <SliderField
-            label="Brightness"
-            description="The top of the range for every effect."
-            value={Number(settings.MAX_BRIGHTNESS ?? 255)}
-            min={0}
-            max={255}
-            step={5}
-            notchTicksVisible={false}
-            showValue={true}
-            disabled={busy || !strip?.ok}
-            onChange={(value: number) => write("strip", { MAX_BRIGHTNESS: value })}
           />
         </PanelSectionRow>
         <PanelSectionRow>
@@ -264,6 +260,7 @@ function Content() {
               <DropdownItem
                 label="Governor"
                 description="How the clock is chosen."
+                key={"governor-" + String(cpu.CPU_GOVERNOR ?? "")}
                 rgOptions={options(offered.governors)}
                 selectedOption={String(cpu.CPU_GOVERNOR ?? "")}
                 disabled={busy || !power?.ok}
@@ -275,8 +272,9 @@ function Content() {
                 <DropdownItem
                   label="Energy preference"
                   description="A hint to the firmware about where in its range to sit. The performance governor pins it."
+                  key={"epp-" + String(cpu.CPU_EPP ?? "")}
                   rgOptions={options(offered.epp)}
-                  selectedOption={String(cpu.CPU_EPP ?? "default")}
+                  selectedOption={String(cpu.CPU_EPP ?? "")}
                   disabled={busy || !power?.ok}
                   onChange={(option) => write("power", { CPU_EPP: String(option.data) })}
                 />
