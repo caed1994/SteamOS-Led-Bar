@@ -275,14 +275,40 @@ class PageTest(unittest.TestCase):
             self.assertIn("key=", one, one[:160])
             self.assertIn("selectedOption=", one, one[:160])
 
-    def test_the_polled_half_is_the_cheap_one(self):
-        """A fork for each answer is a cost that a game pays.
+    def test_the_page_asks_for_one_status_and_not_two(self):
+        """The fault that turned every switch off by itself.
 
-        The page asks for the full status when it opens and on a change. The
-        timer asks for the other one.
+        The switches of the CEC toolkit are in `status --full` and in nothing
+        else: only systemd knows whether a unit is enabled. A timer asked for
+        the cheap status every five seconds and put the answer in the same
+        place, so every five seconds the switches lost their state and the
+        page drew them all as off. Reopening the menu brought them back for
+        five seconds, which is what a person sees.
+
+        One status, so there is no second answer to overwrite the first.
         """
-        timer = self.text[self.text.index("setInterval"):]
-        self.assertIn("refreshCheap", timer[:120])
+        self.assertIn("cec_features", self.text)
+        self.assertIn("get_full_status", self.text)
+        self.assertNotIn('callable<[], Status>("get_status")', self.text)
+
+    def test_there_is_no_timer(self):
+        """A page in a menu is opened, used and closed.
+
+        A timer costs a fork for each answer while a game runs, and it was
+        the reason the switches lost their state. The page reads when it
+        opens and after each change, which is when an answer can differ.
+        """
+        self.assertNotIn("setInterval", self.text)
+
+    def test_the_status_block_and_the_drives_are_off_the_page(self):
+        """Both are answers to a question that nobody asked on a sofa.
+
+        The section titles, and not the words. "This machine has no cpufreq"
+        is a sentence on the page and not the block that was taken off it.
+        """
+        for title in ('title="This machine"', 'title="Drives"'):
+            self.assertNotIn(title, self.text, title)
+        self.assertNotIn("repair-drives", self.text)
 
 
 class RestartLimitTest(unittest.TestCase):
@@ -325,7 +351,8 @@ class BuiltTest(unittest.TestCase):
 
     def test_it_was_built_from_this_source(self):
         built = read("dist", "index.js")
-        for sign in ("SteamOS Utility Center", "repair-drives", "get_status"):
+        for sign in ("SteamOS Utility Center", "cec-standby", "RAINBOW_SHOWS",
+                     "get_full_status"):
             self.assertIn(sign, built, sign)
 
 

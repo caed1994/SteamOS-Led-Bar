@@ -1232,14 +1232,26 @@ What is on the page:
 
 | Section | What it holds |
 | ------- | ------------- |
-| This machine | the module, HDMI CEC, and how many drives are mounted |
-| LED bar | the rainbow slot, the desktop scene, the brightness, notifications |
+| LED bar | the rainbow slot, the desktop scene, notifications |
 | CPU power | the governor and the energy preference |
 | Television | wake, standby, and each switch of the HDMI CEC toolkit |
-| Drives | each drive with its state, and one button to mount them again |
 
-The keyboard layout is not there. It is set one time, and that belongs in the
-panel.
+The page holds what a person changes from a sofa, and nothing else. A keyboard
+layout is set one time and a drive is added one time, so both are in the panel.
+There is no block that reports the health of the machine: a page that says so
+at the top of every visit says it to somebody who came to change one setting.
+What went wrong is on the page when something did.
+
+There is no brightness control. Each step of a slider is a change, each change
+restarts the service, and systemd refuses a service that starts more than five
+times in ten seconds. Two seconds of moving one slider left the bar dark. A
+control that writes at each step of a movement does not belong on a page where
+a write restarts a service.
+
+The page reads when it opens and after each change. It has no timer: one asked
+for the cheap status every five seconds, and that status carries no state for
+the switches of the CEC toolkit, so every five seconds each switch drew itself
+as off.
 
 The plugin holds no rule of its own. Every value comes from
 `steamos-utility-centerctl`, and every change goes back to it, so the plugin

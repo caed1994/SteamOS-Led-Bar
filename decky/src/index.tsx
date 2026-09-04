@@ -9,8 +9,8 @@
 // that command. See server/steamos_utility_center/ctl.py.
 //
 // What is here and what is not follows one question: does a person do this
-// while sitting on a sofa with a controller? The keyboard layout is set one
-// time and is in the panel for that reason.
+// while sitting on a sofa with a controller? A drive is added one time and a
+// keyboard layout is set one time, so both are in the panel.
 
 import { callable, definePlugin } from "@decky/api";
 import {
@@ -27,29 +27,10 @@ import { FaLightbulb } from "react-icons/fa";
 
 type Answer = { ok: boolean; error?: string };
 
-type Ready = {
-  module: boolean;
-  cec: boolean;
-  mounted: number;
-  drives: number;
-};
-
-type Drive = {
-  uuid: string;
-  where: string;
-  type: string;
-  mounted: boolean;
-};
-
 type Status = Answer & {
-  ready?: Ready;
   sudo_rule?: boolean;
-  areas?: {
-    drives?: { drives?: Drive[] };
-    cec?: { installed?: boolean };
-  };
+  areas?: { cec?: { installed?: boolean } };
   cec_features?: Record<string, boolean>;
-  full?: boolean;
 };
 
 type Feature = { name: string; label: string; explains: string };
@@ -59,15 +40,10 @@ type Area = Answer & {
   offers?: Record<string, unknown>;
 };
 
-const getStatus = callable<[], Status>("get_status");
 const getFullStatus = callable<[], Status>("get_full_status");
 const getArea = callable<[string], Area>("get_area");
 const setArea = callable<[string, Record<string, unknown>], Answer>("set_area");
 const doAction = callable<[string], Answer>("do_action");
-
-// How often the cheap status is asked for. It opens files and starts no
-// process, so this costs a game nothing.
-const POLL_MS = 5000;
 
 // The scenes of the strip, in words. The command answers with the names that
 // the configuration file uses.
@@ -106,13 +82,22 @@ function Content() {
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
 
-  // The cheap half, on a timer. The expensive half is asked for when the page
-  // opens and again after a change that can move one of its answers.
-  const refreshCheap = useCallback(async () => {
-    setStatus(await getStatus());
-  }, []);
+  // What a person picked, before the machine has answered.
+  //
+  // A DropdownItem takes its option when it is built and keeps it, so a new
+  // value in the props does not move it. This holds the choice, the key below
+  // carries it, and the box thus says what was pressed at the moment it is
+  // pressed rather than after a command has run. A refresh takes it away
+  // again, and the machine's own answer is what stays.
+  const [chosen, setChosen] = useState<Record<string, string>>({});
 
-  const refreshAll = useCallback(async () => {
+  // One fetch when the page opens, and one after every change.
+  //
+  // There is no timer. There was one, and it asked for the cheap status,
+  // which carries no state for the switches of the CEC toolkit. Every five
+  // seconds it replaced the full answer with one that had none, and every
+  // switch on the page went to off by itself.
+  const refresh = useCallback(async () => {
     const [whole, one, two, three] = await Promise.all([
       getFullStatus(),
       getArea("strip"),
@@ -123,15 +108,14 @@ function Content() {
     setStrip(one);
     setPower(two);
     setCec(three);
+    setChosen({});
   }, []);
 
   useEffect(() => {
-    void refreshAll();
-    const timer = setInterval(() => void refreshCheap(), POLL_MS);
-    return () => clearInterval(timer);
-  }, [refreshAll, refreshCheap]);
+    void refresh();
+  }, [refresh]);
 
-  // One place that changes something, so that every button reports a refusal
+  // One place that changes something, so that every control reports a refusal
   // in the same way and nothing runs while something else does.
   const change = useCallback(
     async (work: () => Promise<Answer>) => {
@@ -145,22 +129,29 @@ function Content() {
         if (!answer.ok) {
           setSaid(answer.error ?? "That did not work.");
         }
-        await refreshAll();
+        await refresh();
       } finally {
         setBusy(false);
       }
     },
-    [busy, refreshAll],
+    [busy, refresh],
   );
 
   const write = (area: string, updates: Record<string, unknown>) =>
     void change(() => setArea(area, updates));
 
-  const ready = status?.ready;
+  // The value to draw: what was pressed, or what the machine holds.
+  const shown = (area: string, key: string, held: unknown, fallback = "") =>
+    chosen[area + "." + key] ?? String(held ?? fallback);
+
+  const pick = (area: string, key: string, value: string) => {
+    setChosen((was) => ({ ...was, [area + "." + key]: value }));
+    write(area, { [key]: value });
+  };
+
   const settings = (strip?.settings ?? {}) as Record<string, unknown>;
   const cpu = (power?.settings ?? {}) as Record<string, unknown>;
   const offered = (power?.offers ?? {}) as Record<string, unknown>;
-  const drives = status?.areas?.drives?.drives ?? [];
   const switches = status?.cec_features ?? {};
   const installed = Boolean(status?.areas?.cec?.installed);
 
@@ -171,69 +162,66 @@ function Content() {
     Array.isArray(cec?.offers?.features) ? cec?.offers?.features : []
   ) as Feature[];
 
+  const rainbow = shown("strip", "RAINBOW_SHOWS", settings.RAINBOW_SHOWS,
+                        "rainbow");
+  const scene = shown("strip", "DESKTOP_SCENE", settings.DESKTOP_SCENE,
+                      "steam");
+  const governor = shown("power", "CPU_GOVERNOR", cpu.CPU_GOVERNOR);
+  const preference = shown("power", "CPU_EPP", cpu.CPU_EPP);
+
   return (
     <>
-      <PanelSection title="This machine">
-        <PanelSectionRow>
-          <div style={{ fontSize: "0.8em", lineHeight: "1.5em" }}>
-            {status && !status.ok ? (
-              <div style={{ color: "#d85c5c" }}>{status.error}</div>
-            ) : (
-              <>
-                <div>
-                  LED bar: {ready?.module ? "ready" : "the kernel module is not loaded"}
-                </div>
-                <div>HDMI CEC: {ready?.cec ? "installed" : "not installed"}</div>
-                <div>
-                  Drives: {ready ? `${ready.mounted} of ${ready.drives} mounted` : "reading"}
-                </div>
-                {status?.sudo_rule === false && (
-                  <div style={{ color: "#d9a441" }}>
-                    Nothing here can change a setting. Install the panel again
-                    in Desktop Mode to get the rule that permits it.
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </PanelSectionRow>
-        {said !== "" && (
-          <PanelSectionRow>
-            <div style={{ fontSize: "0.8em", color: "#d85c5c" }}>{said}</div>
-          </PanelSectionRow>
-        )}
-      </PanelSection>
-
       {/*
-        Each dropdown carries a key that holds its own value.
-
-        A DropdownItem takes the selected option when it is built and keeps
-        it. A new value in the props does not move it, so the effect changed
-        and the box went on showing the effect before it. The key changes with
-        the value, so React builds a new dropdown, and the box then says what
-        the machine holds.
+        Only what went wrong, and nothing when nothing did. A page that
+        reports its own health at the top of every visit reports it to
+        somebody who came to change one setting.
       */}
+      {(said !== "" || status?.sudo_rule === false) && (
+        <PanelSection>
+          {said !== "" && (
+            <PanelSectionRow>
+              <div style={{ fontSize: "0.8em", color: "#d85c5c" }}>{said}</div>
+            </PanelSectionRow>
+          )}
+          {status?.sudo_rule === false && (
+            <PanelSectionRow>
+              <div style={{ fontSize: "0.8em", color: "#d9a441" }}>
+                Nothing here can change a setting. Install the panel again in
+                Desktop Mode to get the rule that permits it.
+              </div>
+            </PanelSectionRow>
+          )}
+        </PanelSection>
+      )}
+
       <PanelSection title="LED bar">
         <PanelSectionRow>
+          {/*
+            The key holds the value. Without it a DropdownItem keeps the
+            option it was built with, so the effect changed and the box went
+            on naming the one before it.
+          */}
           <DropdownItem
+            key={"rainbow-" + rainbow}
             label="Rainbow slot"
             description="What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode."
-            key={"rainbow-" + String(settings.RAINBOW_SHOWS ?? "")}
             rgOptions={options(strip?.offers?.RAINBOW_SHOWS)}
-            selectedOption={String(settings.RAINBOW_SHOWS ?? "rainbow")}
+            selectedOption={rainbow}
             disabled={busy || !strip?.ok}
-            onChange={(option) => write("strip", { RAINBOW_SHOWS: String(option.data) })}
+            onChange={(option) =>
+              pick("strip", "RAINBOW_SHOWS", String(option.data))}
           />
         </PanelSectionRow>
         <PanelSectionRow>
           <DropdownItem
+            key={"scene-" + scene}
             label="Desktop scene"
             description="What the bar shows on the desktop. Game Mode belongs to Steam."
-            key={"scene-" + String(settings.DESKTOP_SCENE ?? "")}
             rgOptions={options(strip?.offers?.DESKTOP_SCENE)}
-            selectedOption={String(settings.DESKTOP_SCENE ?? "steam")}
+            selectedOption={scene}
             disabled={busy || !strip?.ok}
-            onChange={(option) => write("strip", { DESKTOP_SCENE: String(option.data) })}
+            onChange={(option) =>
+              pick("strip", "DESKTOP_SCENE", String(option.data))}
           />
         </PanelSectionRow>
         <PanelSectionRow>
@@ -258,25 +246,27 @@ function Content() {
           <>
             <PanelSectionRow>
               <DropdownItem
+                key={"governor-" + governor}
                 label="Governor"
                 description="How the clock is chosen."
-                key={"governor-" + String(cpu.CPU_GOVERNOR ?? "")}
                 rgOptions={options(offered.governors)}
-                selectedOption={String(cpu.CPU_GOVERNOR ?? "")}
+                selectedOption={governor}
                 disabled={busy || !power?.ok}
-                onChange={(option) => write("power", { CPU_GOVERNOR: String(option.data) })}
+                onChange={(option) =>
+                  pick("power", "CPU_GOVERNOR", String(option.data))}
               />
             </PanelSectionRow>
             {Array.isArray(offered.epp) && offered.epp.length > 0 && (
               <PanelSectionRow>
                 <DropdownItem
+                  key={"epp-" + preference}
                   label="Energy preference"
                   description="A hint to the firmware about where in its range to sit. The performance governor pins it."
-                  key={"epp-" + String(cpu.CPU_EPP ?? "")}
                   rgOptions={options(offered.epp)}
-                  selectedOption={String(cpu.CPU_EPP ?? "")}
+                  selectedOption={preference}
                   disabled={busy || !power?.ok}
-                  onChange={(option) => write("power", { CPU_EPP: String(option.data) })}
+                  onChange={(option) =>
+                    pick("power", "CPU_EPP", String(option.data))}
                 />
               </PanelSectionRow>
             )}
@@ -319,42 +309,11 @@ function Content() {
                   description={feature.explains}
                   checked={Boolean(switches[feature.name])}
                   disabled={busy}
-                  onChange={(on: boolean) => write("cec", { [feature.name]: on })}
+                  onChange={(on: boolean) =>
+                    write("cec", { [feature.name]: on })}
                 />
               </PanelSectionRow>
             ))}
-          </>
-        )}
-      </PanelSection>
-
-      <PanelSection title="Drives">
-        {drives.length === 0 ? (
-          <PanelSectionRow>
-            <div style={{ fontSize: "0.8em" }}>
-              No drive is configured. Add one from the panel in Desktop Mode.
-            </div>
-          </PanelSectionRow>
-        ) : (
-          <>
-            {drives.map((drive) => (
-              <PanelSectionRow key={drive.uuid}>
-                <div style={{ fontSize: "0.8em", display: "flex", justifyContent: "space-between" }}>
-                  <span>{drive.where}</span>
-                  <span style={{ color: drive.mounted ? "#59bf6b" : "#8a98a8" }}>
-                    {drive.mounted ? "mounted" : "not mounted"}
-                  </span>
-                </div>
-              </PanelSectionRow>
-            ))}
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                disabled={busy}
-                onClick={() => void change(() => doAction("repair-drives"))}
-              >
-                Mount them again
-              </ButtonItem>
-            </PanelSectionRow>
           </>
         )}
       </PanelSection>

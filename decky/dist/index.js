@@ -82,14 +82,10 @@ function FaLightbulb (props) {
   return GenIcon({"attr":{"viewBox":"0 0 352 512"},"child":[{"tag":"path","attr":{"d":"M96.06 454.35c.01 6.29 1.87 12.45 5.36 17.69l17.09 25.69a31.99 31.99 0 0 0 26.64 14.28h61.71a31.99 31.99 0 0 0 26.64-14.28l17.09-25.69a31.989 31.989 0 0 0 5.36-17.69l.04-38.35H96.01l.05 38.35zM0 176c0 44.37 16.45 84.85 43.56 115.78 16.52 18.85 42.36 58.23 52.21 91.45.04.26.07.52.11.78h160.24c.04-.26.07-.51.11-.78 9.85-33.22 35.69-72.6 52.21-91.45C335.55 260.85 352 220.37 352 176 352 78.61 272.91-.3 175.45 0 73.44.31 0 82.97 0 176zm176-80c-44.11 0-80 35.89-80 80 0 8.84-7.16 16-16 16s-16-7.16-16-16c0-61.76 50.24-112 112-112 8.84 0 16 7.16 16 16s-7.16 16-16 16z"},"child":[]}]})(props);
 }
 
-const getStatus = callable("get_status");
 const getFullStatus = callable("get_full_status");
 const getArea = callable("get_area");
 const setArea = callable("set_area");
 const doAction = callable("do_action");
-// How often the cheap status is asked for. It opens files and starts no
-// process, so this costs a game nothing.
-const POLL_MS = 5000;
 // The scenes of the strip, in words. The command answers with the names that
 // the configuration file uses.
 const SCENE_WORDS = {
@@ -123,12 +119,21 @@ function Content() {
     const [cec, setCec] = SP_REACT.useState(null);
     const [busy, setBusy] = SP_REACT.useState(false);
     const [said, setSaid] = SP_REACT.useState("");
-    // The cheap half, on a timer. The expensive half is asked for when the page
-    // opens and again after a change that can move one of its answers.
-    const refreshCheap = SP_REACT.useCallback(async () => {
-        setStatus(await getStatus());
-    }, []);
-    const refreshAll = SP_REACT.useCallback(async () => {
+    // What a person picked, before the machine has answered.
+    //
+    // A DropdownItem takes its option when it is built and keeps it, so a new
+    // value in the props does not move it. This holds the choice, the key below
+    // carries it, and the box thus says what was pressed at the moment it is
+    // pressed rather than after a command has run. A refresh takes it away
+    // again, and the machine's own answer is what stays.
+    const [chosen, setChosen] = SP_REACT.useState({});
+    // One fetch when the page opens, and one after every change.
+    //
+    // There is no timer. There was one, and it asked for the cheap status,
+    // which carries no state for the switches of the CEC toolkit. Every five
+    // seconds it replaced the full answer with one that had none, and every
+    // switch on the page went to off by itself.
+    const refresh = SP_REACT.useCallback(async () => {
         const [whole, one, two, three] = await Promise.all([
             getFullStatus(),
             getArea("strip"),
@@ -139,13 +144,12 @@ function Content() {
         setStrip(one);
         setPower(two);
         setCec(three);
+        setChosen({});
     }, []);
     SP_REACT.useEffect(() => {
-        void refreshAll();
-        const timer = setInterval(() => void refreshCheap(), POLL_MS);
-        return () => clearInterval(timer);
-    }, [refreshAll, refreshCheap]);
-    // One place that changes something, so that every button reports a refusal
+        void refresh();
+    }, [refresh]);
+    // One place that changes something, so that every control reports a refusal
     // in the same way and nothing runs while something else does.
     const change = SP_REACT.useCallback(async (work) => {
         if (busy) {
@@ -158,25 +162,33 @@ function Content() {
             if (!answer.ok) {
                 setSaid(answer.error ?? "That did not work.");
             }
-            await refreshAll();
+            await refresh();
         }
         finally {
             setBusy(false);
         }
-    }, [busy, refreshAll]);
+    }, [busy, refresh]);
     const write = (area, updates) => void change(() => setArea(area, updates));
-    const ready = status?.ready;
+    // The value to draw: what was pressed, or what the machine holds.
+    const shown = (area, key, held, fallback = "") => chosen[area + "." + key] ?? String(held ?? fallback);
+    const pick = (area, key, value) => {
+        setChosen((was) => ({ ...was, [area + "." + key]: value }));
+        write(area, { [key]: value });
+    };
     const settings = (strip?.settings ?? {});
     const cpu = (power?.settings ?? {});
     const offered = (power?.offers ?? {});
-    const drives = status?.areas?.drives?.drives ?? [];
     const switches = status?.cec_features ?? {};
     const installed = Boolean(status?.areas?.cec?.installed);
     // The switches of the toolkit, with the words that the panel uses for them.
     // The command answers with this list, so a switch that the toolkit gains
     // appears here with its own label and needs nothing written in this file.
     const features = (Array.isArray(cec?.offers?.features) ? cec?.offers?.features : []);
-    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "This machine", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", lineHeight: "1.5em" }, children: status && !status.ok ? (SP_JSX.jsx("div", { style: { color: "#d85c5c" }, children: status.error })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs("div", { children: ["LED bar: ", ready?.module ? "ready" : "the kernel module is not loaded"] }), SP_JSX.jsxs("div", { children: ["HDMI CEC: ", ready?.cec ? "installed" : "not installed"] }), SP_JSX.jsxs("div", { children: ["Drives: ", ready ? `${ready.mounted} of ${ready.drives} mounted` : "reading"] }), status?.sudo_rule === false && (SP_JSX.jsx("div", { style: { color: "#d9a441" }, children: "Nothing here can change a setting. Install the panel again in Desktop Mode to get the rule that permits it." }))] })) }) }), said !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d85c5c" }, children: said }) }))] }), SP_JSX.jsxs(DFL.PanelSection, { title: "LED bar", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Rainbow slot", description: "What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode.", rgOptions: options(strip?.offers?.RAINBOW_SHOWS), selectedOption: String(settings.RAINBOW_SHOWS ?? "rainbow"), disabled: busy || !strip?.ok, onChange: (option) => write("strip", { RAINBOW_SHOWS: String(option.data) }) }, "rainbow-" + String(settings.RAINBOW_SHOWS ?? "")) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Desktop scene", description: "What the bar shows on the desktop. Game Mode belongs to Steam.", rgOptions: options(strip?.offers?.DESKTOP_SCENE), selectedOption: String(settings.DESKTOP_SCENE ?? "steam"), disabled: busy || !strip?.ok, onChange: (option) => write("strip", { DESKTOP_SCENE: String(option.data) }) }, "scene-" + String(settings.DESKTOP_SCENE ?? "")) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Notifications", description: "A flash for an achievement, a message or a friend who comes online.", checked: Boolean(settings.NOTIFY), disabled: busy || !strip?.ok, onChange: (on) => write("strip", { NOTIFY: on }) }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: "CPU power", children: Number(offered.policies ?? 0) === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "This machine has no cpufreq, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Governor", description: "How the clock is chosen.", rgOptions: options(offered.governors), selectedOption: String(cpu.CPU_GOVERNOR ?? ""), disabled: busy || !power?.ok, onChange: (option) => write("power", { CPU_GOVERNOR: String(option.data) }) }, "governor-" + String(cpu.CPU_GOVERNOR ?? "")) }), Array.isArray(offered.epp) && offered.epp.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Energy preference", description: "A hint to the firmware about where in its range to sit. The performance governor pins it.", rgOptions: options(offered.epp), selectedOption: String(cpu.CPU_EPP ?? ""), disabled: busy || !power?.ok, onChange: (option) => write("power", { CPU_EPP: String(option.data) }) }, "epp-" + String(cpu.CPU_EPP ?? "")) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Television", children: !installed ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "The HDMI CEC toolkit is not installed. Install it from the panel in Desktop Mode." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void change(() => doAction("cec-wake")), children: "Turn the television on" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void change(() => doAction("cec-standby")), children: "Send standby" }) }), features.map((feature) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, description: feature.explains, checked: Boolean(switches[feature.name]), disabled: busy, onChange: (on) => write("cec", { [feature.name]: on }) }) }, feature.name)))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Drives", children: drives.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "No drive is configured. Add one from the panel in Desktop Mode." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [drives.map((drive) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { fontSize: "0.8em", display: "flex", justifyContent: "space-between" }, children: [SP_JSX.jsx("span", { children: drive.where }), SP_JSX.jsx("span", { style: { color: drive.mounted ? "#59bf6b" : "#8a98a8" }, children: drive.mounted ? "mounted" : "not mounted" })] }) }, drive.uuid))), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void change(() => doAction("repair-drives")), children: "Mount them again" }) })] })) })] }));
+    const rainbow = shown("strip", "RAINBOW_SHOWS", settings.RAINBOW_SHOWS, "rainbow");
+    const scene = shown("strip", "DESKTOP_SCENE", settings.DESKTOP_SCENE, "steam");
+    const governor = shown("power", "CPU_GOVERNOR", cpu.CPU_GOVERNOR);
+    const preference = shown("power", "CPU_EPP", cpu.CPU_EPP);
+    return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [(said !== "" || status?.sudo_rule === false) && (SP_JSX.jsxs(DFL.PanelSection, { children: [said !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d85c5c" }, children: said }) })), status?.sudo_rule === false && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: "Nothing here can change a setting. Install the panel again in Desktop Mode to get the rule that permits it." }) }))] })), SP_JSX.jsxs(DFL.PanelSection, { title: "LED bar", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Rainbow slot", description: "What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode.", rgOptions: options(strip?.offers?.RAINBOW_SHOWS), selectedOption: rainbow, disabled: busy || !strip?.ok, onChange: (option) => pick("strip", "RAINBOW_SHOWS", String(option.data)) }, "rainbow-" + rainbow) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Desktop scene", description: "What the bar shows on the desktop. Game Mode belongs to Steam.", rgOptions: options(strip?.offers?.DESKTOP_SCENE), selectedOption: scene, disabled: busy || !strip?.ok, onChange: (option) => pick("strip", "DESKTOP_SCENE", String(option.data)) }, "scene-" + scene) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Notifications", description: "A flash for an achievement, a message or a friend who comes online.", checked: Boolean(settings.NOTIFY), disabled: busy || !strip?.ok, onChange: (on) => write("strip", { NOTIFY: on }) }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: "CPU power", children: Number(offered.policies ?? 0) === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "This machine has no cpufreq, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Governor", description: "How the clock is chosen.", rgOptions: options(offered.governors), selectedOption: governor, disabled: busy || !power?.ok, onChange: (option) => pick("power", "CPU_GOVERNOR", String(option.data)) }, "governor-" + governor) }), Array.isArray(offered.epp) && offered.epp.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Energy preference", description: "A hint to the firmware about where in its range to sit. The performance governor pins it.", rgOptions: options(offered.epp), selectedOption: preference, disabled: busy || !power?.ok, onChange: (option) => pick("power", "CPU_EPP", String(option.data)) }, "epp-" + preference) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Television", children: !installed ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "The HDMI CEC toolkit is not installed. Install it from the panel in Desktop Mode." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void change(() => doAction("cec-wake")), children: "Turn the television on" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void change(() => doAction("cec-standby")), children: "Send standby" }) }), features.map((feature) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, description: feature.explains, checked: Boolean(switches[feature.name]), disabled: busy, onChange: (on) => write("cec", { [feature.name]: on }) }) }, feature.name)))] })) })] }));
 }
 var index = definePlugin(() => ({
     name: "SteamOS Utility Center",
