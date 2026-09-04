@@ -14,13 +14,12 @@
 
 import { callable, definePlugin } from "@decky/api";
 import {
-  ButtonItem,
   DropdownItem,
   PanelSection,
   PanelSectionRow,
   ToggleField,
 } from "@decky/ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FaLightbulb } from "react-icons/fa";
 
 // -- what the command answers -----------------------------------------------
@@ -43,7 +42,6 @@ type Area = Answer & {
 const getFullStatus = callable<[], Status>("get_full_status");
 const getArea = callable<[string], Area>("get_area");
 const setArea = callable<[string, Record<string, unknown>], Answer>("set_area");
-const doAction = callable<[string], Answer>("do_action");
 
 // The scenes of the strip, in words. The command answers with the names that
 // the configuration file uses.
@@ -149,6 +147,20 @@ function Content() {
     write(area, { [key]: value });
   };
 
+  // The option lists, built one time for each answer of the command.
+  //
+  // They were rebuilt at every render before. A Dropdown that holds the
+  // option it was given then holds an object that is no longer in the list it
+  // was given, which is one way for a box to name a value that is gone.
+  const rainbowOptions = useMemo(
+    () => options(strip?.offers?.RAINBOW_SHOWS), [strip]);
+  const sceneOptions = useMemo(
+    () => options(strip?.offers?.DESKTOP_SCENE), [strip]);
+  const governorOptions = useMemo(
+    () => options((power?.offers ?? {}).governors), [power]);
+  const eppOptions = useMemo(
+    () => options((power?.offers ?? {}).epp), [power]);
+
   const settings = (strip?.settings ?? {}) as Record<string, unknown>;
   const cpu = (power?.settings ?? {}) as Record<string, unknown>;
   const offered = (power?.offers ?? {}) as Record<string, unknown>;
@@ -195,29 +207,30 @@ function Content() {
       )}
 
       <PanelSection title="LED bar">
-        <PanelSectionRow>
-          {/*
-            The key holds the value. Without it a DropdownItem keeps the
-            option it was built with, so the effect changed and the box went
-            on naming the one before it.
-          */}
+        {/*
+          The key is on the row, and it holds the value.
+
+          A DropdownItem keeps the option it was built with, and a new value
+          in its props does not move it. A key inside the row did not replace
+          it either. The key is thus on the whole row: React builds a new row,
+          and with it a box that has no old value to hold.
+        */}
+        <PanelSectionRow key={"rainbow-" + rainbow}>
           <DropdownItem
-            key={"rainbow-" + rainbow}
             label="Rainbow slot"
             description="What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode."
-            rgOptions={options(strip?.offers?.RAINBOW_SHOWS)}
+            rgOptions={rainbowOptions}
             selectedOption={rainbow}
             disabled={busy || !strip?.ok}
             onChange={(option) =>
               pick("strip", "RAINBOW_SHOWS", String(option.data))}
           />
         </PanelSectionRow>
-        <PanelSectionRow>
+        <PanelSectionRow key={"scene-" + scene}>
           <DropdownItem
-            key={"scene-" + scene}
             label="Desktop scene"
             description="What the bar shows on the desktop. Game Mode belongs to Steam."
-            rgOptions={options(strip?.offers?.DESKTOP_SCENE)}
+            rgOptions={sceneOptions}
             selectedOption={scene}
             disabled={busy || !strip?.ok}
             onChange={(option) =>
@@ -244,12 +257,11 @@ function Content() {
           </PanelSectionRow>
         ) : (
           <>
-            <PanelSectionRow>
+            <PanelSectionRow key={"governor-" + governor}>
               <DropdownItem
-                key={"governor-" + governor}
                 label="Governor"
                 description="How the clock is chosen."
-                rgOptions={options(offered.governors)}
+                rgOptions={governorOptions}
                 selectedOption={governor}
                 disabled={busy || !power?.ok}
                 onChange={(option) =>
@@ -257,12 +269,11 @@ function Content() {
               />
             </PanelSectionRow>
             {Array.isArray(offered.epp) && offered.epp.length > 0 && (
-              <PanelSectionRow>
+              <PanelSectionRow key={"epp-" + preference}>
                 <DropdownItem
-                  key={"epp-" + preference}
                   label="Energy preference"
                   description="A hint to the firmware about where in its range to sit. The performance governor pins it."
-                  rgOptions={options(offered.epp)}
+                  rgOptions={eppOptions}
                   selectedOption={preference}
                   disabled={busy || !power?.ok}
                   onChange={(option) =>
@@ -284,24 +295,6 @@ function Content() {
           </PanelSectionRow>
         ) : (
           <>
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                disabled={busy}
-                onClick={() => void change(() => doAction("cec-wake"))}
-              >
-                Turn the television on
-              </ButtonItem>
-            </PanelSectionRow>
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                disabled={busy}
-                onClick={() => void change(() => doAction("cec-standby"))}
-              >
-                Send standby
-              </ButtonItem>
-            </PanelSectionRow>
             {features.map((feature) => (
               <PanelSectionRow key={feature.name}>
                 <ToggleField

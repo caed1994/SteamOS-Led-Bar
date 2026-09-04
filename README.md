@@ -1234,7 +1234,7 @@ What is on the page:
 | ------- | ------------- |
 | LED bar | the rainbow slot, the desktop scene, notifications |
 | CPU power | the governor and the energy preference |
-| Television | wake, standby, and each switch of the HDMI CEC toolkit |
+| Television | each switch of the HDMI CEC toolkit |
 
 The page holds what a person changes from a sofa, and nothing else. A keyboard
 layout is set one time and a drive is added one time, so both are in the panel.

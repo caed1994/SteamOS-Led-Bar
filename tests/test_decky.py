@@ -211,9 +211,12 @@ class PageTest(unittest.TestCase):
             self.assertIn(area, ctl.AREAS, area)
 
     def test_every_action_it_names_is_one_the_command_knows(self):
-        named = set(re.findall(r'doAction\("([a-z-]+)"\)', self.text))
-        self.assertTrue(named)
-        for action in sorted(named):
+        """The page names none today. Waking a television is what the
+        television's own remote is for, and the toolkit does it by itself.
+        This holds for the day one comes back.
+        """
+        for action in sorted(set(re.findall(r'doAction\("([a-z-]+)"\)',
+                                            self.text))):
             self.assertIn(action, ctl.ACTIONS, action)
 
     def test_the_keyboard_is_not_on_the_page(self):
@@ -259,21 +262,31 @@ class PageTest(unittest.TestCase):
         self.assertNotIn("SliderField", self.text)
         self.assertNotIn("MAX_BRIGHTNESS", self.text)
 
-    def test_every_dropdown_carries_a_key_that_holds_its_value(self):
+    def test_every_row_with_a_dropdown_carries_a_key_that_holds_its_value(self):
         """A DropdownItem keeps the option it was built with.
 
-        A new value in the props does not move it. So the effect changed and
-        the box went on showing the effect before it. A key that changes with
-        the value makes React build a new dropdown.
+        A new value in its props does not move it, and a key on the box
+        itself did not replace it either. The key is on the row, so React
+        builds a new row and with it a box that has no old value to hold.
         """
-        # An attribute holds an arrow function, so a `>` is not the end of
-        # the tag. The end is the `/>` that closes it.
-        found = [part[:part.index("/>")]
-                 for part in self.text.split("<DropdownItem")[1:]]
+        rows = self.text.split("<PanelSectionRow")[1:]
+        found = [one for one in rows if "<DropdownItem" in one[:400]]
         self.assertTrue(found, "there are no dropdowns to check")
         for one in found:
-            self.assertIn("key=", one, one[:160])
-            self.assertIn("selectedOption=", one, one[:160])
+            head = one[:one.index(">")]
+            self.assertIn("key=", head, head)
+
+    def test_the_option_lists_keep_their_identity(self):
+        """A list rebuilt at every render is a new list of new objects.
+
+        A box that holds the option it was given then holds an object that is
+        no longer in the list it has, which is one way to name a value that
+        is gone.
+        """
+        for name in ("rainbowOptions", "sceneOptions", "governorOptions",
+                     "eppOptions"):
+            self.assertIn("const %s = useMemo(" % name, self.text, name)
+            self.assertIn("rgOptions={%s}" % name, self.text, name)
 
     def test_the_page_asks_for_one_status_and_not_two(self):
         """The fault that turned every switch off by itself.
@@ -351,7 +364,7 @@ class BuiltTest(unittest.TestCase):
 
     def test_it_was_built_from_this_source(self):
         built = read("dist", "index.js")
-        for sign in ("SteamOS Utility Center", "cec-standby", "RAINBOW_SHOWS",
+        for sign in ("SteamOS Utility Center", "Rainbow slot", "RAINBOW_SHOWS",
                      "get_full_status"):
             self.assertIn(sign, built, sign)
 
