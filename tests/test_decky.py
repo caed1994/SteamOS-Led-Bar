@@ -64,6 +64,64 @@ class ManifestTest(unittest.TestCase):
         self.assertIn(self.manifest["name"], shell_value("DECKY_PLUGIN"))
 
 
+class InstallTest(unittest.TestCase):
+    """How the plugin reaches ~/homebrew/plugins, and what is said when it
+    does not.
+
+    The first version of this step copied as the desktop user and said nothing
+    when it skipped. Decky Loader keeps that directory as root, so the copy
+    failed, and a person then looked for a plugin that was never written with
+    nothing on the screen to say why.
+    """
+
+    def _text(self):
+        with open(os.path.join(HERE, "..", "install.sh"),
+                  encoding="utf-8") as handle:
+            return handle.read()
+
+    def _step(self):
+        text = self._text()
+        start = text.index("install_decky_plugin() {")
+        return text[start:text.index("\ninstall_decky_plugin", start)]
+
+    def test_the_installer_has_the_step(self):
+        self.assertIn("install_decky_plugin", self._text())
+
+    def test_it_copies_as_root(self):
+        """Decky keeps that directory as root, and its loader reads as root."""
+        self.assertNotIn("runuser", self._step())
+        self.assertIn("install -d", self._step())
+
+    def test_it_says_something_when_it_skips(self):
+        """A silent skip is the fault this step had.
+
+        Every branch that installs nothing says so. There is no path out of
+        this step that leaves the screen unchanged.
+        """
+        lines = self._step().splitlines()
+        for branch in ("No desktop user", "No Decky Loader"):
+            self.assertIn(branch, "\n".join(lines), branch)
+        # Every way out of this step says something on the three lines above
+        # it. A `return 0` with nothing above it is a silent skip.
+        for index, line in enumerate(lines):
+            if "return 0" not in line:
+                continue
+            above = " ".join(lines[max(0, index - 3):index + 1])
+            self.assertTrue("say " in above or "warn " in above,
+                            "line %d leaves without a word: %s"
+                            % (index + 1, line.strip()))
+
+    def test_it_names_every_file_the_plugin_needs(self):
+        """Decky reads plugin.json, runs main.py and loads dist/index.js."""
+        step = self._step()
+        for file in ("plugin.json", "main.py", "dist/index.js"):
+            self.assertIn(file, step, file)
+
+    def test_it_says_how_to_make_decky_read_it(self):
+        """A copied plugin appears at the next start of the loader."""
+        self.assertIn("plugin_loader", self._step())
+
+
 class BackendTest(unittest.TestCase):
     """The Python half, which is a caller of the command and nothing else."""
 

@@ -1210,10 +1210,23 @@ also:
 settings that a person changes from a sofa into the Quick Access menu of Game
 Mode, where the panel cannot go.
 
-The installer copies it in, but only on a machine that has Decky. Restart Decky
-or the machine afterwards, and the plugin is in the menu. Nothing has to be
+The installer copies it in, but only on a machine that has Decky. It says what
+it did in every case, including when it did nothing, so a plugin that is not
+there is a line in the installation log and not a search. Nothing has to be
 built: `decky/dist/index.js` is in this repository, because nobody must run npm
 on a Steam Machine.
+
+Decky reads its plugins when its loader starts, so a new one appears after:
+
+```bash
+sudo systemctl restart plugin_loader
+```
+
+If the plugin is not in the menu, look for it on the disk first:
+
+```bash
+ls ~/homebrew/plugins/
+```
 
 What is on the page:
 

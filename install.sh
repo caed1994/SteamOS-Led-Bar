@@ -359,27 +359,49 @@ fi
 
 # The Game Mode plugin, where Decky Loader is installed.
 #
-# Only where it is. A machine with no Decky gets no directory made for it and
-# no message about a program that its owner did not ask for.
+# As root, and not as the desktop user. Decky Loader keeps its plugin
+# directory as root, and its own loader runs as root and reads them. A copy as
+# the user fails on `mkdir` there with "permission denied", which is what this
+# step did on the machine it was written for.
+#
+# It says what it did in every case, including when it did nothing. A step
+# that is silent when it skips leaves a person looking for a plugin that was
+# never copied, with nothing on the screen to say so.
 #
 # Decky reads a plugin when it starts, so a new one appears after Decky is
 # restarted. The plugin needs nothing built: dist/index.js is in the
 # repository, because nobody must run npm on a Steam Machine.
-if watcher_user_dirs && [[ -d "$WATCHER_HOME/homebrew/plugins" ]]; then
-    decky_where="$WATCHER_HOME/$DECKY_PLUGIN"
-    say "Installing the Game Mode plugin to $decky_where"
-    if runuser -u "$WATCHER_USER" -- mkdir -p "$decky_where/dist"; then
-        for decky_file in plugin.json main.py package.json dist/index.js; do
-            runuser -u "$WATCHER_USER" -- \
-                cp "$SOURCE_DIR/decky/$decky_file" \
-                   "$decky_where/$decky_file" \
-                || warn "could not copy decky/$decky_file"
-        done
-        say "  restart Decky, or the machine, to see it"
-    else
-        warn "could not write $decky_where"
+install_decky_plugin() {
+    local home where file
+    if ! watcher_user_dirs; then
+        say "No desktop user, so the Game Mode plugin is not installed."
+        return 0
     fi
-fi
+    home="$WATCHER_HOME"
+    if [[ ! -d "$home/homebrew" ]]; then
+        say "No Decky Loader in $home/homebrew, so no Game Mode plugin."
+        say "  Install Decky from https://decky.xyz and run this again."
+        return 0
+    fi
+
+    where="$home/$DECKY_PLUGIN"
+    say "Installing the Game Mode plugin to $where"
+    if ! install -d -m 0755 "$where/dist"; then
+        warn "could not make $where - the Game Mode plugin is not installed"
+        return 0
+    fi
+    for file in plugin.json main.py package.json dist/index.js; do
+        if [[ ! -f "$SOURCE_DIR/decky/$file" ]]; then
+            warn "decky/$file is not in this clone - is it up to date?"
+            return 0
+        fi
+        install -m 0644 "$SOURCE_DIR/decky/$file" "$where/$file" \
+            || { warn "could not write $where/$file"; return 0; }
+    done
+    say "  restart Decky to see it: sudo systemctl restart plugin_loader"
+}
+
+install_decky_plugin
 
 if [[ -f "$POWER_CONFIG_PATH" ]]; then
     say "Keeping existing $POWER_CONFIG_PATH"
