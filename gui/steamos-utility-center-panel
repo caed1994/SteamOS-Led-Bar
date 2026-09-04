@@ -915,8 +915,9 @@ def dress(style, roles, sizes):
         variant("Page.Filled.Button", roles["primary"], "_page")
         variant("Page.Tonal.Button", roles["secondary_container"], "_page")
         variant("Page.Outlined.Button", page, "_page", outline=roles["outline"])
+        variant("Page.Text.Button", page, "_page", sides=2)
         for name in ("Filled", "Tonal", "Outlined", "Text",
-                     "Page.Filled", "Page.Tonal", "Page.Outlined"):
+                     "Page.Filled", "Page.Tonal", "Page.Outlined", "Page.Text"):
             style.layout("%s.TButton" % name, [
                 ("%s.Button" % name, {"sticky": "nsew", "children": [
                     ("Button.label", {"side": "top", "sticky": ""})]})])
@@ -1333,6 +1334,11 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
     style.map("Outlined.TButton", **label_fades("primary"))
     style.configure("Text.TButton", **button("surface", "primary", sides=2))
     style.map("Text.TButton", **label_fades("primary"))
+    # The same, on the ground of the page rather than on a card. The foot of
+    # the window is page-coloured, and a card-coloured button there draws its
+    # own rectangle against it.
+    style.configure("Page.Text.TButton", **button("_page", "primary", sides=2))
+    style.map("Page.Text.TButton", **label_fades("primary"))
 
     # On the page. A notebook is the stack that holds the pages. Its own
     # background is visible above and beside the content of the page. Before
@@ -2107,63 +2113,6 @@ class SidebarEntry:
             self.canvas.itemconfigure(item, **{option: rest})
 
 
-class Indicator:
-    """Shows a coloured dot and a sentence at the foot of the window.
-
-    There are two of them now. The first reports whether a program drives the
-    LED bar. The second reports whether HDMI CEC can reach the television.
-    Both answer a question that a user has on each page. For that reason they
-    are at the foot and not on the page that holds their settings.
-
-    There are three states, and the third state is important. Before the first
-    read there is no answer. A grey dot with the text "looking" is correct
-    there. A red dot with the text "not connected" reports a fault, and no
-    program answered the question yet.
-
-    The dot is a canvas, because ttk does not draw a coloured disc. This class
-    packs and unpacks the two elements together. An indicator with no dot is a
-    sentence, and an indicator with no sentence is a dot with no meaning.
-    """
-
-    def __init__(self, parent, roles, text):
-        self.roles = roles
-        self.canvas = tk.Canvas(parent, width=STATUS_DOT * 2,
-                                height=STATUS_DOT * 2, highlightthickness=0,
-                                borderwidth=0, background=roles["_page"])
-        self.dot = self.canvas.create_oval(
-            1, 1, STATUS_DOT * 2 - 1, STATUS_DOT * 2 - 1, width=0,
-            fill=roles["on_surface_variant"])
-        self.label = ttk.Label(parent, text=text, style="Page.Muted.TLabel")
-
-    def show(self, after=None):
-        """Puts the indicator into the bar, at a position that does not move.
-
-        `after` fixes the position. Without it, an indicator that comes later
-        goes to the end of the elements at the left at that moment. On a window
-        with a failure message, the indicator then comes after that message.
-        """
-        if self.canvas.winfo_ismapped():
-            return
-        # Room in front of it when it follows another one. Without it the
-        # second dot sits against the first one's last word and the two read
-        # as one long sentence with a bullet in the middle of it.
-        self.canvas.pack(side="left",
-                         padx=(GROUP_GAP if after is not None else 0, ROW_GAP),
-                         **({"after": after} if after is not None else {}))
-        self.label.pack(side="left", after=self.canvas)
-
-    def hide(self):
-        self.canvas.pack_forget()
-        self.label.pack_forget()
-
-    def say(self, good, text):
-        self.canvas.itemconfigure(self.dot, fill=(
-            self.roles["on_surface_variant"] if good is None
-            else self.roles["positive"] if good
-            else self.roles["error"]))
-        self.label.configure(text=text)
-
-
 class FanCurve:
     """Shows the fan curve as a graph that the user can drag.
 
@@ -2448,7 +2397,6 @@ class Panel:
         # The Apply row is below the sections and not in one section. One
         # Apply button applies each setting in the window, in each section.
         # See apply_settings.
-        self._build_statusbar(root)
         self.runner = Runner(root, self._write, self._set_busy)
         self._build_apply(root)
         self.sections.pack(fill="both", expand=True)
@@ -2548,7 +2496,6 @@ class Panel:
 
         self._register_buttons()
         self.refresh_status()
-        self._say_cec_link()
         self._cec_first = None
         if cec.installed():
             self._cec_first = self.root.after(CEC_FIRST_LOOK,
@@ -2659,21 +2606,17 @@ class Panel:
         self._section_pages[key] = str(page)
 
     def _build_sidebar(self):
-        """The list down the left edge, and the About entry under it.
+        """The list down the left edge.
 
-        About is packed to the bottom first. pack hands out room in the order
-        it is asked for, so a widget that wants the foot has to claim it
-        before the list above it takes the lot.
+        About is not in it. This list is the list of the pages that hold
+        settings, and About holds none. It is a button at the left end of the
+        foot of the window now. See _build_apply.
         """
         family, size = self.roles["_font"]
         fonts = {"title": (family, size, "bold"),
                  "subtitle": (family, size + TYPE_SUPPORT)}
         width = self._sidebar_width(fonts)
         self._sidebar_entries = {}
-        about = SidebarEntry(self.sidebar, self.roles, fonts, ABOUT,
-                             self._open_section, width)
-        about.pack(side="bottom", anchor="w")
-        self._sidebar_entries[ABOUT[0]] = about
         for entry in SECTIONS:
             made = SidebarEntry(self.sidebar, self.roles, fonts, entry,
                                 self._open_section, width)
@@ -2698,7 +2641,10 @@ class Panel:
         measures = dict((which, tkfont.Font(root=self.root, font=font))
                         for which, font in fonts.items())
         want = 0
-        for _key, title, subtitle, _icon in SECTIONS + (ABOUT,):
+        # SECTIONS and not SECTIONS + (ABOUT,): About is a button at the foot
+        # of the window and not an entry of this list, so its name must not
+        # decide how wide this list is.
+        for _key, title, subtitle, _icon in SECTIONS:
             want = max(want, measures["title"].measure(title),
                        measures["subtitle"].measure(subtitle))
         return min(SIDEBAR_WIDTH_MAX,
@@ -2720,70 +2666,6 @@ class Panel:
         # _relay_wrapping.
         self.root.after_idle(self._relay_wrapping)
         self._tab_changed()
-
-    def _build_statusbar(self, parent):
-        """Builds the line at the foot: the condition of the hardware.
-
-        This is at the bottom of the window and not on the status page. It
-        answers a question that the user has on each page. A page of LED
-        settings has less value when no device receives the settings.
-
-        It holds that line only. The version was at the right end before, and
-        it is now on the About page. A user reads the version one time and
-        does not watch it. The foot of each page is for the values that a user
-        watches.
-        """
-        bar = self.statusbar = ttk.Frame(parent, style="Page.TFrame")
-        bar.pack(side="bottom", fill="x",
-                 padx=SIDE_MARGIN + SIDE_MARGIN // 2, pady=(0, GROUP_GAP))
-        self.link = Indicator(bar, self.roles, "Looking for the bar...")
-        self.link.show()
-        # This code builds the second indicator here and shows it only after
-        # a toolkit is available. See _say_cec_link. A machine without HDMI
-        # CEC has nothing to report. A permanent grey "not installed" makes
-        # the foot of the window report an absence that no user asked about.
-        self.cec_link = Indicator(bar, self.roles, "Looking for HDMI CEC...")
-        # This code builds the label here and packs it only for a message.
-        # See _say_problem. An empty label in the bar still takes its
-        # padding, and that space is then the one element of this line with
-        # no meaning.
-        self.problem = ttk.Label(bar, text="\u26a0 " + PROBLEM_TEXT,
-                                 style="Page.Bad.TLabel")
-
-    def _say_link(self, connected, detail=""):
-        self.link.say(connected,
-                      detail or ("Looking for the bar..." if connected is None
-                                 else "LED bar connected"
-                                 if connected else "LED bar not connected"))
-
-    def _say_cec_link(self):
-        """The same for HDMI CEC, and away entirely when there is none.
-
-        What it reports is the adapter rather than the switches: every feature
-        can be on and none of them work if nothing can be sent, and that is
-        the question worth answering from a page about something else. Which
-        features are on is a thing you go to the section to see.
-        """
-        if not cec.installed():
-            self.cec_link.hide()
-            return
-        self.cec_link.show(after=self.link.label)
-        if self._cec is None:
-            # A question with no answer is not the same as no question. The
-            # first condition is an installed toolkit that does not answer,
-            # and that is a fault. The second condition is a window before
-            # its first read.
-            if self._cec_asked:
-                self.cec_link.say(False, "HDMI CEC is not answering")
-            else:
-                self.cec_link.say(None, "Looking for HDMI CEC...")
-        elif cec.usable(self._cec):
-            self.cec_link.say(True, "HDMI CEC ready")
-        else:
-            found = cec.device(self._cec)
-            self.cec_link.say(False, "HDMI CEC: %s" % (
-                "adapter cannot be written to" if found.get("exists")
-                else "no adapter"))
 
     def _build_soon(self, where, key):
         """A section that is planned but not built.
@@ -3894,35 +3776,58 @@ class Panel:
         self.apply_row.pack(side="bottom", fill="x",
                             padx=SIDE_MARGIN + SIDE_MARGIN // 2,
                             pady=(GROUP_GAP, GROUP_GAP))
-        # Two pairs, and the space between them separates them. The left pair
-        # acts on the settings in this window. The right pair acts on a file of
-        # settings. pack puts them at the two edges and not at one edge. The
-        # row has the width of the window, and the buttons used one third of
-        # it.
+        # About, at the left end. It was the last entry of the sidebar, under
+        # the sections. The list on the left is the list of the pages that
+        # hold settings, and About holds none: it is the name of the program,
+        # its version and who wrote the parts of it. So it stands here, at the
+        # end of the window that is about the window itself.
+        self.about_button = ttk.Button(
+            self.apply_row, text="About", style="Page.Text.TButton",
+            command=lambda: self._open_section(ABOUT[0]))
+        self.about_button.pack(side="left")
+        # The record of a failed command, beside it. It says the same thing
+        # every time and it is packed only for a failure. See _say_problem.
+        # An empty label still takes its padding, and that space is then the
+        # one element of this row with no meaning.
+        self.problem = ttk.Label(self.apply_row, text="\u26a0 " + PROBLEM_TEXT,
+                                 style="Page.Bad.TLabel")
+        # Four buttons at the right end, and none at the left one.
+        #
+        # The first two act on the settings in this window and the last two on
+        # a file of them, and the two pairs stood at the two edges of the row
+        # for that reason. That put the width of the window between two
+        # buttons that a person uses one after the other, and the gap between
+        # the pairs says the same thing at a tenth of the distance.
         #
         # Profiles sit here rather than on a page of their own: this is already
         # the row for "what to do with these settings", and a profile is those
         # settings by another name.
+        #
+        # The list is in the order a person reads them, and _show_apply packs
+        # it backwards: pack puts each widget to the left of the last one. The
+        # order here is thus the order on the screen, and other code that
+        # names the first of them names Apply. See _refresh_unsaved.
         self._apply_buttons = [
             # The text is no longer "Apply and restart service". The settings
             # of the System page restart no service. They belong to the
             # machine, and they take effect at the next login. A button with
             # the word restart describes one part of its work only.
-            ("left", ttk.Button(self.apply_row,
-                                text="Apply changes",
-                                style="Page.Filled.TButton",
-                                command=self.apply_settings)),
-            ("left", ttk.Button(self.apply_row, text="Reload from file",
-                                style="Page.Tonal.TButton",
-                                command=self.reload_settings)),
-            # Right-hand ones in reverse: pack puts each new one to the left of
-            # the last, so this is what reads Save, Load across the page.
-            ("right", ttk.Button(self.apply_row, text="Load profile...",
+            (0, ttk.Button(self.apply_row,
+                           text="Apply changes",
+                           style="Page.Filled.TButton",
+                           command=self.apply_settings)),
+            (ROW_GAP, ttk.Button(self.apply_row, text="Reload from file",
+                                 style="Page.Tonal.TButton",
+                                 command=self.reload_settings)),
+            # The space that used to be the width of the window. It separates
+            # the pair that writes these settings from the pair that writes a
+            # file of them.
+            (GROUP_GAP * 2, ttk.Button(self.apply_row, text="Save profile...",
+                                       style="Page.Outlined.TButton",
+                                       command=self.save_profile)),
+            (ROW_GAP, ttk.Button(self.apply_row, text="Load profile...",
                                  style="Page.Outlined.TButton",
                                  command=self.load_profile)),
-            ("right", ttk.Button(self.apply_row, text="Save profile...",
-                                 style="Page.Outlined.TButton",
-                                 command=self.save_profile)),
         ]
         # The settings in the window that are not yet in the file. A settings
         # window without that report makes the user remember the changes, and
@@ -3937,12 +3842,13 @@ class Panel:
         self._apply_shown = show
         if show:
             self.apply_row.pack_propagate(True)
-            for side, button in self._apply_buttons:
-                button.pack(side=side, padx=(0, ROW_GAP) if side == "left"
-                            else (ROW_GAP, 0))
-            # In the gap the two pairs leave between them, which is where the
-            # eye already goes to read the row.
-            self.unsaved.pack(side="left", padx=GROUP_GAP)
+            # Backwards, because pack puts each widget to the left of the last
+            # one. The list reads in the order of the screen. See _build_apply.
+            for lead, button in reversed(self._apply_buttons):
+                button.pack(side="right", padx=(lead, 0))
+            # Beside Apply, and not at the other end of the row: it is the
+            # count of what Apply would write.
+            self.unsaved.pack(side="right", padx=(0, GROUP_GAP))
             return
         # Hold the height the buttons had, then take them out: with the row
         # free to shrink, the rest of the window slides up to meet it.
@@ -3950,7 +3856,7 @@ class Panel:
         if height > 1:
             self.apply_row.configure(height=height)
             self.apply_row.pack_propagate(False)
-        for _side, button in self._apply_buttons:
+        for _lead, button in self._apply_buttons:
             button.pack_forget()
         self.unsaved.pack_forget()
 
@@ -5505,7 +5411,6 @@ class Panel:
             self._say_cec_needs()
         # The foot of the window reports the same adapter from every page, so
         # it is redrawn by whatever redrew this one.
-        self._say_cec_link()
         # The height of its page also changed. See _refit_page.
         self._refit_page()
 
@@ -6075,19 +5980,28 @@ class Panel:
 
         # The partition to add, read off the machine rather than typed. A UUID
         # is not a value to ask a person to copy.
+        #
+        # One row, and the button is on it. The button stood on a row of its
+        # own below, from _buttons, which lays out a row of several buttons in
+        # equal columns. One button in that grid is one button in the first of
+        # four equal columns, under two fields that are laid out by width. So
+        # the card had three lines that each began at a different place.
         row = ttk.Frame(box, style="OnCard.TFrame")
         row.pack(fill="x", pady=(GROUP_GAP, 0))
-        ttk.Label(row, text="Add").pack(side="left", padx=(0, GROUP_GAP))
+        ttk.Label(row, text="Add").pack(side="left", padx=(0, ROW_GAP))
         self._drive_choice = tk.StringVar()
         self._drive_field = self._field(row, "drive-partition",
                                         self._drive_choice, [], "",
                                         width=SENSOR_WIDTH)
         self._drive_field.pack(side="left")
         self._drive_where = ttk.Entry(row, style="Material.TEntry", width=22)
-        self._drive_where.pack(side="left", padx=(GROUP_GAP, 0))
+        self._drive_where.pack(side="left", padx=(ROW_GAP, 0))
+        self._drive_button = ttk.Button(row, text="Add this drive",
+                                        style="Tonal.TButton",
+                                        command=self.add_drive)
+        self._drive_button.pack(side="left", padx=(GROUP_GAP, 0))
         self._drive_choice.trace_add("write", lambda *_a: self._drive_picked())
 
-        self._buttons(box, (("Add this drive", self.add_drive),), lead=ROW_GAP)
         # What the last apply said. It is empty until there is something to
         # say, and it holds the reason a drive did not mount: a person had to
         # start this panel from a terminal to read that, and the reason was in
@@ -6095,8 +6009,12 @@ class Panel:
         #
         # This label was built and never placed, which is the second time a
         # label on this card was. tests/test_panel_live.py measures both now.
+        #
+        # It carries its own space above it and it has none of its own when it
+        # is empty, so an empty one does not put a band of nothing at the foot
+        # of the card. See _tell_drives.
         self.drives_said = ttk.Label(box, style="Muted.TLabel", justify="left")
-        self.drives_said.pack(anchor="w", pady=(ROW_GAP, 0))
+        self.drives_said.pack(anchor="w")
         self._wrapped.append(self.drives_said)
         self._wrap_insets[str(self.drives_said)] = 2 * GROUP_GAP
         self._show_drives()
@@ -6181,9 +6099,15 @@ class Panel:
                        row=row, column=DRIVE_REMOVE, sticky="w", pady=gap)
 
     def _tell_drives(self, said, bad=False):
-        """Puts one sentence under the drives, or takes the last one away."""
+        """Puts one sentence under the drives, or takes the last one away.
+
+        The space above it belongs to the sentence and not to the card. An
+        empty label with room above it is a band of nothing at the foot of the
+        card, and this card has that shape for most of its life.
+        """
         self.drives_said.configure(
             text=said, style="Bad.TLabel" if bad else "Muted.TLabel")
+        self.drives_said.pack_configure(pady=(ROW_GAP if said else 0, 0))
 
     def add_drive(self):
         """Adds the partition that is selected, and writes the drives."""
@@ -6529,9 +6453,6 @@ class Panel:
             else "Page.Bad.TLabel" if broken or (mine is not None
                                                  and mine.ok is False)
             else "Page.Good.TLabel")
-        # And the foot of the window, which asks a narrower question still -
-        # see ledpanel.bar_is_live.
-        self._say_link(ledpanel.bar_is_live(self._checks))
         # A part that is broken unfolds itself, once. Left folded, the page
         # would say something is wrong and hide what.
         for part in broken:

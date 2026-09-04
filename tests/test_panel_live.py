@@ -785,20 +785,20 @@ class LiveWindowTest(unittest.TestCase):
 
     def test_the_foot_of_the_window_keeps_its_place_on_a_short_screen(self):
         # pack gives out the space in the order of the calls. With the pages
-        # first, and with all the space, a short window had no Apply row and no
-        # status bar. Both came later, and no space was available.
+        # first, and with all the space, a short window had no Apply row at
+        # all. It comes later, and no space was available.
         self.root.geometry("1100x520")
         self.panel.notebook.select(self._page_named("Notifications"))
         for _ in range(6):
             self.root.update()
         bottom = self.root.winfo_rooty() + self.root.winfo_height()
-        for _side, button in self.panel._apply_buttons:
+        for _lead, button in self.panel._apply_buttons:
             self.assertTrue(button.winfo_ismapped(),
                             "%s was squeezed out" % button.cget("text"))
             self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
                                  bottom, button.cget("text"))
-        self.assertTrue(self.panel.link.label.winfo_ismapped(),
-                        "the status bar went missing")
+        self.assertTrue(self.panel.about_button.winfo_ismapped(),
+                        "About went missing")
 
     def test_a_page_asks_for_the_width_its_content_needs(self):
         # A canvas does not pass on the size of its content. It asks for its
@@ -1280,42 +1280,6 @@ class LiveWindowTest(unittest.TestCase):
         self.assertIn("terminal", said)
         self.assertIn("failed", said)
 
-    def test_the_line_fits_the_narrowest_window_with_both_lights_showing(self):
-        """Measured, because nothing trims it any more.
-
-        The bar cut this text to its width before. A fixed sentence needs no
-        cut, but only while it fits. The space is the width after the two
-        indicators. This test measures at the minimum width of the panel. That
-        width is small enough for a failure, and this test must find it before a
-        user does.
-        """
-        self.panel._set_busy(False, 1)
-        self.root.geometry("%dx900" % self.panel_module.MIN_WIDTH)
-        for _ in range(6):
-            self.root.update()
-        line = self.panel.problem
-        self.assertEqual(line.winfo_width(), line.winfo_reqwidth(),
-                         "%r does not fit the bar" % line.cget("text"))
-        # And the bar is still one line tall, which is the thing that would
-        # move every page above it.
-        self.assertEqual(self.panel.statusbar.winfo_height(),
-                         self.panel.link.label.winfo_reqheight())
-
-    def test_the_foot_reports_and_does_not_label(self):
-        """The version used to sit at the right-hand end of this bar.
-
-        A user asked for that change, and it is correct. The foot of each page
-        holds the values that change during a session: the connection of the bar,
-        and the result of the last command. A version number is neither of the
-        two. It is still on the About page and on the status page, and a user
-        reads it there.
-        """
-        said = " ".join(child.cget("text")
-                        for child in self.panel.statusbar.winfo_children()
-                        if isinstance(child, ttk.Label))
-        self.assertNotIn(self.panel_module.VERSION, said, said)
-        self.assertNotIn("SteamOS Utility Center", said, said)
-
     def test_but_the_version_is_still_somewhere_to_be_found(self):
         # The removal of the label must not remove the number. A user gives the
         # version first in each report.
@@ -1403,10 +1367,43 @@ class LiveWindowTest(unittest.TestCase):
         return [entry[0] for entry in self.panel_module.SECTIONS] + ["about"]
 
     def test_every_section_has_an_entry_in_the_sidebar(self):
+        """About is the one section that has no entry, and it has a page.
+
+        The list on the left is the list of the pages that hold settings, and
+        About holds none: it is the name of the program, its version and who
+        wrote the parts of it. It is a button at the foot of the window.
+        """
         self.assertEqual(sorted(self.panel._sidebar_entries),
-                         sorted(self._sections()))
+                         sorted(one for one in self._sections()
+                                if one != "about"))
         self.assertEqual(sorted(self.panel._section_pages),
                          sorted(self._sections()))
+        self.assertTrue(self.panel.about_button.winfo_ismapped())
+
+    def test_the_about_button_opens_the_about_page(self):
+        self.panel._open_section("strip")
+        self.root.update()
+        self.panel.about_button.invoke()
+        self.root.update()
+        self.assertEqual(self.panel.section, "about")
+        self.assertEqual(self.panel.sections.select(),
+                         self.panel._section_pages["about"])
+
+    def test_the_about_button_is_at_the_other_end_from_apply(self):
+        """The two buttons that write the settings moved across to the two
+        that write a file of them. A person uses Apply after Reload, and the
+        width of the window between them was the distance to cross.
+        """
+        self.panel._open_section("keyboard")
+        self.root.update()
+        names = [button.cget("text")
+                 for _lead, button in self.panel._apply_buttons]
+        self.assertEqual(names, ["Apply changes", "Reload from file",
+                                 "Save profile...", "Load profile..."])
+        places = [button.winfo_x()
+                  for _lead, button in self.panel._apply_buttons]
+        self.assertEqual(places, sorted(places), "not in the order they read")
+        self.assertLess(self.panel.about_button.winfo_x(), places[0])
 
     def test_the_sidebar_says_which_section_is_open(self):
         # One entry is always selected, and never two. The mark is the one
@@ -1417,7 +1414,8 @@ class LiveWindowTest(unittest.TestCase):
             self.root.update()
             lit = [name for name, entry
                    in self.panel._sidebar_entries.items() if entry.selected]
-            self.assertEqual(lit, [key])
+            # About has no entry, so nothing in the list is marked for it.
+            self.assertEqual(lit, [] if key == "about" else [key])
 
     def test_the_header_names_the_section_that_is_open(self):
         for key, title, _subtitle, _icon in self.panel_module.SECTIONS:
@@ -1429,12 +1427,12 @@ class LiveWindowTest(unittest.TestCase):
         # Through the binding rather than by calling _open_section, because
         # the binding is the part a canvas has to do for itself: a ttk widget
         # would have brought its own command, and this one does not.
-        entry = self.panel._sidebar_entries["about"]
+        entry = self.panel._sidebar_entries["status"]
         entry.canvas.event_generate("<Button-1>", x=10, y=10)
         self.root.update()
-        self.assertEqual(self.panel.section, "about")
+        self.assertEqual(self.panel.section, "status")
         self.assertEqual(self.panel.sections.select(),
-                         self.panel._section_pages["about"])
+                         self.panel._section_pages["status"])
 
     def test_apply_is_offered_only_where_there_are_settings(self):
         """Two levels to ask now, and the answer has to come from both.
@@ -1572,28 +1570,6 @@ class LiveWindowTest(unittest.TestCase):
         self.panel.notebook.select(self._page_named("Notifications"))
         self.root.update()
         self.assertEqual(self.panel._open_page(), self.panel.notebook.select())
-
-    def test_the_foot_of_the_window_says_whether_the_bar_is_there(self):
-        # Three states and three colours. The state is unknown before the first
-        # read, and then it is good or bad. A grey dot with "looking" is
-        # correct there. A red dot reports a fault for a question with no
-        # answer.
-        seen = {}
-        for connected in (None, True, False):
-            self.panel._say_link(connected)
-            self.root.update()
-            seen[connected] = self.panel.link.canvas.itemcget(
-                self.panel.link.dot, "fill")
-            self.assertTrue(self.panel.link.label.cget("text").strip())
-        self.assertEqual(len(set(seen.values())), 3, seen)
-        self.assertEqual(seen[True], self.panel.roles["positive"])
-        self.assertEqual(seen[False], self.panel.roles["error"])
-
-    def test_the_led_indicator_is_always_in_the_bar(self):
-        # It answers a question this whole window is about, so unlike the
-        # HDMI CEC one there is no state in which it has nothing to say.
-        self.assertTrue(self.panel.link.canvas.winfo_ismapped())
-        self.assertTrue(self.panel.link.label.winfo_ismapped())
 
     def _every_widget(self, widget=None, found=None):
         found = [] if found is None else found
@@ -2506,97 +2482,10 @@ class CecPageTest(unittest.TestCase):
         self.panel._remove_cec()
         self.assertEqual(self.ran[-1][0][2], "remove")
 
-    # -- the indicator at the foot -----------------------------------------
-
-    def _cec_light(self):
-        return self.panel.cec_link.canvas.itemcget(self.panel.cec_link.dot,
-                                                   "fill")
-
-    def test_the_foot_of_the_window_says_whether_cec_can_reach_the_tv(self):
-        """The adapter, not the switches.
-
-        Every feature can be on and none of them work if nothing can be sent,
-        and that is the question worth answering from a page about something
-        else. Which features are on is what you open the section for.
-        """
-        self.panel._reread_cec()
-        self.root.update()
-        self.assertTrue(self.panel.cec_link.canvas.winfo_ismapped())
-        self.assertEqual(self._cec_light(), self.panel.roles["positive"])
-        self.assertIn("ready", self.panel.cec_link.label.cget("text"))
-
-    def test_an_adapter_that_cannot_be_reached_shows_red_down_there_too(self):
-        self.said["cec_device"]["writable"] = False
-        self.panel._reread_cec()
-        self.root.update()
-        self.assertEqual(self._cec_light(), self.panel.roles["error"])
-
-    def test_a_machine_with_no_cec_toolkit_gets_no_second_indicator(self):
-        """Nothing to indicate, so nothing in the bar.
-
-        A permanent grey "HDMI CEC not installed" makes the foot of the window
-        report an absence that no user asked about. It also reports it on each
-        page, for each session, on each machine that needs the LEDs only.
-        """
-        with self._not_installed():
-            self.panel._reread_cec()
-            self.root.update()
-            self.assertFalse(self.panel.cec_link.canvas.winfo_ismapped())
-            self.assertFalse(self.panel.cec_link.label.winfo_ismapped())
-
-    def test_installing_brings_it_into_the_bar_without_a_restart(self):
-        with self._not_installed():
-            self.panel._reread_cec()
-            self.root.update()
-        self.panel._reread_cec()
-        self.root.update()
-        self.assertTrue(self.panel.cec_link.canvas.winfo_ismapped())
-
-    def test_a_toolkit_that_will_not_answer_is_a_fault_not_a_silence(self):
-        # Installed and not answering is a red light; not looked at yet is a
-        # grey one. Reported the same way, the first would look like the
-        # window still thinking about it.
-        def broken(home=None, run=None):
-            raise cec.CecError("no JSON came back")
-
-        self.panel_module.ledpanel.cec_status = broken
-        self.panel._reread_cec()
-        self.root.update()
-        self.assertEqual(self._cec_light(), self.panel.roles["error"])
-        self.assertIn("not answering",
-                      self.panel.cec_link.label.cget("text"))
-
-    def test_it_comes_after_the_led_light_however_late_it_arrives(self):
-        """Packed with an anchor rather than at the end of the row.
-
-        A window with a failure message holds that line at the left. An
-        indicator that comes later therefore goes to the other side of it. The
-        sentence about one light then stands between the two lights.
-        """
-        with self._not_installed():
-            self.panel._reread_cec()
-            self.panel._write("something broke\n")
-            self.panel._set_busy(False, 1)
-            self.root.update()
-        self.panel._reread_cec()
-        self.root.update()
-        self.assertLess(self.panel.link.label.winfo_x(),
-                        self.panel.cec_link.canvas.winfo_x())
-        self.assertLess(self.panel.cec_link.label.winfo_x(),
-                        self.panel.problem.winfo_x())
-
-    def test_the_two_lights_are_not_pushed_against_each_other(self):
-        # Measured: with no room in front of the second dot the two read as
-        # one sentence with a bullet in the middle of it.
-        self.panel._reread_cec()
-        self.root.update()
-        gap = (self.panel.cec_link.canvas.winfo_x()
-               - (self.panel.link.label.winfo_x()
-                  + self.panel.link.label.winfo_width()))
-        self.assertGreaterEqual(gap, self.panel_module.ROW_GAP, gap)
+    # -- when the toolkit is read ------------------------------------------
 
     def test_it_is_read_once_after_the_window_is_up_not_while_it_is_built(self):
-        """The bar shows this from every page, so it cannot wait to be opened.
+        """Every page reads this, so it cannot wait for its own to be opened.
 
         But steamos-cec-toolkitctl runs a handful of systemctl calls, and on
         the construction path that is a delay on every startup of every
@@ -4326,6 +4215,54 @@ class DrivesPageTest(unittest.TestCase):
 
     def _put_back(self):
         self.mounts.read, self.mounts.partitions = self._was
+
+    def test_the_add_row_is_one_row(self):
+        """The button stood on a row of its own, from _buttons.
+
+        _buttons lays out a row of several buttons in equal columns, so one
+        button in it is one button in the first of four equal columns. Above
+        it stood two fields laid out by their width. The card thus had three
+        lines that each began at a different place, which is what a person
+        sees before they read a word of it.
+        """
+        self.panel._open_section("keyboard")
+        self.root.update()
+        for widget in (self.panel._drive_field, self.panel._drive_where,
+                       self.panel._drive_button):
+            self.assertTrue(widget.winfo_ismapped(),
+                            "%s is not on the page" % widget)
+        self.assertEqual(self.panel._drive_button.master,
+                         self.panel._drive_field.master)
+        # Their middles and not their tops: pack centres widgets of unequal
+        # height in the row, so a button one pixel taller than a field starts
+        # one pixel higher and is still beside it.
+        def middle(widget):
+            return widget.winfo_rooty() + widget.winfo_height() // 2
+
+        was = middle(self.panel._drive_field)
+        for widget in (self.panel._drive_where, self.panel._drive_button):
+            self.assertLess(abs(middle(widget) - was), 4,
+                            "%s is not on the row" % widget)
+        self.assertLess(self.panel._drive_field.winfo_rootx(),
+                        self.panel._drive_where.winfo_rootx())
+        self.assertLess(self.panel._drive_where.winfo_rootx(),
+                        self.panel._drive_button.winfo_rootx())
+
+    def test_an_empty_report_takes_no_room_at_the_foot_of_the_card(self):
+        """The label carries its own space above it, and it is empty for most
+        of the life of this card. Room above an empty label is a band of
+        nothing between the last row and the edge of the card.
+        """
+        self.panel._open_section("keyboard")
+        self.root.update()
+        card = self.panel.drives_said.master
+        self.panel._tell_drives("")
+        self.root.update()
+        empty = card.winfo_reqheight()
+        self.panel._tell_drives("The drive did not mount.")
+        self.root.update()
+        self.assertGreater(card.winfo_reqheight(), empty,
+                           "the room above the report is there either way")
 
     def _destroy(self):
         if getattr(self, "root", None) is not None:

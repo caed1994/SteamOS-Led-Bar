@@ -624,7 +624,7 @@ of pages.
 | **System** | the layout that Game Mode uses, and the second drives of this machine. See [Keyboard layout](#keyboard-layout) and [Drives](#drives) |
 | **Status** | the condition of each part of the toolbox, each with the button that repairs it |
 | **App Settings** | this program: its [appearance](#light-and-dark) and its [updates](#updates-and-removal) |
-| **About** | the version, the licence and the credits |
+| **About** | the version, the licence and the credits. It is a button at the foot of the window and not an entry of the list: it holds no setting |
 
 | LED Strip page | What is on it |
 | -------------- | ------------- |
@@ -698,7 +698,10 @@ with the background. This operates against one known colour only. A strip of
 light against a pale window is also difficult to judge.
 
 **Apply and Reload are below all the pages.** Apply writes each setting from
-each page. It is grey while the window and the files agree.
+each page. It is grey while the window and the files agree. They stand at the
+right end of the foot, beside Save profile and Load profile: the first two
+write these settings, the other two write a file of them, and a person uses
+one after the other.
 
 Apply restarts the service only when a setting that the service reads is
 different. The **System** page's keyboard layout is in your own home directory,

@@ -258,24 +258,6 @@ def broken(checks):
     return [check for check in checks if not check.ok]
 
 
-def bar_is_live(checks):
-    """Reports whether a program drives the bar, from these checks only.
-
-    This question is narrower than the question that repair_summary answers,
-    and that is on purpose. The summary reports whether the installation is
-    complete, and an absent menu entry makes it incomplete. The foot of the
-    window reports whether a program drives the strip. The two answers are
-    often different, and both are correct. An installation with an old menu
-    entry is incomplete, and the strip is lit.
-
-    The result is None when no check in the list can answer. That is not a
-    fault. The caller can then report that the answer is not yet available,
-    and not report a failure without proof.
-    """
-    found = [check.ok for check in checks if check.live]
-    return all(found) if found else None
-
-
 def repair_summary(checks):
     """One sentence for the top of the window."""
     problems = broken(checks)
