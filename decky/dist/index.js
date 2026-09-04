@@ -151,7 +151,7 @@ const TEST_OPTIONS = [
 // state went back to "one" at every pick, and no backend was involved.
 //
 // So the values live here, where a component that is built again reads the
-// same ones. `redraw` in the component draws them.
+// same ones, and `draw` below puts them on the screen.
 const held = {
     status: null,
     strip: null,
@@ -167,11 +167,24 @@ const held = {
     busy: false,
     test: "one",
 };
+// Draws the page, and it always draws the one that is on the screen.
+//
+// A component that is built again brings a new way to draw itself, and the
+// old one draws nothing at all. A command that started before the rebuild
+// held the old one, so `busy` went to true, the panel was built again with
+// `busy` still true, and the end of the command drew a component that was
+// already gone. Every control on the page then stayed grey with nothing left
+// to wake it.
+//
+// So the newest component puts its own here, and everything that finishes
+// later draws through this.
+let draw = () => undefined;
 function Content() {
     // The one piece of state in this component, and it holds no value. A
     // component that is built again loses whatever it holds, so it holds
     // nothing: this draws what is in `held`.
     const [, redraw] = SP_REACT.useReducer((count) => count + 1, 0);
+    draw = redraw;
     // One fetch when the page opens, and one after every change.
     //
     // There is no timer. There was one, and it asked for the cheap status,
@@ -191,13 +204,16 @@ function Content() {
         held.power = two;
         held.cec = three;
         held.gpu = four;
-        redraw();
+        draw();
     };
     SP_REACT.useEffect(() => {
-        void refresh();
-        // Once, when this is built. It is built again at every pick, and a fetch
-        // that ran then would draw the value before the change over the value
-        // that a person just picked.
+        // Not while a command runs. This is built again at every pick, and a
+        // fetch that started then would answer with the value before the change
+        // and land after the command that made it.
+        if (!held.busy) {
+            void refresh();
+        }
+        // Once, when this is built.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     // One place that changes something, so that every control reports a refusal
@@ -208,7 +224,7 @@ function Content() {
         }
         held.busy = true;
         held.said = "";
-        redraw();
+        draw();
         try {
             const answer = await work();
             held.said = answer.ok ? "" : (answer.error ?? "That did not work.");
@@ -221,7 +237,7 @@ function Content() {
         }
         finally {
             held.busy = false;
-            redraw();
+            draw();
         }
     };
     const write = (area, updates) => void change(() => setArea(area, updates));
@@ -229,7 +245,7 @@ function Content() {
     const shown = (area, key, value, fallback = "") => held.chosen[area + "." + key] ?? String(value ?? fallback);
     const pick = (area, key, value) => {
         held.chosen[area + "." + key] = value;
-        redraw();
+        draw();
         write(area, { [key]: value });
     };
     // The option lists, built one time for each answer of the command.
@@ -253,7 +269,7 @@ function Content() {
         }
         held.busy = true;
         held.said = "";
-        redraw();
+        draw();
         try {
             const answer = await setArea("gpu", held.wanted);
             if (!answer.ok) {
@@ -265,7 +281,7 @@ function Content() {
         }
         finally {
             held.busy = false;
-            redraw();
+            draw();
         }
     };
     const keep = async () => {
@@ -273,7 +289,7 @@ function Content() {
             return;
         }
         held.busy = true;
-        redraw();
+        draw();
         try {
             const answer = await doAction("gpu-keep");
             if (!answer.ok) {
@@ -285,7 +301,7 @@ function Content() {
         }
         finally {
             held.busy = false;
-            redraw();
+            draw();
         }
     };
     const settings = (held.strip?.settings ?? {});
@@ -303,13 +319,13 @@ function Content() {
     const preference = shown("power", "CPU_EPP", cpu.CPU_EPP);
     return (SP_JSX.jsxs(SP_JSX.Fragment, { children: [(held.said !== "" || held.status?.sudo_rule === false) && (SP_JSX.jsxs(DFL.PanelSection, { children: [held.said !== "" && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d85c5c" }, children: held.said }) })), held.status?.sudo_rule === false && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: "Nothing here can change a setting. Install the panel again in Desktop Mode to get the rule that permits it." }) }))] })), SP_JSX.jsxs(DFL.PanelSection, { title: "LED bar", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Rainbow slot", description: "What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode.", options: rainbowOptions, value: rainbow, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "RAINBOW_SHOWS", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Desktop scene", description: "What the bar shows on the desktop. Game Mode belongs to Steam.", options: sceneOptions, value: scene, disabled: held.busy || !held.strip?.ok, onPick: (value) => pick("strip", "DESKTOP_SCENE", value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: "Notifications", description: "A flash for an achievement, a message or a friend who comes online.", checked: Boolean(settings.NOTIFY), disabled: held.busy || !held.strip?.ok, onChange: (on) => write("strip", { NOTIFY: on }) }) })] }), SP_JSX.jsx(DFL.PanelSection, { title: "CPU power", children: Number(offered.policies ?? 0) === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "This machine has no cpufreq, so there is nothing to set." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Governor", description: "How the clock is chosen.", options: governorOptions, value: governor, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_GOVERNOR", value) }) }), Array.isArray(offered.epp) && offered.epp.length > 0 && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "Energy preference", description: "A hint to the firmware about where in its range to sit. The performance governor pins it.", options: eppOptions, value: preference, disabled: held.busy || !held.power?.ok, onPick: (value) => pick("power", "CPU_EPP", value) }) }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Graphics card", children: !Boolean((held.gpu?.settings ?? {}).available) ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT is not running, so there is nothing to set." }) })) : knobs.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "LACT reports no control for this card." }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [knobs.map((knob) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: knob.label + (knob.unit ? " (" + knob.unit + ")" : ""), value: held.wanted[knob.key] ?? knob.start, min: knob.min, max: knob.max, step: 1, notchTicksVisible: false, showValue: true, disabled: held.busy, onChange: (value) => {
                                     held.wanted[knob.key] = value;
-                                    redraw();
+                                    draw();
                                 } }) }, knob.key))), held.keeping === "" ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy || Object.keys(held.wanted).length === 0, onClick: () => void send(), children: "Send to the card" }) })) : (SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em", color: "#d9a441" }, children: held.keeping }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: held.busy, onClick: () => void keep(), children: "Keep it" }) })] }))] })) }), SP_JSX.jsx(DFL.PanelSection, { title: "Television", children: !installed ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { fontSize: "0.8em" }, children: "The HDMI CEC toolkit is not installed. Install it from the panel in Desktop Mode." }) })) : (SP_JSX.jsx(SP_JSX.Fragment, { children: features.map((feature) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ToggleField, { label: feature.label, description: feature.explains, checked: Boolean(switches[feature.name]), disabled: held.busy, onChange: (on) => write("cec", { [feature.name]: on }) }) }, feature.name))) })) }), SP_JSX.jsxs(DFL.PanelSection, { title: "Dropdown test", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.DropdownItem, { label: "Steam's own row", rgOptions: TEST_OPTIONS, selectedOption: held.test, onChange: (option) => {
                                 held.test = String(option.data);
-                                redraw();
+                                draw();
                             } }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(Choice, { label: "This page's row", description: "", options: TEST_OPTIONS, value: held.test, disabled: false, onPick: (value) => {
                                 held.test = value;
-                                redraw();
+                                draw();
                             } }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { fontSize: "0.8em" }, children: [SP_JSX.jsxs("div", { children: ["What this page holds: ", held.test] }), SP_JSX.jsxs("div", { children: ["Rainbow slot: ", rainbow] }), SP_JSX.jsxs("div", { children: ["Governor: ", governor === "" ? "(not set)" : governor] })] }) })] })] }));
 }
 var index = definePlugin(() => ({

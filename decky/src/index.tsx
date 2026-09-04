@@ -152,7 +152,7 @@ const TEST_OPTIONS: Pick[] = [
 // state went back to "one" at every pick, and no backend was involved.
 //
 // So the values live here, where a component that is built again reads the
-// same ones. `redraw` in the component draws them.
+// same ones, and `draw` below puts them on the screen.
 const held = {
   status: null as Status | null,
   strip: null as Area | null,
@@ -169,11 +169,25 @@ const held = {
   test: "one",
 };
 
+// Draws the page, and it always draws the one that is on the screen.
+//
+// A component that is built again brings a new way to draw itself, and the
+// old one draws nothing at all. A command that started before the rebuild
+// held the old one, so `busy` went to true, the panel was built again with
+// `busy` still true, and the end of the command drew a component that was
+// already gone. Every control on the page then stayed grey with nothing left
+// to wake it.
+//
+// So the newest component puts its own here, and everything that finishes
+// later draws through this.
+let draw: () => void = () => undefined;
+
 function Content() {
   // The one piece of state in this component, and it holds no value. A
   // component that is built again loses whatever it holds, so it holds
   // nothing: this draws what is in `held`.
   const [, redraw] = useReducer((count: number) => count + 1, 0);
+  draw = redraw;
 
   // One fetch when the page opens, and one after every change.
   //
@@ -194,14 +208,17 @@ function Content() {
     held.power = two;
     held.cec = three;
     held.gpu = four;
-    redraw();
+    draw();
   };
 
   useEffect(() => {
-    void refresh();
-    // Once, when this is built. It is built again at every pick, and a fetch
-    // that ran then would draw the value before the change over the value
-    // that a person just picked.
+    // Not while a command runs. This is built again at every pick, and a
+    // fetch that started then would answer with the value before the change
+    // and land after the command that made it.
+    if (!held.busy) {
+      void refresh();
+    }
+    // Once, when this is built.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -213,7 +230,7 @@ function Content() {
     }
     held.busy = true;
     held.said = "";
-    redraw();
+    draw();
     try {
       const answer = await work();
       held.said = answer.ok ? "" : (answer.error ?? "That did not work.");
@@ -225,7 +242,7 @@ function Content() {
       held.wanted = {};
     } finally {
       held.busy = false;
-      redraw();
+      draw();
     }
   };
 
@@ -238,7 +255,7 @@ function Content() {
 
   const pick = (area: string, key: string, value: string) => {
     held.chosen[area + "." + key] = value;
-    redraw();
+    draw();
     write(area, { [key]: value });
   };
 
@@ -271,7 +288,7 @@ function Content() {
     }
     held.busy = true;
     held.said = "";
-    redraw();
+    draw();
     try {
       const answer = await setArea("gpu", held.wanted);
       if (!answer.ok) {
@@ -282,7 +299,7 @@ function Content() {
                      + "card back by itself.";
     } finally {
       held.busy = false;
-      redraw();
+      draw();
     }
   };
 
@@ -291,7 +308,7 @@ function Content() {
       return;
     }
     held.busy = true;
-    redraw();
+    draw();
     try {
       const answer = await doAction("gpu-keep");
       if (!answer.ok) {
@@ -302,7 +319,7 @@ function Content() {
       await refresh();
     } finally {
       held.busy = false;
-      redraw();
+      draw();
     }
   };
 
@@ -446,7 +463,7 @@ function Content() {
                   disabled={held.busy}
                   onChange={(value: number) => {
                     held.wanted[knob.key] = value;
-                    redraw();
+                    draw();
                   }}
                 />
               </PanelSectionRow>
@@ -516,7 +533,7 @@ function Content() {
             selectedOption={held.test}
             onChange={(option) => {
               held.test = String(option.data);
-              redraw();
+              draw();
             }}
           />
         </PanelSectionRow>
@@ -529,7 +546,7 @@ function Content() {
             disabled={false}
             onPick={(value) => {
               held.test = value;
-              redraw();
+              draw();
             }}
           />
         </PanelSectionRow>

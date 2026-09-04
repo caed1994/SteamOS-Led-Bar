@@ -361,6 +361,35 @@ class PageTest(unittest.TestCase):
             self.assertNotIn("useState", line, line)
         self.assertIn("useReducer", self.text)
 
+    def test_the_page_is_drawn_through_the_component_that_is_on_screen(self):
+        """A component that is built again brings a new way to draw itself.
+
+        The old one draws nothing. A command that started before the rebuild
+        held the old one, so `busy` went to true, the panel was built again
+        with `busy` still true, and the end of the command drew a component
+        that was already gone. Every control then stayed grey with nothing
+        left to wake it.
+
+        One rule and no exception: everything draws through the module. A rule
+        with an exception is a rule that the next change gets wrong.
+        """
+        self.assertIn("let draw:", self.text)
+        self.assertIn("draw = redraw;", self.text)
+        for line in self.text.splitlines():
+            if line.strip().startswith("//") or "draw = redraw" in line:
+                continue
+            self.assertNotIn("redraw()", line, line)
+
+    def test_a_rebuild_does_not_fetch_over_a_command_that_runs(self):
+        """This is built again at every pick.
+
+        A fetch that started then would answer with the value before the
+        change and land after the command that made it.
+        """
+        one = self.text[self.text.index("useEffect(() => {"):]
+        one = one[:one.index("}, []);")]
+        self.assertIn("!held.busy", one)
+
     def test_there_is_no_timer(self):
         """A page in a menu is opened, used and closed.
 
