@@ -15,7 +15,9 @@
 import { callable, definePlugin } from "@decky/api";
 import {
   ButtonItem,
+  Dropdown,
   DropdownItem,
+  Field,
   PanelSection,
   PanelSectionRow,
   SliderField,
@@ -88,6 +90,56 @@ function options(offered: unknown): { data: string; label: string }[] {
   }));
 }
 
+type Pick = { data: string; label: string };
+
+function Choice(props: {
+  label: string;
+  description: string;
+  options: Pick[];
+  value: string;
+  disabled: boolean;
+  onPick: (value: string) => void;
+}) {
+  // Field and Dropdown, and not DropdownItem.
+  //
+  // DropdownItem is Steam's own settings row with Steam's own dropdown inside
+  // it, and this project cannot see what that row does with a prop it does
+  // not know. renderButtonValue is declared by @decky/ui on Dropdown, so it
+  // goes to Dropdown here and passes through nothing on the way.
+  //
+  // Field is the same row that DropdownItem draws, so the page looks as it
+  // did.
+  return (
+    <Field label={props.label} description={props.description}
+           childrenContainerWidth="min">
+      <Dropdown
+        rgOptions={props.options}
+        selectedOption={props.value}
+        disabled={props.disabled}
+        renderButtonValue={() =>
+          props.options.find((one) => one.data === props.value)?.label
+          ?? props.value}
+        onChange={(option) => props.onPick(String(option.data))}
+      />
+    </Field>
+  );
+}
+
+// Three options and nothing behind them, for one question: does a dropdown
+// follow the state of this page at all?
+//
+// Four changes to the real controls did nothing, and each of them was a guess
+// about a component that cannot be run outside Game Mode. This answers the
+// guess. If the line below the box changes and the box does not, the box is
+// the fault. If neither changes, the fault is in this file.
+//
+// It comes off the page once the answer is in.
+const TEST_OPTIONS: Pick[] = [
+  { data: "one", label: "One" },
+  { data: "two", label: "Two" },
+  { data: "three", label: "Three" },
+];
+
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
   const [strip, setStrip] = useState<Area | null>(null);
@@ -99,10 +151,10 @@ function Content() {
 
   // What a person picked, before the machine has answered.
   //
-  // A DropdownItem takes its option when it is built and keeps it, so a new
-  // value in the props does not move it. This holds the choice, the key below
-  // carries it, and the box thus says what was pressed at the moment it is
-  // pressed rather than after a command has run. A refresh takes it away
+  // The dropdown of Steam keeps the option it was built with, so a new value
+  // in its props does not move it. This holds the choice, and Choice draws
+  // the closed box from it, so a box says what was pressed at the moment it
+  // is pressed rather than after a command has run. A refresh takes it away
   // again, and the machine's own answer is what stays.
   const [chosen, setChosen] = useState<Record<string, string>>({});
 
@@ -114,6 +166,7 @@ function Content() {
   // hold a value, one button sends them, and a second button keeps them.
   const [wanted, setWanted] = useState<Record<string, number>>({});
   const [keeping, setKeeping] = useState("");
+  const [test, setTest] = useState("one");
 
   // One fetch when the page opens, and one after every change.
   //
@@ -280,42 +333,24 @@ function Content() {
       )}
 
       <PanelSection title="LED bar">
-        {/*
-          renderButtonValue draws the closed box, and it draws it from the
-          state of this page.
-
-          The Dropdown of Steam is a class with SetSelectedOption on its
-          prototype: it takes the option when it is built and keeps it, and a
-          new value in its props does not move it. A key that built a new one
-          did not help either, and it would take the focus away from a person
-          with a controller at the moment they pick something.
-
-          This prop is the way that @decky/ui offers for exactly this. What
-          the box says is now what this page holds, and the memory of the
-          class is not asked.
-        */}
         <PanelSectionRow>
-          <DropdownItem
+          <Choice
             label="Rainbow slot"
             description="What the rainbow entry of Steam's own LED menu shows. This is the one that acts in Game Mode."
-            rgOptions={rainbowOptions}
-            selectedOption={rainbow}
-            renderButtonValue={() => words(rainbow)}
+            options={rainbowOptions}
+            value={rainbow}
             disabled={busy || !strip?.ok}
-            onChange={(option) =>
-              pick("strip", "RAINBOW_SHOWS", String(option.data))}
+            onPick={(value) => pick("strip", "RAINBOW_SHOWS", value)}
           />
         </PanelSectionRow>
         <PanelSectionRow>
-          <DropdownItem
+          <Choice
             label="Desktop scene"
             description="What the bar shows on the desktop. Game Mode belongs to Steam."
-            rgOptions={sceneOptions}
-            selectedOption={scene}
-            renderButtonValue={() => words(scene)}
+            options={sceneOptions}
+            value={scene}
             disabled={busy || !strip?.ok}
-            onChange={(option) =>
-              pick("strip", "DESKTOP_SCENE", String(option.data))}
+            onPick={(value) => pick("strip", "DESKTOP_SCENE", value)}
           />
         </PanelSectionRow>
         <PanelSectionRow>
@@ -339,28 +374,24 @@ function Content() {
         ) : (
           <>
             <PanelSectionRow>
-              <DropdownItem
+              <Choice
                 label="Governor"
                 description="How the clock is chosen."
-                rgOptions={governorOptions}
-                selectedOption={governor}
-                renderButtonValue={() => words(governor)}
+                options={governorOptions}
+                value={governor}
                 disabled={busy || !power?.ok}
-                onChange={(option) =>
-                  pick("power", "CPU_GOVERNOR", String(option.data))}
+                onPick={(value) => pick("power", "CPU_GOVERNOR", value)}
               />
             </PanelSectionRow>
             {Array.isArray(offered.epp) && offered.epp.length > 0 && (
               <PanelSectionRow>
-                <DropdownItem
+                <Choice
                   label="Energy preference"
                   description="A hint to the firmware about where in its range to sit. The performance governor pins it."
-                  rgOptions={eppOptions}
-                  selectedOption={preference}
-                  renderButtonValue={() => words(preference)}
+                  options={eppOptions}
+                  value={preference}
                   disabled={busy || !power?.ok}
-                  onChange={(option) =>
-                    pick("power", "CPU_EPP", String(option.data))}
+                  onPick={(value) => pick("power", "CPU_EPP", value)}
                 />
               </PanelSectionRow>
             )}
@@ -455,6 +486,33 @@ function Content() {
             ))}
           </>
         )}
+      </PanelSection>
+      <PanelSection title="Dropdown test">
+        <PanelSectionRow>
+          <DropdownItem
+            label="Steam's own row"
+            rgOptions={TEST_OPTIONS}
+            selectedOption={test}
+            onChange={(option) => setTest(String(option.data))}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Choice
+            label="This page's row"
+            description=""
+            options={TEST_OPTIONS}
+            value={test}
+            disabled={false}
+            onPick={setTest}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ fontSize: "0.8em" }}>
+            <div>What this page holds: {test}</div>
+            <div>Rainbow slot: {rainbow}</div>
+            <div>Governor: {governor === "" ? "(not set)" : governor}</div>
+          </div>
+        </PanelSectionRow>
       </PanelSection>
     </>
   );

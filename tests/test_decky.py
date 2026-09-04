@@ -285,32 +285,32 @@ class PageTest(unittest.TestCase):
         # the second one only after the first one.
         self.assertIn("keeping", self.text)
 
-    def test_every_dropdown_draws_its_own_closed_box(self):
-        """The Dropdown of Steam keeps the option it was built with.
+    def test_a_setting_uses_the_row_this_page_builds(self):
+        """Field and Dropdown, and not Steam's own DropdownItem.
 
-        It is a class with SetSelectedOption on its prototype, so the option
-        is instance state that a new value in the props does not move. The
-        box thus named the value before the change, and a key that built a
-        new one did not help.
-
-        renderButtonValue is the prop that @decky/ui offers for this. What the
-        closed box says is then what this page holds, and the memory of the
-        class is not asked.
+        DropdownItem is Steam's settings row with Steam's dropdown inside it,
+        and this project cannot see what that row does with a prop it does not
+        know. renderButtonValue is declared on Dropdown, so the row here hands
+        it to Dropdown and nothing passes it on the way.
         """
-        found = [part[:part.index("/>")]
-                 for part in self.text.split("<DropdownItem")[1:]]
-        self.assertTrue(found, "there are no dropdowns to check")
-        for one in found:
-            self.assertIn("renderButtonValue=", one, one[:200])
-            self.assertIn("selectedOption=", one, one[:200])
-
-    def test_the_closed_box_is_drawn_from_the_same_value_it_is_given(self):
-        """Two sources for one box is one box that can disagree with itself."""
-        for part in self.text.split("<DropdownItem")[1:]:
+        for part in self.text.split("<Choice")[1:]:
             one = part[:part.index("/>")]
-            held = one.split("selectedOption={")[1].split("}")[0]
-            drawn = one.split("renderButtonValue={")[1].split("}")[0]
-            self.assertIn(held, drawn, one[:200])
+            self.assertIn("value=", one, one[:200])
+            self.assertIn("onPick=", one, one[:200])
+        self.assertIn("<Field", self.text)
+        self.assertIn("<Dropdown", self.text)
+
+    def test_that_row_draws_its_closed_box_from_the_value_it_is_given(self):
+        """Two sources for one box is one box that can disagree with itself."""
+        # The body, and not the list of props above it: the first "\n}" in
+        # this function closes that list.
+        one = self.text[self.text.index("function Choice"):]
+        one = one[one.index("return ("):]
+        one = one[:one.index("\n}")]
+        self.assertIn("selectedOption={props.value}", one)
+        self.assertIn("renderButtonValue=", one)
+        drawn = one.split("renderButtonValue={")[1].split("onChange")[0]
+        self.assertIn("props.value", drawn)
 
     def test_the_option_lists_keep_their_identity(self):
         """A list rebuilt at every render is a new list of new objects.
@@ -322,7 +322,7 @@ class PageTest(unittest.TestCase):
         for name in ("rainbowOptions", "sceneOptions", "governorOptions",
                      "eppOptions"):
             self.assertIn("const %s = useMemo(" % name, self.text, name)
-            self.assertIn("rgOptions={%s}" % name, self.text, name)
+            self.assertIn("options={%s}" % name, self.text, name)
 
     def test_the_page_asks_for_one_status_and_not_two(self):
         """The fault that turned every switch off by itself.
