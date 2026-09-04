@@ -264,6 +264,31 @@ class GpuPartTest(unittest.TestCase):
         """
         self.assertIsNone(ledpanel.gpu_part(None).ok)
 
+    def test_no_socket_is_the_answer_and_not_a_window_that_did_not_ask(self):
+        """`state is None` had three meanings, and this read it as one.
+
+        No daemon, a daemon that gives no answer, and a window that did not
+        ask are three different things. The page reported all three as
+        "LACT is not running", so a person whose card was under LACT's
+        control read that on the status page while the page beside it set the
+        card.
+        """
+        gone = ledpanel.gpu_part(None, available=False)
+        self.assertIsNone(gone.ok)
+        self.assertIn("not running", gone.verdict)
+
+        looking = ledpanel.gpu_part(None, available=True, asked=False)
+        self.assertIsNone(looking.ok)
+        self.assertIn("Looking", looking.verdict)
+
+        quiet = ledpanel.gpu_part(None, available=True, asked=True)
+        self.assertFalse(quiet.ok, "a daemon that will not answer is a fault")
+        self.assertIn("did not answer", quiet.verdict)
+
+    def test_a_card_it_read_is_reported_whatever_the_socket_says(self):
+        """An answer in hand beats a file test that raced it."""
+        self.assertTrue(ledpanel.gpu_part(self._state(), available=True).ok)
+
     def test_a_daemon_that_would_not_answer_is_a_fault_with_its_own_words(self):
         part = ledpanel.gpu_part(None, "the socket refused this user")
         self.assertFalse(part.ok)

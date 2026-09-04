@@ -4095,6 +4095,82 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(_has_display(), "no tkinter or no display")
+class GpuFirstLookTest(unittest.TestCase):
+    """The card is read soon after the window opens, and not only on its page.
+
+    It was read when somebody opened the CPU and GPU page and at no other
+    time. A person who never opened that page thus read "LACT is not running"
+    on the status page for as long as the window was open, while the card was
+    under LACT's control the whole time.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def setUp(self):
+        self.lact = self.panel_module.lact
+        self.was = (self.lact.available, self.lact.state)
+        self.addCleanup(self._put_back)
+        self.lact.available = lambda path=None: True
+        self.read = []
+        # ledpanel.gpu_state is bound to lact.state when the module is
+        # imported, so a stub on lact.state alone is a stub that nothing
+        # calls.
+        self.panel_ledpanel = self.panel_module.ledpanel
+        self.was_state = self.panel_ledpanel.gpu_state
+        self.addCleanup(setattr, self.panel_ledpanel, "gpu_state",
+                        self.was_state)
+        self.panel_ledpanel.gpu_state = lambda path=None, ask=None: (
+            self.read.append(True),
+            {"gpu": "1002:1234", "name": "A card", "config": {},
+             "clocks": {}, "stats": {}, "profiles": [], "profile": ""})[1]
+
+        self.root = tk.Tk()
+        self.addCleanup(self._destroy)
+        self.panel = self.panel_module.Panel(self.root)
+        self.root.update()
+
+    def _put_back(self):
+        self.lact.available, self.lact.state = self.was
+
+    def _destroy(self):
+        if getattr(self, "root", None) is not None:
+            self.root.destroy()
+            self.root = None
+
+    def test_the_first_look_is_booked(self):
+        self.assertIsNotNone(self.panel._gpu_first,
+                             "nothing reads the card until its page opens")
+
+    def test_it_reads_the_card_and_reports_it(self):
+        self.panel._first_look_gpu()
+        self.root.update()
+        self.assertTrue(self.read, "the card was not read")
+        self.assertTrue(self.panel._gpu_asked)
+        parts = self.panel._read_parts()
+        part = [one for one in parts if one.key == "gpu"][0]
+        self.assertNotIn("not running", part.verdict)
+
+    def test_a_machine_with_no_daemon_books_nothing(self):
+        """A file test, so this costs nothing on a machine without LACT.
+
+        One window at a time: two roots in one process cannot share the icon
+        of this panel, and Tk says so rather than drawing the second one.
+        """
+        self._destroy()
+        self.lact.available = lambda path=None: False
+        self.root = tk.Tk()
+        panel = self.panel_module.Panel(self.root)
+        self.root.update()
+        self.assertIsNone(panel._gpu_first)
+
+    def test_the_timer_is_cancelled_with_the_window(self):
+        """A callback for a window that has gone is an invalid command name."""
+        self.panel._stop_timers()
+        self.assertIsNone(self.panel._gpu_first)
+
+
 class DrivesPageTest(unittest.TestCase):
     """The drives on the System page, in a real window.
 

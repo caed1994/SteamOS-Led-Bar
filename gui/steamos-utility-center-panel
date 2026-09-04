@@ -2559,6 +2559,14 @@ class Panel:
         if cec.installed():
             self._cec_first = self.root.after(CEC_FIRST_LOOK,
                                               self._reread_cec)
+        # The card, for the same reason and at the same distance. It was read
+        # when somebody opened the CPU and GPU page and at no other time, so
+        # the status page said "LACT is not running" to a person whose card
+        # was under LACT's control.
+        self._gpu_first = None
+        if lact.available():
+            self._gpu_first = self.root.after(CEC_FIRST_LOOK,
+                                              self._first_look_gpu)
         # Open at the height the content needs, so the first thing anyone does
         # is not what resizes the window.
         self._fit_window()
@@ -4599,7 +4607,7 @@ class Panel:
     def _stop_timers(self, event=None):
         """Drop what is booked, so nothing fires at a window that has gone.
 
-        All three have work in the queue for most of the time. The preview has
+        Each of them has work in the queue for most of the time. The preview has
         work while its page is open. The resize has work between a fold and the
         layout pass after it. The idle catch-up has work after a change. Tk
         reports a callback for a window that no longer exists as an invalid
@@ -4608,11 +4616,12 @@ class Panel:
         if event is not None and event.widget is not self.root:
             return                              # a child of ours, not the window
         for job in (self._preview_job, self._refit_job, self._catching_up,
-                    getattr(self, "_cec_first", None)):
+                    getattr(self, "_cec_first", None),
+                    getattr(self, "_gpu_first", None)):
             if job is not None:
                 self.root.after_cancel(job)
         self._preview_job = self._refit_job = self._catching_up = None
-        self._cec_first = None
+        self._cec_first = self._gpu_first = None
 
     def _preview_chosen(self):
         """Restart the clock, so a shape is seen from its beginning."""
@@ -4857,6 +4866,17 @@ class Panel:
         self.gpu_box = ttk.Frame(outer, style="Page.TFrame")
         self.gpu_box.pack(fill="x")
         return outer
+
+    def _first_look_gpu(self):
+        """Reads the card one time after the window opens, and reports it.
+
+        The block of the page is drawn by _reread_gpu whether or not the page
+        is on the screen, which costs nothing: the page is built already, and
+        a person who opens it then finds it filled in.
+        """
+        self._gpu_first = None
+        self._reread_gpu()
+        self.refresh_status()
 
     def _catch_up_gpu(self):
         """Read the card the first time somebody opens this section."""
@@ -5751,7 +5771,9 @@ class Panel:
         return [
             ledpanel.led_part(checks),
             ledpanel.power_part(self.power, power.available()),
-            ledpanel.gpu_part(self._gpu, self._gpu_error),
+            ledpanel.gpu_part(self._gpu, self._gpu_error,
+                              available=lact.available(),
+                              asked=self._gpu_asked),
             ledpanel.cec_part(self._cec, cec.installed(), SOURCE_DIR),
             ledpanel.layout_part(self.system.get(syssettings.LAYOUT, ""),
                                  dict((value, label) for label, value

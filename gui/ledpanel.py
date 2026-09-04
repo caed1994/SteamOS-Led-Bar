@@ -461,16 +461,33 @@ def cec_part(status, installed, source_dir=None):
                 % (device.get("device"), len(on)), detail)
 
 
-def gpu_part(state, error=""):
+def gpu_part(state, error="", available=None, asked=True):
     """Returns the graphics card, when a daemon controls it.
 
     The result is "not installed" when LACT does not run, and that is the
     condition of most machines. LACT is the tool of another project, and
     nothing here installs it. Its absence is not a fault, and this function
     does not count it as one.
+
+    `available` is the socket of the daemon, which is a file test. `asked`
+    tells whether the window spoke to the daemon already.
+
+    Both are here because `state is None` had three meanings and this function
+    read it as one. No daemon, a daemon that gives no answer, and a window
+    that did not ask are three different things. The page reported all three
+    as "LACT is not running." A person whose card was under LACT's control
+    read that on the status page, while the page beside it set the card.
     """
     if error:
         return Part("gpu", "Graphics card", False, error)
+    if available is False:
+        return Part("gpu", "Graphics card", None, "LACT is not running.")
+    if state is None and available and not asked:
+        return Part("gpu", "Graphics card", None,
+                    "Looking for the graphics card...")
+    if state is None and available:
+        return Part("gpu", "Graphics card", False,
+                    "LACT is running and did not answer.")
     if state is None:
         return Part("gpu", "Graphics card", None, "LACT is not running.")
     if not state.get("gpu"):

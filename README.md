@@ -673,6 +673,11 @@ A part that is defective opens its fold one time. The page thus never says that
 something is defective and then hides the detail. If you close the fold, it
 stays closed. The panel reads the machine again after each command.
 
+**The graphics card block speaks to LACT soon after the window opens.** It thus
+reports the card to a person who never opens the CPU & GPU page. While the
+first read is in progress, the block says that it looks for the card. The block
+says that LACT is not running only when the socket of the daemon is absent.
+
 ### Light and dark
 
 **App Settings > Colours** has three answers:
