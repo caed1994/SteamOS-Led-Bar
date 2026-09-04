@@ -9,6 +9,7 @@ and "what fixes it", and those are worth testing without a display.
 
 from __future__ import annotations
 
+import getpass
 import os
 import platform
 import re
@@ -753,6 +754,92 @@ def apply_config_command(source_dir, staged_path, ask=False):
     """Install a prepared config file and restart the service."""
     return applier_command("strip", source_dir, "apply-config.sh",
                            staged_path, ask=ask)
+
+
+# -- the Game Mode plugin --------------------------------------------------
+#
+# Decky Loader keeps its plugins under the home directory of the user, so
+# nothing here needs root to *look*. To install one does: Decky keeps that
+# directory as root and its loader is a system service.
+
+DECKY_HOME = "homebrew"
+DECKY_PLUGIN = os.path.join(DECKY_HOME, "plugins", "SteamOS Utility Center")
+
+# The files that Decky reads, and the ones this compares. dist/index.js is
+# built and in the repository, because nobody must run npm on a Steam Machine.
+DECKY_FILES = ("plugin.json", "main.py", "package.json",
+               os.path.join("dist", "index.js"))
+
+# What the machine is, as one word. The page draws a different sentence and a
+# different button for each.
+DECKY_NONE = "no-decky"          # Decky Loader is not installed
+DECKY_ABSENT = "absent"          # Decky is there and the plugin is not
+DECKY_OLD = "old"                # installed, and not the files of this clone
+DECKY_CURRENT = "current"        # installed, and the same files
+
+
+def decky_where(home=None):
+    """Where Decky keeps this plugin, under the home directory of the user."""
+    return os.path.join(home or os.path.expanduser("~"), DECKY_PLUGIN)
+
+
+def decky_state(source_dir, home=None):
+    """Returns which of the four cases this machine is in.
+
+    It reads files and starts nothing. The page asks it whenever it is drawn,
+    and an answer that cost a process would be a process for each visit.
+    """
+    home = home or os.path.expanduser("~")
+    if not os.path.isdir(os.path.join(home, DECKY_HOME)):
+        return DECKY_NONE
+    where = decky_where(home)
+    for name in DECKY_FILES:
+        there = os.path.join(where, name)
+        if not os.path.exists(there):
+            return DECKY_ABSENT
+        # The bytes, and not the time of the file. A clone that is updated
+        # writes a new time on a file whose content did not change, and a
+        # button that offered an update for that would offer it for ever.
+        try:
+            with open(there, "rb") as installed, \
+                    open(os.path.join(source_dir, "decky", name), "rb") as mine:
+                if installed.read() != mine.read():
+                    return DECKY_OLD
+        except OSError:
+            return DECKY_ABSENT
+    return DECKY_CURRENT
+
+
+# What the page says and what the button is called, for each of the four.
+DECKY_WORDS = {
+    DECKY_NONE: (
+        "Decky Loader is not installed, so there is nowhere to put the "
+        "plugin. Install Decky from https://decky.xyz and open this page "
+        "again.",
+        "Install it anyway"),
+    DECKY_ABSENT: (
+        "The Game Mode plugin is not installed. It puts the strip, the CPU, "
+        "the graphics card and the television into the Quick Access menu.",
+        "Add the Game Mode plugin"),
+    DECKY_OLD: (
+        "The Game Mode plugin is installed, and this clone has a newer one.",
+        "Update the Game Mode plugin"),
+    DECKY_CURRENT: (
+        "The Game Mode plugin is installed and current. Open the Quick "
+        "Access menu in Game Mode.",
+        "Install it again"),
+}
+
+
+def install_decky_command(source_dir, user=None):
+    """Installs the plugin and restarts the loader, in one prompt.
+
+    Root for both halves: Decky keeps its plugin directory as root, and the
+    loader is a system service. See scripts/install-decky.sh, which the
+    installer runs as well.
+    """
+    return ["pkexec", os.path.join(source_dir, "scripts", "install-decky.sh"),
+            source_dir, user or getpass.getuser()]
 
 
 # -- updating the clone ----------------------------------------------------

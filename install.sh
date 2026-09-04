@@ -359,49 +359,26 @@ fi
 
 # The Game Mode plugin, where Decky Loader is installed.
 #
-# As root, and not as the desktop user. Decky Loader keeps its plugin
-# directory as root, and its own loader runs as root and reads them. A copy as
-# the user fails on `mkdir` there with "permission denied", which is what this
-# step did on the machine it was written for.
+# One script for this, and the panel has a button that runs the same one. Two
+# copies of the copy would be two sets of files on one machine.
 #
-# It says what it did in every case, including when it did nothing. A step
-# that is silent when it skips leaves a person looking for a plugin that was
-# never copied, with nothing on the screen to say so.
-#
-# Decky reads a plugin when it starts, so a new one appears after Decky is
-# restarted. The plugin needs nothing built: dist/index.js is in the
-# repository, because nobody must run npm on a Steam Machine.
-install_decky_plugin() {
-    local home where file
-    if ! watcher_user_dirs; then
-        say "No desktop user, so the Game Mode plugin is not installed."
-        return 0
-    fi
-    home="$WATCHER_HOME"
-    if [[ ! -d "$home/homebrew" ]]; then
-        say "No Decky Loader in $home/homebrew, so no Game Mode plugin."
-        say "  Install Decky from https://decky.xyz and run this again."
-        return 0
-    fi
-
-    where="$home/$DECKY_PLUGIN"
-    say "Installing the Game Mode plugin to $where"
-    if ! install -d -m 0755 "$where/dist"; then
-        warn "could not make $where - the Game Mode plugin is not installed"
-        return 0
-    fi
-    for file in plugin.json main.py package.json dist/index.js; do
-        if [[ ! -f "$SOURCE_DIR/decky/$file" ]]; then
-            warn "decky/$file is not in this clone - is it up to date?"
-            return 0
-        fi
-        install -m 0644 "$SOURCE_DIR/decky/$file" "$where/$file" \
-            || { warn "could not write $where/$file"; return 0; }
-    done
-    say "  restart Decky to see it: sudo systemctl restart plugin_loader"
-}
-
-install_decky_plugin
+# Only where Decky is. A machine without it gets one line and no directory
+# made for a program that its owner did not ask for. The script says which
+# case it is, so a plugin that is not there is a line in this log and not a
+# search. See scripts/install-decky.sh.
+if ! watcher_user_dirs; then
+    say "No desktop user, so the Game Mode plugin is not installed."
+elif decky_said="$(bash "$SOURCE_DIR/scripts/install-decky.sh" \
+                  "$SOURCE_DIR" "$WATCHER_USER" 2>&1)"; then
+    say "Installing the Game Mode plugin for $WATCHER_USER"
+    printf '%s\n' "$decky_said" | while read -r line; do say "  $line"; done
+elif [[ $? -eq 3 ]]; then
+    say "No Decky Loader, so no Game Mode plugin. Install Decky from"
+    say "https://decky.xyz and run this again."
+else
+    warn "could not install the Game Mode plugin:"
+    printf '%s\n' "$decky_said" | while read -r line; do warn "  $line"; done
+fi
 
 if [[ -f "$POWER_CONFIG_PATH" ]]; then
     say "Keeping existing $POWER_CONFIG_PATH"

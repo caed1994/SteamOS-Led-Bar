@@ -374,7 +374,7 @@ SECTIONS = (
     # settings of the machine rather than of the bar. The key stays "keyboard",
     # because the code refers to a section by that key and a rename of it is a
     # rename in every place that names the section.
-    ("keyboard", "System", "Keyboard and drives", "keys"),
+    ("keyboard", "System", "Keyboard, drives and Game Mode", "keys"),
     # This is not a page of the LED strip, and it was a page of the strip
     # before. It reports on the *installation*: the kernel module, the
     # units, the udev rule, and the services that stay alive across Game
@@ -5961,7 +5961,7 @@ class Panel:
     # -- the drives ---------------------------------------------------------
 
     def _build_system(self, where, table, note):
-        """The System page: the keyboard layout, and the drives.
+        """The System page: the keyboard layout, the drives, and the plugin.
 
         Both are settings of the machine and not of the bar, which is why they
         share a section. They are not alike in one way that matters. The
@@ -5971,7 +5971,58 @@ class Panel:
         """
         outer = self._build_settings(where, table, note)
         self._build_drives(outer)
+        self._build_decky(outer)
         return outer
+
+    def _build_decky(self, parent):
+        """The Game Mode plugin, and one button that installs it.
+
+        The panel is a window on the desktop, and Game Mode has no desktop.
+        The plugin is the other half of this project for that reason, and it
+        is on this page because a person who cannot find it does not know
+        that it exists.
+
+        This is a card of state and one button, and both come from the same
+        four words. See ledpanel.decky_state.
+        """
+        box = self._section(parent, "Game Mode", card=True)
+        self.decky_said = ttk.Label(box, style="Muted.TLabel", justify="left")
+        self.decky_said.pack(anchor="w")
+        self._wrapped.append(self.decky_said)
+        self._wrap_insets[str(self.decky_said)] = 2 * GROUP_GAP
+        # The one button of that row, because its name changes with the
+        # state. _buttons returns the row, and the row holds the button.
+        row = self._buttons(
+            box, (("Add the Game Mode plugin", self.install_decky),),
+            lead=ROW_GAP)
+        self.decky_button = row.winfo_children()[0]
+        self._show_decky()
+        return box
+
+    def _show_decky(self):
+        """Puts the state of the plugin, and the name of the button, on it."""
+        self._decky = ledpanel.decky_state(SOURCE_DIR)
+        said, called = ledpanel.DECKY_WORDS[self._decky]
+        self.decky_said.configure(text=said)
+        self.decky_button.configure(text=called)
+
+    def install_decky(self):
+        """Copies the plugin in and restarts the loader, after asking."""
+        if self._decky == ledpanel.DECKY_NONE and not self._ask(
+                "Game Mode",
+                "There is no Decky Loader on this machine, so this has "
+                "nowhere to put the plugin.\n\nInstall Decky from "
+                "https://decky.xyz first. Press Install to try it "
+                "anyway.", confirm="Install"):
+            return
+
+        def finished(_code):
+            self._show_decky()
+            self._refit_page()
+            self.refresh_status()
+
+        self.runner.start(ledpanel.install_decky_command(SOURCE_DIR),
+                          finished)
 
     def _build_drives(self, parent):
         """The second drives of this machine, and what mounts them.

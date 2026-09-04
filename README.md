@@ -1210,22 +1210,35 @@ also:
 settings that a person changes from a sofa into the Quick Access menu of Game
 Mode, where the panel cannot go.
 
-The installer copies it in, but only on a machine that has Decky. It says what
-it did in every case, including when it did nothing, so a plugin that is not
-there is a line in the installation log and not a search. Nothing has to be
-built: `decky/dist/index.js` is in this repository, because nobody must run npm
-on a Steam Machine.
+**The panel installs it.** The **System** page has a *Game Mode* card with one
+button. It says which of four cases this machine is in, and the button says
+what it does:
 
-Decky reads its plugins when its loader starts, so a new one appears after:
+| The machine | The button |
+| ----------- | ---------- |
+| no Decky Loader | names where Decky comes from, and asks first |
+| Decky, and no plugin | **Add the Game Mode plugin** |
+| a plugin older than this clone | **Update the Game Mode plugin** |
+| the files of this clone | **Install it again** |
 
-```bash
-sudo systemctl restart plugin_loader
-```
+Older or current is the bytes of the files and not their time. A clone that is
+updated writes a new time on a file whose content did not change, and a button
+that offered an update for that would offer it for ever.
 
-If the plugin is not in the menu, look for it on the disk first:
+The full installer does the same, with the same script, so the two cannot put
+different files on one machine. Nothing has to be built: `decky/dist/index.js`
+is in this repository, because nobody must run npm on a Steam Machine.
+
+It needs your password one time, for both halves of the work. Decky keeps its
+plugin directory as root, and its loader is a system service that has to
+restart before it reads a new plugin. The button does that restart, so the
+plugin is in the Quick Access menu when the button is finished.
+
+By hand, if you would rather:
 
 ```bash
 ls ~/homebrew/plugins/
+sudo systemctl restart plugin_loader
 ```
 
 What is on the page:

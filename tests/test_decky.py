@@ -19,7 +19,10 @@ import ast
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -65,8 +68,11 @@ class ManifestTest(unittest.TestCase):
 
 
 class InstallTest(unittest.TestCase):
-    """How the plugin reaches ~/homebrew/plugins, and what is said when it
-    does not.
+    """How a full installation puts the plugin in, and what it says.
+
+    The copy itself is scripts/install-decky.sh, which the button on the
+    System page runs as well. Two copies of the copy would be two sets of
+    files on one machine.
 
     The first version of this step copied as the desktop user and said nothing
     when it skipped. Decky Loader keeps that directory as root, so the copy
@@ -81,45 +87,26 @@ class InstallTest(unittest.TestCase):
 
     def _step(self):
         text = self._text()
-        start = text.index("install_decky_plugin() {")
-        return text[start:text.index("\ninstall_decky_plugin", start)]
+        start = text.index("# The Game Mode plugin, where Decky Loader")
+        return text[start:text.index("\nif [[ -f \"$POWER_CONFIG_PATH\"", start)]
 
-    def test_the_installer_has_the_step(self):
-        self.assertIn("install_decky_plugin", self._text())
+    def test_it_runs_the_script_the_button_runs(self):
+        self.assertIn("scripts/install-decky.sh", self._step())
 
-    def test_it_copies_as_root(self):
-        """Decky keeps that directory as root, and its loader reads as root."""
-        self.assertNotIn("runuser", self._step())
-        self.assertIn("install -d", self._step())
-
-    def test_it_says_something_when_it_skips(self):
-        """A silent skip is the fault this step had.
-
-        Every branch that installs nothing says so. There is no path out of
-        this step that leaves the screen unchanged.
-        """
-        lines = self._step().splitlines()
-        for branch in ("No desktop user", "No Decky Loader"):
-            self.assertIn(branch, "\n".join(lines), branch)
-        # Every way out of this step says something on the three lines above
-        # it. A `return 0` with nothing above it is a silent skip.
-        for index, line in enumerate(lines):
-            if "return 0" not in line:
-                continue
-            above = " ".join(lines[max(0, index - 3):index + 1])
-            self.assertTrue("say " in above or "warn " in above,
-                            "line %d leaves without a word: %s"
-                            % (index + 1, line.strip()))
-
-    def test_it_names_every_file_the_plugin_needs(self):
-        """Decky reads plugin.json, runs main.py and loads dist/index.js."""
+    def test_it_says_something_in_every_case(self):
+        """A silent skip is the fault this step had."""
         step = self._step()
-        for file in ("plugin.json", "main.py", "dist/index.js"):
-            self.assertIn(file, step, file)
+        for branch in ("No desktop user", "No Decky Loader",
+                       "could not install"):
+            self.assertIn(branch, step, branch)
 
-    def test_it_says_how_to_make_decky_read_it(self):
-        """A copied plugin appears at the next start of the loader."""
-        self.assertIn("plugin_loader", self._step())
+    def test_it_tells_a_missing_decky_from_a_failure(self):
+        """The script says which one it is with a status of its own.
+
+        A machine with no Decky is not a fault to warn about. A copy that
+        failed is.
+        """
+        self.assertIn("-eq 3", self._step())
 
 
 class BackendTest(unittest.TestCase):
@@ -497,3 +484,127 @@ class BuiltTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PluginInstallerTest(unittest.TestCase):
+    """The button on the System page, and the script behind it.
+
+    Nothing here installs anything. Each test works in a home directory of its
+    own, and the script is read rather than run where running it would need
+    root.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "gui"))
+        import ledpanel
+        self.ledpanel = ledpanel
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.home = holder.name
+        self.clone = os.path.join(HERE, "..")
+
+    def _script(self):
+        with open(os.path.join(HERE, "..", "scripts", "install-decky.sh"),
+                  encoding="utf-8") as handle:
+            return handle.read()
+
+    def _install(self):
+        """Puts the files of this clone where Decky keeps them."""
+        where = self.ledpanel.decky_where(self.home)
+        os.makedirs(os.path.join(where, "dist"), exist_ok=True)
+        for name in self.ledpanel.DECKY_FILES:
+            shutil.copy(os.path.join(DECKY, name), os.path.join(where, name))
+        return where
+
+    def test_a_machine_with_no_decky_is_its_own_answer(self):
+        """Not "not installed": there is nowhere to install it to.
+
+        The page says so and names where Decky comes from, because this
+        project does not install a program of other people.
+        """
+        self.assertEqual(self.ledpanel.decky_state(self.clone, self.home),
+                         self.ledpanel.DECKY_NONE)
+        said, _button = self.ledpanel.DECKY_WORDS[self.ledpanel.DECKY_NONE]
+        self.assertIn("decky.xyz", said)
+
+    def test_decky_with_no_plugin_of_ours(self):
+        os.makedirs(os.path.join(self.home, "homebrew"))
+        self.assertEqual(self.ledpanel.decky_state(self.clone, self.home),
+                         self.ledpanel.DECKY_ABSENT)
+
+    def test_the_files_of_this_clone_read_as_current(self):
+        os.makedirs(os.path.join(self.home, "homebrew"))
+        self._install()
+        self.assertEqual(self.ledpanel.decky_state(self.clone, self.home),
+                         self.ledpanel.DECKY_CURRENT)
+
+    def test_a_file_that_differs_reads_as_old(self):
+        """The bytes, and not the time of the file.
+
+        A clone that is updated writes a new time on a file whose content did
+        not change, and a button that offered an update for that would offer
+        it for ever.
+        """
+        os.makedirs(os.path.join(self.home, "homebrew"))
+        where = self._install()
+        os.utime(os.path.join(where, "main.py"), (0, 0))
+        self.assertEqual(self.ledpanel.decky_state(self.clone, self.home),
+                         self.ledpanel.DECKY_CURRENT)
+        with open(os.path.join(where, "dist", "index.js"), "a",
+                  encoding="utf-8") as handle:
+            handle.write("\n// somebody's edit\n")
+        self.assertEqual(self.ledpanel.decky_state(self.clone, self.home),
+                         self.ledpanel.DECKY_OLD)
+
+    def test_a_half_copied_plugin_reads_as_absent(self):
+        """An installation that stopped part way is one to do again."""
+        os.makedirs(os.path.join(self.home, "homebrew"))
+        where = self._install()
+        os.unlink(os.path.join(where, "dist", "index.js"))
+        self.assertEqual(self.ledpanel.decky_state(self.clone, self.home),
+                         self.ledpanel.DECKY_ABSENT)
+
+    def test_every_state_has_words_and_a_button(self):
+        for state in (self.ledpanel.DECKY_NONE, self.ledpanel.DECKY_ABSENT,
+                      self.ledpanel.DECKY_OLD, self.ledpanel.DECKY_CURRENT):
+            said, button = self.ledpanel.DECKY_WORDS[state]
+            self.assertTrue(said, state)
+            self.assertTrue(button, state)
+
+    def test_the_button_runs_the_script_the_installer_runs(self):
+        """One script, or the two would put different files on one machine."""
+        command = self.ledpanel.install_decky_command("/clone", "deck")
+        self.assertEqual(command[0], "pkexec")
+        self.assertTrue(command[1].endswith("scripts/install-decky.sh"))
+        self.assertEqual(command[2:], ["/clone", "deck"])
+        with open(os.path.join(HERE, "..", "install.sh"),
+                  encoding="utf-8") as handle:
+            self.assertIn("scripts/install-decky.sh", handle.read())
+
+    def test_the_script_says_no_decky_with_a_status_of_its_own(self):
+        """The installer tells that case from a failure by the status."""
+        self.assertIn("exit 3", self._script())
+
+    def test_the_script_copies_every_file_the_page_compares(self):
+        text = self._script()
+        for name in self.ledpanel.DECKY_FILES:
+            self.assertIn(name, text, name)
+
+    def test_the_script_restarts_the_loader(self):
+        """Decky reads its plugins when the loader starts."""
+        text = self._script()
+        self.assertIn("plugin_loader", text)
+        self.assertLess(text.index("install -m 0644"),
+                        text.index('systemctl restart'))
+
+    def test_the_script_refuses_to_run_as_anybody_but_root(self):
+        """Decky keeps its plugins as root, and the loader is a system unit."""
+        done = subprocess.run(
+            ["bash", os.path.join(HERE, "..", "scripts", "install-decky.sh"),
+             self.clone, "nobody"],
+            capture_output=True, text=True,
+            env=dict(os.environ, ROOT=self.home))
+        if os.getuid() == 0:
+            self.skipTest("this suite runs as root")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("root", done.stdout + done.stderr)
