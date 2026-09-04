@@ -5752,7 +5752,7 @@ class Panel:
             ledpanel.led_part(checks),
             ledpanel.power_part(self.power, power.available()),
             ledpanel.gpu_part(self._gpu, self._gpu_error),
-            ledpanel.cec_part(self._cec, cec.installed()),
+            ledpanel.cec_part(self._cec, cec.installed(), SOURCE_DIR),
             ledpanel.layout_part(self.system.get(syssettings.LAYOUT, ""),
                                  dict((value, label) for label, value
                                       in syssettings.layouts())),
@@ -6425,8 +6425,20 @@ class Panel:
 
         self.runner.start(ledpanel.update_command(SOURCE_DIR, wanted), updated)
 
-    def _installed(self, code):
+    def _after_install(self):
+        """Reads the machine again, after anything that installed something.
+
+        The toolkit as well. An installation can replace it now, and this page
+        drew what it read when the window opened: the HDMI CEC block and the
+        line at the foot of the window were both correct only after somebody
+        pressed Check again.
+        """
         self.refresh_status()
+        if cec.installed():
+            self._reread_cec()
+
+    def _installed(self, code):
+        self._after_install()
         if code != 0:
             self._write("The install did not finish, so the panel is still "
                         "running the old files.\n\n")
@@ -6547,8 +6559,11 @@ class Panel:
                           "touched. This asks for your password.",
                 confirm="Re-run the installer"):
             return
+        # Not _installed: this repairs with the files that are already here,
+        # so the panel is not out of date and has no reason to offer a
+        # restart.
         self.runner.start(ledpanel.reinstall_command(SOURCE_DIR),
-                          lambda _code: self.refresh_status())
+                          lambda _code: self._after_install())
 
 
 def main():

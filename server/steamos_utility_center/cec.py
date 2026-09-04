@@ -201,6 +201,43 @@ def source_dir(repo):
     return os.path.join(repo, SOURCE)
 
 
+# The file that says which toolkit a clone carries. The installed copy reports
+# its own, and `toolkitctl status` carries it as "version".
+VERSION_FILE = "VERSION"
+
+
+def clone_version(repo):
+    """Returns the version of the toolkit in a clone, or "" if unreadable."""
+    try:
+        with open(os.path.join(source_dir(repo), VERSION_FILE),
+                  encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def running_version(status):
+    """Returns the version that the installed toolkit reports."""
+    return str((status or {}).get("version") or "").strip()
+
+
+def out_of_date(status, repo):
+    """Reports whether the installed toolkit is older than this clone.
+
+    False where either version is unreadable. A question that cannot be
+    answered is not an answer of "yes": an old toolkit is worth reporting, and
+    a report on a machine that has nothing to compare is noise.
+
+    This exists because nothing compared the two. `update.sh` brought a newer
+    cec-toolkit/ into the clone, the installer did not touch the toolkit at
+    all, and the copy on the machine stayed as old as it was with nothing to
+    say so.
+    """
+    running = running_version(status)
+    theirs = clone_version(repo)
+    return bool(running and theirs and running != theirs)
+
+
 def status_command(home=None):
     return [command_path(home), "status"]
 

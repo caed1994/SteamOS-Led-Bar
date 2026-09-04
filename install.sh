@@ -357,6 +357,34 @@ else
     fi
 fi
 
+# The HDMI CEC toolkit, where it is already installed.
+#
+# It has its own installer and its own button on the CEC page, and that is
+# right: it writes udev rules, wireplumber configuration and units of its own,
+# and a person who never asked for it must not get it from here.
+#
+# But a person who *has* it expects an update to bring it. It did not. This
+# script never named the toolkit at all, so `update.sh` brought a newer
+# cec-toolkit/ into the clone, "Rebuild and reinstall" installed everything
+# else, and the copy on the machine stayed as old as it was. The five fixes
+# that this fork made are in cec-toolkit/bin, so an old copy is a machine
+# without them, and nothing said so.
+#
+# Only where it is, so the rule is still opt-in.
+if watcher_user_dirs \
+        && [[ -x "$WATCHER_HOME/.local/bin/steamos-cec-toolkitctl" ]]; then
+    say "Installing the HDMI CEC toolkit for $WATCHER_USER"
+    if cec_said="$(bash "$SOURCE_DIR/scripts/install-cec.sh" install \
+                  "$SOURCE_DIR/cec-toolkit" "$WATCHER_USER" 2>&1)"; then
+        say "  HDMI CEC toolkit $(cat "$SOURCE_DIR/cec-toolkit/VERSION")"
+    else
+        warn "could not bring the HDMI CEC toolkit up to date:"
+        printf '%s\n' "$cec_said" | tail -5 \
+            | while read -r line; do warn "  $line"; done
+        warn "Its own button on the HDMI CEC page installs it."
+    fi
+fi
+
 # The Game Mode plugin, where Decky Loader is installed.
 #
 # One script for this, and the panel has a button that runs the same one. Two

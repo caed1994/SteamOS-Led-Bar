@@ -195,6 +195,56 @@ class CecPartTest(unittest.TestCase):
         self.assertIn("steam-button", [n for n, _k, _l, _s in cec.FEATURES])
 
 
+class CecVersionPartTest(unittest.TestCase):
+    """A toolkit that answers every question and is not the one in the clone.
+
+    It was reported as ready. update.sh brought a newer cec-toolkit/ into the
+    clone, install.sh named the toolkit nowhere, and the copy on the machine
+    stayed as old as it was.
+    """
+
+    def setUp(self):
+        import tempfile
+        from steamos_utility_center import cec as cec_module
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.clone = holder.name
+        os.makedirs(os.path.join(self.clone, cec_module.SOURCE))
+        with open(os.path.join(self.clone, cec_module.SOURCE, "VERSION"),
+                  "w", encoding="utf-8") as handle:
+            handle.write("v9.9.9\n")
+
+    def test_a_toolkit_of_this_clone_is_ready(self):
+        part = ledpanel.cec_part(cec_status(version="v9.9.9"), True,
+                                 self.clone)
+        self.assertTrue(part.ok)
+
+    def test_an_older_one_is_not_ready_and_says_both_versions(self):
+        part = ledpanel.cec_part(cec_status(version="v9.9.8"), True,
+                                 self.clone)
+        self.assertFalse(part.ok)
+        self.assertIn("v9.9.8", part.verdict)
+        self.assertIn("v9.9.9", part.verdict)
+        self.assertEqual(part.repair, "install-cec")
+
+    def test_it_says_what_to_do_about_it(self):
+        part = ledpanel.cec_part(cec_status(version="v9.9.8"), True,
+                                 self.clone)
+        self.assertTrue(any("install" in line.lower() for line in part.detail),
+                        part.detail)
+
+    def test_a_caller_with_no_clone_asks_no_such_question(self):
+        """The status page passes it. A caller that does not is unchanged."""
+        self.assertTrue(ledpanel.cec_part(cec_status(version="v0.0.1"),
+                                          True).ok)
+
+    def test_the_version_is_in_the_detail_either_way(self):
+        part = ledpanel.cec_part(cec_status(version="v9.9.9"), True,
+                                 self.clone)
+        self.assertTrue(any("v9.9.9" in line for line in part.detail),
+                        part.detail)
+
+
 class GpuPartTest(unittest.TestCase):
 
     def _state(self, **changes):

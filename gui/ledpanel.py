@@ -414,8 +414,9 @@ def adapter_gone_cost(status):
             % (len(on), " is" if len(on) == 1 else "s are"))
 
 
-def cec_part(status, installed):
-    """HDMI CEC: is the toolkit there, and can it reach the television."""
+def cec_part(status, installed, source_dir=None):
+    """HDMI CEC: is the toolkit there, can it reach the television, and is it
+    the one that this clone carries."""
     if not installed:
         return Part("cec", "HDMI CEC", None, "Not installed.")
     if status is None:
@@ -427,6 +428,8 @@ def cec_part(status, installed):
           if cec_module.feature_on(status, name)]
     detail = ["Adapter: %s" % (device.get("device") or "none configured"),
               "Features on: %s" % (", ".join(on) if on else "none")]
+    if cec_module.running_version(status):
+        detail.append("Version: %s" % cec_module.running_version(status))
     if not cec_module.usable(status):
         # The cost of this condition goes into the detail and not into the
         # verdict. The verdict is one line in a headline. This text is the
@@ -436,6 +439,23 @@ def cec_part(status, installed):
                     "%s cannot be reached, so nothing can be sent."
                     % (device.get("device") or "The adapter"),
                     detail + ([cost] if cost else []), repair="install-cec")
+
+    # An old toolkit is not a fault, and it is not "ready" either.
+    #
+    # Nothing compared the two before. update.sh brought a newer cec-toolkit/
+    # into the clone, the installer did not touch the toolkit, and the copy on
+    # the machine stayed as old as it was. It answered every question, so the
+    # page reported it as ready, and the five fixes of this fork were not on
+    # the machine.
+    if source_dir and cec_module.out_of_date(status, source_dir):
+        return Part("cec", "HDMI CEC", False,
+                    "Ready on %s, and older than this clone: %s against %s."
+                    % (device.get("device"),
+                       cec_module.running_version(status),
+                       cec_module.clone_version(source_dir)),
+                    detail + ["Install it again on the HDMI CEC page, or "
+                              "press Rebuild and reinstall."],
+                    repair="install-cec")
     return Part("cec", "HDMI CEC", True,
                 "Ready on %s, %d feature(s) on."
                 % (device.get("device"), len(on)), detail)

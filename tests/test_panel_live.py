@@ -2132,8 +2132,12 @@ class CecPageTest(unittest.TestCase):
             self.root = None
 
     def _status(self, **changes):
+        # The version of the clone that runs this test, so a recorded answer
+        # does not read as a toolkit that is older than the clone. That
+        # comparison has its own tests in tests/test_cec.py.
         found = {
-            "ok": True, "version": "v0.1.26",
+            "ok": True, "version": cec.clone_version(
+                os.path.join(HERE, "..")),
             "config": {"CEC_DEVICE": "/dev/cec0",
                        "CEC_AUDIO_LOGICAL_ADDRESS": "5",
                        "HDMI_ALSA_CARD_NAME": "alsa_card.pci-0000_03_00.1"},
@@ -2201,6 +2205,21 @@ class CecPageTest(unittest.TestCase):
         self.root.update()
         self.assertTrue(self.panel.cec_present.winfo_ismapped())
         self.assertFalse(self.panel.cec_missing.winfo_ismapped())
+
+    def test_an_installation_reads_the_toolkit_again(self):
+        """It did not, and that is the second half of the fault.
+
+        An installation can replace the toolkit now. The page went on drawing
+        what it read when the window opened, so the HDMI CEC block and the
+        line at the foot of the window were correct only after somebody
+        pressed Check again.
+        """
+        read = []
+        was = self.panel._reread_cec
+        self.panel._reread_cec = lambda then=None: read.append(True)
+        self.addCleanup(setattr, self.panel, "_reread_cec", was)
+        self.panel._after_install()
+        self.assertEqual(len(read), 1, "the toolkit was not read again")
 
     def test_reading_the_status_takes_the_headline_with_it(self):
         """The line under the title is drawn from this answer, and drawn first.

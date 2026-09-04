@@ -821,6 +821,18 @@ output usually does not have CEC. It also needs `cec-ctl` from v4l-utils,
 `varlinkctl` from systemd, and the python `dbus_next` module. The panel gives
 the names of the missing parts before the installation and not after it.
 
+**An update brings the toolkit with it.** `update.sh` fetches a newer
+`cec-toolkit/` into the clone, and **Rebuild and reinstall** then installs it,
+but only on a machine that already has it. A machine that never asked for the
+toolkit does not get it from there: it writes udev rules, WirePlumber
+configuration and units of its own.
+
+This did not happen before, and nothing said so. The installer named the
+toolkit nowhere, so the copy on the machine stayed as old as it was, answered
+every question, and was reported as ready. The five fixes of this fork are in
+`cec-toolkit/bin/`, so an old copy is a machine without them. The status page
+compares the two versions now, and says which is which.
+
 **The installation** asks one time for your password and enables nothing. Each
 feature then has a switch that takes effect when you click it. The toolkit's
 installer writes a sudoers rule for the helpers that those switches use. There

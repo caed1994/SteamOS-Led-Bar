@@ -183,7 +183,7 @@ remove_cec_toolkit() {
     [[ -x "$control" ]] || return 0
     echo "Removing the HDMI CEC toolkit."
     if ! bash "$SOURCE_DIR/scripts/install-cec.sh" remove \
-            "$SOURCE_DIR/vendor/steamos-cec-toolkit" "$WATCHER_USER"; then
+            "$SOURCE_DIR/cec-toolkit" "$WATCHER_USER"; then
         echo "  the toolkit's own uninstaller did not finish - what is left" >&2
         echo "  can be removed with: $control uninstall" >&2
     fi

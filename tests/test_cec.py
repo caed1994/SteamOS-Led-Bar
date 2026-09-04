@@ -590,3 +590,88 @@ class PanelCommandTest(unittest.TestCase):
 
 if __name__ == "__main__":                                  # pragma: no cover
     unittest.main()
+
+
+class VersionTest(unittest.TestCase):
+    """Whether the toolkit on the machine is the one that this clone carries.
+
+    Nothing compared the two. update.sh brought a newer cec-toolkit/ into the
+    clone, install.sh did not name the toolkit at all, and the copy on the
+    machine stayed as old as it was. It answered every question, so the page
+    reported it as ready, and the five fixes of this fork were not there.
+    """
+
+    def setUp(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.clone = holder.name
+        os.makedirs(os.path.join(self.clone, cec.SOURCE))
+        self._write("v1.2.3")
+
+    def _write(self, version):
+        with open(os.path.join(self.clone, cec.SOURCE, cec.VERSION_FILE),
+                  "w", encoding="utf-8") as handle:
+            handle.write(version + "\n")
+
+    def test_the_clone_says_which_one_it_carries(self):
+        self.assertEqual(cec.clone_version(self.clone), "v1.2.3")
+
+    def test_a_clone_with_no_such_file_says_nothing(self):
+        self.assertEqual(cec.clone_version(tempfile.gettempdir()), "")
+
+    def test_the_status_says_which_one_runs(self):
+        self.assertEqual(cec.running_version({"version": "v1.2.3"}), "v1.2.3")
+        self.assertEqual(cec.running_version({}), "")
+        self.assertEqual(cec.running_version(None), "")
+
+    def test_the_same_version_is_not_out_of_date(self):
+        self.assertFalse(cec.out_of_date({"version": "v1.2.3"}, self.clone))
+
+    def test_a_different_version_is(self):
+        self.assertTrue(cec.out_of_date({"version": "v1.2.2"}, self.clone))
+
+    def test_a_version_that_cannot_be_read_is_not_a_yes(self):
+        """A question with no answer is not an answer of yes.
+
+        An old toolkit is worth reporting. A report on a machine that has
+        nothing to compare is noise.
+        """
+        self.assertFalse(cec.out_of_date({}, self.clone))
+        self.assertFalse(cec.out_of_date({"version": "v1.2.3"},
+                                         tempfile.gettempdir()))
+
+
+class InstallerTest(unittest.TestCase):
+    """What the installers do about the toolkit.
+
+    install.sh named it nowhere, so "Rebuild and reinstall" after an update
+    left the old copy on the machine. uninstall.sh named vendor/, which this
+    project moved to cec-toolkit/ some time ago, so its removal step ran on a
+    directory that is not there.
+    """
+
+    def _read(self, name):
+        with open(os.path.join(HERE, "..", name), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_installer_brings_the_toolkit_up_to_date(self):
+        self.assertIn("scripts/install-cec.sh", self._read("install.sh"))
+
+    def test_it_does_that_only_where_the_toolkit_is_installed(self):
+        """A person who never asked for it must not get it from here.
+
+        It writes udev rules, wireplumber configuration and units of its own.
+        """
+        text = self._read("install.sh")
+        step = text[text.index("# The HDMI CEC toolkit, where it is already"):]
+        step = step[:step.index("# The Game Mode plugin")]
+        self.assertIn("steamos-cec-toolkitctl", step)
+        self.assertIn("install-cec.sh", step)
+
+    def test_neither_script_names_the_directory_that_moved(self):
+        for name in ("install.sh", "uninstall.sh"):
+            self.assertNotIn("vendor/steamos-cec-toolkit", self._read(name),
+                             name)
+
+    def test_the_uninstaller_names_the_one_that_is_there(self):
+        self.assertIn("cec-toolkit", self._read("uninstall.sh"))
