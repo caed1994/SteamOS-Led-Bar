@@ -14,9 +14,11 @@
 
 import { callable, definePlugin } from "@decky/api";
 import {
+  ButtonItem,
   DropdownItem,
   PanelSection,
   PanelSectionRow,
+  SliderField,
   ToggleField,
 } from "@decky/ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -34,6 +36,19 @@ type Status = Answer & {
 
 type Feature = { name: string; label: string; explains: string };
 
+// One control of the graphics card, as the daemon reports it. The card
+// decides which of these exist: a control with no range is a control that the
+// card does not have. See lact.offered.
+type Knob = {
+  key: string;
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  start: number;
+  value: number | null;
+};
+
 type Area = Answer & {
   settings?: Record<string, unknown>;
   offers?: Record<string, unknown>;
@@ -42,6 +57,7 @@ type Area = Answer & {
 const getFullStatus = callable<[], Status>("get_full_status");
 const getArea = callable<[string], Area>("get_area");
 const setArea = callable<[string, Record<string, unknown>], Answer>("set_area");
+const doAction = callable<[string], Answer>("do_action");
 
 // The scenes of the strip, in words. The command answers with the names that
 // the configuration file uses.
@@ -77,6 +93,7 @@ function Content() {
   const [strip, setStrip] = useState<Area | null>(null);
   const [power, setPower] = useState<Area | null>(null);
   const [cec, setCec] = useState<Area | null>(null);
+  const [gpu, setGpu] = useState<Area | null>(null);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
 
@@ -88,6 +105,15 @@ function Content() {
   // pressed rather than after a command has run. A refresh takes it away
   // again, and the machine's own answer is what stays.
   const [chosen, setChosen] = useState<Record<string, string>>({});
+
+  // The controls of the card, and whether one is waiting to be kept.
+  //
+  // A slider here writes nothing while it moves. The daemon takes a change
+  // back after some seconds unless it is told to keep it, and a slider that
+  // sent at every step would start that clock at every step. So the sliders
+  // hold a value, one button sends them, and a second button keeps them.
+  const [wanted, setWanted] = useState<Record<string, number>>({});
+  const [keeping, setKeeping] = useState("");
 
   // One fetch when the page opens, and one after every change.
   //
@@ -106,7 +132,9 @@ function Content() {
     setStrip(one);
     setPower(two);
     setCec(three);
+    setGpu(await getArea("gpu"));
     setChosen({});
+    setWanted({});
   }, []);
 
   useEffect(() => {
@@ -160,6 +188,51 @@ function Content() {
     () => options((power?.offers ?? {}).governors), [power]);
   const eppOptions = useMemo(
     () => options((power?.offers ?? {}).epp), [power]);
+
+  const knobs = (
+    Array.isArray(gpu?.offers?.knobs) ? gpu?.offers?.knobs : []
+  ) as Knob[];
+
+  // Send what the sliders hold, and then wait to be told to keep it.
+  //
+  // The daemon puts the card back by itself if nobody says so. That is not a
+  // step to skip: a voltage offset that is too low hangs the card, and a hang
+  // that was kept comes back at every boot.
+  const send = async () => {
+    if (busy || Object.keys(wanted).length === 0) {
+      return;
+    }
+    setBusy(true);
+    setSaid("");
+    try {
+      const answer = await setArea("gpu", wanted);
+      if (!answer.ok) {
+        setSaid(answer.error ?? "The card would not take it.");
+        return;
+      }
+      setKeeping("The card has it. Press Keep it, or the daemon puts the "
+                 + "card back by itself.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const keep = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const answer = await doAction("gpu-keep");
+      if (!answer.ok) {
+        setSaid(answer.error ?? "The daemon did not take the confirmation.");
+      }
+      setKeeping("");
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const settings = (strip?.settings ?? {}) as Record<string, unknown>;
   const cpu = (power?.settings ?? {}) as Record<string, unknown>;
@@ -280,6 +353,69 @@ function Content() {
                     pick("power", "CPU_EPP", String(option.data))}
                 />
               </PanelSectionRow>
+            )}
+          </>
+        )}
+      </PanelSection>
+
+      <PanelSection title="Graphics card">
+        {!Boolean((gpu?.settings ?? {}).available) ? (
+          <PanelSectionRow>
+            <div style={{ fontSize: "0.8em" }}>
+              LACT is not running, so there is nothing to set.
+            </div>
+          </PanelSectionRow>
+        ) : knobs.length === 0 ? (
+          <PanelSectionRow>
+            <div style={{ fontSize: "0.8em" }}>
+              LACT reports no control for this card.
+            </div>
+          </PanelSectionRow>
+        ) : (
+          <>
+            {knobs.map((knob) => (
+              <PanelSectionRow key={knob.key}>
+                <SliderField
+                  label={knob.label + (knob.unit ? " (" + knob.unit + ")" : "")}
+                  value={wanted[knob.key] ?? knob.start}
+                  min={knob.min}
+                  max={knob.max}
+                  step={1}
+                  notchTicksVisible={false}
+                  showValue={true}
+                  disabled={busy}
+                  onChange={(value: number) =>
+                    setWanted((was) => ({ ...was, [knob.key]: value }))}
+                />
+              </PanelSectionRow>
+            ))}
+            {keeping === "" ? (
+              <PanelSectionRow>
+                <ButtonItem
+                  layout="below"
+                  disabled={busy || Object.keys(wanted).length === 0}
+                  onClick={() => void send()}
+                >
+                  Send to the card
+                </ButtonItem>
+              </PanelSectionRow>
+            ) : (
+              <>
+                <PanelSectionRow>
+                  <div style={{ fontSize: "0.8em", color: "#d9a441" }}>
+                    {keeping}
+                  </div>
+                </PanelSectionRow>
+                <PanelSectionRow>
+                  <ButtonItem
+                    layout="below"
+                    disabled={busy}
+                    onClick={() => void keep()}
+                  >
+                    Keep it
+                  </ButtonItem>
+                </PanelSectionRow>
+              </>
             )}
           </>
         )}

@@ -618,6 +618,97 @@ class StagedFileTest(unittest.TestCase):
         self.assertTrue(os.path.exists(path))
 
 
+class GraphicsCardTest(unittest.TestCase):
+    """The card, which LACT drives and this command does not.
+
+    Nothing here speaks to a daemon. The build machine has none, and a test
+    that needed one would pass on one machine and not on another.
+    """
+
+    def setUp(self):
+        from steamos_utility_center import lact
+        self.lact = lact
+        self.was = (lact.available, lact.state, lact.set_gpu_config,
+                    lact.confirm)
+        self.addCleanup(self._put_back)
+        self.sent = []
+        lact.available = lambda path=None: True
+        lact.state = lambda path=None, ask=None: {
+            "gpu": "1002:1234", "name": "A card",
+            "config": {"power_cap": 100.0},
+            "clocks": {}, "stats": {"power": {"cap_current": 100.0,
+                                              "cap_min": 50.0,
+                                              "cap_max": 200.0,
+                                              "cap_default": 150.0}}}
+        lact.set_gpu_config = lambda gpu, config, path=None: (
+            self.sent.append((gpu, config)), 5)[1]
+        lact.confirm = lambda path=None, keep=True: self.sent.append(
+            ("confirm", keep))
+
+    def _put_back(self):
+        (self.lact.available, self.lact.state, self.lact.set_gpu_config,
+         self.lact.confirm) = self.was
+
+    def test_the_cheap_status_asks_no_daemon(self):
+        """A socket has a timeout, and the cheap half must not wait on one."""
+        self.assertEqual(ctl.gpu_read(), {"available": True})
+
+    def test_the_controls_come_from_the_card(self):
+        offered = ctl.gpu_offers()
+        self.assertEqual(offered["gpu"], "1002:1234")
+        keys = [knob["key"] for knob in offered["knobs"]]
+        self.assertIn("power_cap", keys)
+
+    def test_a_control_this_card_does_not_have_is_refused(self):
+        with self.assertRaises(ctl.CtlError) as caught:
+            ctl.set_values("gpu", {"max_core_clock": 2000})
+        self.assertIn("max_core_clock", str(caught.exception))
+        self.assertEqual(self.sent, [])
+
+    def test_the_whole_document_goes_back_and_not_a_patch(self):
+        """set_gpu_config replaces the document rather than patching it.
+
+        Anything not carried across is a setting silently turned off on
+        somebody's card: a fan curve that they set in the panel, for one.
+        """
+        self.lact.state = lambda path=None, ask=None: {
+            "gpu": "1002:1234", "name": "A card",
+            "config": {"power_cap": 100.0, "fan_control_settings": {"mode":
+                                                                    "curve"}},
+            "clocks": {}, "stats": {"power": {"cap_current": 100.0,
+                                              "cap_min": 50.0,
+                                              "cap_max": 200.0,
+                                              "cap_default": 150.0}}}
+        ctl.set_values("gpu", {"power_cap": 120})
+        _gpu, config = self.sent[0]
+        self.assertEqual(config["power_cap"], 120)
+        self.assertIn("fan_control_settings", config)
+
+    def test_writing_never_confirms_by_itself(self):
+        """The daemon puts the card back unless it is told to keep it.
+
+        That is not a step to skip. A voltage offset that is too low hangs
+        the card, and a hang that was kept comes back at every boot.
+        """
+        said = ctl.set_values("gpu", {"power_cap": 120})["said"]
+        self.assertNotIn("confirm", [one[0] for one in self.sent])
+        self.assertIn("gpu-keep", said)
+
+    def test_keeping_it_is_an_action_of_its_own(self):
+        ctl.action("gpu-keep")
+        self.assertEqual(self.sent[-1], ("confirm", True))
+
+    def test_putting_it_back_is_another(self):
+        ctl.action("gpu-revert")
+        self.assertEqual(self.sent[-1], ("confirm", False))
+
+    def test_a_machine_with_no_card_says_so_and_does_not_fail(self):
+        self.lact.state = lambda path=None, ask=None: None
+        self.assertEqual(ctl.gpu_offers()["knobs"], [])
+        with self.assertRaises(ctl.CtlError):
+            ctl.set_values("gpu", {"power_cap": 120})
+
+
 class DiscoveryTest(unittest.TestCase):
     """`areas` is what lets a front end be written against this build."""
 

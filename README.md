@@ -1234,6 +1234,7 @@ What is on the page:
 | ------- | ------------- |
 | LED bar | the rainbow slot, the desktop scene, notifications |
 | CPU power | the governor and the energy preference |
+| Graphics card | the power limit, the offsets and the clock limits |
 | Television | each switch of the HDMI CEC toolkit |
 
 The page holds what a person changes from a sofa, and nothing else. A keyboard
@@ -1241,6 +1242,22 @@ layout is set one time and a drive is added one time, so both are in the panel.
 There is no block that reports the health of the machine: a page that says so
 at the top of every visit says it to somebody who came to change one setting.
 What went wrong is on the page when something did.
+
+**The graphics card takes two presses.** Its sliders write nothing while they
+move: one button sends them to the card, and a second one keeps them. That is
+LACT's own safety and not an extra step of this project. The daemon puts the
+card back after a few seconds unless it is told to keep the change, and that is
+what saves a machine from a voltage offset that is too low: such a card hangs,
+and a hang that was kept comes back at every boot. Do not press Keep it before
+the picture is still there.
+
+The card decides which sliders exist. A control with no range is a control that
+the card does not publish, so a machine with integrated graphics and no power
+limit gets no power slider rather than one that writes nowhere.
+
+The fan and the settings of the firmware are not there. Those are for a person
+with the window of LACT open and a stress test in progress, and a second and
+worse LACT is not what this is.
 
 There is no brightness control. Each step of a slider is a change, each change
 restarts the service, and systemd refuses a service that starts more than five

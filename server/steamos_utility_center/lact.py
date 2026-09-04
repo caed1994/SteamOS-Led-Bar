@@ -759,6 +759,48 @@ def with_fan(config, enabled=None, mode=None, static_speed=None, curve=None):
     return made
 
 
+def state(path=None, ask=None):
+    """Returns the data for the GPU block, or None when no daemon runs.
+
+    The result is None and not an empty document. That difference decides the
+    action of the page. With no daemon, the page does not draw the block. An
+    empty document means a card that reports no value, and the page then
+    draws a set of empty sliders.
+    """
+    where = path or SOCKET_PATH
+    if not available(where):
+        return None
+    # Not named `talk`: the module has a function of that name, and this is
+    # the caller's own way to ask. A test gives its own.
+    asked = ask or (lambda name, args=None: talk(name, where, args))
+    # A LactError from any of these reaches the caller. The page turns it into
+    # a block that says the daemon would not answer, which is a different
+    # thing from there being no daemon and has to stay different.
+    found = asked("list_devices")
+    devices = list(found) if isinstance(found, list) else []
+    if not devices:
+        # A daemon with no card has nothing to configure. This is a state of
+        # its own, so the page can report it. Without the state, the page
+        # shows an empty card selector.
+        return {"gpu": "", "name": "", "devices": []}
+    gpu = devices[0].get("id", "")
+    state = {
+        "gpu": gpu,
+        "name": devices[0].get("name", ""),
+        "devices": devices,
+        "config": asked("get_gpu_config", {"id": gpu}) or {},
+        "stats": asked("device_stats", {"id": gpu}) or {},
+        "clocks": asked("device_clocks_info", {"id": gpu}) or {},
+    }
+    # Read the profiles separately. An older daemon does not have them, and
+    # then the page must lose its profile selector only, and not the
+    # complete block.
+    try:
+        state["profiles"], state["profile"] = profiles(where)
+    except LactError:
+        state["profiles"], state["profile"] = [], ""
+    return state
+
 def with_knob(config, key, value, scale=1):
     """Returns a copy of the config with one control changed at its position.
 

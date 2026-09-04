@@ -360,6 +360,70 @@ def cec_write(updates, may_prompt=False, run=None, home=None):
     return "\n".join(one for one in said if one)
 
 
+def gpu_read(home=None):
+    """Whether there is a daemon to speak to. It is not the card itself.
+
+    A file test, so this stays in the half that costs nothing. Every value of
+    the card comes over a socket, and those are in gpu_offers, which a caller
+    asks for when a page opens.
+    """
+    return {"available": lact.available()}
+
+
+def gpu_offers():
+    """Each control that this card publishes, with its range and its value.
+
+    The list comes from the card and not from a table in this project. A
+    control with no range is a control that the card does not have, and to
+    draw it is to offer a setting that writes nowhere. See lact.offered.
+
+    The fan and the settings of the firmware are not here. Those are for a
+    person with the window of LACT open and a stress test in progress, and a
+    second and worse LACT is not what this is.
+    """
+    found = lact.state()
+    if not found or not found.get("gpu"):
+        return {"knobs": [], "gpu": "", "name": ""}
+    return {"knobs": lact.offered(found.get("config") or {},
+                                  found.get("clocks") or {},
+                                  found.get("stats") or {}),
+            "gpu": found["gpu"], "name": found.get("name", "")}
+
+
+def gpu_write(updates, may_prompt=False, run=None, home=None):
+    """Writes one or more controls of the card, and waits to be told to keep it.
+
+    Two rules of LACT that this has to follow.
+
+    set_gpu_config replaces the whole document rather than patching it, so
+    this starts from the document the daemon holds and changes only the keys
+    that the caller named. Anything else would turn off a fan curve that
+    somebody set in the panel.
+
+    The daemon takes the change back after some seconds unless it is told to
+    keep it. That is not a step to skip: a voltage offset that is too low
+    hangs the card, and a hang after the change was kept is a card that hangs
+    again at every boot. So this returns the seconds, and the caller says
+    `gpu-keep` when the machine is still there to say it.
+    """
+    found = lact.state()
+    if not found or not found.get("gpu"):
+        raise CtlError("no graphics card that LACT reports")
+    known = {knob["key"]: knob for knob in lact.offered(
+        found.get("config") or {}, found.get("clocks") or {},
+        found.get("stats") or {})}
+    config = found.get("config") or {}
+    for key, value in updates.items():
+        if key not in known:
+            raise CtlError("this card has no %s. It has: %s"
+                           % (key, ", ".join(sorted(known)) or "nothing"))
+        config = lact.with_knob(config, key, round(float(value)),
+                                known[key].get("scale", 1))
+    seconds = lact.set_gpu_config(found["gpu"], config)
+    return ("the card took it. Say gpu-keep in %s seconds, or the daemon "
+            "puts it back." % seconds)
+
+
 # The table that makes a new setting free. To add an area is four functions
 # and one line here. To add a setting inside an area is nothing.
 #
@@ -378,6 +442,10 @@ AREA = {
     "drives": {"read": drives_read, "offers": drives_offers,
                "write": drives_write, "keys": ("drives",)},
     "cec": {"read": cec_read, "offers": cec_offers, "write": cec_write,
+            "keys": None},
+    # The card decides which controls it has, so there is no list here. A key
+    # that this card does not publish is refused by gpu_write itself.
+    "gpu": {"read": gpu_read, "offers": gpu_offers, "write": gpu_write,
             "keys": None},
 }
 
@@ -448,7 +516,21 @@ def restart_service(may_prompt=False, run=None, home=None):
     return privileged(["systemctl", "restart", UNITS[0]], may_prompt, run)
 
 
+def gpu_keep(may_prompt=False, run=None, home=None):
+    """Tells the daemon to keep the last change to the card."""
+    lact.confirm(keep=True)
+    return "kept"
+
+
+def gpu_revert(may_prompt=False, run=None, home=None):
+    """Tells the daemon to put the card back, without waiting for the clock."""
+    lact.confirm(keep=False)
+    return "put back"
+
+
 ACTION = {
+    "gpu-keep": gpu_keep,
+    "gpu-revert": gpu_revert,
     "cec-wake": _cec_action("wake"),
     "cec-standby": _cec_action("standby"),
     "cec-volume-up": _cec_action("volume-up"),
@@ -713,7 +795,8 @@ def main(argv=None):
     # and SettingError are all ValueError, and power.validate raises the plain
     # one. A refusal is an answer here and not a fault, so it is printed as
     # one rather than as a stack trace that a front end cannot read.
-    except (CtlError, ValueError, OSError) as exc:
+    except (CtlError, ValueError, OSError, lact.LactError,
+            cec.CecError) as exc:
         answer = {"ok": False, "error": str(exc)}
     print(json.dumps(answer, sort_keys=True, default=str))
     return 0 if answer["ok"] else 1

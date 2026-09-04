@@ -250,17 +250,40 @@ class PageTest(unittest.TestCase):
         for name in cec.BY_NAME:
             self.assertNotIn('"%s"' % name, self.text, name)
 
-    def test_nothing_on_the_page_writes_while_a_control_moves(self):
+    def test_no_slider_writes_while_it_moves(self):
         """A slider wrote at every step, and each step restarted the service.
 
         systemd counts five starts in ten seconds and refuses the sixth, so
         two seconds of moving one slider left the bar dark and the service
-        failed. scripts/apply-config.sh clears that counter now, and the
-        slider is gone: a control that writes at each step of a movement does
-        not belong on a page where a write restarts a service.
+        failed.
+
+        The brightness slider is gone for that reason. The sliders of the
+        graphics card are a different thing: each one holds a value, and a
+        button sends them. They must stay that way, and for a second reason.
+        The daemon takes a change to the card back unless it is told to keep
+        it, and a slider that sent at every step would start that clock at
+        every step.
         """
-        self.assertNotIn("SliderField", self.text)
         self.assertNotIn("MAX_BRIGHTNESS", self.text)
+        for part in self.text.split("<SliderField")[1:]:
+            one = part[:part.index("/>")]
+            self.assertIn("setWanted", one, one[:200])
+            self.assertNotIn("write(", one, one[:200])
+            self.assertNotIn("setArea(", one, one[:200])
+
+    def test_the_card_is_sent_by_a_button_and_kept_by_a_second_one(self):
+        """LACT's own safety, and it must not be worked around.
+
+        A voltage offset that is too low hangs the card. The daemon puts the
+        card back after some seconds unless somebody says to keep it, and a
+        hang that was kept comes back at every boot. So nothing here confirms
+        by itself.
+        """
+        self.assertIn('doAction("gpu-keep")', self.text)
+        self.assertNotIn("gpu-revert", self.text)
+        # The send and the confirmation are two presses, and the page draws
+        # the second one only after the first one.
+        self.assertIn("keeping", self.text)
 
     def test_every_row_with_a_dropdown_carries_a_key_that_holds_its_value(self):
         """A DropdownItem keeps the option it was built with.
@@ -312,6 +335,24 @@ class PageTest(unittest.TestCase):
         opens and after each change, which is when an answer can differ.
         """
         self.assertNotIn("setInterval", self.text)
+
+    def test_the_card_offers_what_lact_reports_and_no_list_of_its_own(self):
+        """A control with no range is a control that this card does not have.
+
+        The card decides, and the daemon says so. A list in this file would
+        draw a slider for a control that writes nowhere.
+        """
+        from steamos_utility_center import lact
+        for key, _label, _unit, _source, _end in lact.KNOBS:
+            self.assertNotIn('"%s"' % key, self.text, key)
+        self.assertIn("gpu?.offers?.knobs", self.text)
+
+    def test_the_fan_and_the_firmware_are_not_on_the_page(self):
+        """Those are for a person with the window of LACT open and a stress
+        test in progress. A second and worse LACT is not what this is.
+        """
+        for word in ("zero_rpm", "fan", "acoustic", "curve"):
+            self.assertNotIn(word, self.text.lower(), word)
 
     def test_the_status_block_and_the_drives_are_off_the_page(self):
         """Both are answers to a question that nobody asked on a sofa.
