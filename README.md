@@ -16,33 +16,40 @@ Twenty effects on a simulated strip, each with an explanation.
 ## Contents
 
 1. [Quick start](#quick-start)
-2. [What you need](#what-you-need)
-3. [Settings](#settings)
-4. [Effects](#effects)
-5. [The rainbow slot](#the-rainbow-slot)
-6. [Notifications](#notifications)
-7. [The control panel](#the-control-panel)
-8. [The command that speaks JSON](#the-command-that-speaks-json)
-9. [Game Mode](#game-mode)
-10. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
-11. [Updates and removal](#updates-and-removal)
-12. [How it works](#how-it-works)
-13. [Credits and licence](#credits-and-licence)
+2. [Modules](#modules)
+3. [What you need](#what-you-need)
+4. [Settings](#settings)
+5. [Effects](#effects)
+6. [The rainbow slot](#the-rainbow-slot)
+7. [Notifications](#notifications)
+8. [The control panel](#the-control-panel)
+9. [The command that speaks JSON](#the-command-that-speaks-json)
+10. [Game Mode](#game-mode)
+11. [Diagnostics and troubleshooting](#diagnostics-and-troubleshooting)
+12. [Updates and removal](#updates-and-removal)
+13. [How it works](#how-it-works)
+14. [Credits and licence](#credits-and-licence)
 
 ## Quick start
 
 ```bash
 git clone https://github.com/caed1994/SteamOS-Utility-Center.git ~/SteamOS-Utility-Center
 cd ~/SteamOS-Utility-Center
-sudo ./install.sh
+sudo ./install.sh --with led
 ```
 
-This installs all of it: the kernel module, the service and the control panel.
 Keep the directory. You need it again after each SteamOS update.
 
-The installer asks four questions: the LED count, the serial port, the baud
-rate and the firmware. Each question has a default. If you press Enter four
-times, the installation is complete.
+`sudo ./install.sh` on its own installs the core only: the control panel, the
+control command and the keyboard layout. The LED bar, the CPU and GPU power,
+HDMI CEC and the drives are **modules**, and you ask for each one. See
+[Modules](#modules) below. `--with led` thus gives you the LED bar with the
+core.
+
+With `--with led`, the installer asks four questions: the LED count, the serial
+port, the baud rate and the firmware. Each question has a default. If you press
+Enter four times, the installation is complete. A core-only install asks
+nothing.
 
 The installer asks before it installs anything on your system:
 
@@ -60,6 +67,9 @@ with no questions, use these:
 sudo ./install.sh --leds 60 --yes             # never flashes
 sudo ./install.sh --leds 60 --yes --flash 1   # unless you ask
 ```
+
+`--leds`, `--port`, `--baud` and `--flash` are settings of the LED module, so
+each of them asks for that module.
 
 Then connect the strip. [docs/WIRING.md](docs/WIRING.md) tells you how. Connect
 the ESP. Open **Settings > Personalization** in Game Mode and select a colour or
@@ -83,6 +93,44 @@ sudo pacman-key --populate
 sudo pacman -S base-devel
 sudo pacman -S "$(cat /usr/lib/modules/$(uname -r)/pkgbase)-headers"
 ```
+
+## Modules
+
+The core is the control panel, the control command, the shared code and the
+keyboard layout. It writes no unit, no udev rule and no sudoers line. Each
+other part is a module that you ask for:
+
+| Module | What it gives you | What it installs |
+| --- | --- | --- |
+| `led` | The strip on the case: the game you play, achievements, messages, the CPU and GPU load, and a light in standby | The LED service, the serial settings, the `leds-valve-shim` kernel module, PlatformIO for the ESP firmware, and the two watchers in your session |
+| `power` | The governor and the energy preference of the CPU, and the power limits, the clocks and the fan of the graphics card through LACT | A program that applies the settings, a unit that applies them at each boot, and the switch that wakes the television after a resume |
+| `cec` | Talking to the television over the HDMI cable | The SteamOS CEC Toolkit from `cec-toolkit/` |
+| `system` | The drives you mount at each boot, and the Game Mode plugin | A program that writes the mount units, a unit that writes them again at each boot, and the Decky plugin |
+
+```bash
+./install.sh --modules                   # what each one is, and what you have
+sudo ./install.sh --with led,power       # add two of them
+sudo ./install.sh --without cec          # take one back off
+sudo ./install.sh                        # the core, and what you have already
+```
+
+The control panel offers the same on the page of each module. A page whose
+module is not installed says what the module does and has a button that
+installs it. A page whose module is installed has a **Remove** button at the
+head of the page.
+
+A run with no `--with` and no `--without` keeps the modules that the machine
+already has, so the panel's "Rebuild and reinstall" repairs the machine and
+does not strip it.
+
+A removal keeps your settings. `/etc/steamos-utility-center.conf`, the power
+settings and the record of the drives stay where they are, and a second install
+reads them back. `sudo ./uninstall.sh` removes every part, module or not.
+
+Two things a module removal leaves: the `leds-valve-shim` kernel module, which
+is another project's code that other programs can load, and the firmware on the
+ESP board, which no script here can reach. `sudo ./uninstall.sh` takes the
+kernel module.
 
 ## What you need
 
@@ -1493,6 +1541,10 @@ sudo ./install.sh --yes
 The installer does not change `/etc/steamos-utility-center.conf`. Flash the ESP
 firmware again only when something in `firmware/` changed.
 
+`sudo ./install.sh --yes` with no `--with` and no `--without` reaches each
+module that this machine has, and it adds none. To add one or take one off,
+see [Modules](#modules).
+
 Caution: After a SteamOS system update, the kernel module is gone. The update
 resets the root filesystem, and a module matches one kernel only.
 
@@ -1507,6 +1559,10 @@ sudo ./uninstall.sh                    # removes everything it installed
 sudo ./uninstall.sh --keep-conf        # keeps the settings
 sudo ./uninstall.sh --keep-module      # keeps the kernel module
 ```
+
+`uninstall.sh` removes every part, and the module state does not change that.
+To take one part off and keep the rest, use `--without` or the **Remove**
+button on the page of that module.
 
 ## How it works
 

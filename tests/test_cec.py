@@ -518,21 +518,45 @@ class PanelCommandTest(unittest.TestCase):
         import ledpanel
         self.ledpanel = ledpanel
 
-    def test_installing_goes_through_our_own_script_not_theirs(self):
+    def test_the_page_installs_it_as_a_module(self):
+        """One route for every module, and not a second one for this page.
+
+        The page called scripts/install-cec.sh itself before there were
+        modules. Two ways to install one thing are two answers on the day one
+        of them changes, so the button now runs the installer with --with.
+        """
+        command = self.ledpanel.module_command("/repo", "cec")
+        self.assertEqual(command[0], "pkexec")
+        self.assertTrue(command[1].endswith("install.sh"))
+        self.assertIn("--with", command)
+        self.assertEqual(command[-1], "cec")
+
+    def test_removing_is_the_same_command_with_the_other_word(self):
+        command = self.ledpanel.module_command("/repo", "cec", remove=True)
+        self.assertIn("--without", command)
+        self.assertNotIn("--with", command)
+
+    def test_the_installer_goes_through_our_own_script_not_theirs(self):
         """Not `pkexec cec-toolkit/install.sh`.
 
-        That installer refuses to run as root, which is what pkexec makes it -
-        so aimed straight at it the prompt would be spent to be told no.
+        That installer refuses to run as root, which is what pkexec makes it,
+        so aimed straight at it the prompt would be spent to be told no. See
+        scripts/install-cec.sh for the steps between the two.
         """
-        command = self.ledpanel.install_cec_command("/repo")
-        self.assertEqual(command[0], "pkexec")
-        self.assertTrue(command[1].endswith("scripts/install-cec.sh"))
-        self.assertEqual(command[2], "install")
-        self.assertIn("cec-toolkit", command[3])
-
-    def test_removing_is_the_same_script_with_the_other_word(self):
-        command = self.ledpanel.install_cec_command("/repo", remove=True)
-        self.assertEqual(command[2], "remove")
+        with open(os.path.join(HERE, "..", "install.sh"),
+                  encoding="utf-8") as handle:
+            text = handle.read()
+        for name, word in (("install_cec", "install"),
+                           ("remove_cec", "remove")):
+            body = text[text.index("\n%s() {" % name):]
+            body = body[:body.index("\n}\n")]
+            if name == "install_cec":
+                self.assertIn("scripts/install-cec.sh", body)
+                self.assertIn(word, body)
+            else:
+                # The removal is the shared one, whose body is in
+                # scripts/user-unit.sh and calls the same script.
+                self.assertIn("remove_cec_toolkit", body)
 
     def test_a_machine_without_the_toolkit_has_no_status_rather_than_a_blank(self):
         """None and {} are different pages.
@@ -673,7 +697,7 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("install-cec.sh", body)
         self.assertIn("install", body)
         # And the loop that decides. Without it every machine gets the module.
-        self.assertIn('if want "$name"; then', text)
+        self.assertIn('if installing "$name"; then', text)
         self.assertIn('"install_$name"', text)
 
     def test_the_module_comes_off_again(self):

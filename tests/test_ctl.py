@@ -35,7 +35,8 @@ from contextlib import redirect_stdout
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "server"))
 
-from steamos_utility_center import ctl               # noqa: E402
+from steamos_utility_center import ctl
+from steamos_utility_center import modules               # noqa: E402
 from steamos_utility_center import mounts            # noqa: E402
 from steamos_utility_center import syssettings       # noqa: E402
 
@@ -394,6 +395,52 @@ class InstallerTest(unittest.TestCase):
         with open(os.path.join(HERE, "..", "uninstall.sh"),
                   encoding="utf-8") as handle:
             self.assertIn("CTL_COMMAND_LINK", handle.read())
+
+
+class MissingModuleTest(unittest.TestCase):
+    """What a caller reads when the module of a setting is not installed."""
+
+    def test_it_names_the_module_and_not_the_sudoers_rule(self):
+        """The two failures look the same to sudo and are not the same.
+
+        A rule that does not permit a program and a program that is not there
+        both end as a refusal. The message for the first tells a person to
+        reinstall, and that is wrong advice for the second: the rule is
+        correct, and the machine simply has no such module.
+
+        It matters most in Game Mode, where the plugin is the only screen.
+        """
+        def refuse(command, timeout=120):
+            return 1, "sudo: a password is required"
+
+        with self.assertRaises(ctl.CtlError) as caught:
+            ctl.privileged([ctl.APPLY_POWER, "/tmp/nothing"], run=refuse)
+        said = str(caught.exception)
+        self.assertIn("module is not installed", said)
+        self.assertIn("--with power", said)
+        self.assertNotIn(ctl.SUDO_RULE, said)
+
+    def test_a_program_that_is_there_gets_the_rule_message(self):
+        def refuse(command, timeout=120):
+            return 1, "sudo: a password is required"
+
+        with self.assertRaises(ctl.CtlError) as caught:
+            ctl.privileged(["/bin/true", "/tmp/nothing"], run=refuse)
+        self.assertIn(ctl.SUDO_RULE, str(caught.exception))
+
+    def test_the_switch_belongs_to_the_power_module(self):
+        """It is that module's program, and it is not the file that marks it."""
+        self.assertEqual(ctl.module_of(ctl.RESUME_WAKE), modules.POWER)
+        self.assertEqual(ctl.module_of(ctl.APPLY_CONFIG), modules.LED)
+        self.assertEqual(ctl.module_of("/bin/true"), "")
+
+    def test_nothing_is_asked_of_a_call_that_worked(self):
+        """A machine that answers has nothing to explain."""
+        looked = []
+        ctl.privileged(["/var/lib/steamos-utility-center/nope"],
+                       run=lambda command, timeout=120: looked.append(command)
+                       or (0, "done"))
+        self.assertEqual(len(looked), 1)
 
 
 class SudoersTest(unittest.TestCase):

@@ -19,6 +19,7 @@ from steamos_utility_center import cec as cec_module
 from steamos_utility_center import ctl as ctl_module
 from steamos_utility_center import config as config_module
 from steamos_utility_center import lact as lact_module
+from steamos_utility_center import modules as modules_module
 from steamos_utility_center import phone
 from steamos_utility_center import power as power_module
 from steamos_utility_center import temperature
@@ -323,8 +324,21 @@ REPAIR_LABELS = {
 }
 
 
-def led_part(checks):
-    """The LED service, from the checklist that was this page's only content."""
+def led_part(checks, installed=True):
+    """The LED service, from the checklist that was this page's only content.
+
+    A machine without the LED module has no service, no kernel module and no
+    udev rule. None of that is a fault: it is a module that nobody asked for.
+    So the answer there is "not installed", which is ok=None, and not a list
+    of checks that failed.
+
+    Without this, a machine with the core only reported "The kernel module is
+    missing for the running kernel" at the head of every page, and offered a
+    repair for a part that it does not have. See modules.py.
+    """
+    if not installed:
+        return Part("led", "LED bar", None,
+                    "Not installed. The LED Strip page installs it.")
     problems = broken(checks)
     if not problems:
         verdict = "Installed and running."
@@ -1516,17 +1530,43 @@ def _where(path):
 # the one record of the commands that it runs.
 
 
-def install_cec_command(source_dir, remove=False):
-    """Returns the command that installs or removes the CEC toolkit.
+# -- the modules -------------------------------------------------------------
+#
+# Each module has a page in the window, and that page installs it and removes
+# it. The commands are here with the other commands of this window.
+#
+# One script in both directions, and the same script that a terminal runs. A
+# button that installed by another route would be a second installer, and the
+# two would answer differently on the day one of them changed.
 
-    The command asks for a password one time. It calls a script of this
-    project and not the installer of the toolkit. That installer refuses to
-    run as root, and it calls sudo approximately forty times. See
-    scripts/install-cec.sh for the steps between the two.
+
+def module_command(source_dir, name, remove=False):
+    """Returns the command that installs or removes one module.
+
+    It asks for a password one time, through pkexec, because it writes into
+    /etc and /var/lib.
+
+    --flash 0 is explicit: the LED module installs the service and the kernel
+    module, and a button on a page must never write to the board. The firmware
+    has a button of its own.
     """
-    return ["pkexec", os.path.join(source_dir, "scripts", "install-cec.sh"),
-            "remove" if remove else "install",
-            cec_module.source_dir(source_dir)]
+    return ["pkexec", os.path.join(source_dir, "install.sh"), "--yes",
+            "--flash", "0", "--without" if remove else "--with", name]
+
+
+def module_installed(name, home=None):
+    """Whether one module is on this machine. See modules.py."""
+    return modules_module.installed(name, home=home)
+
+
+def module_says(name):
+    """What one module is, in the words the page puts on the screen."""
+    return modules_module.SAYS[name]
+
+
+def modules_here(home=None):
+    """The modules on this machine, in the order of the pages."""
+    return modules_module.here(home=home)
 
 
 def wake_radios_command():

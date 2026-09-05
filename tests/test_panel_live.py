@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "gui"))
 
 import appsettings                                          # noqa: E402
 import kdetheme                                             # noqa: E402
+import ledpanel                                             # noqa: E402
+from steamos_utility_center import modules                   # noqa: E402
 from steamos_utility_center import syssettings              # noqa: E402
 from steamos_utility_center import cec                                 # noqa: E402
 from steamos_utility_center import lact                                # noqa: E402
@@ -49,6 +51,31 @@ def _panel_module():
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
+
+
+# What the window asked the machine before this file changed the answer.
+_REAL_MODULES_HERE = None
+
+
+def setUpModule():
+    """Every window in this file is built for a machine with each module.
+
+    The page of a module is two pages in one frame, and the machine decides
+    which of the two is packed. Without this, each test in this file would
+    measure the machine it runs on: a build machine has no module at all, so
+    every one of those pages would be the offer to install one, and none of
+    the content that these tests look at.
+
+    ModulePageTest builds its own windows and answers this question itself.
+    """
+    global _REAL_MODULES_HERE
+    _REAL_MODULES_HERE = ledpanel.modules_here
+    ledpanel.modules_here = lambda home=None: modules.ORDER
+
+
+def tearDownModule():
+    if _REAL_MODULES_HERE is not None:
+        ledpanel.modules_here = _REAL_MODULES_HERE
 
 
 def _has_display():
@@ -2453,15 +2480,22 @@ class CecPageTest(unittest.TestCase):
                                  "%s left nothing to read the status back"
                                  % self.ran[-1][0])
 
-    def test_installing_asks_first_and_then_runs_our_bridge(self):
+    def test_installing_asks_first_and_then_runs_the_installer(self):
+        """The toolkit is a module, so this page installs it as one.
+
+        It called scripts/install-cec.sh itself before there were modules.
+        One route for every module: two ways to install one thing are two
+        answers on the day one of them changes.
+        """
         asked = []
         self.panel._ask = lambda *a, **k: (asked.append(a), True)[1]
         self.panel._install_cec()
         self.assertTrue(asked, "it installed without asking")
         command, _done = self.ran[-1]
         self.assertEqual(command[0], "pkexec")
-        self.assertTrue(command[1].endswith("install-cec.sh"))
-        self.assertEqual(command[2], "install")
+        self.assertTrue(command[1].endswith("install.sh"))
+        self.assertIn("--with", command)
+        self.assertEqual(command[-1], "cec")
 
     def test_saying_no_to_the_question_installs_nothing(self):
         self.panel._ask = lambda *a, **k: False
@@ -2474,7 +2508,8 @@ class CecPageTest(unittest.TestCase):
         self.assertEqual(self.ran, [])
         self.panel._ask = lambda *a, **k: True
         self.panel._remove_cec()
-        self.assertEqual(self.ran[-1][0][2], "remove")
+        self.assertIn("--without", self.ran[-1][0])
+        self.assertEqual(self.ran[-1][0][-1], "cec")
 
     # -- when the toolkit is read ------------------------------------------
 
@@ -4648,3 +4683,152 @@ class DrivesPageTest(unittest.TestCase):
         self._apply(0, "0 drive(s) mounted, 0 did not\n")
         self.panel._apply_drives([])
         self.assertEqual(asked, [ctl.STAGED["drives"]])
+
+
+@unittest.skipUnless(_has_display(), "no tkinter or no display")
+class ModulePageTest(unittest.TestCase):
+    """The two halves of a module page, and the buttons between them.
+
+    Each page of a module is two pages in one frame. One of them says what the
+    module does and offers to install it. The other is the page itself, with a
+    Remove button at its head.
+
+    This class builds its own windows, because it is the one place that needs
+    a machine with a module and a machine without one. See setUpModule.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.panel_module = _panel_module()
+
+    def _panel(self, here):
+        """A window built for a machine with exactly those modules."""
+        was = ledpanel.modules_here
+        ledpanel.modules_here = lambda home=None, answer=tuple(here): answer
+        self.addCleanup(setattr, ledpanel, "modules_here", was)
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        panel = self.panel_module.Panel(root)
+        root.update_idletasks()
+        return panel
+
+    def test_a_machine_with_no_module_sees_the_offer_and_not_the_page(self):
+        panel = self._panel([])
+        self.assertTrue(panel._module_halves, "no page registered a module")
+        for name, (missing, present) in panel._module_halves.items():
+            self.assertEqual(missing.winfo_manager(), "pack", name)
+            self.assertEqual(present.winfo_manager(), "", name)
+
+    def test_a_machine_with_the_module_sees_the_page_and_not_the_offer(self):
+        panel = self._panel(modules.ORDER)
+        for name, (missing, present) in panel._module_halves.items():
+            self.assertEqual(present.winfo_manager(), "pack", name)
+            self.assertEqual(missing.winfo_manager(), "", name)
+
+    def test_each_page_answers_for_its_own_module(self):
+        """One module off does not take the pages of the others with it."""
+        panel = self._panel([name for name in modules.ORDER
+                             if name != modules.POWER])
+        missing, present = panel._module_halves[modules.POWER]
+        self.assertEqual(missing.winfo_manager(), "pack")
+        self.assertEqual(present.winfo_manager(), "")
+        missing, present = panel._module_halves[modules.LED]
+        self.assertEqual(present.winfo_manager(), "pack")
+        self.assertEqual(missing.winfo_manager(), "")
+
+    def test_the_offer_says_what_the_module_does(self):
+        """A person decides here, so the page says what arrives.
+
+        The words come from modules.py, which is where `./install.sh
+        --modules` reads them as well.
+        """
+        panel = self._panel([])
+        for name in panel._module_halves:
+            said = modules.SAYS[name]
+            texts = self._labels(panel._module_halves[name][0])
+            for wanted in (said["does"], said["brings"], said["needs"]):
+                self.assertTrue(any(wanted in one for one in texts),
+                                "%s does not say %r" % (name, wanted[:30]))
+
+    def _labels(self, widget):
+        found = []
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Label):
+                found.append(str(child.cget("text")))
+            found.extend(self._labels(child))
+        return found
+
+    def test_the_installed_page_offers_to_remove_it(self):
+        """Named, and not "Remove".
+
+        The System page has a Remove button on each drive. Two buttons with
+        one word on one page are two buttons a person must tell apart.
+        """
+        panel = self._panel(modules.ORDER)
+        for name in panel._module_halves:
+            buttons = self._buttons(panel._module_halves[name][1])
+            self.assertIn("Remove %s" % modules.SAYS[name]["title"], buttons,
+                          name)
+
+    def _buttons(self, widget):
+        found = []
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Button):
+                found.append(str(child.cget("text")))
+            found.extend(self._buttons(child))
+        return found
+
+    def test_installing_and_removing_go_through_the_installer(self):
+        """One route, and the same one a terminal uses."""
+        panel = self._panel([])
+        ran = []
+        panel.runner.start = lambda command, done=None: ran.append(command)
+        panel._ask = lambda *a, **k: True
+        panel._install_module(modules.LED)
+        self.assertEqual(ran[-1][0], "pkexec")
+        self.assertTrue(ran[-1][1].endswith("install.sh"))
+        self.assertIn("--with", ran[-1])
+        self.assertEqual(ran[-1][-1], modules.LED)
+        panel._remove_module(modules.POWER)
+        self.assertIn("--without", ran[-1])
+        self.assertEqual(ran[-1][-1], modules.POWER)
+
+    def test_saying_no_installs_and_removes_nothing(self):
+        panel = self._panel([])
+        ran = []
+        panel.runner.start = lambda command, done=None: ran.append(command)
+        panel._ask = lambda *a, **k: False
+        panel._install_module(modules.LED)
+        panel._remove_module(modules.LED)
+        self.assertEqual(ran, [])
+
+    # One window for each test, and not two in one.
+    #
+    # The pictures of this window are cached at the module level, and a
+    # PhotoImage belongs to the interpreter that made it. A second Tk() beside
+    # the first thus gets the images of the first, and Tk refuses them.
+
+    def test_apply_is_not_offered_for_a_page_that_has_no_settings_now(self):
+        """The power page is its module, so with no module it has nothing.
+
+        An Apply row under the offer to install a module would be a button for
+        a page with no setting on it.
+        """
+        panel = self._panel([])
+        panel.section = "power"
+        self.assertFalse(panel._has_settings())
+
+    def test_apply_comes_back_with_the_module(self):
+        panel = self._panel([modules.POWER])
+        panel.section = "power"
+        self.assertTrue(panel._has_settings())
+
+    def test_the_keyboard_half_of_the_system_page_needs_no_module(self):
+        """It writes into the home directory of the user and needs no rights.
+
+        So the System page keeps its settings and its Apply row with the
+        module off, and only the drives and the plugin go away.
+        """
+        panel = self._panel([])
+        panel.section = "keyboard"
+        self.assertTrue(panel._has_settings())

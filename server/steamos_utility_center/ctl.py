@@ -54,6 +54,7 @@ import tempfile
 from . import cec
 from . import config as config_module
 from . import lact
+from . import modules
 from . import mounts
 from . import power
 from . import shim
@@ -159,18 +160,46 @@ def refused_for_rights(said):
     return any(sign in lowered for sign in REFUSAL_SIGNS)
 
 
+def module_of(program):
+    """Which module installs one privileged program, or "" for none.
+
+    modules.MARK is the one place that pairs a module with its applier. This
+    adds the switch for the wake after a resume, which is the power module's
+    program and is not the file that marks it.
+    """
+    for name, where in modules.MARK.items():
+        if where == program:
+            return name
+    return modules.POWER if program == RESUME_WAKE else ""
+
+
 def privileged(command, may_prompt=False, run=None):
     """Runs one of the appliers, and turns a refusal into a sentence."""
     run = _run if run is None else run
     code, said = run(escalate(command, may_prompt))
-    if code != 0 and refused_for_rights(said):
+    if code == 0:
+        return said.strip()
+    # A module that is not installed has no applier. sudo answers that as a
+    # refusal about rights, and the second message below would then tell a
+    # person to reinstall for a rule that is already correct. The true answer
+    # is that this machine has no such module.
+    #
+    # It matters most in Game Mode, where the plugin is the only screen and
+    # nobody can look in /var/lib to see which of the two answers it is.
+    #
+    # After the call and not before it: a failure is what makes the question
+    # worth asking, and a machine that answers has nothing to explain.
+    owner = module_of(command[0])
+    if owner and not os.path.exists(command[0]):
+        raise CtlError("the %s module is not installed on this machine. "
+                       "Install it from its page in the panel, or with "
+                       "install.sh --with %s." % (modules.title(owner), owner))
+    if refused_for_rights(said):
         raise CtlError(
             "%s may not run this without a password. The installer writes %s "
             "to permit it. Reinstall, or use --may-prompt where a person can "
             "answer." % (os.path.basename(command[0]), SUDO_RULE))
-    if code != 0:
-        raise CtlError(said.strip() or "%s failed" % os.path.basename(command[0]))
-    return said.strip()
+    raise CtlError(said.strip() or "%s failed" % os.path.basename(command[0]))
 
 
 def stage(text, path):

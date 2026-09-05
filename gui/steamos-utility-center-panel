@@ -50,6 +50,7 @@ from steamos_utility_center import cec                                 # noqa: E
 from steamos_utility_center import config as config_module             # noqa: E402
 from steamos_utility_center import ctl                                 # noqa: E402
 from steamos_utility_center import lact                                # noqa: E402
+from steamos_utility_center import modules                             # noqa: E402
 from steamos_utility_center import mounts                              # noqa: E402
 from steamos_utility_center import notify                              # noqa: E402
 from steamos_utility_center import power                               # noqa: E402
@@ -627,12 +628,27 @@ SCROLLBAR_ROOM = 16
 # width.
 CONTENT_MAX = 1040
 
+# What a card takes from the width of the page it stands on: the border of the
+# notebook, the margin at each side of the card, and the padding inside it.
+#
+# This uses material.SPACE and not GROUP_GAP. GROUP_GAP is six of these, and
+# this file declares it below. A constant cannot use a later constant.
+#
+# One value, because two places subtract it. CARD_WRAP below is the width a
+# paragraph has before the window is measured, and Panel._rewrap is the width
+# it has after.
+#
+# Those two were not equal. _rewrap subtracted three side margins, which is
+# 48, and this line subtracted 96. A paragraph on a page thus had 48 pixels
+# more than its card. A sentence whose last word crossed that line was cut at
+# the edge of the card, and a sentence one word shorter was not. The HDMI CEC
+# page stood one pixel from it.
+CARD_INSET = 24 * material.SPACE
+
 # The maximum width of a paragraph in a card. The card has the width
 # CONTENT_MAX at its widest, and it has padding on both sides. A paragraph
 # that wraps at CONTENT_MAX puts its last words past the edge of the card.
-# This uses material.SPACE and not GROUP_GAP. GROUP_GAP is four of these, and
-# this file declares it below. A constant cannot use a later constant.
-CARD_WRAP = CONTENT_MAX - 24 * material.SPACE
+CARD_WRAP = CONTENT_MAX - CARD_INSET
 
 # The size of the window at the start, and its minimum size. A user cannot
 # drag it below the minimum.
@@ -2367,6 +2383,15 @@ class Panel:
         # See _relay_buttons.
         self._button_rows = []
         self._button_across = {}
+        # module name -> (the offer to install it, the page it is installed
+        # for). One of the two is packed, and the machine decides which. See
+        # _show_module.
+        self._module_halves = {}
+        # Which modules this machine has, read one time and not on each
+        # question. _has_settings asks at every change of the open page, and
+        # a stat call there would be a stat call in a loop.
+        self._modules_here = frozenset()
+        self._read_modules()
 
         # The header gives the open *section* and not the name of the
         # program. The title bar gives the name. A second copy of the name in
@@ -2420,7 +2445,16 @@ class Panel:
         # With the rail the pages have no tab row of their own: the list down
         # the left side is what picks them, and the notebook is only the stack
         # of pages underneath.
-        strip = ttk.Frame(self.sections, style="Page.TFrame")
+        # The LED bar is a module, so this section is two pages in one frame
+        # and the machine decides which one is packed. The other three sections
+        # reach the same shape through _module_page. This one is written out,
+        # because its content is not a builder that returns a widget: it is a
+        # rail and a notebook that the code below fills in place.
+        strip_outer = ttk.Frame(self.sections, style="Page.TFrame")
+        strip_present = ttk.Frame(strip_outer, style="Page.TFrame")
+        self._build_module_line(strip_present, "led")
+        strip = ttk.Frame(strip_present, style="Page.TFrame")
+        strip.pack(fill="both", expand=True)
         # The inner list sits on a raised card, which is the one place in the
         # window that needs a box round it: it is a list of pages standing
         # beside the page it chose, and with both on the same ground the two
@@ -2448,6 +2482,9 @@ class Panel:
         notebook.add(self.preview_tab, text="Preview")
         notebook.add(self._page(notebook, self._build_tests), text="Test")
         self._build_rail()
+        self._module_halves["led"] = (
+            self._build_module_offer(strip_outer, "led"), strip_present)
+        self._show_module("led")
 
         # And the sections themselves, in the order the sidebar lists them.
         self._section_pages = {}
@@ -2455,7 +2492,7 @@ class Panel:
         # so a section added to SECTIONS and to neither of the two below is
         # caught here rather than showing an empty page.
         self._section_pages["strip"] = None      # placed by _add_section
-        self._add_section("strip", strip)
+        self._add_section("strip", strip_outer)
         for key, _title, _subtitle, _icon in SECTIONS:
             if key == "strip":
                 continue
@@ -2465,9 +2502,20 @@ class Panel:
                          "power": self._build_power,
                          "keyboard": self._build_system}.get(
                              key, self._build_settings)
-                page = self._page(self.sections,
-                                  lambda where, b=build, t=table, n=note:
-                                  b(where, t, n))
+                if key == "power":
+                    # Every setting on this page is written by the power
+                    # module's applier, so the whole page is behind the offer
+                    # to install it. The System page is not: its keyboard half
+                    # is the core and works with no module. See _build_system.
+                    page = self._page(
+                        self.sections,
+                        lambda where, b=build, t=table, n=note:
+                        self._module_page(where, "power",
+                                          lambda holder: b(holder, t, n)))
+                else:
+                    page = self._page(self.sections,
+                                      lambda where, b=build, t=table, n=note:
+                                      b(where, t, n))
             elif key == "cec":
                 page = self._page(self.sections, self._build_cec)
             elif key in SOON:
@@ -2672,6 +2720,9 @@ class Panel:
         self.section = key
         self.section_title.configure(text=dict(
             (entry[0], entry[1]) for entry in SECTIONS + (ABOUT,))[key])
+        # The line under the title answers for the open page, so it moves
+        # with the page. See _say_headline.
+        self._say_headline()
         if key == "cec":
             self._catch_up_cec()
         elif key == "power":
@@ -3651,7 +3702,7 @@ class Panel:
         # with a bar. The height of the window decides whether a page has a
         # bar. Without this, the wrap changes with the height of the window.
         width = max(320, min(event.width, CONTENT_MAX)
-                    - 3 * SIDE_MARGIN - SCROLLBAR_ROOM)
+                    - CARD_INSET - SCROLLBAR_ROOM)
         if width == self._wrap_widths.get(str(event.widget)):
             return
         self._wrap_widths[str(event.widget)] = width
@@ -3930,6 +3981,14 @@ class Panel:
         if getattr(self, "section", None) is None:
             return False
         if self.section in SECTION_SETTINGS:
+            # A page whose module is not installed shows the offer to install
+            # it and no settings at all. An Apply row under that offer would
+            # be a button for a page with nothing on it.
+            #
+            # The System page is not in this list. Its keyboard half is the
+            # core, and it has settings whatever the module does.
+            if self.section == "power" and not self._module_here("power"):
+                return False
             # But not for a page where each setting takes effect at once. The
             # App Settings page is such a page. An Apply row below a page
             # whose one setting is already applied reports an open change, and
@@ -3940,6 +3999,11 @@ class Panel:
             return any(row[0] not in APP_KEYS
                        for group in table for row in group[1])
         if self.section != "strip":
+            return False
+        # The tabs of this section are still there when the LED module is not,
+        # because the notebook is built and simply never packed. select() thus
+        # answers with a tab that nobody can see.
+        if not self._module_here("led"):
             return False
         return self.notebook.select() in self._settings_tabs
 
@@ -5126,6 +5190,164 @@ class Panel:
 
     # -- HDMI CEC ----------------------------------------------------------
 
+    # -- the modules -------------------------------------------------------
+    #
+    # The core of this project is this window, the control command and the
+    # keyboard layout. The LED bar, the CPU and GPU power, HDMI CEC and the
+    # drives are modules, and each one arrives and leaves from its own page.
+    #
+    # Its own page, and not one list of modules in a fifth place. A person who
+    # wants the drives is on the System page already, and a list somewhere
+    # else is a place they must find first.
+    #
+    # Each of those pages is thus two pages in one frame, and the machine
+    # decides which one a person sees. That is the shape the HDMI CEC page had
+    # before there were modules. See _show_cec, which is the same idea for a
+    # page that also reports on a television.
+
+    def _read_modules(self):
+        """Asks the machine which modules it has. See modules.py."""
+        self._modules_here = frozenset(ledpanel.modules_here())
+
+    def _module_here(self, name):
+        return name in self._modules_here
+
+    def _module_page(self, parent, name, build):
+        """One section, with the offer to install its module in front of it."""
+        outer = ttk.Frame(parent, style="Page.TFrame")
+        present = ttk.Frame(outer, style="Page.TFrame")
+        self._build_module_line(present, name)
+        build(present).pack(fill="both", expand=True)
+        self._module_halves[name] = (self._build_module_offer(outer, name),
+                                     present)
+        self._show_module(name)
+        return outer
+
+    def _build_module_offer(self, parent, name):
+        """What the page holds before its module is installed.
+
+        It says what the module does, what it puts on the machine, and what it
+        needs, rather than only offering a button. A person decides here, and
+        "install failed" three minutes later is a worse way to find out that
+        the machine has no board on it.
+
+        The words are in server/steamos_utility_center/modules.py, so this page
+        and `./install.sh --modules` say the same thing.
+        """
+        holder = ttk.Frame(parent, style="Page.TFrame")
+        card = self._card(holder)
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+
+        said = ledpanel.module_says(name)
+        ttk.Label(inner, text="Not installed yet",
+                  style="Section.TLabel").pack(anchor="w")
+        for text in (said["does"], "Installs " + said["brings"],
+                     "Needs " + said["needs"]):
+            line = ttk.Label(inner, text=text, style="Muted.TLabel",
+                             justify="left", wraplength=CARD_WRAP)
+            line.pack(anchor="w", pady=(ROW_GAP, 0))
+            self._wrapped.append(line)
+
+        row = ttk.Frame(inner, style="OnCard.TFrame")
+        row.pack(anchor="w", pady=(GROUP_GAP, 0))
+        ttk.Button(row, text="Install %s" % said["title"],
+                   style="Filled.TButton",
+                   command=lambda: self._install_module(name)).pack(side="left")
+        ttk.Button(row, text="Check again", style="Text.TButton",
+                   command=self._reread_modules).pack(side="left",
+                                                      padx=(ROW_GAP, 0))
+        return holder
+
+    def _build_module_line(self, parent, name):
+        """The card at the head of a page whose module is installed.
+
+        One sentence and one button. The full description belongs to a person
+        who must decide, and that person reads the other half of this page.
+        Somebody who opens this page every day must not read the same
+        paragraph every day.
+        """
+        said = ledpanel.module_says(name)
+        card = self._card(parent)
+        card.pack(fill="x", padx=SIDE_MARGIN, pady=(ROW_GAP, 0))
+        inner = ttk.Frame(card, style="OnCard.TFrame")
+        inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
+        inner.columnconfigure(0, weight=1)
+        ttk.Label(inner, text="%s module" % said["title"],
+                  style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        # At the far end of the line, where a rare and deliberate button
+        # belongs. It is not a setting of this page, and a place among the
+        # settings would read as one.
+        #
+        # Named, and not "Remove". The System page has a Remove button on each
+        # drive, and two buttons with one word on one page are two buttons
+        # that a person must try to tell apart. The HDMI CEC page has said
+        # "Remove HDMI CEC" since before there were modules.
+        ttk.Button(inner, text="Remove %s" % said["title"],
+                   style="Text.TButton",
+                   command=lambda: self._remove_module(name)).grid(
+                       row=0, column=1, sticky="e")
+        line = ttk.Label(inner, text=said["does"], style="Muted.TLabel",
+                         justify="left", wraplength=CARD_WRAP)
+        line.grid(row=1, column=0, columnspan=2, sticky="w",
+                  pady=(ROW_GAP, 0))
+        self._wrapped.append(line)
+        return card
+
+    def _show_module(self, name):
+        """Pack whichever half the machine justifies."""
+        halves = self._module_halves.get(name)
+        if halves is None:
+            return
+        here = self._module_here(name)
+        for half, wanted in ((halves[1], here), (halves[0], not here)):
+            if wanted:
+                half.pack(fill="both", expand=True)
+            else:
+                half.pack_forget()
+
+    def _reread_modules(self):
+        """Reads the machine again and shows the right half of each page."""
+        self._read_modules()
+        for name in self._module_halves:
+            self._show_module(name)
+        # The Apply row belongs to the settings that are on screen, and a
+        # module that went away took its settings with it.
+        self._catch_up()
+        self._refit_page()
+
+    def _install_module(self, name):
+        said = ledpanel.module_says(name)
+        if not self._ask(said["title"],
+                         "This installs the %s module and asks for your "
+                         "password once.\n\nIt installs %s"
+                         % (said["title"], said["brings"]),
+                         confirm="Install"):
+            return
+        self.runner.start(ledpanel.module_command(SOURCE_DIR, name),
+                          lambda _code: self._module_changed(name))
+
+    def _remove_module(self, name):
+        said = ledpanel.module_says(name)
+        if not self._ask(said["title"],
+                         "This takes the %s module off the machine and asks "
+                         "for your password once.\n\nYour settings stay "
+                         "where they are, so a second install reads them "
+                         "back." % said["title"],
+                         confirm="Remove"):
+            return
+        self.runner.start(
+            ledpanel.module_command(SOURCE_DIR, name, remove=True),
+            lambda _code: self._module_changed(name))
+
+    def _module_changed(self, name):
+        """After a module arrived or left. The page and the status both move."""
+        self._reread_modules()
+        if name == "cec":
+            self._reread_cec()
+        self._after_install()
+
     def _build_cec(self, parent):
         """Talking to the television, if the toolkit for it is installed.
 
@@ -5180,15 +5402,14 @@ class Panel:
         inner.pack(fill="x", padx=GROUP_GAP, pady=GROUP_GAP)
 
         ttk.Label(inner, text="Not installed yet", style="Section.TLabel").pack(anchor="w")
-        for text in (
-                "Lets this machine talk to the television over the HDMI "
-                "cable: wake the screen and switch the input to it, turn it "
-                "off when the machine sleeps, and put the television's own "
-                "volume on Game Mode's volume buttons.",
-                "This installs the SteamOS CEC Toolkit, almost all of it "
-                "somebody else's work, kept in this repository under "
-                "cec-toolkit/. Nothing is switched on by installing it - "
-                "each feature gets a switch here afterwards."):
+        # The same three sentences as the other three modules, from the same
+        # place. See _build_module_offer and modules.py. The fourth line is
+        # this page's own: nothing here switches itself on.
+        module = ledpanel.module_says("cec")
+        for text in (module["does"], "Installs " + module["brings"],
+                     "Needs " + module["needs"],
+                     "Nothing is switched on by installing it. Each feature "
+                     "gets a switch here afterwards."):
             said = ttk.Label(inner, text=text, style="Muted.TLabel", justify="left",
                              wraplength=CARD_WRAP)
             said.pack(anchor="w", pady=(ROW_GAP, 0))
@@ -5613,14 +5834,21 @@ class Panel:
                           lambda _code: self._reread_cec())
 
     def _install_cec(self):
+        """The CEC module, through the same installer as the other three.
+
+        One route for every module, and not this page's own. Two ways to
+        install one thing are two answers on the day one of them changes. The
+        installer calls scripts/install-cec.sh, which is what this page called
+        before. See install.sh, install_cec.
+        """
         if not self._ask("HDMI CEC",
                          "This installs the SteamOS CEC Toolkit from "
                          "cec-toolkit/ and asks for your password once."
                          "\n\nNothing is switched on by installing it.",
                          confirm="Install"):
             return
-        self.runner.start(ledpanel.install_cec_command(SOURCE_DIR),
-                          lambda _code: self._reread_cec())
+        self.runner.start(ledpanel.module_command(SOURCE_DIR, "cec"),
+                          lambda _code: self._module_changed("cec"))
 
     def _ask_wake_radios(self):
         """Asks which radios the toolkit found, and which of them can wake.
@@ -5651,8 +5879,9 @@ class Panel:
                          "television is left however it is now.",
                          confirm="Remove"):
             return
-        self.runner.start(ledpanel.install_cec_command(SOURCE_DIR, remove=True),
-                          lambda _code: self._reread_cec())
+        self.runner.start(ledpanel.module_command(SOURCE_DIR, "cec",
+                                                  remove=True),
+                          lambda _code: self._module_changed("cec"))
 
     # -- status and repair ------------------------------------------------
 
@@ -5702,7 +5931,7 @@ class Panel:
         checks = ledpanel.run_checks(config=self.config)
         self._checks = checks           # kept for the foot of the window
         return [
-            ledpanel.led_part(checks),
+            ledpanel.led_part(checks, self._module_here("led")),
             ledpanel.power_part(self.power, power.available()),
             ledpanel.gpu_part(self._gpu, self._gpu_error,
                               available=lact.available(),
@@ -5925,8 +6154,19 @@ class Panel:
         page now has a privileged half where it had none.
         """
         outer = self._build_settings(where, table, note)
-        self._build_drives(outer)
-        self._build_decky(outer)
+        # The keyboard layout above is the core. It writes into the home
+        # directory of the user, it needs no rights at all, and it therefore
+        # works on a machine with no module.
+        #
+        # The drives and the plugin are the module. They arrive together and
+        # they leave together, so they share one offer below the keyboard.
+        present = ttk.Frame(outer, style="Page.TFrame")
+        self._build_module_line(present, "system")
+        self._build_drives(present)
+        self._build_decky(present)
+        self._module_halves["system"] = (
+            self._build_module_offer(outer, "system"), present)
+        self._show_module("system")
         return outer
 
     def _build_decky(self, parent):
@@ -6446,17 +6686,48 @@ class Panel:
         # The blocks' buttons are new widgets every time, so the list of what
         # to grey while a command runs has to be taken again.
         self._register_buttons()
-        # One line below the title gives the condition, and each section
-        # shows it. This counts each part. Before, it counted the LED
-        # checklist only. The problem count of the LED bar then stood over
-        # the HDMI CEC page, and a machine with a removed adapter read
-        # "everything is in order".
+        # What they said, for the line under the title. That line follows the
+        # open page, and a page opens far more often than the parts change.
+        self._parts = parts
+        self._say_headline()
         broken = [part for part in parts if part.ok is False]
-        # The line reports the open page when that page has something to
-        # report. See ledpanel.summary_for. A part that is only absent gets
-        # neither a good nor a bad colour. "Not installed." in green is a
-        # contradiction. In red it reports a fault on a machine that does
-        # not want the function.
+        # A part that is broken unfolds itself, once. Left folded, the page
+        # would say something is wrong and hide what.
+        for part in broken:
+            if part.detail and part.key not in self._shown_parts:
+                self._shown_parts.add(part.key)
+                self._open_parts.add(part.key)
+                self.root.after_idle(self.refresh_status)
+        self._rewrap_parts()
+
+    def _say_headline(self):
+        """One line below the title, for the page that is open now.
+
+        It counts each part. Before, it counted the LED checklist only. The
+        problem count of the LED bar then stood over the HDMI CEC page, and a
+        machine with a removed adapter read "everything is in order".
+
+        The line reports the open page when that page has something to report.
+        See ledpanel.summary_for. A part that is only absent gets neither a
+        good nor a bad colour. "Not installed." in green is a contradiction.
+        In red it reports a fault on a machine that does not want the
+        function.
+
+        It reads the parts of the last status read and does not read them
+        again. A change of the page must not run the checks: they call
+        systemctl, lsmod and LACT, and a person who walks down the sidebar
+        would wait for all of them at each step.
+
+        This is a function of its own because refresh_status held it, and
+        refresh_status runs at the start and at Check again. The line thus
+        named the page that was open at the last read. A machine with no LED
+        module read "LED bar: Not installed" over the CPU page and over the
+        System page.
+        """
+        parts = getattr(self, "_parts", None)
+        if not parts:
+            return
+        broken = [part for part in parts if part.ok is False]
         section = getattr(self, "section", "") or ""
         mine = next((part for part in parts
                      if part.key == ledpanel.SECTION_PARTS.get(section,
@@ -6467,14 +6738,6 @@ class Panel:
             else "Page.Bad.TLabel" if broken or (mine is not None
                                                  and mine.ok is False)
             else "Page.Good.TLabel")
-        # A part that is broken unfolds itself, once. Left folded, the page
-        # would say something is wrong and hide what.
-        for part in broken:
-            if part.detail and part.key not in self._shown_parts:
-                self._shown_parts.add(part.key)
-                self._open_parts.add(part.key)
-                self.root.after_idle(self.refresh_status)
-        self._rewrap_parts()
 
     def _forget_dead_labels(self):
         """Drop wrapped labels whose widgets have gone.

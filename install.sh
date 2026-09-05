@@ -234,12 +234,32 @@ while read -r name; do
     MODULE_WANT["$name"]="off"
 done < <(module_list "$WITHOUT")
 
-# The four questions the steps below ask. They read as English at the place
-# they are asked, which a pair of associative arrays does not.
-want()     { [[ "${MODULE_WANT[$1]:-off}" == "on" ]]; }
-have()     { [[ "${MODULE_ON[$1]:-off}" == "on" ]]; }
-adding()   { want "$1" && ! have "$1"; }
-dropping() { have "$1" && ! want "$1"; }
+# Which modules this run touches at all.
+#
+# With no --with and no --without, every module. A bare run is the repair that
+# the panel offers, and a repair must reach each part of the machine.
+#
+# With either option, the named modules only. A person who adds HDMI CEC from
+# its page must not have their LED service stopped and started for it.
+declare -A MODULE_TOUCH=()
+if [[ -z "$WITH" && -z "$WITHOUT" ]]; then
+    for name in "${MODULE_ORDER[@]}"; do
+        MODULE_TOUCH["$name"]=1
+    done
+else
+    # Both lists start with a comma, so one read covers the two.
+    while read -r name; do
+        [[ -n "$name" ]] && MODULE_TOUCH["$name"]=1
+    done < <(module_list "$WITH$WITHOUT")
+fi
+
+# The questions the steps below ask. They read as English at the place they
+# are asked, which a pair of associative arrays does not.
+want()       { [[ "${MODULE_WANT[$1]:-off}" == "on" ]]; }
+have()       { [[ "${MODULE_ON[$1]:-off}" == "on" ]]; }
+touching()   { [[ -n "${MODULE_TOUCH[$1]:-}" ]]; }
+installing() { touching "$1" && want "$1"; }
+dropping()   { touching "$1" && have "$1" && ! want "$1"; }
 
 # --- the read-only rootfs ---------------------------------------------------
 #
@@ -267,7 +287,7 @@ ask() {  # ask <prompt> <default>
 # Each question below belongs to the LED module. A run that does not install
 # that module asks nothing at all, and that is the point of the split: a
 # machine with no strip on it has no strip to describe.
-if want led; then
+if installing led; then
     if [[ -z "$LED_COUNT" ]]; then
         LED_COUNT="$(ask 'Number of LEDs on the strip' 17)"
     fi
@@ -310,7 +330,7 @@ resolve_firmware_choice() {
 
 # The board is the LED module's board, so a run without that module never
 # asks and never flashes.
-if ! want led; then
+if ! installing led; then
     FLASH_ENV=""
 else
     if [[ -z "$FLASH_ENV" && $ASSUME_YES -eq 0 ]]; then
@@ -637,7 +657,7 @@ remove_system() {
 
 # Set by install_user_units for the summary at the end, so the outcome is
 # decided once where it is known rather than reconstructed later.
-WATCHER_STATUS="not attempted"
+WATCHER_STATUS="left as it is"
 # Appended to it: installed and running is only half the answer if they stop
 # the moment you switch to Game Mode.
 LINGER_NOTE=""
@@ -1134,7 +1154,10 @@ flash_firmware() {
         bash "$SOURCE_DIR/flash-esp.sh" "$FLASH_ENV"
 }
 
-FIRMWARE_STATUS="not installed"
+# "left as it is" and not "not flashed": a run that adds another module does
+# not reach the board at all, and a line that read "not flashed" there would
+# report a step that this run never had.
+FIRMWARE_STATUS="left as it is"
 
 install_led_firmware() {
     ensure_platformio || true
@@ -1312,9 +1335,9 @@ check_notify_pipe() {
 # nobody can name.
 
 for name in "${MODULE_ORDER[@]}"; do
-    if want "$name"; then
+    if installing "$name"; then
         "install_$name" || warn "the $name module did not install - see above"
-    elif have "$name"; then
+    elif dropping "$name"; then
         "remove_$name" || warn "the $name module did not come off - see above"
     fi
 done
