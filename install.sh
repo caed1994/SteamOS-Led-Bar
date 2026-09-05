@@ -4,8 +4,18 @@
 
 # Installer for the SteamOS Utility Center.
 #
-#   sudo ./install.sh                 interactive
-#   sudo ./install.sh --leds 60 --port /dev/steamos-led-esp --yes
+#   sudo ./install.sh                 the core, and the modules already here
+#   sudo ./install.sh --with led      the core and the LED bar
+#   sudo ./install.sh --without cec   take one module back off
+#   sudo ./install.sh --modules       what the modules are, and what is here
+#
+# This installs the core: the control panel, the control command, the shared
+# code, and the keyboard layout. The LED bar, the CPU and GPU power, HDMI CEC
+# and the drives are modules, and a person asks for each one.
+#
+# A run with no --with and no --without keeps the modules that the machine
+# already has. The panel repairs an installation by running this script, and a
+# repair that removed the modules would be a repair that broke the machine.
 #
 # Everything lands in /var/lib so it survives SteamOS system updates, which
 # reset the read-only rootfs.
@@ -35,6 +45,12 @@ REBUILD_MODULE=0
 SKIP_WATCHER=0
 SKIP_SUDOERS=0
 FLASH_ENV=""
+# The modules to add and the modules to take away, as the person typed them.
+# The machine decides the rest: a run with neither keeps what is already here.
+# See the module section below.
+WITH=""
+WITHOUT=""
+LIST_MODULES=0
 
 # The firmware builds, in the order of the menu.
 #
@@ -56,8 +72,13 @@ FIRMWARE_ENVS=(
 die()  { printf '\033[1;31m error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
-    sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     cat <<'EOF'
+
+Modules:
+  --with LIST     install these as well, e.g. --with led,power or --with all
+  --without LIST  take these back off the machine
+  --modules       say what each module is, and what this machine has
 
 Options:
   --leds N        number of LEDs on the strip (default: 17)
@@ -72,6 +93,9 @@ Options:
                   or a number from the menu; omit to be asked, 0 to skip
   -y, --yes       accept defaults, no prompts
   -h, --help      this text
+
+--leds, --port, --baud and --flash are settings of the LED module, so any of
+them asks for that module.
 EOF
 }
 
@@ -80,6 +104,12 @@ while [[ $# -gt 0 ]]; do
         --leds) LED_COUNT="${2:-}"; shift 2 ;;
         --port) SERIAL_PORT="${2:-}"; shift 2 ;;
         --baud) BAUD="${2:-}"; shift 2 ;;
+        # A comma or a space between the names, because a person writes one
+        # and a script writes the other. Each option adds to the list, so
+        # --with led --with power is the same as --with led,power.
+        --with) WITH="$WITH,${2:-}"; shift 2 ;;
+        --without) WITHOUT="$WITHOUT,${2:-}"; shift 2 ;;
+        --modules) LIST_MODULES=1; shift ;;
         --skip-module) SKIP_MODULE=1; shift ;;
         --rebuild-module) REBUILD_MODULE=1; shift ;;
         --skip-watcher) SKIP_WATCHER=1; shift ;;
@@ -91,10 +121,125 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ $EUID -eq 0 ]] || die "run as root: sudo ./install.sh"
 command -v python3 >/dev/null || die "python3 not found"
 [[ -f "$SOURCE_DIR/server/steamos-utility-center" ]] \
     || die "run this script from inside the cloned repository"
+
+# --- which modules ----------------------------------------------------------
+#
+# This run installs the core, and then it makes the modules of this machine
+# equal to MODULE_WANT. There are two lists and not one:
+#
+#   MODULE_ON     what the machine has now
+#   MODULE_WANT   what it must have when this run ends
+#
+# The difference between them is the work. A module in both lists is installed
+# again, which is how an update reaches an installed module.
+#
+# MODULE_ON starts as the answer of the machine and not as an empty list. The
+# panel repairs an installation by running this script with no --with, and a
+# repair that started from an empty list would take every module off every
+# machine that has one.
+
+declare -A MODULE_ON=()
+declare -A MODULE_WANT=()
+MODULE_ORDER=()
+
+# Whose home to look in for HDMI CEC, which installs into a home directory.
+#
+# --modules needs no root, and a run with no sudo has no SUDO_UID to read. The
+# home of the person who typed the command is the right answer there.
+module_home() {
+    if watcher_user_dirs; then
+        printf '%s' "$WATCHER_HOME"
+    elif [[ $EUID -ne 0 ]]; then
+        printf '%s' "$HOME"
+    fi
+}
+
+read_modules() {
+    local name state
+    MODULE_ORDER=()
+    while read -r name state; do
+        [[ -n "$name" ]] || continue
+        MODULE_ORDER+=("$name")
+        MODULE_ON["$name"]="$state"
+    done < <(module_states "$(module_home)")
+    (( ${#MODULE_ORDER[@]} > 0 )) \
+        || die "could not read the module list from server/steamos_utility_center"
+}
+
+is_module() {   # is_module <name>
+    local one
+    for one in "${MODULE_ORDER[@]}"; do
+        [[ "$one" == "$1" ]] && return 0
+    done
+    return 1
+}
+
+# "led,power system" becomes one name per line, and "all" becomes every name.
+module_list() {     # module_list <what the person typed>
+    local name
+    for name in ${1//,/ }; do
+        if [[ "$name" == "all" ]]; then
+            printf '%s\n' "${MODULE_ORDER[@]}"
+        else
+            printf '%s\n' "$name"
+        fi
+    done
+}
+
+read_modules
+
+if [[ $LIST_MODULES -eq 1 ]]; then
+    echo "The core is the control panel, the control command and the keyboard"
+    echo "layout. It is always installed. These are the modules:"
+    echo
+    for name in "${MODULE_ORDER[@]}"; do
+        module_says "$name"
+        if [[ "${MODULE_ON[$name]}" == "on" ]]; then
+            echo "           On this machine: yes"
+        else
+            echo "           On this machine: no. Add it with --with $name"
+        fi
+        echo
+    done
+    exit 0
+fi
+
+[[ $EUID -eq 0 ]] || die "run as root: sudo ./install.sh"
+
+# A setting of the LED module asks for the LED module. Somebody who types
+# --leds 60 has a strip, and a run that took the number and installed nothing
+# to use it would be a run that did what it was told and nothing that was
+# meant.
+if [[ -n "$LED_COUNT" || -n "$SERIAL_PORT" || -n "$BAUD" || -n "$FLASH_ENV" ]]
+then
+    WITH="$WITH,led"
+fi
+
+for name in "${MODULE_ORDER[@]}"; do
+    MODULE_WANT["$name"]="${MODULE_ON[$name]}"
+done
+while read -r name; do
+    [[ -n "$name" ]] || continue
+    is_module "$name" \
+        || die "no such module: $name (try --modules)"
+    MODULE_WANT["$name"]="on"
+done < <(module_list "$WITH")
+while read -r name; do
+    [[ -n "$name" ]] || continue
+    is_module "$name" \
+        || die "no such module: $name (try --modules)"
+    MODULE_WANT["$name"]="off"
+done < <(module_list "$WITHOUT")
+
+# The four questions the steps below ask. They read as English at the place
+# they are asked, which a pair of associative arrays does not.
+want()     { [[ "${MODULE_WANT[$1]:-off}" == "on" ]]; }
+have()     { [[ "${MODULE_ON[$1]:-off}" == "on" ]]; }
+adding()   { want "$1" && ! have "$1"; }
+dropping() { have "$1" && ! want "$1"; }
 
 # --- the read-only rootfs ---------------------------------------------------
 #
@@ -119,22 +264,30 @@ ask() {  # ask <prompt> <default>
     printf '%s' "${answer:-$2}"
 }
 
-if [[ -z "$LED_COUNT" ]]; then
-    LED_COUNT="$(ask 'Number of LEDs on the strip' 17)"
-fi
-[[ "$LED_COUNT" =~ ^[0-9]+$ ]] && (( LED_COUNT >= 1 && LED_COUNT <= 1024 )) \
-    || die "LED count must be a number between 1 and 1024"
-
-if [[ -z "$SERIAL_PORT" ]]; then
-    say "Detected USB serial devices:"
-    if ! python3 "$SOURCE_DIR/server/steamos-utility-center" --list-ports 2>/dev/null; then
-        echo "   (none - plug the ESP in, or set the port later in $CONFIG_PATH)"
+# Each question below belongs to the LED module. A run that does not install
+# that module asks nothing at all, and that is the point of the split: a
+# machine with no strip on it has no strip to describe.
+if want led; then
+    if [[ -z "$LED_COUNT" ]]; then
+        LED_COUNT="$(ask 'Number of LEDs on the strip' 17)"
     fi
-    SERIAL_PORT="$(ask 'Serial port ("auto" picks the first ESP adapter)' auto)"
-fi
+    [[ "$LED_COUNT" =~ ^[0-9]+$ ]] \
+        && (( LED_COUNT >= 1 && LED_COUNT <= 1024 )) \
+        || die "LED count must be a number between 1 and 1024"
 
-[[ -n "$BAUD" ]] || BAUD="$(ask 'Baud rate (all shipped firmware uses 230400)' 230400)"
-[[ "$BAUD" =~ ^[0-9]+$ ]] || die "baud rate must be a number"
+    if [[ -z "$SERIAL_PORT" ]]; then
+        say "Detected USB serial devices:"
+        if ! python3 "$SOURCE_DIR/server/steamos-utility-center" \
+                --list-ports 2>/dev/null; then
+            echo "   (none - plug the ESP in, or set the port later in $CONFIG_PATH)"
+        fi
+        SERIAL_PORT="$(ask 'Serial port ("auto" picks the first ESP adapter)' auto)"
+    fi
+
+    [[ -n "$BAUD" ]] \
+        || BAUD="$(ask 'Baud rate (all shipped firmware uses 230400)' 230400)"
+    [[ "$BAUD" =~ ^[0-9]+$ ]] || die "baud rate must be a number"
+fi
 
 # --- firmware ---------------------------------------------------------------
 
@@ -155,19 +308,31 @@ resolve_firmware_choice() {
     die "unknown firmware environment: $choice"
 }
 
-if [[ -z "$FLASH_ENV" && $ASSUME_YES -eq 0 ]]; then
-    # Default is 0: flashing is the one step that touches the hardware, and
-    # nobody re-running the installer for a config change expects it.
-    say "Flash the ESP firmware as well?"
-    echo "   0  no - it is already flashed (default)"
-    for index in "${!FIRMWARE_ENVS[@]}"; do
-        printf '   %d  %s\n' "$((index + 1))" "${FIRMWARE_ENVS[index]#*:}"
-    done
-    FLASH_ENV="$(ask 'Firmware' 0)"
+# The board is the LED module's board, so a run without that module never
+# asks and never flashes.
+if ! want led; then
+    FLASH_ENV=""
+else
+    if [[ -z "$FLASH_ENV" && $ASSUME_YES -eq 0 ]]; then
+        # Default is 0: flashing is the one step that touches the hardware,
+        # and nobody re-running the installer for a config change expects it.
+        say "Flash the ESP firmware as well?"
+        echo "   0  no - it is already flashed (default)"
+        for index in "${!FIRMWARE_ENVS[@]}"; do
+            printf '   %d  %s\n' "$((index + 1))" "${FIRMWARE_ENVS[index]#*:}"
+        done
+        FLASH_ENV="$(ask 'Firmware' 0)"
+    fi
+    FLASH_ENV="$(resolve_firmware_choice "$FLASH_ENV")"
 fi
-FLASH_ENV="$(resolve_firmware_choice "$FLASH_ENV")"
 
-# --- install ---------------------------------------------------------------
+# --- install: the core ------------------------------------------------------
+#
+# The control panel, the control command, the shared code and the keyboard
+# layout. Every machine gets this part.
+#
+# It writes no unit, no udev rule and no sudoers line of its own. Each of those
+# arrives with a module, and a machine with no module has none of them.
 
 # Before a single new file is written. The old install has to be stopped and
 # out of the way first: its service holds the serial port the new one is about
@@ -175,35 +340,17 @@ FLASH_ENV="$(resolve_firmware_choice "$FLASH_ENV")"
 # would write fresh defaults over the top of nothing. See migrate_old_install.
 migrate_old_install
 
-say "Installing service to $INSTALL_DIR"
+say "Installing the core to $INSTALL_DIR"
 install -d -m 0755 "$INSTALL_DIR"
 rm -rf "${INSTALL_DIR:?}/steamos_utility_center"
 cp -r "$SOURCE_DIR/server/steamos_utility_center" "$INSTALL_DIR/"
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-center" "$INSTALL_DIR/steamos-utility-center"
-install -m 0755 "$SOURCE_DIR/server/steamos-utility-center-power" "$INSTALL_DIR/steamos-utility-center-power"
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-centerctl" "$INSTALL_DIR/steamos-utility-centerctl"
-# The three appliers, beside the programs they work with. Each one must have a
-# path that does not move, for two reasons. The boot-time repair unit runs the
-# drives one from here, and a person who moved the clone would take it away
-# from that unit. And a sudoers rule names the program it permits: a rule for
-# a path inside a clone permits whatever a person puts there.
-# See server/steamos-utility-center-mounts.service and ctl.py.
-install -m 0755 "$SOURCE_DIR/scripts/apply-config.sh" \
-    "$INSTALL_DIR/steamos-utility-center-config-apply"
-install -m 0755 "$SOURCE_DIR/scripts/apply-power.sh" \
-    "$INSTALL_DIR/steamos-utility-center-power-apply"
-install -m 0755 "$SOURCE_DIR/scripts/apply-mounts.sh" \
-    "$INSTALL_DIR/steamos-utility-center-mounts-apply"
-# The switch for the wake after a resume, for the same reason: a sudoers rule
-# names a program, and this one is small enough to name. See
-# scripts/resume-wake.sh.
-install -m 0755 "$SOURCE_DIR/scripts/resume-wake.sh" \
-    "$INSTALL_DIR/steamos-utility-center-resume-wake"
 find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
 
 # The commit of those files, so that the panel can report a clone that moved
-# ahead of them. This is the last of the three writes, so a stamp that exists
-# is a stamp for files that all exist.
+# ahead of them. This is the last write of the core, so a stamp that exists is
+# a stamp for core files that all exist.
 #
 # It uses safe.directory because this script runs as root over the clone of
 # another person, and git refuses to read a clone of another owner.
@@ -244,177 +391,247 @@ else
     warn "could not write $COMMAND_LINK - run it by its full path instead"
 fi
 
-ln -sfn "$INSTALL_DIR/steamos-utility-center-power" "$POWER_COMMAND_LINK" 2>/dev/null \
-    || warn "could not write $POWER_COMMAND_LINK - run it by its full path"
-
 ln -sfn "$INSTALL_DIR/steamos-utility-centerctl" "$CTL_COMMAND_LINK" 2>/dev/null \
     || warn "could not write $CTL_COMMAND_LINK - run it by its full path"
 
-if [[ -f "$CONFIG_PATH" ]]; then
-    say "Keeping existing $CONFIG_PATH"
-    warn "check that LED_COUNT/SERIAL_PORT/BAUD there still match your setup"
-else
-    say "Writing $CONFIG_PATH"
-    install -m 0644 "$SOURCE_DIR/server/steamos-utility-center.conf" "$CONFIG_PATH"
-    sed -i \
-        -e "s|^LED_COUNT=.*|LED_COUNT=$LED_COUNT|" \
-        -e "s|^SERIAL_PORT=.*|SERIAL_PORT=$SERIAL_PORT|" \
-        -e "s|^BAUD=.*|BAUD=$BAUD|" \
-        "$CONFIG_PATH"
-fi
+# --- the modules ------------------------------------------------------------
+#
+# One pair of functions for each module: what it puts on the machine, and what
+# it takes off again. The pair is together, so a file that one adds and the
+# other forgets is a fault a reader can see.
+#
+# A removal keeps the settings of its module. /etc/steamos-utility-center.conf,
+# the power settings and the record of the drives are answers that the person
+# gave, and nothing else can find them again. A second install reads them back.
+# uninstall.sh removes them, because "uninstall" is the word that means it.
+#
+# The appliers land beside the programs they work with, and each one must have
+# a path that does not move. There are two reasons. The boot-time repair unit
+# runs the drives one from there, and a person who moved the clone would take
+# it away from that unit. And a sudoers rule names the program it permits: a
+# rule for a path inside a clone permits whatever a person puts there.
+# See server/steamos-utility-center-mounts.service and ctl.py.
+#
+# The applier is also the file that says the module is installed. See
+# server/steamos_utility_center/modules.py.
 
-say "Installing udev rule to $UDEV_PATH"
-install -m 0644 "$SOURCE_DIR/udev/99-steamos-utility-center.rules" "$UDEV_PATH"
-udevadm control --reload >/dev/null 2>&1 || warn "could not reload udev rules"
-udevadm trigger --subsystem-match=tty >/dev/null 2>&1 || true
+# -- led: the strip on the case ----------------------------------------------
 
-say "Installing the suspend hook to $SLEEP_HOOK_PATH"
-# The program that tells the strip about a suspend. Without it, the strip goes
-# dark during a suspend, as it did before.
-#
-# A system with no /usr/lib/systemd/system-sleep thus has one feature less. It
-# is not a failed installation.
-if [ -d "$(dirname "$SLEEP_HOOK_PATH")" ]; then
-    install -m 0755 "$SOURCE_DIR/systemd-sleep/steamos-utility-center" \
-        "$SLEEP_HOOK_PATH"
-else
-    warn "no $(dirname "$SLEEP_HOOK_PATH") - the strip will go dark in standby"
-fi
+install_led() {
+    say "Installing the LED bar module"
+    install -m 0755 "$SOURCE_DIR/scripts/apply-config.sh" \
+        "$INSTALL_DIR/steamos-utility-center-config-apply"
 
-say "Installing systemd unit to $UNIT_PATH"
-sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
-    "$SOURCE_DIR/server/steamos-utility-center.service" > "$UNIT_PATH"
-chmod 0644 "$UNIT_PATH"
-
-# The CPU settings. This installs the unit and deliberately does not enable it.
-#
-# With no setting in the configuration file, the unit runs at each boot and
-# does nothing. A service that nobody asked for is a service that a person must
-# examine.
-#
-# The panel enables it at the first setting. See scripts/apply-power.sh.
-say "Installing systemd unit to $POWER_UNIT_PATH"
-sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
-    "$SOURCE_DIR/server/steamos-utility-center-power.service" > "$POWER_UNIT_PATH"
-chmod 0644 "$POWER_UNIT_PATH"
-
-# The drives of the System page.
-#
-# The unit writes the mount units again at every boot, for a SteamOS update
-# that did not honour the keep-list. It is enabled only on a machine that has
-# a record, because a unit that nobody asked for is a unit that a person must
-# examine. The panel enables it at the first drive. See scripts/apply-mounts.sh.
-say "Installing systemd unit to $MOUNTS_UNIT_PATH"
-sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
-    "$SOURCE_DIR/server/steamos-utility-center-mounts.service" \
-    > "$MOUNTS_UNIT_PATH"
-chmod 0644 "$MOUNTS_UNIT_PATH"
-if [[ -f "$MOUNTS_RECORD_PATH" ]]; then
-    say "Keeping the drives in $MOUNTS_RECORD_PATH"
-    systemctl enable "$(basename "$MOUNTS_UNIT_PATH")" >/dev/null 2>&1 || true
-fi
-
-# Ask SteamOS to carry this project into the next image.
-#
-# A SteamOS update rebuilds /etc from the new image, and this project wrote
-# nothing that asked for its files back. Its configuration, its units and its
-# udev rule thus had the exposure that loses a hand-written line in
-# /etc/fstab. See server/steamos_utility_center/mounts.py.
-say "Writing $KEEP_LIST_PATH"
-install -d -m 0755 "$(dirname "$KEEP_LIST_PATH")"
-if ! keep_said="$("$INSTALL_DIR/steamos-utility-center" --write-mounts \
-                 "$MOUNTS_RECORD_PATH" 2>&1)"; then
-    warn "could not write the keep-list, so a SteamOS update can take this"
-    warn "installation away again:"
-    warn "  $keep_said"
-fi
-
-# Let the control command apply a change with no password.
-#
-# Game Mode runs no polkit agent and gives no terminal, so pkexec there has
-# nobody to ask. Without this rule every setting of this project is a setting
-# for the desktop only, and a plugin in Game Mode can read them and change
-# none of them.
-#
-# The command writes its own rule. The paths in the rule must be the paths it
-# runs, and a copy of them in this script is a second answer to one question.
-# It reads the file with visudo before it installs it: a sudoers file that
-# does not parse takes sudo away from the machine.
-#
-# --no-sudoers leaves it out, for a person who uses the panel only.
-if [[ "$SKIP_SUDOERS" -eq 1 ]]; then
-    say "Leaving out the sudoers rule, so settings are the desktop's only"
-elif ! watcher_user_dirs; then
-    warn "cannot tell which desktop user to permit, so Game Mode cannot"
-    warn "change a setting. Run the installer with sudo from your account."
-else
-    say "Permitting $WATCHER_USER to apply a change with no password"
-    if ! permit_said="$("$INSTALL_DIR/steamos-utility-centerctl" \
-                       permit "$WATCHER_USER" 2>&1)"; then
-        warn "could not write the sudoers rule, so Game Mode cannot change a"
-        warn "setting:"
-        warn "  $permit_said"
+    if [[ -f "$CONFIG_PATH" ]]; then
+        say "Keeping existing $CONFIG_PATH"
+        warn "check that LED_COUNT/SERIAL_PORT/BAUD there still match your setup"
+    else
+        say "Writing $CONFIG_PATH"
+        install -m 0644 "$SOURCE_DIR/server/steamos-utility-center.conf" "$CONFIG_PATH"
+        sed -i \
+            -e "s|^LED_COUNT=.*|LED_COUNT=$LED_COUNT|" \
+            -e "s|^SERIAL_PORT=.*|SERIAL_PORT=$SERIAL_PORT|" \
+            -e "s|^BAUD=.*|BAUD=$BAUD|" \
+            "$CONFIG_PATH"
     fi
-fi
 
-# The HDMI CEC toolkit, where it is already installed.
+    say "Installing udev rule to $UDEV_PATH"
+    install -m 0644 "$SOURCE_DIR/udev/99-steamos-utility-center.rules" "$UDEV_PATH"
+    udevadm control --reload >/dev/null 2>&1 || warn "could not reload udev rules"
+    udevadm trigger --subsystem-match=tty >/dev/null 2>&1 || true
+
+    say "Installing the suspend hook to $SLEEP_HOOK_PATH"
+    # The program that tells the strip about a suspend. Without it, the strip
+    # goes dark during a suspend, as it did before.
+    #
+    # A system with no /usr/lib/systemd/system-sleep thus has one feature less.
+    # It is not a failed installation.
+    if [ -d "$(dirname "$SLEEP_HOOK_PATH")" ]; then
+        install -m 0755 "$SOURCE_DIR/systemd-sleep/steamos-utility-center" \
+            "$SLEEP_HOOK_PATH"
+    else
+        warn "no $(dirname "$SLEEP_HOOK_PATH") - the strip will go dark in standby"
+    fi
+
+    say "Installing systemd unit to $UNIT_PATH"
+    sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
+        "$SOURCE_DIR/server/steamos-utility-center.service" > "$UNIT_PATH"
+    chmod 0644 "$UNIT_PATH"
+
+    # The units of the desktop session, the kernel module and the firmware.
+    # Each one is a step of its own further down this file, because each one
+    # is long and each one can fail on its own.
+    install_user_units || true
+    install_led_module
+    install_led_firmware
+    start_led_service
+}
+
+remove_led() {
+    say "Removing the LED bar module"
+    # A stop makes the strip dark before the process exits. A strip that keeps
+    # the last frame after a removal is a strip that looks installed.
+    systemctl disable --now "$NAME.service" 2>/dev/null || true
+    rm -f "$UNIT_PATH" "$INSTALL_DIR/steamos-utility-center-config-apply"
+    rm -f "$UDEV_PATH" "$SLEEP_HOOK_PATH"
+    udevadm control --reload >/dev/null 2>&1 || true
+    systemctl daemon-reload
+    remove_user_units
+    # The kernel module and the ESP firmware stay. The module is another
+    # project's code and other programs can load it, and the firmware is on a
+    # board that this script cannot reach. uninstall.sh takes the module.
+    say "  the settings in $CONFIG_PATH stay, for a second install"
+}
+
+# -- power: the CPU and the graphics card ------------------------------------
+
+install_power() {
+    say "Installing the CPU and GPU power module"
+    install -m 0755 "$SOURCE_DIR/server/steamos-utility-center-power" \
+        "$INSTALL_DIR/steamos-utility-center-power"
+    install -m 0755 "$SOURCE_DIR/scripts/apply-power.sh" \
+        "$INSTALL_DIR/steamos-utility-center-power-apply"
+    # The switch for the wake after a resume, for the reason above: a sudoers
+    # rule names a program, and this one is small enough to name. See
+    # scripts/resume-wake.sh.
+    install -m 0755 "$SOURCE_DIR/scripts/resume-wake.sh" \
+        "$INSTALL_DIR/steamos-utility-center-resume-wake"
+
+    ln -sfn "$INSTALL_DIR/steamos-utility-center-power" "$POWER_COMMAND_LINK" \
+        2>/dev/null \
+        || warn "could not write $POWER_COMMAND_LINK - run it by its full path"
+
+    # This installs the unit and deliberately does not enable it.
+    #
+    # With no setting in the configuration file, the unit runs at each boot and
+    # does nothing. A service that nobody asked for is a service that a person
+    # must examine.
+    #
+    # The panel enables it at the first setting. See scripts/apply-power.sh.
+    say "Installing systemd unit to $POWER_UNIT_PATH"
+    sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
+        "$SOURCE_DIR/server/steamos-utility-center-power.service" \
+        > "$POWER_UNIT_PATH"
+    chmod 0644 "$POWER_UNIT_PATH"
+    systemctl daemon-reload
+
+    if [[ -f "$POWER_CONFIG_PATH" ]]; then
+        say "Keeping existing $POWER_CONFIG_PATH"
+    else
+        say "Writing $POWER_CONFIG_PATH"
+        install -m 0644 "$SOURCE_DIR/server/steamos-utility-center-power.conf" \
+            "$POWER_CONFIG_PATH"
+    fi
+}
+
+remove_power() {
+    say "Removing the CPU and GPU power module"
+    # The current settings stay on the machine. To put the governor back needs
+    # the value from before the installation, and nothing recorded that value.
+    # It is a setting and not a change to reverse.
+    systemctl disable --now "$NAME-power.service" 2>/dev/null || true
+    rm -f "$POWER_UNIT_PATH" \
+          "$INSTALL_DIR/steamos-utility-center-power" \
+          "$INSTALL_DIR/steamos-utility-center-power-apply" \
+          "$INSTALL_DIR/steamos-utility-center-resume-wake"
+    if [[ -L "$POWER_COMMAND_LINK" \
+          && "$(readlink "$POWER_COMMAND_LINK")" == "$INSTALL_DIR/$NAME-power" ]]
+    then
+        rm -f "$POWER_COMMAND_LINK"
+    fi
+    systemctl daemon-reload
+    say "  the settings in $POWER_CONFIG_PATH stay, for a second install"
+}
+
+# -- cec: the television -----------------------------------------------------
 #
-# It has its own installer and its own button on the CEC page, and that is
-# right: it writes udev rules, wireplumber configuration and units of its own,
-# and a person who never asked for it must not get it from here.
+# This module is one call in each direction. The toolkit has its own installer,
+# which writes udev rules, wireplumber configuration and units of its own.
 #
-# But a person who *has* it expects an update to bring it. It did not. This
-# script never named the toolkit at all, so `update.sh` brought a newer
-# cec-toolkit/ into the clone, "Rebuild and reinstall" installed everything
-# else, and the copy on the machine stayed as old as it was. The five fixes
-# that this fork made are in cec-toolkit/bin, so an old copy is a machine
-# without them, and nothing said so.
-#
-# Only where it is, so the rule is still opt-in.
-if watcher_user_dirs \
-        && [[ -x "$WATCHER_HOME/.local/bin/steamos-cec-toolkitctl" ]]; then
-    say "Installing the HDMI CEC toolkit for $WATCHER_USER"
+# scripts/install-cec.sh is between the two, because that installer refuses to
+# run as root and calls sudo approximately forty times. The panel runs the same
+# script from its own button.
+
+install_cec() {
+    if ! watcher_user_dirs; then
+        warn "cannot tell which desktop user to install HDMI CEC for."
+        warn "Run the installer with sudo from your normal account."
+        return 1
+    fi
+    say "Installing the HDMI CEC module for $WATCHER_USER"
     if cec_said="$(bash "$SOURCE_DIR/scripts/install-cec.sh" install \
                   "$SOURCE_DIR/cec-toolkit" "$WATCHER_USER" 2>&1)"; then
         say "  HDMI CEC toolkit $(cat "$SOURCE_DIR/cec-toolkit/VERSION")"
-    else
-        warn "could not bring the HDMI CEC toolkit up to date:"
-        printf '%s\n' "$cec_said" | tail -5 \
-            | while read -r line; do warn "  $line"; done
-        warn "Its own button on the HDMI CEC page installs it."
+        return 0
     fi
-fi
+    warn "could not install the HDMI CEC toolkit:"
+    printf '%s\n' "$cec_said" | tail -5 \
+        | while read -r line; do warn "  $line"; done
+    return 1
+}
 
-# The Game Mode plugin, where Decky Loader is installed.
-#
-# One script for this, and the panel has a button that runs the same one. Two
-# copies of the copy would be two sets of files on one machine.
-#
-# Only where Decky is. A machine without it gets one line and no directory
-# made for a program that its owner did not ask for. The script says which
-# case it is, so a plugin that is not there is a line in this log and not a
-# search. See scripts/install-decky.sh.
-if ! watcher_user_dirs; then
-    say "No desktop user, so the Game Mode plugin is not installed."
-elif decky_said="$(bash "$SOURCE_DIR/scripts/install-decky.sh" \
-                  "$SOURCE_DIR" "$WATCHER_USER" 2>&1)"; then
-    say "Installing the Game Mode plugin for $WATCHER_USER"
-    printf '%s\n' "$decky_said" | while read -r line; do say "  $line"; done
-elif [[ $? -eq 3 ]]; then
-    say "No Decky Loader, so no Game Mode plugin. Install Decky from"
-    say "https://decky.xyz and run this again."
-else
-    warn "could not install the Game Mode plugin:"
-    printf '%s\n' "$decky_said" | while read -r line; do warn "  $line"; done
-fi
+remove_cec() {
+    remove_cec_toolkit || true
+}
 
-if [[ -f "$POWER_CONFIG_PATH" ]]; then
-    say "Keeping existing $POWER_CONFIG_PATH"
-else
-    say "Writing $POWER_CONFIG_PATH"
-    install -m 0644 "$SOURCE_DIR/server/steamos-utility-center-power.conf" \
-        "$POWER_CONFIG_PATH"
-fi
+# -- system: the drives and Game Mode ----------------------------------------
+
+install_system() {
+    say "Installing the drives and Game Mode module"
+    install -m 0755 "$SOURCE_DIR/scripts/apply-mounts.sh" \
+        "$INSTALL_DIR/steamos-utility-center-mounts-apply"
+
+    # The unit writes the mount units again at every boot, for a SteamOS update
+    # that did not honour the keep-list. It is enabled only on a machine that
+    # has a record, because a unit that nobody asked for is a unit that a
+    # person must examine. The panel enables it at the first drive. See
+    # scripts/apply-mounts.sh.
+    say "Installing systemd unit to $MOUNTS_UNIT_PATH"
+    sed "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
+        "$SOURCE_DIR/server/steamos-utility-center-mounts.service" \
+        > "$MOUNTS_UNIT_PATH"
+    chmod 0644 "$MOUNTS_UNIT_PATH"
+    systemctl daemon-reload
+    if [[ -f "$MOUNTS_RECORD_PATH" ]]; then
+        say "Keeping the drives in $MOUNTS_RECORD_PATH"
+        systemctl enable "$(basename "$MOUNTS_UNIT_PATH")" >/dev/null 2>&1 || true
+    fi
+
+    # The Game Mode plugin, where Decky Loader is installed.
+    #
+    # One script for this, and the panel has a button that runs the same one.
+    # Two copies of the copy would be two sets of files on one machine.
+    #
+    # A machine without Decky gets one line and no directory made for a program
+    # that its owner did not ask for. The script says which case it is, so a
+    # plugin that is not there is a line in this log and not a search. See
+    # scripts/install-decky.sh.
+    if ! watcher_user_dirs; then
+        say "No desktop user, so the Game Mode plugin is not installed."
+    elif decky_said="$(bash "$SOURCE_DIR/scripts/install-decky.sh" \
+                      "$SOURCE_DIR" "$WATCHER_USER" 2>&1)"; then
+        say "Installing the Game Mode plugin for $WATCHER_USER"
+        printf '%s\n' "$decky_said" | while read -r line; do say "  $line"; done
+    elif [[ $? -eq 3 ]]; then
+        say "No Decky Loader, so no Game Mode plugin. Install Decky from"
+        say "https://decky.xyz and run this again."
+    else
+        warn "could not install the Game Mode plugin:"
+        printf '%s\n' "$decky_said" | while read -r line; do warn "  $line"; done
+    fi
+}
+
+remove_system() {
+    say "Removing the drives and Game Mode module"
+    systemctl disable --now "$NAME-mounts.service" 2>/dev/null || true
+    rm -f "$MOUNTS_UNIT_PATH" "$MOUNTS_APPLIER_PATH"
+    # The drives themselves. Without this they stay mounted until the machine
+    # restarts, and nothing on the machine can unmount them any more.
+    remove_mount_units
+    systemctl daemon-reload
+    remove_decky_plugin
+    say "  the drives in $MOUNTS_RECORD_PATH stay, for a second install"
+}
 
 # --- the units that run in the desktop session ------------------------------
 
@@ -559,12 +776,11 @@ start_user_units() {
     return 0
 }
 
-# Here, before the first step that can fail. Each step after this point can
-# end the run under set -e: pacman, the kernel module, and the firmware
-# flash. These files need none of those steps. When the installer wrote them
-# at the end, a machine with one bad step earlier did not get them, and no
-# message said so. The start step is separate and stays at the end.
-install_user_units || true
+# install_led calls this before the first step that can fail. Each step after
+# that point can end the run under set -e: pacman, the kernel module, and the
+# firmware flash. These files need none of those steps. When the installer
+# wrote them at the end, a machine with one bad step earlier did not get them,
+# and no message said so. The start step is separate and stays at the end.
 
 # --- build prerequisites ----------------------------------------------------
 #
@@ -765,13 +981,17 @@ install_shim_module() {
     return 0
 }
 
+# MODULE_OK is read nowhere else. It is here so that the two warnings below
+# are one answer given one time, rather than a reader of the log having to
+# join a failed build to a service that waits.
 MODULE_OK=1
-install_shim_module || MODULE_OK=0
 
-if [[ $MODULE_OK -eq 0 ]]; then
+install_led_module() {
+    install_shim_module || MODULE_OK=0
+    [[ $MODULE_OK -eq 0 ]] || return 0
     warn "$SHIM_DEVICE is not available."
     warn "The service will still be installed and waits for the device to appear."
-fi
+}
 
 # --- firmware ---------------------------------------------------------------
 
@@ -914,17 +1134,19 @@ flash_firmware() {
         bash "$SOURCE_DIR/flash-esp.sh" "$FLASH_ENV"
 }
 
-ensure_platformio || true
+FIRMWARE_STATUS="not installed"
 
-FIRMWARE_STATUS="not flashed (say so at the prompt, or --flash, to change that)"
-if [[ -n "$FLASH_ENV" ]]; then
+install_led_firmware() {
+    ensure_platformio || true
+    FIRMWARE_STATUS="not flashed (say so at the prompt, or --flash, to change that)"
+    [[ -n "$FLASH_ENV" ]] || return 0
     if flash_firmware; then
         FIRMWARE_STATUS="flashed: $FLASH_ENV"
     else
         FIRMWARE_STATUS="FAILED to flash $FLASH_ENV - see above"
         warn "firmware flashing failed; the service is installed either way."
     fi
-fi
+}
 
 # --- control panel ----------------------------------------------------------
 
@@ -1003,41 +1225,51 @@ install_control_panel() {
 say "Installing the control panel menu entry"
 install_control_panel || true
 
-# --- start it --------------------------------------------------------------
+# --- the LED service --------------------------------------------------------
+#
+# install_led calls this last. The unit, the settings and the kernel module are
+# on the machine at that point, so a service that does not stay up here has a
+# reason that this script can print.
 
-say "Enabling steamos-utility-center.service"
-systemctl daemon-reload
-systemctl enable steamos-utility-center.service
-# Not "enable --now", on purpose. That command starts a stopped service and
-# does not touch a service that runs. An install over a running copy then
-# keeps the old code from the old unit: new files, but the same behaviour.
-# A restart always runs what this installer wrote.
-systemctl restart steamos-utility-center.service
+start_led_service() {
+    say "Enabling steamos-utility-center.service"
+    systemctl daemon-reload
+    systemctl enable steamos-utility-center.service
+    # Not "enable --now", on purpose. That command starts a stopped service and
+    # does not touch a service that runs. An install over a running copy then
+    # keeps the old code from the old unit: new files, but the same behaviour.
+    # A restart always runs what this installer wrote.
+    systemctl restart steamos-utility-center.service
 
-# systemctl restart returns when the process starts. A service that stops on
-# its own configuration is therefore "active" for a short time. A restart
-# loop also moves through active, failed and activating, so a single read
-# gives any of the three. Read the state again after the time it needs to
-# fail, and count the restarts.
-sleep 4
-restarts="$(systemctl show -p NRestarts --value steamos-utility-center.service \
-            2>/dev/null || true)"
-if systemctl is-active --quiet steamos-utility-center.service \
-   && [[ "${restarts:-0}" == "0" ]]; then
-    say "Service is running."
-else
-    if [[ "${restarts:-0}" != "0" ]]; then
-        warn "Service started and then died ${restarts}x - it is not staying up."
+    # systemctl restart returns when the process starts. A service that stops on
+    # its own configuration is therefore "active" for a short time. A restart
+    # loop also moves through active, failed and activating, so a single read
+    # gives any of the three. Read the state again after the time it needs to
+    # fail, and count the restarts.
+    sleep 4
+    local restarts
+    restarts="$(systemctl show -p NRestarts --value steamos-utility-center.service \
+                2>/dev/null || true)"
+    if systemctl is-active --quiet steamos-utility-center.service \
+       && [[ "${restarts:-0}" == "0" ]]; then
+        say "Service is running."
     else
-        warn "Service is not active."
+        if [[ "${restarts:-0}" != "0" ]]; then
+            warn "Service started and then died ${restarts}x - it is not staying up."
+        else
+            warn "Service is not active."
+        fi
+        # Print the reason here, and do not make the user find it in the
+        # journal. A bad line in the configuration gives a clear message, and
+        # that message is the one to show at the end of an install.
+        warn "The last thing it said:"
+        journalctl -u steamos-utility-center.service -n 5 --no-pager -o cat 2>/dev/null \
+            | sed 's/^/    /' >&2 || true
     fi
-    # Print the reason here, and do not make the user find it in the
-    # journal. A bad line in the configuration gives a clear message, and
-    # that message is the one to show at the end of an install.
-    warn "The last thing it said:"
-    journalctl -u steamos-utility-center.service -n 5 --no-pager -o cat 2>/dev/null \
-        | sed 's/^/    /' >&2 || true
-fi
+
+    check_notify_pipe
+    start_user_units || true
+}
 
 # The service makes the notification pipe at start. If that fails, it writes
 # one warning and continues. A machine with this fault still reports
@@ -1052,40 +1284,140 @@ notify_setting() {  # notify_setting <KEY> <default>
     printf '%s' "${value:-$2}"
 }
 
-if [[ "$(notify_setting NOTIFY 1)" =~ ^(1|true|yes|on)$ ]]; then
-    NOTIFY_FIFO="$(notify_setting NOTIFY_FIFO /run/steamos-utility-center/notify)"
+check_notify_pipe() {
+    [[ "$(notify_setting NOTIFY 1)" =~ ^(1|true|yes|on)$ ]] || return 0
+    local fifo
+    fifo="$(notify_setting NOTIFY_FIFO /run/steamos-utility-center/notify)"
     for _ in 1 2 3 4 5 6; do
-        [[ -p "$NOTIFY_FIFO" ]] && break
+        [[ -p "$fifo" ]] && break
         sleep 0.5
     done
-    if [[ -p "$NOTIFY_FIFO" ]]; then
-        say "Notification pipe ready ($NOTIFY_FIFO)"
+    if [[ -p "$fifo" ]]; then
+        say "Notification pipe ready ($fifo)"
     else
-        warn "the service is running, but $NOTIFY_FIFO was not created -"
+        warn "the service is running, but $fifo was not created -"
         warn "no flash of any kind will work."
         warn "The reason is in: journalctl -u steamos-utility-center -n 40"
     fi
+}
+
+# --- make the modules equal to what was asked for ---------------------------
+#
+# One pass over every module. A module that is wanted is installed, and that
+# covers an update of a module the machine already has. A module that the
+# machine has and nobody wants is removed.
+#
+# A failure of one module does not end the run. The others are independent, and
+# an installer that stopped at the first one would leave a machine whose state
+# nobody can name.
+
+for name in "${MODULE_ORDER[@]}"; do
+    if want "$name"; then
+        "install_$name" || warn "the $name module did not install - see above"
+    elif have "$name"; then
+        "remove_$name" || warn "the $name module did not come off - see above"
+    fi
+done
+
+# Read the machine again, and do not trust the wish. A module that failed to
+# install is not installed, and the summary below and the sudoers rule must
+# both say what is true.
+read_modules
+
+# Ask SteamOS to carry this project into the next image.
+#
+# A SteamOS update rebuilds /etc from the new image, and this project wrote
+# nothing that asked for its files back. Its configuration, its units and its
+# udev rule thus had the exposure that loses a hand-written line in
+# /etc/fstab. See server/steamos_utility_center/mounts.py.
+#
+# After the modules and not before them: the list names each file that this
+# project can install, and a file that a module wrote a moment ago must be in
+# the list this run writes.
+say "Writing $KEEP_LIST_PATH"
+install -d -m 0755 "$(dirname "$KEEP_LIST_PATH")"
+if ! keep_said="$("$INSTALL_DIR/steamos-utility-center" --write-mounts \
+                 "$MOUNTS_RECORD_PATH" 2>&1)"; then
+    warn "could not write the keep-list, so a SteamOS update can take this"
+    warn "installation away again:"
+    warn "  $keep_said"
 fi
 
-start_user_units || true
+# Let the control command apply a change with no password.
+#
+# Game Mode runs no polkit agent and gives no terminal, so pkexec there has
+# nobody to ask. Without this rule every setting of this project is a setting
+# for the desktop only, and a plugin in Game Mode can read them and change
+# none of them.
+#
+# The command writes its own rule. The paths in the rule must be the paths it
+# runs, and a copy of them in this script is a second answer to one question.
+# It reads the file with visudo before it installs it: a sudoers file that
+# does not parse takes sudo away from the machine.
+#
+# After the modules, because the rule names one program for each installed
+# module. A run that removed a module rewrites the rule without it, and a run
+# with no module left removes the rule. See ctl.sudoers_text.
+#
+# --no-sudoers leaves it out, for a person who uses the panel only.
+if [[ "$SKIP_SUDOERS" -eq 1 ]]; then
+    say "Leaving out the sudoers rule, so settings are the desktop's only"
+elif ! watcher_user_dirs; then
+    warn "cannot tell which desktop user to permit, so Game Mode cannot"
+    warn "change a setting. Run the installer with sudo from your account."
+else
+    say "Permitting $WATCHER_USER to apply a change with no password"
+    if ! permit_said="$("$INSTALL_DIR/steamos-utility-centerctl" \
+                       permit "$WATCHER_USER" 2>&1)"; then
+        warn "could not write the sudoers rule, so Game Mode cannot change a"
+        warn "setting:"
+        warn "  $permit_said"
+    fi
+fi
 
 # Each step that needs a writable / is complete at this point. Do this here
 # and not in the exit trap. Then the last text on the screen is the summary
 # and not a message about filesystems.
 relock_rootfs
 
+# --- the summary ------------------------------------------------------------
+
+# The modules of this machine, as one line. "none" and not an empty line: a
+# blank after a label reads as a fault in the script.
+module_summary() {
+    local name found=()
+    for name in "${MODULE_ORDER[@]}"; do
+        [[ "${MODULE_ON[$name]}" == "on" ]] && found+=("$name")
+    done
+    if (( ${#found[@]} == 0 )); then
+        printf 'none. Add one with --with, or from its page in the panel'
+    else
+        printf '%s' "${found[*]}"
+    fi
+}
+
 cat <<EOF
 
 Done.
 
   Panel:    $PANEL_STATUS
-  Firmware: $FIRMWARE_STATUS
   Command:  $COMMAND_STATUS
+  Modules:  $(module_summary)
+  Add one:  sudo ./install.sh --with <name>   ($COMMAND_STATUS's panel has
+            the same button on the page of each module)
+  What they are: ./install.sh --modules
+EOF
+
+if [[ "${MODULE_ON[led]}" == "on" ]]; then
+cat <<EOF
+
+LED bar:
+  Firmware: $FIRMWARE_STATUS
   Config:   $CONFIG_PATH
   Logs:     journalctl -u steamos-utility-center -f
   Restart:  sudo systemctl restart steamos-utility-center
 
-Desktop-session services: $WATCHER_STATUS
+  Desktop-session services: $WATCHER_STATUS
   Achievements, messages and friends
   Check:    $COMMAND_STATUS --steam-check   (with a game running)
   Log:      journalctl --user -u steamos-utility-center-achievements -f
@@ -1102,3 +1434,6 @@ Test the strip without Steam (stop the service first so the port is free):
   sudo systemctl start steamos-utility-center
 
 EOF
+else
+    echo
+fi

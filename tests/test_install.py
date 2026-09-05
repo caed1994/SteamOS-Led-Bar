@@ -724,6 +724,16 @@ class InstallerShapeTest(unittest.TestCase):
         self.assertEqual(typed - linked - {"steamos-utility-center.conf"}, set(),
                          "the README names a command nothing installs")
 
+    def _body(self, name):
+        """The text of one function of the installer, without its neighbours.
+
+        The steps of a module are in a function of that module now, so an
+        order in this file is an order inside one function. A search of the
+        whole file would find the same call in another module's function.
+        """
+        start = self.text.index("\n%s() {\n" % name)
+        return self.text[start:self.text.index("\n}\n", start)]
+
     def test_the_user_units_are_installed_before_anything_that_can_fail(self):
         """The order, and not the presence. A user reported this fault.
 
@@ -733,23 +743,31 @@ class InstallerShapeTest(unittest.TestCase):
         steamos-utility-center-phone.service not found", and each other step
         worked there. The units need none of those steps, so they go to disk
         first.
+
+        All four are steps of the LED module now, so the order is the order
+        inside install_led.
         """
-        installed = self.text.index("\ninstall_user_units || true")
-        for marker, what in (("pacman -S --needed", "installing packages"),
-                             ('"$dir/install.sh"', "the kernel module"),
-                             ("flash_firmware", "the firmware flash"),
-                             ("install_control_panel ||", "the panel entry")):
-            self.assertLess(installed, self.text.index(marker),
+        body = self._body("install_led")
+        installed = body.index("install_user_units || true")
+        for marker, what in (("install_led_module",
+                              "the packages and the kernel module"),
+                             ("install_led_firmware", "the firmware flash"),
+                             ("start_led_service", "starting the service")):
+            self.assertLess(installed, body.index(marker),
                             "%s runs before the user units are installed"
                             % what)
 
     def test_starting_them_stays_after_the_service_is_up(self):
         # The achievement watcher wants the service running and the bridge
         # wants its pipe, so starting early would only make both retry.
-        started = self.text.index("\nstart_user_units || true")
-        self.assertLess(self.text.index("systemctl restart steamos-utility-center"),
-                        started)
-        self.assertLess(self.text.index("\ninstall_user_units || true"), started)
+        body = self._body("start_led_service")
+        started = body.index("start_user_units || true")
+        self.assertLess(
+            body.index("systemctl restart steamos-utility-center"), started)
+        # And the units are on disk before that, which install_led decides.
+        led = self._body("install_led")
+        self.assertLess(led.index("install_user_units || true"),
+                        led.index("start_led_service"))
 
     def test_the_uninstaller_takes_back_the_same_link(self):
         # And only when it is still ours: somebody who put their own there is
@@ -811,8 +829,14 @@ class InstallerShapeTest(unittest.TestCase):
         """
         with open(UNINSTALLER) as handle:
             text = handle.read()
+        with open(USER_UNIT) as handle:
+            shared = handle.read()
         self.assertIn("remove_cec_toolkit", text)
-        self.assertIn("install-cec.sh", text)
+        # The body moved into the shared file, because a removal of the CEC
+        # module takes the same files off. The uninstaller calls it whatever
+        # the module state says, so "uninstall" still means every part.
+        self.assertIn("remove_cec_toolkit() {", shared)
+        self.assertIn("install-cec.sh", shared)
 
     def test_the_uninstaller_turns_lingering_back_off(self):
         # The installer turns it on. Reported as "left in place", it stayed on
@@ -872,11 +896,11 @@ class InstallerShapeTest(unittest.TestCase):
         through the installer therefore never reads about PlatformIO. At the
         first flash, that user must download it first.
         """
-        offer = self.text.index("\nensure_platformio || true")
-        guard = self.text.index('[[ -n "$FLASH_ENV" ]] || return 0')
-        self.assertLess(offer, self.text.index('if [[ -n "$FLASH_ENV" ]]; then'),
+        body = self._body("install_led_firmware")
+        self.assertLess(body.index("ensure_platformio || true"),
+                        body.index('[[ -n "$FLASH_ENV" ]] || return 0'),
                         "the offer has to come before the flashing step")
-        self.assertNotIn("install_platformio", self.text[guard:guard + 2000],
+        self.assertNotIn("install_platformio", self._body("flash_firmware"),
                          "flash_firmware should not ask a second time")
 
     def test_the_path_line_reaches_the_profile_unexpanded(self):
@@ -1050,10 +1074,12 @@ class RetiredUserFilesTest(unittest.TestCase):
                         body.index('rm -f "$WATCHER_DIR/$unit"'))
 
     def test_both_scripts_call_it(self):
-        # The installer as part of its migration, the uninstaller as part of
-        # taking the current units away.
+        # The installer as part of its migration, the uninstaller through
+        # remove_user_units, which takes the current units away.
         self.assertIn("remove_retired_user_files", self.installer + self.shared)
-        self.assertIn("remove_retired_user_files", self.uninstaller)
+        self.assertIn("remove_retired_user_files",
+                      self.shared[self.shared.index("remove_user_units() {"):])
+        self.assertIn("remove_user_units", self.uninstaller)
 
     def test_it_does_not_take_a_directory_that_is_not_empty(self):
         """The drop-in directory belongs to somebody else's unit.

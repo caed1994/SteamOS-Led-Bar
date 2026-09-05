@@ -399,18 +399,26 @@ class InstallerTest(unittest.TestCase):
 class SudoersTest(unittest.TestCase):
     """The rule that makes a password unnecessary, and its limits."""
 
+    # A machine with every module installed, and a machine with none.
+    #
+    # The rule writes one line for each applier that is on the machine, so a
+    # test that asked the machine it runs on would examine that machine and
+    # not the rule. See modules.py.
+    EVERY = staticmethod(lambda path: True)
+    NONE = staticmethod(lambda path: False)
+
     def test_there_is_no_wildcard_in_it(self):
         """A rule with a `*` permits every argument.
 
         The argument of these programs is a file that they read as root, so a
         rule with a wildcard is a rule that lets a caller name any file.
         """
-        for line in ctl.sudoers_text("deck").splitlines():
+        for line in ctl.sudoers_text("deck", present=self.EVERY).splitlines():
             if line.startswith("deck"):
                 self.assertNotIn("*", line, line)
 
     def _rules(self):
-        return [line for line in ctl.sudoers_text("deck").splitlines()
+        return [line for line in ctl.sudoers_text("deck", present=self.EVERY).splitlines()
                 if line.startswith("deck")]
 
     def test_each_line_names_one_program_and_one_argument(self):
@@ -440,7 +448,7 @@ class SudoersTest(unittest.TestCase):
 
     def test_it_permits_exactly_the_files_the_command_stages(self):
         """A rule for a file the command never writes is a rule with no use."""
-        rules = ctl.sudoers_text("deck")
+        rules = ctl.sudoers_text("deck", present=self.EVERY)
         for path in ctl.STAGED.values():
             self.assertIn(path, rules)
 
@@ -450,7 +458,7 @@ class SudoersTest(unittest.TestCase):
         The comments name it, because a reader of the file must know why it is
         not there. This looks at the rules and not at the comments.
         """
-        rules = [line for line in ctl.sudoers_text("deck").splitlines()
+        rules = [line for line in ctl.sudoers_text("deck", present=self.EVERY).splitlines()
                  if not line.startswith("#") and line.strip()]
         self.assertTrue(rules)
         for line in rules:
@@ -468,7 +476,7 @@ class SudoersTest(unittest.TestCase):
     def test_the_rule_is_read_by_visudo_before_it_is_installed(self):
         """A sudoers file that does not parse takes sudo away from a machine."""
         runner = Recorder()
-        ctl.permit("deck", run=runner)
+        ctl.permit("deck", run=runner, present=self.EVERY)
         self.assertEqual(runner.commands[0][0], "visudo")
         self.assertIn("-c", runner.commands[0])
 
@@ -482,12 +490,12 @@ class SudoersTest(unittest.TestCase):
 
         runner = Refuse()
         with self.assertRaises(ctl.CtlError):
-            ctl.permit("deck", run=runner)
+            ctl.permit("deck", run=runner, present=self.EVERY)
         self.assertEqual(len(runner.commands), 1, "it went on after visudo")
 
     def test_the_staging_directory_belongs_to_that_user(self):
         runner = Recorder()
-        ctl.permit("deck", run=runner)
+        ctl.permit("deck", run=runner, present=self.EVERY)
         made = [one for one in runner.commands if one[:2] == ["install", "-d"]]
         self.assertEqual(len(made), 1)
         self.assertIn("deck", made[0])
@@ -504,7 +512,7 @@ class SudoersTest(unittest.TestCase):
         staged = tempfile.NamedTemporaryFile("w", suffix=".sudoers",
                                              delete=False)
         with staged:
-            staged.write(ctl.sudoers_text("deck"))
+            staged.write(ctl.sudoers_text("deck", present=self.EVERY))
         self.addCleanup(os.unlink, staged.name)
         done = subprocess.run(["visudo", "-c", "-f", staged.name],
                               capture_output=True, text=True)
@@ -518,6 +526,41 @@ class SudoersTest(unittest.TestCase):
         sys.path.insert(0, HERE)
         from shellvalues import shell_value
         self.assertEqual(shell_value("SUDO_RULE_PATH"), ctl.SUDO_RULE)
+
+    def test_a_module_that_is_not_installed_gets_no_line(self):
+        """The rule is the list of installed modules, and nothing more.
+
+        A line for an applier that is not on the machine permits a program
+        that is not there. It is not a hole today, and it becomes one on the
+        day somebody writes a file with that name.
+        """
+        only_power = ctl.sudoers_text(
+            "deck", present=lambda path: path == ctl.APPLY_POWER)
+        rules = [line for line in only_power.splitlines()
+                 if line.startswith("deck")]
+        self.assertEqual(len(rules), 1)
+        self.assertIn(ctl.APPLY_POWER, rules[0])
+        for absent in (ctl.APPLY_CONFIG, ctl.APPLY_MOUNTS, ctl.RESUME_WAKE):
+            self.assertNotIn(absent, only_power)
+
+    def test_the_switch_comes_with_the_power_module_only(self):
+        # It is the power module's program, so it is asked for on its own and
+        # not carried in by another module's applier.
+        text = ctl.sudoers_text("deck",
+                                present=lambda path: path == ctl.APPLY_CONFIG)
+        self.assertNotIn(ctl.RESUME_WAKE, text)
+
+    def test_a_machine_with_no_module_gets_no_rule(self):
+        """The core writes no rule, because it has nothing to permit.
+
+        A file of comments would report as "the rule is there" on the status
+        page, and that report would be false.
+        """
+        self.assertEqual(ctl.sudoers_text("deck", present=self.NONE), "")
+        runner = Recorder()
+        answer = ctl.permit("deck", run=runner, present=self.NONE)
+        self.assertEqual(answer["rule"], "")
+        self.assertEqual(runner.commands, [["rm", "-f", ctl.SUDO_RULE]])
 
 
 class StagedFileTest(unittest.TestCase):

@@ -1167,12 +1167,21 @@ class InstallerTest(unittest.TestCase):
                       shell_value("WATCHER_UNITS"))
 
     def test_the_installer_and_the_uninstaller_walk_the_same_list(self):
-        # The failure this prevents is quiet: a unit installed by one script
-        # and unknown to the other is a file left in somebody's ~/.config
-        # with nothing to remove it.
-        for name in ("install.sh", "uninstall.sh"):
+        """The failure this prevents is quiet.
+
+        A unit installed by one script and unknown to the other is a file left
+        in somebody's ~/.config with nothing to remove it.
+
+        The installer walks the list to write them. The removal walks it in
+        scripts/user-unit.sh, where both the uninstaller and the removal of
+        the LED module reach it.
+        """
+        for name in ("install.sh", os.path.join("scripts", "user-unit.sh")):
             with open(os.path.join(HERE, "..", name)) as handle:
                 self.assertIn("WATCHER_UNITS[@]", handle.read(), name)
+        for name in ("install.sh", "uninstall.sh"):
+            with open(os.path.join(HERE, "..", name)) as handle:
+                self.assertIn("remove_user_units", handle.read(), name)
 
 
 if __name__ == "__main__":

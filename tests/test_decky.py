@@ -86,9 +86,14 @@ class InstallTest(unittest.TestCase):
             return handle.read()
 
     def _step(self):
+        """The plugin step, which is inside the system module now.
+
+        The whole of install_system, and not the file: the same words appear
+        in the other modules, and a search of the file would find those.
+        """
         text = self._text()
-        start = text.index("# The Game Mode plugin, where Decky Loader")
-        return text[start:text.index("\nif [[ -f \"$POWER_CONFIG_PATH\"", start)]
+        start = text.index("\ninstall_system() {")
+        return text[start:text.index("\n}\n", start)]
 
     def test_it_runs_the_script_the_button_runs(self):
         self.assertIn("scripts/install-decky.sh", self._step())
@@ -107,6 +112,16 @@ class InstallTest(unittest.TestCase):
         failed is.
         """
         self.assertIn("-eq 3", self._step())
+
+    def test_the_module_takes_the_plugin_off_again(self):
+        """The System page offers a removal, so the installer must have one.
+
+        remove_decky_plugin is in scripts/user-unit.sh, so this removal and
+        the uninstaller's take the same directory.
+        """
+        text = self._text()
+        body = text[text.index("\nremove_system() {"):]
+        self.assertIn("remove_decky_plugin", body[:body.index("\n}\n")])
 
 
 class BackendTest(unittest.TestCase):

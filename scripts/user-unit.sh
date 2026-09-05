@@ -610,6 +610,132 @@ refresh_desktop_caches() {  # refresh_desktop_caches <applications dir>
     done
 }
 
+# --- the modules ------------------------------------------------------------
+#
+# The core is the panel, the control command and the shared code. The LED bar,
+# the CPU and GPU power, HDMI CEC and the drives are modules, and a person
+# takes each one on its own.
+#
+# server/steamos_utility_center/modules.py holds the list of them and the rule
+# for "is this one installed". These scripts ask it.
+#
+# A copy of that rule here would be a second answer to one question. This file
+# exists because two copies of seven paths became different, and a fifth copy
+# of the same idea is the same fault with a new name.
+
+# Every module and whether this machine has it, as "name on" or "name off",
+# one per line and in the order of the pages of the panel.
+#
+# It gives every module and not the installed ones only, because the caller
+# needs both halves: which to install, and which to offer.
+module_states() {   # module_states [home of the desktop user]
+    PYTHONPATH="$SOURCE_DIR/server" python3 -c '
+import sys
+from steamos_utility_center import modules
+home = sys.argv[1] or None
+for name in modules.ORDER:
+    print(name, "on" if modules.installed(name, home=home) else "off")
+' "${1:-}"
+}
+
+# What one module is and what it brings, for a person who must decide.
+#
+# The panel puts the same sentences on the page. They are in modules.py, so
+# the page and this text cannot become different.
+module_says() {     # module_says <name>
+    PYTHONPATH="$SOURCE_DIR/server" python3 -c '
+import sys, textwrap
+from steamos_utility_center import modules
+name = sys.argv[1]
+said = modules.SAYS[name]
+print("  %-8s %s" % (name, said["title"]))
+for key in ("does", "brings", "needs"):
+    label = {"does": "", "brings": "Installs ", "needs": "Needs "}[key]
+    for line in textwrap.wrap(label + said[key], 66):
+        print("           " + line)
+' "$1"
+}
+
+# --- what more than one script removes --------------------------------------
+#
+# Each function here is a removal that both the uninstaller and a module
+# removal must do. A second copy in the installer is a copy that stops at a
+# different point.
+
+# The two units that this project puts into the systemd of the desktop user.
+#
+# Each unit that this project installs, and not the current units only. That
+# list is what stops a file from an older installation from staying in a
+# ~/.config directory with nothing to remove it.
+remove_user_units() {
+    watcher_user_dirs || return 0
+
+    local unit removed=0
+    for unit in "${WATCHER_UNITS[@]}"; do
+        [[ -f "$WATCHER_DIR/$unit" ]] || continue
+        user_systemctl stop "$unit" || true
+        rm -f "$WATCHER_DIR/$unit" "$WATCHER_DIR/$WATCHER_WANTS/$unit"
+        removed=1
+    done
+
+    # And the units that older releases installed and this one does not. See
+    # RETIRED_USER_UNITS above. Without this, they continue to run at each
+    # login and nothing here removes them.
+    if remove_retired_user_files; then
+        removed=1
+    fi
+    [[ $removed -eq 1 ]] || return 0
+
+    user_systemctl daemon-reload || true
+    say "Removed the desktop-session services for $WATCHER_USER"
+}
+
+# The mount units of the drives on the System page.
+#
+# Unmount each one before the unit files go, or the drive stays mounted until
+# the machine restarts. systemd forgets a unit whose file is gone at the next
+# daemon-reload, so `stop` after that finds no such unit.
+remove_mount_units() {
+    local mount_unit
+    shopt -s nullglob
+    for mount_unit in "$UNIT_DIR"/*.mount; do
+        grep -q "written by the SteamOS Utility Center" "$mount_unit" \
+            || continue
+        say "Unmounting $(basename "$mount_unit")"
+        systemctl disable --now "$(basename "$mount_unit")" 2>/dev/null || true
+        rm -f "$mount_unit"
+    done
+    shopt -u nullglob
+}
+
+# The HDMI CEC toolkit.
+#
+# Its units, its helpers, its udev rule and its sudoers file each arrived
+# through one script, so one script takes them back. The uninstaller of the
+# toolkit refuses to run as root, and it thus needs the desktop user.
+remove_cec_toolkit() {
+    watcher_user_dirs || return 0
+    local control="$WATCHER_HOME/.local/bin/steamos-cec-toolkitctl"
+    [[ -x "$control" ]] || return 0
+    say "Removing the HDMI CEC toolkit"
+    if ! bash "$SOURCE_DIR/scripts/install-cec.sh" remove \
+            "$SOURCE_DIR/cec-toolkit" "$WATCHER_USER"; then
+        warn "the toolkit's own uninstaller did not finish - what is left"
+        warn "can be removed with: $control uninstall"
+        return 1
+    fi
+    return 0
+}
+
+# The Game Mode plugin, where this project installed one. Only the directory
+# that this project writes, and not the plugins of other people beside it.
+remove_decky_plugin() {
+    watcher_user_dirs || return 0
+    [[ -d "$WATCHER_HOME/$DECKY_PLUGIN" ]] || return 0
+    say "Removing the Game Mode plugin"
+    rm -rf "${WATCHER_HOME:?}/$DECKY_PLUGIN"
+}
+
 # --- the read-only rootfs ---------------------------------------------------
 #
 # SteamOS mounts / read-only, and both scripts write to it. The installer

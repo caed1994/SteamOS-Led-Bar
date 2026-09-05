@@ -70,32 +70,10 @@ REMOVE_MODULE=$(( 1 - KEEP_MODULE ))
 unlock_rootfs || true
 
 # --- the units that run in the desktop session ------------------------------
-
-remove_user_units() {
-    watcher_user_dirs || return 0
-
-    local unit removed=0
-    # Each unit that this project installs, and not the current units only.
-    # This list is what stops a file from an older installation from staying
-    # in a ~/.config directory with nothing to remove it.
-    for unit in "${WATCHER_UNITS[@]}"; do
-        [[ -f "$WATCHER_DIR/$unit" ]] || continue
-        user_systemctl stop "$unit" || true
-        rm -f "$WATCHER_DIR/$unit" "$WATCHER_DIR/$WATCHER_WANTS/$unit"
-        removed=1
-    done
-
-    # And the units that older releases installed and this one does not. See
-    # RETIRED_USER_UNITS in scripts/user-unit.sh. Without this, they continue
-    # to run at each login and nothing here removes them.
-    if remove_retired_user_files; then
-        removed=1
-    fi
-    [[ $removed -eq 1 ]] || return 0
-
-    user_systemctl daemon-reload || true
-    echo "Removed the desktop-session services for $WATCHER_USER."
-}
+#
+# remove_user_units is in scripts/user-unit.sh. A removal of the LED module
+# takes the same two units off, and one copy here would be the copy that stops
+# at a different point.
 
 remove_user_units
 
@@ -167,32 +145,16 @@ remove_platformio_path() {
     fi
 }
 
-# --- the HDMI CEC toolkit ---------------------------------------------------
+# The HDMI CEC toolkit. remove_cec_toolkit is in scripts/user-unit.sh, because
+# a removal of the CEC module takes the same files off.
 #
-# The page of this panel installs the toolkit from cec-toolkit/, so this
-# script removes it.
-#
-# Its units, its helpers, its udev rule and its sudoers file each arrived
-# through a button here, and this uninstaller did not remove them before.
-#
-# This uses the same script that the page uses. The uninstaller of the toolkit
-# refuses to run as root, and it thus needs the desktop user.
-remove_cec_toolkit() {
-    watcher_user_dirs || return 0
-    local control="$WATCHER_HOME/.local/bin/steamos-cec-toolkitctl"
-    [[ -x "$control" ]] || return 0
-    echo "Removing the HDMI CEC toolkit."
-    if ! bash "$SOURCE_DIR/scripts/install-cec.sh" remove \
-            "$SOURCE_DIR/cec-toolkit" "$WATCHER_USER"; then
-        echo "  the toolkit's own uninstaller did not finish - what is left" >&2
-        echo "  can be removed with: $control uninstall" >&2
-    fi
-}
+# "uninstall" means every part, so this runs whether or not the module counts
+# as installed. The function itself asks whether there is a toolkit to remove.
 
 PLATFORMIO_NOTE=0
 remove_menu_entry
 remove_platformio_path
-remove_cec_toolkit
+remove_cec_toolkit || true
 
 # A stop of the service makes the strip dark before the process exits.
 systemctl disable --now "$NAME.service" 2>/dev/null || true
@@ -217,14 +179,7 @@ rm -f "$POWER_UNIT_PATH"
 # and a second install reads it back. --purge takes it, with the settings.
 systemctl disable --now "$NAME-mounts.service" 2>/dev/null || true
 rm -f "$MOUNTS_UNIT_PATH" "$MOUNTS_APPLIER_PATH"
-shopt -s nullglob
-for mount_unit in "$UNIT_DIR"/*.mount; do
-    grep -q "written by the SteamOS Utility Center" "$mount_unit" || continue
-    say "Unmounting $(basename "$mount_unit")"
-    systemctl disable --now "$(basename "$mount_unit")" 2>/dev/null || true
-    rm -f "$mount_unit"
-done
-shopt -u nullglob
+remove_mount_units
 
 # And the file that asked SteamOS to keep all of the above.
 rm -f "$KEEP_LIST_PATH"
@@ -276,12 +231,10 @@ fi
 # not tidy either.
 rm -f "$SUDO_RULE_PATH"
 
-# The Game Mode plugin, where this installed one. Only the directory that this
-# project writes, and not the plugins of other people beside it.
-if watcher_user_dirs && [[ -d "$WATCHER_HOME/$DECKY_PLUGIN" ]]; then
-    echo "Removing the Game Mode plugin."
-    rm -rf "${WATCHER_HOME:?}/$DECKY_PLUGIN"
-fi
+# The Game Mode plugin, where this installed one. remove_decky_plugin is in
+# scripts/user-unit.sh, because a removal of the system module takes the same
+# directory off.
+remove_decky_plugin
 
 rm -rf "${INSTALL_DIR:?}"
 

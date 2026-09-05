@@ -648,6 +648,9 @@ class InstallerTest(unittest.TestCase):
     left the old copy on the machine. uninstall.sh named vendor/, which this
     project moved to cec-toolkit/ some time ago, so its removal step ran on a
     directory that is not there.
+
+    The toolkit is the CEC module now. The installer brings it where the
+    module is wanted, and the same run takes it off where it is not.
     """
 
     def _read(self, name):
@@ -657,16 +660,27 @@ class InstallerTest(unittest.TestCase):
     def test_the_installer_brings_the_toolkit_up_to_date(self):
         self.assertIn("scripts/install-cec.sh", self._read("install.sh"))
 
-    def test_it_does_that_only_where_the_toolkit_is_installed(self):
+    def test_it_does_that_only_where_the_module_is_wanted(self):
         """A person who never asked for it must not get it from here.
 
         It writes udev rules, wireplumber configuration and units of its own.
+        The module loop is the guard: install_cec runs for a machine that
+        wants the module, and for no other machine.
         """
         text = self._read("install.sh")
-        step = text[text.index("# The HDMI CEC toolkit, where it is already"):]
-        step = step[:step.index("# The Game Mode plugin")]
-        self.assertIn("steamos-cec-toolkitctl", step)
-        self.assertIn("install-cec.sh", step)
+        body = text[text.index("\ninstall_cec() {"):]
+        body = body[:body.index("\n}\n")]
+        self.assertIn("install-cec.sh", body)
+        self.assertIn("install", body)
+        # And the loop that decides. Without it every machine gets the module.
+        self.assertIn('if want "$name"; then', text)
+        self.assertIn('"install_$name"', text)
+
+    def test_the_module_comes_off_again(self):
+        """The page offers a removal, so the installer must have one."""
+        text = self._read("install.sh")
+        body = text[text.index("\nremove_cec() {"):]
+        self.assertIn("remove_cec_toolkit", body[:body.index("\n}\n")])
 
     def test_neither_script_names_the_directory_that_moved(self):
         for name in ("install.sh", "uninstall.sh"):
@@ -674,4 +688,11 @@ class InstallerTest(unittest.TestCase):
                              name)
 
     def test_the_uninstaller_names_the_one_that_is_there(self):
-        self.assertIn("cec-toolkit", self._read("uninstall.sh"))
+        """It calls the shared removal, whose body names cec-toolkit/.
+
+        "uninstall" means every part, so the call is there whether or not the
+        module counts as installed.
+        """
+        self.assertIn("remove_cec_toolkit", self._read("uninstall.sh"))
+        self.assertIn("cec-toolkit",
+                      self._read(os.path.join("scripts", "user-unit.sh")))

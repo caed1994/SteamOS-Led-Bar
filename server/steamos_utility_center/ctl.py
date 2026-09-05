@@ -702,16 +702,44 @@ def action(name, may_prompt=False, run=None, home=None):
 NAME = re.compile(r"^[a-z_][a-z0-9_.-]*\$?$")
 
 
-def sudoers_text(user):
+def sudoers_text(user, present=None):
     """The rule that lets one user apply a change with no password.
 
     One line for each applier, and each line names the one file that applier
     is permitted to read. There is no `*` in it. A rule with a `*` permits
     every argument, and the argument of these programs is a file that they
     read as root.
+
+    An applier that is not on the machine gets no line. The appliers are the
+    modules: a machine with the LED module only has one applier, and a rule
+    that named the other two would permit programs that are not there.
+
+    That also makes this rule the answer to "which modules are installed", and
+    it is the answer the panel reads. See modules.py.
+
+    Returns "" for a machine with no module at all. permit() then removes the
+    rule rather than writing a file of comments.
+
+    `present` is a parameter so a test can answer for a machine it did not
+    build.
     """
     if not NAME.match(user or ""):
         raise CtlError("%r is not a user name" % user)
+    present = os.path.exists if present is None else present
+    permitted = [(applier, STAGED[area])
+                 for applier, area in ((APPLY_CONFIG, "strip"),
+                                       (APPLY_POWER, "power"),
+                                       (APPLY_MOUNTS, "drives"))
+                 if present(applier)]
+    # The switch for the wake after a resume. Two lines rather than one with a
+    # `*`: the argument is one of two words, so both words fit in the rule and
+    # nothing else does.
+    #
+    # It arrives with the power module, so it is asked for on its own.
+    if present(RESUME_WAKE):
+        permitted.extend((RESUME_WAKE, state) for state in ("on", "off"))
+    if not permitted:
+        return ""
     lines = [
         "# Written by the SteamOS Utility Center. See",
         "# server/steamos_utility_center/ctl.py.",
@@ -733,30 +761,32 @@ def sudoers_text(user):
         "# in the panel, where a person answers for it.",
         "",
     ]
-    for applier, area in ((APPLY_CONFIG, "strip"), (APPLY_POWER, "power"),
-                          (APPLY_MOUNTS, "drives")):
+    for program, argument in permitted:
         lines.append("%s ALL=(root) NOPASSWD: %s %s"
-                     % (user, applier, STAGED[area]))
-    # The switch for the wake after a resume. Two lines rather than one with a
-    # `*`: the argument is one of two words, so both words fit in the rule and
-    # nothing else does.
-    for state in ("on", "off"):
-        lines.append("%s ALL=(root) NOPASSWD: %s %s"
-                     % (user, RESUME_WAKE, state))
+                     % (user, program, argument))
     return "\n".join(lines) + "\n"
 
 
-def permit(user, run=None):
+def permit(user, run=None, present=None):
     """Writes that rule, and makes the directory the rule names.
 
     visudo reads the file before it is installed. A sudoers file that does not
     parse takes sudo away from the machine, and this program must never be the
     reason for that.
 
+    A machine with no module has nothing to permit, so this removes the rule.
+    The installer runs this after every module install and every module
+    removal, so the rule follows the modules in both directions.
+
     This needs root, and the installer is what runs it.
     """
     run = _run if run is None else run
-    text = sudoers_text(user)
+    text = sudoers_text(user, present=present)
+    if not text:
+        code, said = run(["rm", "-f", SUDO_RULE])
+        if code != 0:
+            raise CtlError(said.strip() or "could not remove %s" % SUDO_RULE)
+        return {"rule": "", "staged": STAGED_DIR, "user": user}
     staged = tempfile.NamedTemporaryFile("w", suffix=".sudoers", delete=False)
     with staged:
         staged.write(text)
