@@ -43,6 +43,16 @@ fi
 # the notifications can be off. In both cases there is nothing to give.
 [ -p "$FIFO" ] || exit 0
 
+# Where the service says that it has dealt with the word. Beside the pipe,
+# because a machine with a NOTIFY_FIFO of its own has both of them there. See
+# service.STANDBY_DONE.
+DONE="$(dirname "$FIFO")/standby-done"
+
+# How long to wait for that, in steps of 0.02 seconds. The old wait was a flat
+# 0.5 and this is the same half second, as the last answer rather than the
+# only one.
+STEPS=25
+
 # This opens the pipe for read and write, and that is the important part.
 #
 # A FIFO that a program opens for write only blocks until another program opens
@@ -58,14 +68,26 @@ tell() {
 
 case "$1" in
   pre)
+    # The mark of the last suspend is not an answer about this one.
+    rm -f "$DONE" 2>/dev/null
     tell standby
-    # systemd suspends the machine when this script returns. This wait thus gives
-    # the service the time to read the word and send the message to the serial
-    # port.
-    #
-    # Without the wait, the machine can suspend before the ESP gets the message,
+    # systemd suspends the machine when this script returns, so this waits for
+    # the service to read the word and send the message to the serial port.
+    # Without a wait, the machine can suspend before the ESP has the message,
     # and the strip goes dark.
-    sleep 0.5
+    #
+    # It waits for the service to say so, and not for a length of time. Half a
+    # second was a guess, and it was on every suspend of every machine. The
+    # answer usually comes in some tens of milliseconds.
+    #
+    # A service that does not answer costs the same half second as before: a
+    # machine that is already too old to know this file is a machine this
+    # cannot make slower.
+    step=0
+    while [ ! -e "$DONE" ] && [ "$step" -lt "$STEPS" ]; do
+        sleep 0.02
+        step=$((step + 1))
+    done
     ;;
   post)
     tell resume

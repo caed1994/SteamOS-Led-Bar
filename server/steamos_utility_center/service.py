@@ -77,6 +77,17 @@ STARTUP_PERIOD_MS = 3000
 STANDBY_WORD = "standby"
 RESUME_WORD = "resume"
 
+# The file that tells the sleep hook the strip is ready for the sleep.
+#
+# It is beside the pipe, so a machine with a NOTIFY_FIFO of its own gets it
+# beside that one. The hook reads the same setting and looks in the same
+# place.
+#
+# Without it the hook waited half a second and hoped. It waits for this now,
+# which is some tens of milliseconds on a machine that answers and the same
+# half second on one that does not. See systemd-sleep/steamos-utility-center.
+STANDBY_DONE = "standby-done"
+
 # The maximum length of the standby state while this process runs.
 #
 # The clock is the important part. time.monotonic() does not advance during a
@@ -431,9 +442,29 @@ class Runner:
             else:
                 self.overlay.trigger(word, now)
 
+    def _standby_done(self):
+        """Says that this process has dealt with the standby word.
+
+        The sleep hook waits for this and then lets the machine go. What it
+        waits for is the end of the work and not a message on the wire: a
+        strip that is switched off, and a link that would not take the
+        message, are both answers, and a wait for a message that nobody will
+        send is half a second of nothing at each suspend.
+        """
+        try:
+            with open(os.path.join(
+                    os.path.dirname(self.config["NOTIFY_FIFO"]),
+                    STANDBY_DONE), "w"):
+                pass
+        except OSError as exc:
+            # The hook then waits its full time, which is what it did before
+            # this file existed. It is not a reason to hold up a suspend.
+            LOG.debug("could not write the standby mark: %s", exc)
+
     def _enter_standby(self):
         if not self.config["STANDBY_PULSE"]:
             LOG.info("standby pulse is switched off, leaving the strip dark")
+            self._standby_done()
             return
         colour = standby_colour(self.config)
         shape = config_module.STANDBY_SHAPES[self.config["STANDBY_SHOWS"]]
@@ -450,6 +481,7 @@ class Runner:
             LOG.info("standby: the ESP has the strip until we are back")
         else:
             LOG.warning("could not hand the strip over for standby")
+        self._standby_done()
 
     def _hold_for_steam(self):
         """Gives the strip to the ESP while Steam writes nothing.

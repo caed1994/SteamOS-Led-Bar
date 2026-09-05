@@ -17,6 +17,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -579,6 +581,64 @@ class SleepHookTest(unittest.TestCase):
         # A build machine has no file at the default path, so the hook takes
         # the exit below and writes nothing. That is the subject of this test.
         self.assertEqual(self._run("pre", config).returncode, 0)
+
+    def test_it_goes_as_soon_as_the_service_says_it_is_ready(self):
+        """It waited half a second on every suspend of every machine.
+
+        The wait is there because systemd suspends the machine when this
+        script returns, and the strip must have the message first. But half a
+        second was a guess. The service says when it is done, and that is
+        usually some tens of milliseconds.
+        """
+        room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
+        reader = os.open(pipe, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, reader)
+
+        def answer():
+            time.sleep(0.05)
+            open(os.path.join(room, "standby-done"), "w").close()
+
+        said = threading.Thread(target=answer)
+        said.start()
+        self.addCleanup(said.join)
+        started = time.monotonic()
+        self._run("pre", config)
+        took = time.monotonic() - started
+        self.assertLess(took, 0.4, "it waited past the answer")
+
+    def test_a_service_that_does_not_answer_costs_what_it_always_did(self):
+        """A machine too old to know that file is one this cannot slow down.
+
+        The wait ends by itself, and the strip gets the same half second it
+        had before there was anything to wait for.
+        """
+        _room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
+        reader = os.open(pipe, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, reader)
+        started = time.monotonic()
+        self._run("pre", config)
+        took = time.monotonic() - started
+        self.assertGreater(took, 0.4, "it did not wait for the strip at all")
+        self.assertLess(took, 1.5, "it waited longer than it ever did")
+
+    def test_the_mark_of_the_last_suspend_is_not_an_answer_about_this_one(self):
+        """Without the removal, every suspend after the first went at once,
+        and the strip went dark on each of them.
+        """
+        room, pipe, config = self._setup("NOTIFY_FIFO=@PIPE@\n")
+        reader = os.open(pipe, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, reader)
+        open(os.path.join(room, "standby-done"), "w").close()
+        started = time.monotonic()
+        self._run("pre", config)
+        self.assertGreater(time.monotonic() - started, 0.4)
+
+    def test_the_service_and_the_hook_name_the_same_file(self):
+        """Two names for one file is a wait that never ends."""
+        sys.path.insert(0, os.path.join(HERE, "..", "server"))
+        from steamos_utility_center import service
+        self.assertIn('"$(dirname "$FIFO")/%s"' % service.STANDBY_DONE,
+                      open(SLEEP_HOOK).read())
 
     def test_a_pipe_nobody_is_reading_does_not_hang_the_suspend(self):
         """systemd waits here before it suspends.

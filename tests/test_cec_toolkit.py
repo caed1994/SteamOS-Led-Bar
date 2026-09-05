@@ -317,6 +317,32 @@ class FixedHereTest(unittest.TestCase):
         helper = self._read("bin", "steamos-cec-before-sleep")
         self.assertEqual(helper.count("busctl --user --timeout="), 2)
         self.assertNotIn("busctl --user call", helper)
+        # Half a second each, and not the two it was. A daemon that is there
+        # answers in milliseconds, so a working machine pays nothing for this.
+        self.assertIn("BUSCTL_TIMEOUT=0.5", helper)
+
+    def test_the_bus_calls_are_skipped_with_no_session_to_call(self):
+        """On a shutdown the session of that user is often gone. Each call is
+        then a runuser and a busctl that start, find nothing and stop, and
+        that is a tenth of a second for an answer one path already holds.
+        """
+        helper = self._read("bin", "steamos-cec-before-sleep")
+        self.assertIn("session_bus_is_there", helper)
+        self.assertIn('[[ -S "/run/user/$STEAMOS_CEC_UID/bus" ]]', helper)
+        self.assertIn('&& session_bus_is_there; then', helper)
+
+    def test_the_unit_cannot_hold_the_machine_for_a_minute_and_a_half(self):
+        """The suspend and the shutdown wait for this unit, and without a
+        limit of its own it gets the default of the machine. One cec-ctl that
+        does not return then holds the machine for that long.
+        """
+        unit = self._read("systemd", "system",
+                          "steamos-cec-before-sleep.service")
+        found = re.search(r"^TimeoutStartSec=(\d+)$", unit, re.M)
+        self.assertIsNotNone(found, "the unit has no limit of its own")
+        # Room for the messages it sends, which take about three seconds, and
+        # not room for a minute of nothing.
+        self.assertLessEqual(int(found.group(1)), 30)
 
 
 class UsbWakeMatchTest(unittest.TestCase):

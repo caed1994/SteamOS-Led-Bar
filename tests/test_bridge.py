@@ -855,6 +855,45 @@ class StandbyTest(unittest.TestCase):
         with self.assertNoLogs("steamos-utility-center", "WARNING"):
             runner._enter_standby()
 
+    def test_the_sleep_hook_is_told_that_the_strip_is_ready(self):
+        """It waited half a second and hoped. It waits for this now.
+
+        The file goes beside the pipe, because a machine with a NOTIFY_FIFO
+        of its own has both of them there.
+        """
+        room = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, room, True)
+        pipe = os.path.join(room, "notify")
+        runner = self._runner(NOTIFY_FIFO=pipe)
+        runner._enter_standby()
+        self.assertTrue(os.path.exists(os.path.join(room,
+                                                    service.STANDBY_DONE)))
+
+    def test_it_is_told_that_also_when_there_is_nothing_to_send(self):
+        """A strip that is switched off, and a link that would not take the
+        message, are answers too. A hook that waited for a message nobody
+        will send is half a second of nothing at each suspend.
+        """
+        room = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, room, True)
+        pipe = os.path.join(room, "notify")
+        mark = os.path.join(room, service.STANDBY_DONE)
+
+        runner = self._runner(NOTIFY_FIFO=pipe, STANDBY_PULSE=False)
+        runner._enter_standby()
+        self.assertTrue(os.path.exists(mark), "switched off")
+
+        os.unlink(mark)
+        runner = self._runner(NOTIFY_FIFO=pipe)
+        runner.link.answer = False
+        runner._enter_standby()
+        self.assertTrue(os.path.exists(mark), "the link would not take it")
+
+    def test_a_directory_it_cannot_write_does_not_stop_the_suspend(self):
+        runner = self._runner(NOTIFY_FIFO="/proc/nowhere/notify")
+        runner._enter_standby()             # raises nothing
+        self.assertEqual(len(runner.link.standby), 1)
+
     def test_it_can_be_switched_off(self):
         runner = self._runner(STANDBY_PULSE=False)
         runner._enter_standby()

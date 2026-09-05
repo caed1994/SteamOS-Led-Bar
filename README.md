@@ -279,6 +279,11 @@ the breath effect.
 During suspend, the strip shows a slow white breath effect. After the wake, the
 normal effect returns. `STANDBY_PULSE=0` disables it.
 
+The suspend waits for the strip, because the message must reach the ESP before
+systemd freezes the service. It waits for the service to say that it is done,
+which is some tens of milliseconds, and it gives up after half a second. So a
+machine where the service is stopped waits that half second and no longer.
+
 ![the standby breath](docs/previews/standby.png)
 
 Both effects are dim. The standby effect has a maximum of 30 of 255. This is
@@ -908,6 +913,19 @@ is thus no password and no Apply after the first time.
 **Try it** sends one wake, standby or volume command and leaves nothing behind.
 Use it to find out whether the television receives anything, before you enable
 a feature and reboot.
+
+**Turn the television off with the machine costs some seconds of each suspend
+and each shutdown.** The machine waits for it: the unit sends standby to the
+television and the machine goes only after that. The messages take about three
+seconds, because the toolkit sends six of them with pauses between, and it does
+that because different sets listen to different ones. `TV_STANDBY_SETTLE_SECONDS`
+holds the last of those pauses, which is the time the set has to act before the
+HDMI link goes away.
+
+Nothing here waits longer than it must: the unit has a limit of 15 seconds, so
+one `cec-ctl` that does not return cannot hold the machine for the minute and a
+half a systemd default would give it. And the two calls to Steam's own CEC
+daemon are skipped when the session is gone, which it usually is at a shutdown.
 
 The page has three settings: the adapter, the device that carries the volume,
 and the HDMI sound card. **Discover** fills them in. It asks the CEC bus and

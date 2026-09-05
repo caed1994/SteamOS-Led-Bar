@@ -7,6 +7,12 @@ StopWhenUnneeded=yes
 [Service]
 Type=oneshot
 ExecStart=/var/lib/steamos-cec-toolkit/steamos-cec-before-sleep
+# The suspend and the shutdown wait for this unit. Without a limit of its own
+# it gets the default of the machine, which is a minute and a half, so one
+# cec-ctl that does not return holds the machine for that long. The script
+# sends its messages in about three seconds, and this is the room it needs and
+# no more.
+TimeoutStartSec=15
 
 [Install]
 WantedBy=sleep.target shutdown.target

@@ -55,7 +55,12 @@ run_as_user_bus() {
 # go to the cecd of Steam. A daemon that is not there fails at once. A daemon
 # that stopped answering held the suspend for 50 seconds, and the calls are an
 # attempt and not a requirement: the cec-ctl messages below do the same work.
-BUSCTL_TIMEOUT=2
+#
+# Half a second, and not the two it was. A daemon that is there answers in
+# milliseconds, so this costs a working machine nothing. A daemon that does
+# not answer is a daemon this script does not need, and every tenth of a
+# second here is on each suspend and each shutdown.
+BUSCTL_TIMEOUT=0.5
 
 current_playback_logical_address() {
   local logical
@@ -132,7 +137,15 @@ fi
 
 echo "steamos-cec: running sleep/shutdown CEC action '$CEC_SLEEP_TV_ACTION'"
 
-if [[ "$CEC_SLEEP_TV_ACTION" == "standby" ]]; then
+# The session bus of that user, which the two calls below need. On a shutdown
+# the session is often gone already, and then each call is a runuser and a
+# busctl that start, find nothing and stop. That is a tenth of a second for an
+# answer this file can read from one path.
+session_bus_is_there() {
+  [[ -S "/run/user/$STEAMOS_CEC_UID/bus" ]]
+}
+
+if [[ "$CEC_SLEEP_TV_ACTION" == "standby" ]] && session_bus_is_there; then
   run_as_user_bus busctl --user --timeout="$BUSCTL_TIMEOUT" call \
     com.steampowered.CecDaemon1 \
     /com/steampowered/CecDaemon1/Daemon \
