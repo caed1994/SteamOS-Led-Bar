@@ -2552,6 +2552,29 @@ class GpuBlockTest(unittest.TestCase):
         self.root.update()
         self.panel._open_section("power")
         self.root.update()
+        self._settle()
+
+    def _settle(self):
+        """Read the card now, and take away the booking that reads it later.
+
+        The window reads the card one time, a fifth of a second after it
+        opens, and that read draws the block again from what the daemon says.
+        See Panel._first_look_gpu.
+
+        A test that set a value on the block and then let the loop run lost
+        that value to it. Whether the loop ran that long was a matter of the
+        clock, so the test passed or failed by the time of day: a test class
+        that ran before this one moved the moment, and each of these tests is
+        a different length.
+
+        This fires it here, where the test can see it, and takes the booking
+        away. The block is then the block the test drives.
+        """
+        if getattr(self.panel, "_gpu_first", None) is not None:
+            self.root.after_cancel(self.panel._gpu_first)
+            self.panel._gpu_first = None
+        self.panel._reread_gpu()
+        self.root.update()
 
     def _show(self, widget):
         """Scroll this page until the widget is on the screen.
