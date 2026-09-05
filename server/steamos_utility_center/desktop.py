@@ -465,6 +465,10 @@ class Ownership:
         # What the shim held while the scene had the bar. It is the rest state
         # of Steam. See steam_has_it.
         self.at_rest = None
+        # The last write of Steam, as (seq, key, resting key). Two writes
+        # beside each other are what tells a fade from a download. See
+        # _learn_from_a_fade.
+        self._last_write = None
 
     def game_mode(self, now):
         """Returns the Game Mode process that runs now, or "". From the cache."""
@@ -499,6 +503,45 @@ class Ownership:
             up = self.uptime()
             self._booted_at = now - (self.boot_settle if up is None else up)
         return now - self._booted_at < self.boot_settle
+
+    def _learn_from_a_fade(self, snapshot):
+        """Learns the rest state of Steam from a fade, while none is known.
+
+        A Game Mode session leaves no rest state behind: the branch below
+        forgets it at each tick of that session, and the one way to learn one
+        again is the silence after Steam stops writing.
+
+        A download never gives that silence. A person who left Game Mode
+        during one thus had no rest state for the whole of it, and the
+        handover at its end cost the full grace time rather than nothing. It
+        is the same complaint that at_rest answers, and it came back on this
+        one path.
+
+        Steam fades its own effect at each end of a download, one step in each
+        thirty milliseconds, and each step is that effect at another
+        brightness. So two writes that differ in the brightness and in nothing
+        else are a fade, and the effect under them is the effect Steam rests
+        at. The measurement is in steam_has_it, which reads the same fade the
+        other way round.
+
+        That signature is the one a download does not have. Steam writes the
+        progress bar some hundreds of times each second and the bar advances
+        every few seconds, so most of those writes are one write twice over:
+        the brightness of one is the brightness of the next. A rule that read
+        "the same twice" as rest would give the bar away between two steps of
+        every download.
+
+        A Steam that does not fade teaches this nothing, and the grace time
+        then ends the download as it did before.
+        """
+        if snapshot is None or snapshot.seq <= shim.UNTOUCHED_SEQ:
+            return
+        seen = (snapshot.seq, snapshot.key(), resting_key(snapshot))
+        was, self._last_write = self._last_write, seen
+        if self.at_rest is not None or was is None or seen[0] == was[0]:
+            return
+        if seen[2] == was[2] and seen[1] != was[1]:
+            self.at_rest = seen[2]
 
     def steam_has_it(self, snapshot, now):
         """Returns whether to leave the bar alone because Steam drives it.
@@ -556,6 +599,11 @@ class Ownership:
 
         Before both of those there is the boot, where the answer is neither.
         See still_booting.
+
+        The remembered state is the one thing a Game Mode session takes away,
+        and a download gives no silence in which to learn a new one. See
+        _learn_from_a_fade, which reads the same fade as the paragraphs above
+        and reads it the other way round.
         """
         if self.game_mode(now):
             # No value from the desktop stays valid after a Game Mode session.
@@ -565,7 +613,12 @@ class Ownership:
             # An old value reads as Steam that shows something of its own, and
             # it holds the bar for the full time below.
             self.at_rest = None
+            # And the pair of writes that _learn_from_a_fade compares. A write
+            # from before the session is not the neighbour of a write after
+            # it.
+            self._last_write = None
             return True
+        self._learn_from_a_fade(snapshot)
         ago = steam_wrote_ago(snapshot, now)
         if ago is None and self.still_booting(now):
             # Neither mode gives an answer: there is no Game Mode session, and

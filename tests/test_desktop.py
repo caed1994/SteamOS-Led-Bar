@@ -747,6 +747,113 @@ class OwnershipTest(unittest.TestCase):
         self.assertFalse(watch.steam_has_it(self._snapshot(wrote_at=10.0), 13.0))
         self.assertIsNotNone(watch.at_rest)
 
+    # -- out of Game Mode, into a download ---------------------------------
+    #
+    # The path where the rest state cannot be learned. Game Mode forgets it at
+    # each tick of the session, and the one way to learn one again is the
+    # silence after Steam stops writing. A download gives no silence.
+
+    def _bar(self, seq, filled, wrote_at):
+        """The progress bar of a download, `filled` LEDs of the strip."""
+        snapshot = shim.make_snapshot(effect=shim.EFFECT_MANUAL)
+        snapshot.pixels = [(0, 100, 200, 255) if led < filled
+                           else (0, 0, 0, 255)
+                           for led in range(shim.LOGICAL_LEDS)]
+        snapshot.seq = seq
+        snapshot.monotonic_ns = int(wrote_at * 1e9)
+        return snapshot
+
+    def _resting(self, seq, wrote_at, brightness=255):
+        """Steam at rest, at one step of a fade of its own effect."""
+        snapshot = shim.make_snapshot(effect=shim.EFFECT_RAINBOW,
+                                      brightness=brightness)
+        snapshot.seq = seq
+        snapshot.monotonic_ns = int(wrote_at * 1e9)
+        return snapshot
+
+    def _left_game_mode(self):
+        """A watch that was in Game Mode and is on the desktop now."""
+        watch = self._watch(["gamescope", ""], interval=0.0, grace=2.0)
+        watch.steam_has_it(self._bar(20, 3, 0.0), 0.0)
+        self.assertIsNone(watch.at_rest, "Game Mode left a rest state behind")
+        return watch
+
+    def test_a_download_keeps_the_bar_although_no_rest_state_is_known(self):
+        """What the person asked for: the progress bar keeps its place."""
+        watch = self._left_game_mode()
+        for tick in range(20):
+            when = 1.0 + tick * 0.5
+            self.assertTrue(
+                watch.steam_has_it(self._bar(21 + tick, 3 + tick // 7, when),
+                                   when), when)
+
+    def test_the_same_write_twice_over_is_not_a_rest_state(self):
+        """Steam writes the progress bar some hundreds of times each second
+        and the bar advances every few seconds, so most of those writes are
+        one write twice over. A rule that read "the same twice" as rest would
+        give the bar away between two steps of every download.
+        """
+        watch = self._left_game_mode()
+        for tick in range(30):
+            when = 1.0 + tick * 0.01
+            self.assertTrue(
+                watch.steam_has_it(self._bar(21 + tick, 3, when), when), when)
+        self.assertIsNone(watch.at_rest)
+
+    def test_the_fade_at_the_end_hands_the_bar_over_at_once(self):
+        """Steam fades its own effect back up when a download ends, one step
+        in each thirty milliseconds, and each step is that effect at another
+        brightness. Two writes that differ in the brightness and in nothing
+        else are thus a fade, and the effect under them is the rest state.
+
+        Without this the handover waited for the grace time, and a Game Mode
+        effect that nobody asked for stood on the bar for those seconds. It is
+        the complaint that at_rest answers, and it came back on this path.
+        """
+        watch = self._left_game_mode()
+        watch.steam_has_it(self._bar(21, 4, 1.0), 1.0)
+        # The fade back up. The second step is the first pair to compare.
+        self.assertTrue(watch.steam_has_it(self._resting(22, 1.1, 30), 1.11))
+        self.assertFalse(
+            watch.steam_has_it(self._resting(23, 1.14, 60), 1.15),
+            "the scene waited for the grace time after the fade")
+        self.assertIsNotNone(watch.at_rest)
+
+    def test_a_steam_that_does_not_fade_ends_it_as_it_always_did(self):
+        """The fade is a measurement of one machine and not a promise. Where
+        it does not happen, this costs nothing and changes nothing.
+        """
+        watch = self._left_game_mode()
+        watch.steam_has_it(self._bar(21, 4, 1.0), 1.0)
+        restored = self._resting(22, 1.1)
+        self.assertTrue(watch.steam_has_it(restored, 1.2))
+        self.assertTrue(watch.steam_has_it(restored, 3.0))
+        self.assertFalse(watch.steam_has_it(restored, 3.2))
+
+    def test_a_fade_teaches_it_nothing_once_it_knows_the_rest_state(self):
+        """The learned value is the state Steam returns to. A fade at the
+        *start* of a download is a fade of that same effect, so nothing is
+        lost, but the value must come from where it always came from.
+        """
+        watch = self._watch("", grace=2.0)
+        watch.steam_has_it(self._resting(20, -60.0), 0.0)
+        known = watch.at_rest
+        self.assertIsNotNone(known)
+        watch.steam_has_it(self._bar(21, 4, 0.1), 0.2)
+        watch.steam_has_it(self._bar(22, 5, 0.2), 0.3)
+        self.assertEqual(watch.at_rest, known, "it learned mid-download")
+
+    def test_a_session_breaks_the_pair_of_writes_it_compares(self):
+        """A write from before a Game Mode session is not the neighbour of a
+        write after it, and a pair across the session is not a fade.
+        """
+        watch = self._watch(["", "gamescope", ""], interval=0.0, grace=2.0)
+        watch.steam_has_it(self._resting(20, 0.0, 30), 0.1)
+        watch.steam_has_it(self._resting(21, 0.2, 60), 0.3)   # in Game Mode
+        self.assertIsNone(watch.at_rest)
+        self.assertTrue(watch.steam_has_it(self._bar(22, 3, 0.4), 0.5),
+                        "a pair across the session read as a fade")
+
     def test_the_process_table_is_not_read_once_a_frame(self):
         # Sixty times a second, times a few hundred processes, for an answer
         # that cannot change faster than somebody can switch sessions.

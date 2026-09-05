@@ -249,6 +249,16 @@ if either mode uses the gauge.
 Steam's own LED settings. Notifications continue to flash above a scene. A
 download that starts on the desktop continues to show its progress bar.
 
+**A download keeps the bar, and gives it back at its end.** This holds also
+when you leave Game Mode while one runs. The progress bar stays there for the
+whole download, and your scene comes back when it ends.
+
+The service knows the end because Steam fades its own effect back up, one step
+in each thirty milliseconds. Two writes that differ in the brightness and in
+nothing else are a fade, and what is under them is what Steam rests at. Where
+Steam does not fade, the scene comes back two seconds after the last write, as
+it always did.
+
 If the bar keeps your scene during a game, or never shows it, run this command:
 
 ```bash
