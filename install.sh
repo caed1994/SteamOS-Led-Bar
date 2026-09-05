@@ -1426,8 +1426,8 @@ Done.
   Panel:    $PANEL_STATUS
   Command:  $COMMAND_STATUS
   Modules:  $(module_summary)
-  Add one:  sudo ./install.sh --with <name>   ($COMMAND_STATUS's panel has
-            the same button on the page of each module)
+  Add one:  sudo ./install.sh --with <name>
+            The control panel has the same button on the page of each module.
   What they are: ./install.sh --modules
 EOF
 
