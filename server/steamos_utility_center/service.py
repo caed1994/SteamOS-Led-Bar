@@ -18,6 +18,7 @@ import time
 
 from . import config as config_module
 from . import desktop, elf, load, mounts, notify, phone, render
+from . import link as link_module
 from . import serialport, shim
 from . import steamworks
 from . import temperature
@@ -49,6 +50,10 @@ CONFIG_REFUSED_EXIT = 2
 #
 # It is not lower. A WS2812 has large steps at the low end, and white there
 # takes a colour.
+#
+# These two are the values of a machine that set neither STANDBY_COLOR nor
+# STANDBY_BRIGHTNESS. White at 30 of 255 is (30, 30, 30), so a machine that
+# upgrades from a build with no such settings sees no change at all.
 STANDBY_COLOR = (30, 30, 30)
 STANDBY_PERIOD_MS = 6000            # one slow breath, calmer than the waiting one
 
@@ -188,6 +193,21 @@ def build_renderer(config):
         load_gpu_colour=notify.parse_color(config["LOAD_GPU_COLOR"]),
         load_swap=config["LOAD_SWAP"],
     )
+
+
+def standby_colour(config):
+    """The colour the ESP holds while the machine sleeps.
+
+    Three numbers make it, and each one has a reason to be its own setting.
+    The colour is a choice. The level is what makes a colour from the menu a
+    standby light and not a night light: every colour there is at full
+    strength. And MAX_BRIGHTNESS is the ceiling of the bar, which each other
+    thing this service draws also obeys.
+    """
+    red, green, blue = notify.parse_color(config["STANDBY_COLOR"])
+    level = (max(0, min(int(config["STANDBY_BRIGHTNESS"]), 255))
+             * max(0, min(int(config["MAX_BRIGHTNESS"]), 255)) / (255.0 * 255))
+    return tuple(int(channel * level) for channel in (red, green, blue))
 
 
 def build_scene(config):
@@ -415,9 +435,17 @@ class Runner:
         if not self.config["STANDBY_PULSE"]:
             LOG.info("standby pulse is switched off, leaving the strip dark")
             return
-        colour = tuple(int(channel * self.config["MAX_BRIGHTNESS"] / 255)
-                       for channel in STANDBY_COLOR)
-        if self.link.send_standby(colour, STANDBY_PERIOD_MS):
+        colour = standby_colour(self.config)
+        shape = config_module.STANDBY_SHAPES[self.config["STANDBY_SHOWS"]]
+        # A board flashed before the shape byte reads five bytes and breathes.
+        # That is the old behaviour and not a failure, but a person who set
+        # the dot must not be left to work out why the bar breathes.
+        if shape != link_module.STANDBY_BREATH and not self.link.standby_shapes:
+            LOG.warning(
+                "STANDBY_SHOWS=%s needs a newer firmware on the board; this "
+                "one draws the breath. Flash it from the Test page of the "
+                "panel.", self.config["STANDBY_SHOWS"])
+        if self.link.send_standby(colour, STANDBY_PERIOD_MS, shape):
             self.standby_since = time.monotonic()
             LOG.info("standby: the ESP has the strip until we are back")
         else:

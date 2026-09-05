@@ -759,11 +759,14 @@ class StandbyTest(unittest.TestCase):
     class FakeLink:
         """Enough of EspLink for the real loop to run against."""
 
-        def __init__(self):
+        def __init__(self, shapes=True):
             self.standby = []
             self.frames = 0
             self.sent = []
             self.answer = True
+            # Whether the board reads the shape byte. A board flashed before
+            # it reads five bytes and breathes whatever the host asks for.
+            self.standby_shapes = shapes
 
         connected = True
 
@@ -776,8 +779,8 @@ class StandbyTest(unittest.TestCase):
         def shutdown(self):
             pass
 
-        def send_standby(self, colour, period_ms):
-            self.standby.append((tuple(colour), period_ms))
+        def send_standby(self, colour, period_ms, shape=0):
+            self.standby.append((tuple(colour), period_ms, shape))
             return self.answer
 
         def send_frame(self, payload, led_count):
@@ -797,9 +800,10 @@ class StandbyTest(unittest.TestCase):
         runner = self._runner()
         runner._enter_standby()
         self.assertEqual(len(runner.link.standby), 1)
-        colour, period = runner.link.standby[0]
+        colour, period, shape = runner.link.standby[0]
         self.assertEqual(colour, service.STANDBY_COLOR)
         self.assertEqual(period, service.STANDBY_PERIOD_MS)
+        self.assertEqual(shape, link.STANDBY_BREATH)
         self.assertIsNotNone(runner.standby_since)
 
     def test_the_brightness_ceiling_applies_to_it_too(self):
@@ -807,9 +811,49 @@ class StandbyTest(unittest.TestCase):
         # not get a full-brightness white breath all night.
         runner = self._runner(MAX_BRIGHTNESS=51)       # a fifth
         runner._enter_standby()
-        colour, _period = runner.link.standby[0]
+        colour = runner.link.standby[0][0]
         self.assertEqual(colour, tuple(channel // 5
                                        for channel in service.STANDBY_COLOR))
+
+    def test_the_colour_comes_from_the_settings(self):
+        """It was a constant in this module, and white was the only answer."""
+        runner = self._runner(STANDBY_COLOR="#ff8000", STANDBY_BRIGHTNESS=60)
+        runner._enter_standby()
+        self.assertEqual(runner.link.standby[0][0], (60, 30, 0))
+
+    def test_the_default_settings_are_the_colour_this_module_had(self):
+        """A machine that upgrades must see no change at all.
+
+        White at 30 of 255 is the (30, 30, 30) that was written here, so the
+        two settings reproduce it and do not approximately reproduce it.
+        """
+        self.assertEqual(service.standby_colour(dict(config.DEFAULTS)),
+                         service.STANDBY_COLOR)
+
+    def test_the_shape_goes_with_it(self):
+        runner = self._runner(STANDBY_SHOWS="dot")
+        runner._enter_standby()
+        self.assertEqual(runner.link.standby[0][2], link.STANDBY_DOT)
+
+    def test_a_board_that_cannot_draw_it_is_reported(self):
+        """It reads five bytes and breathes, which is the old behaviour and
+        not a failure. But a person who set the dot must not be left to work
+        out why the bar breathes.
+        """
+        runner = self._runner(STANDBY_SHOWS="dot")
+        runner.link.standby_shapes = False
+        with self.assertLogs("steamos-utility-center", "WARNING") as caught:
+            runner._enter_standby()
+        self.assertIn("firmware", "\n".join(caught.output))
+        # And it still hands the strip over: a breath is better than a dark
+        # bar for the whole of a suspend.
+        self.assertEqual(len(runner.link.standby), 1)
+
+    def test_a_breath_on_such_a_board_says_nothing(self):
+        runner = self._runner(STANDBY_SHOWS="breath")
+        runner.link.standby_shapes = False
+        with self.assertNoLogs("steamos-utility-center", "WARNING"):
+            runner._enter_standby()
 
     def test_it_can_be_switched_off(self):
         runner = self._runner(STANDBY_PULSE=False)
@@ -998,9 +1042,12 @@ class StartupBreathTest(StandbyQuietTest):
         runner = self._runner()
         self._drive(runner, seq=service.UNTOUCHED_SEQ)
         self.assertEqual(len(runner.link.standby), 1, "asked once, not per frame")
-        colour, period = runner.link.standby[0]
+        colour, period, shape = runner.link.standby[0]
         self.assertEqual(colour, service.STARTUP_COLOR)
         self.assertEqual(period, service.STARTUP_PERIOD_MS)
+        # The breath, whatever STANDBY_SHOWS says. This is the wait for the
+        # first write of Steam and not the sleep of the machine.
+        self.assertEqual(shape, link.STANDBY_BREATH)
 
     def test_the_first_thing_steam_writes_takes_the_bar_back(self):
         # The sequence number is what says so: the module steps it on every

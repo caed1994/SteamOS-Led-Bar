@@ -13,6 +13,7 @@ import logging
 import os
 
 from . import desktop
+from . import link
 from . import notify
 from . import phone
 from . import render
@@ -81,6 +82,16 @@ DEFAULTS = {
     "NOTIFY_PHONE": False,
     "NOTIFY_WARNING": True,
     "STANDBY_PULSE": True,
+    # What the ESP draws while the machine sleeps, and in which colour.
+    #
+    # The colour and the level were constants in service.py, and the level is
+    # the reason they are two settings and not one. A colour from the menu is
+    # a colour at full strength, and a standby light at full strength is a
+    # night light. White at 30 of 255 is what this was before either setting
+    # existed, so a machine that upgrades sees no change.
+    "STANDBY_SHOWS": "breath",
+    "STANDBY_COLOR": "#ffffff",
+    "STANDBY_BRIGHTNESS": 30,
     "ACHIEVEMENT_COLOR": "#ffff00",
     "MESSAGE_COLOR": "#8000ff",
     "FRIEND_COLOR": "#00ff00",
@@ -276,6 +287,18 @@ NOTIFY_STYLES = notify.STYLES
 RAINBOW_CHOICES = render.RAINBOW_CHOICES
 DESKTOP_SCENES = desktop.SCENES
 
+# What the ESP can draw while the machine sleeps. The name is here and the
+# number is in link.py: this file holds what a person writes, and the protocol
+# holds what goes on the wire.
+#
+# The breath is first because it is what the bar did before there was a
+# choice, and because a board with an old firmware draws it whatever this
+# says. See link.send_standby.
+STANDBY_SHAPES = {
+    "breath": link.STANDBY_BREATH,
+    "dot": link.STANDBY_DOT,
+}
+
 # The permitted speed of a desktop scene. The limits are the limits of the
 # delay field that the speed sets.
 #
@@ -353,6 +376,15 @@ def validate(config):
     if config["RAINBOW_SHOWS"] not in RAINBOW_CHOICES:
         raise ConfigError("RAINBOW_SHOWS must be one of: %s"
                           % ", ".join(RAINBOW_CHOICES))
+    if config["STANDBY_SHOWS"] not in STANDBY_SHAPES:
+        raise ConfigError("STANDBY_SHOWS must be one of: %s"
+                          % ", ".join(sorted(STANDBY_SHAPES)))
+    try:
+        notify.parse_color(config["STANDBY_COLOR"])
+    except ValueError as exc:
+        raise ConfigError("STANDBY_COLOR: %s" % exc)
+    if not 0 <= config["STANDBY_BRIGHTNESS"] <= 255:
+        raise ConfigError("STANDBY_BRIGHTNESS must be between 0 and 255")
     if config["DESKTOP_SCENE"] not in DESKTOP_SCENES:
         raise ConfigError("DESKTOP_SCENE must be one of: %s"
                           % ", ".join(DESKTOP_SCENES))

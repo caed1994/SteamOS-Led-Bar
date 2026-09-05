@@ -37,9 +37,33 @@ MSG_STANDBY = 0x21
 MSG_PING = 0x40
 # esp -> host
 MSG_INFO = 0x02
+# What this board can do beyond the messages it always understood.
+#
+# It is a message of its own and not a field of INFO. The name in INFO runs to
+# the end of the payload, so nothing can be appended after it. And the version
+# byte in the header of every frame cannot be raised: each side refuses a
+# frame whose version it does not know, so a board and a host of different
+# versions would not speak at all.
+#
+# A firmware that does not send this is a firmware with none of these, which
+# is the correct answer for every board flashed before them.
+MSG_CAPS = 0x03
 MSG_STATS = 0x30
 MSG_LOG = 0x31
 MSG_PONG = 0x41
+
+# The bit in the CAPS payload that says this board draws more than one standby
+# shape. One bit, because a board either reads the shape byte or it does not.
+CAP_STANDBY_SHAPES = 0x01
+
+# What the ESP draws while the machine sleeps. The number travels in the
+# STANDBY message, and the firmware holds the drawing.
+#
+# BREATH is 0 on purpose. A board that ignores the shape byte breathes, so the
+# number of the shape it draws is the number a new host would send for it.
+STANDBY_BREATH = 0
+STANDBY_DOT = 1
+STANDBY_SHAPES = (STANDBY_BREATH, STANDBY_DOT)
 
 # Tried in order when the configured rate gets no answer: the shipped firmware's
 # rate first, then what earlier and hand-rolled builds are likely to use.
@@ -48,7 +72,7 @@ FALLBACK_BAUD_RATES = (230400, 460800, 921600, 115200)
 MSG_NAMES = {
     MSG_HELLO: "HELLO", MSG_FRAME: "FRAME", MSG_FILL: "FILL",
     MSG_BLANK: "BLANK", MSG_STANDBY: "STANDBY", MSG_PING: "PING",
-    MSG_INFO: "INFO",
+    MSG_INFO: "INFO", MSG_CAPS: "CAPS",
     MSG_STATS: "STATS", MSG_LOG: "LOG", MSG_PONG: "PONG",
 }
 
@@ -160,6 +184,9 @@ class EspLink:
         self.autodetect_baud = autodetect_baud
         self.serial = None
         self.info = None
+        # What the board says it can do. Zero until a board says otherwise,
+        # which is the answer for every firmware from before CAPS existed.
+        self.caps = 0
         self.device = None
         self.active_baudrate = None
         self._parser = FrameParser()
@@ -204,7 +231,7 @@ class EspLink:
                     return False
                 continue
 
-            info = self._greet(port)
+            info, caps = self._greet(port)
             if info is not None:
                 if index > 0:
                     self._scanned.discard(device)
@@ -212,7 +239,7 @@ class EspLink:
                         # Held open for the blind-mode fallback below, which
                         # this answer makes unnecessary.
                         preferred.close()
-                self._adopt(port, device, rate, info)
+                self._adopt(port, device, rate, info, caps)
                 return True
 
             if index == 0:
@@ -227,7 +254,7 @@ class EspLink:
         # Nothing answered. The firmware can be older than the handshake, so
         # send frames at the configured rate and do not stop.
         if preferred is not None:
-            self._adopt(preferred, device, candidates[0], None)
+            self._adopt(preferred, device, candidates[0], None, 0)
             LOG.warning("no HELLO reply from %s; streaming at %d baud anyway",
                         describe(device), candidates[0])
             return True
@@ -262,14 +289,20 @@ class EspLink:
         return port
 
     def _greet(self, port):
-        """Send HELLO and wait for INFO. Returns None if the ESP stays quiet."""
+        """Send HELLO and wait for INFO. Returns (info, caps).
+
+        `info` is None when the ESP stays quiet. `caps` is what the board said
+        it can do, and zero when it said nothing: a firmware from before CAPS
+        sends no such message, and none of those capabilities is one it has.
+        """
         parser = FrameParser()
+        caps = 0
         for _ in range(self.HELLO_ATTEMPTS):
             try:
                 port.write(build(MSG_HELLO))
             except (OSError, SerialError) as exc:
                 LOG.warning("handshake write failed: %s", exc)
-                return None
+                return None, caps
             deadline = time.monotonic() + self.HELLO_TIMEOUT
             while True:
                 remaining = deadline - time.monotonic()
@@ -280,22 +313,28 @@ class EspLink:
                 try:
                     data = port.read()
                 except OSError:
-                    return None
+                    return None, caps
                 for msg_type, payload in parser.feed(data):
-                    if msg_type == MSG_INFO:
+                    if msg_type == MSG_CAPS:
+                        # The firmware sends this before INFO, so one read
+                        # usually holds both. A board whose CAPS lands in a
+                        # later read is caught by poll() instead.
+                        caps = payload[0] if payload else 0
+                    elif msg_type == MSG_INFO:
                         try:
-                            return DeviceInfo.parse(payload)
+                            return DeviceInfo.parse(payload), caps
                         except ValueError as exc:
                             LOG.warning("malformed INFO: %s", exc)
                     elif msg_type == MSG_LOG:
                         LOG.info("esp: %s", payload.decode("ascii", "replace").strip())
-        return None
+        return None, caps
 
-    def _adopt(self, port, device, baudrate, info):
+    def _adopt(self, port, device, baudrate, info, caps=0):
         self.serial = port
         self.device = device
         self.active_baudrate = baudrate
         self.info = info
+        self.caps = caps
         self._parser = FrameParser()
         if info is None:
             return
@@ -325,7 +364,12 @@ class EspLink:
         if not data:
             return
         for msg_type, payload in self._parser.feed(data):
-            if msg_type == MSG_LOG:
+            if msg_type == MSG_CAPS:
+                # A board that sends CAPS after the handshake returned. The
+                # standby message goes out at a suspend, which is long after
+                # this, so the answer is in hand by then.
+                self.caps = payload[0] if payload else 0
+            elif msg_type == MSG_LOG:
                 LOG.info("esp: %s", payload.decode("ascii", "replace").strip())
             elif msg_type == MSG_STATS and len(payload) >= 8:
                 frames = int.from_bytes(payload[0:4], "little")
@@ -362,23 +406,36 @@ class EspLink:
     def send_blank(self):
         return self._send(build(MSG_BLANK))
 
-    def send_standby(self, colour, period_ms):
-        """Hand the strip to the ESP to breathe on its own until we return.
+    def send_standby(self, colour, period_ms, shape=STANDBY_BREATH):
+        """Hand the strip to the ESP to draw on its own until we return.
 
         The one thing the firmware animates on the host's behalf, because
         during a suspend there is no host: the service is frozen and nothing
-        can be rendered. So the colour and the period are sent once and the
-        ESP keeps going alone. A firmware too old to know this message ignores
-        it and the strip simply goes dark, as it did before.
+        can be rendered. So the colour, the period and the shape are sent once
+        and the ESP keeps going alone. A firmware too old to know this message
+        ignores it and the strip simply goes dark, as it did before.
+
+        The shape is a sixth byte, and the firmware that came before it reads
+        five and returns. Such a board thus breathes whatever this asks for,
+        which is the old behaviour and not a failure. `standby_shapes` reports
+        whether the board on the other end reads the byte, so a caller can say
+        so rather than draw the wrong thing in silence.
         """
-        payload = bytes(colour) + int(period_ms).to_bytes(2, "little")
+        payload = (bytes(colour) + int(period_ms).to_bytes(2, "little")
+                   + bytes([int(shape) & 0xFF]))
         return self._send(build(MSG_STANDBY, payload))
+
+    @property
+    def standby_shapes(self):
+        """Whether the board draws a standby shape other than the breath."""
+        return bool(self.caps & CAP_STANDBY_SHAPES)
 
     def disconnect(self):
         if self.serial is not None:
             self.serial.close()
             self.serial = None
         self.info = None
+        self.caps = 0
         self.active_baudrate = None
         self._next_attempt = time.monotonic() + self.reconnect_delay
 

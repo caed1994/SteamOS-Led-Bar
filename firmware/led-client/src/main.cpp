@@ -154,6 +154,7 @@ static const uint8_t PROTOCOL_VERSION = 1;
 
 static const uint8_t MSG_HELLO = 0x01;
 static const uint8_t MSG_INFO = 0x02;
+static const uint8_t MSG_CAPS = 0x03;
 static const uint8_t MSG_FRAME = 0x10;
 static const uint8_t MSG_FILL = 0x11;
 static const uint8_t MSG_BLANK = 0x20;
@@ -162,6 +163,23 @@ static const uint8_t MSG_STATS = 0x30;
 static const uint8_t MSG_LOG = 0x31;
 static const uint8_t MSG_PING = 0x40;
 static const uint8_t MSG_PONG = 0x41;
+
+// What this build can do beyond the messages every build understood. The host
+// reads it to tell a board that draws a standby shape from one that always
+// breathes. A board that sends nothing has none of them, which is the correct
+// answer for every build before this one.
+//
+// It is a message of its own because PROTOCOL_VERSION cannot move: each side
+// refuses a frame whose version it does not know, so a raise here would stop
+// an old host and this board from speaking at all.
+static const uint8_t CAP_STANDBY_SHAPES = 0x01;
+static const uint8_t CAPABILITIES = CAP_STANDBY_SHAPES;
+
+// The shapes this build draws while the host sleeps. The numbers are the
+// numbers on the wire; see link.py, which holds the same list.
+static const uint8_t STANDBY_BREATH = 0;
+static const uint8_t STANDBY_DOT = 1;
+static const uint8_t STANDBY_LAST = STANDBY_DOT;
 
 static const uint16_t MAX_PAYLOAD = MAX_LEDS * 3 + 8;
 
@@ -204,6 +222,11 @@ static void sendFrame(uint8_t type, const uint8_t *payload, uint16_t length) {
 
 static void sendLog(const char *message) {
   sendFrame(MSG_LOG, (const uint8_t *)message, (uint16_t)strlen(message));
+}
+
+static void sendCaps() {
+  const uint8_t payload[1] = {CAPABILITIES};
+  sendFrame(MSG_CAPS, payload, 1);
 }
 
 static void sendInfo() {
@@ -259,6 +282,10 @@ static uint8_t standbyGreen = 0;
 static uint8_t standbyBlue = 0;
 static uint32_t standbyPeriodMs = 1;
 static uint32_t standbyStartMs = 0;
+// What to draw while the host sleeps. Zero is the breath, and zero is what
+// this holds when the host sends the five-byte message that came before the
+// shape byte - so an old host gets the animation it expects.
+static uint8_t standbyShape = STANDBY_BREATH;
 static uint32_t lastStandbyFrameMs = 0;
 
 static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length) {
@@ -277,6 +304,10 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
 
   switch (type) {
     case MSG_HELLO:
+      // Before INFO, so that one read on the host usually holds both. The
+      // host returns from its handshake on INFO, and a CAPS behind it would
+      // arrive after that.
+      sendCaps();
       sendInfo();
       break;
     case MSG_STANDBY: {
@@ -289,6 +320,14 @@ static void handleMessage(uint8_t type, const uint8_t *payload, uint16_t length)
       const uint32_t period =
           (uint32_t)payload[3] | ((uint32_t)payload[4] << 8);
       standbyPeriodMs = period > 0 ? period : 1;
+      // The sixth byte is the shape, and a host from before it sends five.
+      // An unknown number is the breath, because a strip that goes dark is a
+      // worse answer to "this build is newer than yours" than a strip that
+      // breathes.
+      standbyShape = STANDBY_BREATH;
+      if (length >= 6 && payload[5] <= STANDBY_LAST) {
+        standbyShape = payload[5];
+      }
       standbyStartMs = millis();
       standby = true;
       // The strip is meant to stay lit through the silence that follows, so
@@ -451,6 +490,28 @@ static void waitingAnimation(uint32_t now) {
   strip->Show();
 }
 
+// One dot in the middle of the strip, in the colour the host asked for. It
+// does not move and it does not fade: this is the light on the front of a
+// television that is off. A light that breathes says that the machine
+// works.
+//
+// An odd strip has a middle LED. An even strip has none, so this lights the
+// two either side of the middle. The dot is then one LED wider and it is
+// still in the middle, and a dot that sits half a LED off centre is what a
+// person sees on a bar of sixteen.
+static void standbyDot() {
+  const uint16_t count = strip->PixelCount();
+  strip->ClearTo(RgbColor(0, 0, 0));
+  if (count > 0) {
+    const RgbColor colour(clampBrightness(standbyRed),
+                          clampBrightness(standbyGreen),
+                          clampBrightness(standbyBlue));
+    strip->SetPixelColor((count - 1) / 2, colour);
+    strip->SetPixelColor(count / 2, colour);
+  }
+  strip->Show();
+}
+
 // The same breath, in the colour the host asked for, while the machine is
 // asleep. The colour and the period travel in the message rather than living
 // here: the host decides what things look like everywhere else, and a change
@@ -466,6 +527,11 @@ static void standbyAnimation(uint32_t now) {
   // knownLength(). The whole strip goes to sleep, not the first seventeen.
   ensureStrip(knownLength());
   if (strip == nullptr) {
+    return;
+  }
+
+  if (standbyShape == STANDBY_DOT) {
+    standbyDot();
     return;
   }
 
@@ -485,6 +551,7 @@ void setup() {
 
   waitStartMs = millis();
   lastFrameMs = waitStartMs;
+  sendCaps();
   sendInfo();
   sendLog("ready");
 }

@@ -85,9 +85,20 @@ STRIP = [
         ("PATROL_DOTS", "Patrol dots", "int", 1, 3, 1),
         ("SPEED", "Effect speed", "float", 0.1, 4.0, 0.1),
         # Drawn by the ESP, not by us: during a suspend this service is
-        # frozen, so the strip has to carry on alone.
-        ("STANDBY_PULSE", "Pulse white while the machine sleeps", "bool",
+        # frozen, so the strip has to carry on alone. That is also why the
+        # shape is one of a short list and not any effect of this project:
+        # the firmware holds the drawing, and the message carries the number
+        # of it. See link.send_standby.
+        ("STANDBY_PULSE", "Show something while the machine sleeps", "bool",
          None, None, None),
+        ("STANDBY_SHOWS", "While it sleeps show", "named",
+         ledpanel.STANDBY_SHAPES, None, None),
+        ("STANDBY_COLOR", "Colour", "named",
+         ledpanel.NOTIFICATION_COLOURS, None, None),
+        # Its own row, and not the level in the colour. Each colour in that
+        # menu is at full strength, and a standby light at full strength is a
+        # night light.
+        ("STANDBY_BRIGHTNESS", "Brightness", "int", 0, 255, 1),
         # Nothing can add an entry to the LED menu of Steam. So an effect of
         # this project must use an entry that the menu already has. Users
         # give up the rainbow entry the most readily. There is one slot, and
@@ -499,6 +510,9 @@ DEPENDS_ON = {
     "TEMPERATURE_MIN": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_MAX": (TEMPERATURE_SHOWN,),
     "TEMPERATURE_SENSOR": (TEMPERATURE_SHOWN,),
+    "STANDBY_SHOWS": ("STANDBY_PULSE",),
+    "STANDBY_COLOR": ("STANDBY_PULSE",),
+    "STANDBY_BRIGHTNESS": ("STANDBY_PULSE",),
     "NOTIFY_ACHIEVEMENTS": ("NOTIFY",),
     "NOTIFY_MESSAGES": ("NOTIFY",),
     "NOTIFY_FRIEND_ONLINE": ("NOTIFY",),

@@ -9,6 +9,7 @@ without any hardware attached.
 
 import os
 import pty
+import re
 import sys
 import threading
 import time
@@ -28,13 +29,16 @@ class FakeEsp(threading.Thread):
 
     daemon = True
 
-    def __init__(self, master_fd):
+    def __init__(self, master_fd, caps=None):
         super().__init__()
         self.fd = master_fd
         self.parser = link.FrameParser()
         self.received = []
         self.lock = threading.Lock()
         self.running = True
+        # None is a board flashed before CAPS existed, which answers HELLO
+        # with INFO and nothing else.
+        self.caps = caps
 
     def run(self):
         while self.running:
@@ -51,6 +55,11 @@ class FakeEsp(threading.Thread):
                 with self.lock:
                     self.received.append((msg_type, payload))
                 if msg_type == link.MSG_HELLO:
+                    # CAPS first, as the firmware sends it: the host returns
+                    # from its handshake on INFO.
+                    if self.caps is not None:
+                        os.write(self.fd, link.build(link.MSG_CAPS,
+                                                     bytes([self.caps])))
                     info = bytes([1]) + (300).to_bytes(2, "little") + bytes([2])
                     os.write(self.fd, link.build(link.MSG_INFO,
                                                  info + b"fake-esp"))
@@ -68,6 +77,60 @@ class FakeEsp(threading.Thread):
         return None
 
 
+class FirmwareAgreesTest(unittest.TestCase):
+    """The numbers on the wire live in two files, so they can disagree.
+
+    The firmware is C++ and no test compiles it here. It is read as text
+    instead, which catches the one mistake that matters: a number changed on
+    one side of the cable and not on the other. Such a mistake is not a
+    failure that anybody sees. It is a strip that draws the wrong thing.
+    """
+
+    SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "firmware", "led-client", "src", "main.cpp")
+
+    def setUp(self):
+        with open(self.SOURCE, "r", encoding="utf-8") as handle:
+            self.text = handle.read()
+
+    def _value(self, name):
+        found = re.search(r"static const uint8_t %s = (0x[0-9a-fA-F]+|\d+);"
+                          % name, self.text)
+        self.assertIsNotNone(found, "%s is not in the firmware" % name)
+        return int(found.group(1), 0)
+
+    def test_the_message_numbers_agree(self):
+        for name, wanted in (("MSG_HELLO", link.MSG_HELLO),
+                             ("MSG_INFO", link.MSG_INFO),
+                             ("MSG_CAPS", link.MSG_CAPS),
+                             ("MSG_STANDBY", link.MSG_STANDBY)):
+            self.assertEqual(self._value(name), wanted, name)
+
+    def test_the_standby_shapes_agree(self):
+        self.assertEqual(self._value("STANDBY_BREATH"), link.STANDBY_BREATH)
+        self.assertEqual(self._value("STANDBY_DOT"), link.STANDBY_DOT)
+        self.assertEqual(self._value("CAP_STANDBY_SHAPES"),
+                         link.CAP_STANDBY_SHAPES)
+
+    def test_the_breath_is_zero(self):
+        """A board that ignores the shape byte breathes. The number of that
+        shape must therefore be the number a host sends for it, or the two
+        boards draw different things from the same message.
+        """
+        self.assertEqual(link.STANDBY_BREATH, 0)
+
+    def test_the_firmware_says_what_it_can_do(self):
+        """Without this the host cannot tell a board that draws the dot from
+        one that breathes whatever it is asked for.
+        """
+        self.assertIn("sendCaps()", self.text)
+        self.assertIn("CAPABILITIES", self.text)
+
+    def test_it_refuses_a_shape_it_does_not_know(self):
+        """A newer host is not a reason for a dark strip through a suspend."""
+        self.assertIn("payload[5] <= STANDBY_LAST", self.text)
+
+
 class SerialLoopbackTest(unittest.TestCase):
     def setUp(self):
         self.master, self.slave = pty.openpty()
@@ -75,14 +138,14 @@ class SerialLoopbackTest(unittest.TestCase):
         self.esp = None
         self.addCleanup(self._teardown)
 
-    def start_esp(self):
+    def start_esp(self, caps=None):
         """Attaches the fake ESP, for a test that does not read the master.
 
         The reader thread takes the bytes of a test that reads the master.
         """
         # The slave fd stays open on purpose: with no process on that end,
         # reads on the master fail with EIO.
-        self.esp = FakeEsp(self.master)
+        self.esp = FakeEsp(self.master, caps)
         self.esp.start()
         return self.esp
 
@@ -125,6 +188,43 @@ class SerialLoopbackTest(unittest.TestCase):
         self.assertEqual(int.from_bytes(received[:2], "little"), 17)
         self.assertEqual(received[2:], payload)
         self.assertEqual(received[2:5], bytes((10, 20, 30)))
+
+    def test_a_board_from_before_caps_reports_none(self):
+        """Every board flashed before that message. Silence is the answer,
+        and the host must read it as "none of them" and not as a failure.
+        """
+        self.start_esp()
+        bridge = link.EspLink(port=self.device, baudrate=BAUD, led_count=17)
+        bridge.BOOT_DELAY = 0.05
+        self.addCleanup(bridge.disconnect)
+        self.assertTrue(bridge.connect())
+        self.assertEqual(bridge.caps, 0)
+        self.assertFalse(bridge.standby_shapes)
+
+    def test_a_board_that_says_so_is_read(self):
+        self.start_esp(caps=link.CAP_STANDBY_SHAPES)
+        bridge = link.EspLink(port=self.device, baudrate=BAUD, led_count=17)
+        bridge.BOOT_DELAY = 0.05
+        self.addCleanup(bridge.disconnect)
+        self.assertTrue(bridge.connect())
+        self.assertTrue(bridge.standby_shapes)
+
+    def test_the_standby_message_carries_the_shape(self):
+        """Six bytes, and the sixth is the shape. The firmware that came
+        before it reads five and returns, so such a board breathes.
+        """
+        esp = self.start_esp(caps=link.CAP_STANDBY_SHAPES)
+        bridge = link.EspLink(port=self.device, baudrate=BAUD, led_count=17)
+        bridge.BOOT_DELAY = 0.05
+        self.addCleanup(bridge.disconnect)
+        self.assertTrue(bridge.connect())
+        self.assertTrue(bridge.send_standby((9, 8, 7), 6000,
+                                            link.STANDBY_DOT))
+        payload = esp.wait_for(link.MSG_STANDBY)
+        self.assertIsNotNone(payload, "the message never arrived")
+        self.assertEqual(payload[:3], bytes((9, 8, 7)))
+        self.assertEqual(int.from_bytes(payload[3:5], "little"), 6000)
+        self.assertEqual(payload[5], link.STANDBY_DOT)
 
     def test_blank_on_shutdown(self):
         esp = self.start_esp()
@@ -205,7 +305,8 @@ class SerialLoopbackTest(unittest.TestCase):
         bridge._open = lambda device, rate: opened.append(
             open_port(device, rate)) or opened[-1]
         # Silence only the first candidate, so the scan moves on to the next.
-        bridge._greet = lambda port: None if len(opened) == 1 else greet(port)
+        # _greet answers (info, caps), and no answer is (None, 0).
+        bridge._greet = lambda port: (None, 0) if len(opened) == 1 else greet(port)
 
         self.assertTrue(bridge.connect())
         self.assertGreater(len(opened), 1, "expected a second candidate")

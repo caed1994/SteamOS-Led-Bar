@@ -1188,6 +1188,18 @@ def load_colours():
     return tuple(offered)
 
 
+# What the ESP draws while the machine sleeps, in words. The names are the
+# names in the configuration file, and config.STANDBY_SHAPES holds the number
+# that each one puts on the wire.
+#
+# The breath comes first: it is what the bar did before there was a choice,
+# and a board with an old firmware draws it whatever this says.
+STANDBY_SHAPES = (
+    ("A slow breath", "breath"),
+    ("One dot in the middle", "dot"),
+)
+
+
 def palette():
     """Returns the colours for a direct selection, in a useful order.
 

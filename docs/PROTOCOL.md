@@ -34,7 +34,7 @@ on the same UART.
 | `0x10` | FRAME   | `count` (u16) and `count * 3` bytes RGB    |
 | `0x11` | FILL    | `count` (u16) and 3 bytes RGB for each LED |
 | `0x20` | BLANK   | empty. It makes the strip dark             |
-| `0x21` | STANDBY | 3 bytes RGB and `period` (u16, ms)         |
+| `0x21` | STANDBY | 3 bytes RGB, `period` (u16, ms) and `shape` (u8) |
 | `0x40` | PING    | empty                                      |
 
 `FRAME` carries complete pixels. The host renders each effect, applies the
@@ -47,9 +47,30 @@ length is thus a host setting only. The firmware's `MAX_LEDS` is its limit.
 The firmware applies the colour order. The `COLOR_ORDER_*` build flag selects
 it. The wire always carries plain RGB.
 
-`STANDBY` is the one message that asks the firmware to animate and not to
-show a frame. The firmware breathes the given colour, one full breath in each
-`period`. The message also suspends the idle timeout below for its full length.
+`STANDBY` is the one message that asks the firmware to draw and not to show a
+frame. The message also suspends the idle timeout below for its full length.
+
+`shape` selects what the firmware draws:
+
+| Value | Name   | What it draws                                          |
+| ----- | ------ | ------------------------------------------------------ |
+| `0`   | BREATH | the given colour, one full breath in each `period`     |
+| `1`   | DOT    | the middle of the strip in the given colour, and hold  |
+
+The `shape` byte is the sixth byte and it came after the other five. A
+firmware from before it reads five bytes and returns, so such a board breathes
+whatever the host asks for. `BREATH` is `0` for that reason: the shape that an
+old board draws must have the number that a new host sends for it.
+
+A firmware that knows `shape` and does not know the value it receives draws the
+breath. A strip that goes dark is a worse answer to "this host is newer than
+this board" than a strip that breathes.
+
+The host reads `CAPS` below to tell the two boards apart. See `CAP_STANDBY_SHAPES`.
+
+A strip with an even number of LEDs has no middle LED. `DOT` there lights the
+two either side of the middle, so the dot stays in the middle and is one LED
+wider.
 
 The message exists because a machine in suspend has no host. The service is
 frozen and can render nothing, but the strip must still show that the machine
@@ -75,9 +96,28 @@ and the strip goes dark as before.
 | Type   | Name  | Payload                                                       |
 | ------ | ----- | ------------------------------------------------------------- |
 | `0x02` | INFO  | `protocol` (u8), `max_leds` (u16), `data_pin` (u8), name (ASCII) |
+| `0x03` | CAPS  | `flags` (u8). See below                                        |
 | `0x30` | STATS | `frames` (u32), `crc_errors` (u16), `resyncs` (u16)           |
 | `0x31` | LOG   | ASCII text. The service writes it to the log                  |
 | `0x41` | PONG  | empty                                                         |
+
+`CAPS` says what this board can do beyond the messages that every board
+understood. The firmware sends it directly before `INFO`, at the start and in
+each answer to `HELLO`.
+
+| Bit    | Name                 | What it says                              |
+| ------ | -------------------- | ----------------------------------------- |
+| `0x01` | CAP\_STANDBY\_SHAPES | the board reads the `shape` byte of `STANDBY` |
+
+A board that sends no `CAPS` has none of these. That is the correct answer for
+each board flashed before the message existed, and the host reads silence that
+way.
+
+`CAPS` is a message of its own for two reasons. The name in `INFO` runs to the
+end of the payload, so nothing can be appended after it. And the version byte
+in the header of every frame cannot be raised: each side refuses a frame whose
+version it does not know, so a board and a host of different versions would not
+speak at all.
 
 The ESP sends `STATS` every 5 seconds. It appears in the journal at debug
 level:

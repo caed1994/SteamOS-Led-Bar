@@ -167,7 +167,10 @@ sudo systemctl start steamos-utility-center
 | `GAMMA` | `1.0` | `2.2` is smoother at low brightness |
 | `SPEED` | `1.0` | the animation speed (`0.5` is half speed) |
 | `PATROL_DOTS` | `1` | the number of dots in the patrol effect |
-| `STANDBY_PULSE` | `1` | show a white breath effect during suspend |
+| `STANDBY_PULSE` | `1` | show something during suspend |
+| `STANDBY_SHOWS` | `breath` | what it shows: `breath` or `dot`. See [Standby](#before-steam-starts-and-during-suspend) |
+| `STANDBY_COLOR` | `#ffffff` | the colour of it |
+| `STANDBY_BRIGHTNESS` | `30` | how bright, 0 to 255 |
 | `DESKTOP_SCENE` | `steam` | what the bar shows in [Desktop Mode](#desktop-mode): `steam`, `off`, `color`, `breath`, `patrol`, `rainbow`, `fire`, `aurora`, `temperature`, `load` |
 | `DESKTOP_COLOR` / `DESKTOP_BRIGHTNESS` | `#ffffff` / `128` | the colour and the brightness of that scene |
 | `DESKTOP_SPEED` | `1.0` | the speed of that scene. It operates as Steam's own speed control |
@@ -256,16 +259,43 @@ the breath effect.
 ![the startup breath](docs/previews/startup.png)
 
 During suspend, the strip shows a slow white breath effect. After the wake, the
-normal effect returns. `STANDBY_PULSE=0` disables the breath effect.
+normal effect returns. `STANDBY_PULSE=0` disables it.
 
 ![the standby breath](docs/previews/standby.png)
 
 Both effects are dim. The standby effect has a maximum of 30 of 255. This is
 the complete animation. The image is not defective.
 
+**There are two standby shapes, and the colour of each one is yours.** The
+**LED Strip > Effects** page has all three settings:
+
+| | |
+| --- | --- |
+| `STANDBY_SHOWS` | `breath` (the default) or `dot` |
+| `STANDBY_COLOR` | any colour. The menu offers the colour wheel of the notifications |
+| `STANDBY_BRIGHTNESS` | 0 to 255, and 30 by default |
+
+`breath` is the slow breath that this bar always had. `dot` lights the middle
+of the strip and holds it: this is the light on the front of a television that
+is off. A light that breathes says that the machine works. A strip
+with an even number of LEDs has no middle LED, so the dot there is the two
+either side of the middle.
+
+The colour and the level are two settings and not one, because every colour in
+that menu is at full strength. White at 30 is what the bar did before there
+were settings for it, so a machine that upgrades sees no change.
+
 **The ESP makes both effects itself**, because nothing runs during a suspend.
 The ESP must thus stay powered. The BIOS setting has the name *ErP*, *Wake on
 USB* or *USB power in S3*. The ESP also needs the firmware from this version.
+
+**The dot needs a board with the firmware from this version.** The message
+that hands the strip over grew one byte for the shape, and a board flashed
+before that byte reads the five bytes it knows and breathes. That is the old
+behaviour and not a failure, so the strip does something correct either way.
+The board says which of the two it is, and the service writes one line into
+the journal when you ask for a shape that the board cannot draw. Flash it from
+**LED Strip > Test**.
 
 To test the effects without a suspend, use these commands:
 

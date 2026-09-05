@@ -180,7 +180,9 @@ class LiveWindowTest(unittest.TestCase):
         # decides which block is there. See the note above DEPENDS_ON.
         self.panel.vars["RAINBOW_SHOWS"][0].set("Temperature")
         self.root.update()
-        rows = ("STANDBY_PULSE", "RAINBOW_SHOWS", "TEMPERATURE_MIN",
+        # The row directly above the governing row, and not one further up:
+        # the standby switch gained rows of its own below it.
+        rows = ("STANDBY_BRIGHTNESS", "RAINBOW_SHOWS", "TEMPERATURE_MIN",
                 "TEMPERATURE_MAX")
         # The measurement uses the name labels and not the controls. Each label
         # is a plain label of one height. A switch, a menu and a slider have
@@ -2551,6 +2553,38 @@ class GpuBlockTest(unittest.TestCase):
         self.panel._open_section("power")
         self.root.update()
 
+    def _show(self, widget):
+        """Scroll this page until the widget is on the screen.
+
+        A page is a frame inside a canvas, and Tk does not lay out the part of
+        it that is scrolled past the edge. A block below the fold thus reports
+        a height of 1, whatever the layout gave it, and a test that measured
+        the layout measured the scroll position instead.
+
+        Nothing on this page decides where the fold is. The window is as tall
+        as its tallest page and no taller than the screen, so a row added to
+        another page moves it. This scrolls to the widget rather than to the
+        foot for the same reason: the block under test is in the middle of
+        this page, and the foot is past it.
+
+        A widget that is hidden rather than scrolled away never arrives. The
+        loop ends, and the caller then reads it as hidden, which it is.
+        """
+        page = self.panel._section_pages["power"]
+        canvas = self.panel._scrollers.get(page)
+        # From the top each time. This scrolls down only, and a widget above
+        # the position the last call left behind is a widget it never reaches.
+        if canvas is not None:
+            canvas.yview_moveto(0.0)
+        for _ in range(80):
+            self.root.update()
+            if widget.winfo_ismapped() and widget.winfo_height() > 1:
+                return
+            if canvas is None:
+                return
+            canvas.yview_scroll(1, "units")
+        self.root.update()
+
     def _answers(self, clocks=None):
         return {
             "list_devices": DEVICES,
@@ -2675,7 +2709,8 @@ class GpuBlockTest(unittest.TestCase):
                      [("Curve", lact.FAN_CURVE),
                       ("Fixed speed", lact.FAN_STATIC)])[mode])
             self.panel._gpu_fan_changed()
-            self.root.update()
+            self._show(self.panel.gpu_fan_curve if curve_shown
+                       else self.panel.gpu_fan_static)
             self.assertEqual(
                 bool(self.panel.gpu_fan_curve.winfo_ismapped()), curve_shown,
                 mode)
@@ -2717,6 +2752,7 @@ class GpuBlockTest(unittest.TestCase):
         self.panel._gpu_fan_changed()
         for _ in range(4):
             self.root.update()
+        self._show(self.panel.gpu_fan_curve)
         canvas = self.panel._gpu_curve.canvas
         self.assertEqual(canvas.winfo_height(), canvas.winfo_reqheight())
 
