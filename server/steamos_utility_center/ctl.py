@@ -97,9 +97,9 @@ BOOST_SPEED = 1.0
 BOOST_MEMORY = os.path.join(".local", "state", "steamos-utility-center",
                             "gpu-fan.json")
 
-# The rule that lets the three programs above run with no password. The
-# installer writes it. Its absence is the usual reason a `set` fails, so the
-# answer names it rather than printing what sudo said.
+# The rule that lets the appliers above run with no password. The installer
+# writes it, with one line for each module that is installed. Its absence is
+# the usual reason a `set` fails, so the answer names it.
 SUDO_RULE = "/etc/sudoers.d/zz-steamos-utility-center"
 
 # Our own units, for the full status.

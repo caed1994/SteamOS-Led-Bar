@@ -3,14 +3,8 @@
 
 """Every part of the toolbox, described the same way.
 
-The status page held the LED checklist only, below the heading "this
-installation". At that time the toolbox installed four parts. The other three
-parts reported on their own settings pages, in their own forms, and never
-together.
-
-This file checks that form: three states and not two, a clear difference
-between "not installed" and "broken", and a summary that counts each part and
-not one part.
+Three states and not two, a clear difference between "not installed" and
+"broken", and a summary that counts each part and not one part.
 """
 
 import os
@@ -382,8 +376,8 @@ class PanelPartTest(unittest.TestCase):
 class ApplierCommandTest(unittest.TestCase):
     """With a password or without one, and what decides which.
 
-    The installer writes a sudoers rule for the three appliers. A run that
-    matches a line of it needs no password. Everything else goes through
+    The installer writes a sudoers rule for the appliers it installed. A run
+    that matches a line of it needs no password. Everything else goes through
     pkexec, which asks.
     """
 
