@@ -313,15 +313,12 @@ APP = [
     ]),
 ]
 
-# Sections where the complete body is one table of settings, and not a list
-# of pages. This is a table for the same reason as SETTINGS_TABS. Together
-# the two hold each settings row in the window, and the tests read both. Apply
-# does not collect a section that is absent from here.
+# Sections whose whole body is one table of settings and not a list of pages.
+# With SETTINGS_TABS these hold every settings row in the window, and the
+# tests read both. Apply does not collect a section that is absent from here.
 #
-# The second element is a line below the cards of the section. None is the
-# answer for each of them now: what those paragraphs said belongs in the
-# README, and a page of prose under two drop-downs is read by nobody. See the
-# note inside the Keyboard card for the one sentence that stayed.
+# The second element is a line below the cards of the section, and None for
+# each of them: a page of prose under two drop-downs is read by nobody.
 SECTION_SETTINGS = {
     "keyboard": (SYSTEM, None),
     "power": (POWER, None),
@@ -559,27 +556,21 @@ STATUS_DOT = 5
 # long enough for the window to draw itself first.
 CEC_FIRST_LOOK = 200
 
-# The text at the foot of the window after a command fails. This is one fixed
-# sentence and not the last line of the command. Half a sentence is worse
-# than no sentence. The line shares a bar with two indicators and the version,
-# so the bar cut a real error to the available width. The cut removed the end
-# of the line, and the end gives the fault. A short text that is always
-# complete is better than a reason that the bar sometimes cuts.
+# The text at the foot of the window after a command fails. One fixed sentence
+# and not the last line of the command: the bar shares its width with two
+# indicators and the version, and it cut a real error at the end, which is
+# where the fault is.
 #
-# The reason is not lost. It goes to stderr, as each other message from the
-# commands of the window does. This sentence tells the user to read it there.
+# The reason goes to stderr with each other message of the window, and this
+# sentence says where to read it.
 PROBLEM_TEXT = ("A command failed. Start the panel from a terminal to see "
                 "why.")
 
-# The scrollbar. This file draws it, and clam does not. The clam scrollbar has
-# an arrow button with a bevelled edge, a trough with a box around it, and
-# grip lines in the middle of the thumb. This scrollbar is a bar with full
-# round ends in the margin. It has no arrow and no visible trough, and it uses
-# the shapes of the other controls.
+# The scrollbar, drawn by this file and not by clam: a bar with full round
+# ends in the margin, with no arrow and no visible trough.
 #
-# SCROLL_WIDTH is the complete margin of the scrollbar, and SCROLL_THUMB is
-# the bar in it. The bar then has space on both sides and does not touch the
-# edge of the window.
+# SCROLL_WIDTH is the whole margin and SCROLL_THUMB is the bar in it, so the
+# bar has space on both sides and does not touch the edge of the window.
 SCROLL_WIDTH = 12
 SCROLL_THUMB = 6
 
@@ -994,12 +985,10 @@ def dress(style, roles, sizes):
         def family(element, layout, ground, hovered):
             """One radio, drawn against one ground.
 
-There are two, because a radio button paints its own background.
-            The indicator is a picture with the colour below it in the
-            picture, and the label carries a -background. A radio button for
-            a card, packed onto a page, leaves a block of the colour of the
-            card behind each name. The effect names on the preview page had
-            that fault.
+            There are two, because a radio button paints its own background:
+            the indicator picture carries the colour below it, and the label
+            carries a -background. A radio built for a card and packed onto a
+            page leaves a block of the card colour behind each name.
             """
             style.element_create(
                 element, "image",
@@ -1581,12 +1570,10 @@ class Popup:
     def _left(self):
         """Closes the list, if the focus left this application.
 
-        The two bindings that call this never ask immediately. A focus event
-        arrives at the start of the change. An immediate question can find
-        the moment after the old window released the focus and before the new
-        window took it. A click on a second field, with the first list open,
-        gives exactly that moment. After one pass of the idle loop the answer
-        is correct.
+        Never asked immediately. A focus event arrives at the start of the
+        change, and a question then can land after the old window released the
+        focus and before the new one took it. One pass of the idle loop is
+        enough.
         """
         self.window.after_idle(self._elsewhere)
 
@@ -1746,12 +1733,10 @@ class Dialog:
 class CountdownDialog(Dialog):
     """Asks the user to keep these settings, or to let LACT reverse them.
 
-    LACT applies a change and reverses it after some seconds, if the user does
-    not confirm it. That is a function and not an obstacle. A clock that the
-    card cannot hold, or a voltage that it cannot use, makes the screen black.
-    A machine that reverses such a change itself stays usable. So this dialog
-    asks the question, and it answers "no" itself when no user answers. The
-    timer of the daemon exists for exactly that condition.
+    LACT reverses a change after some seconds without a confirmation. That is
+    a function: a clock the card cannot hold makes the screen black, and a
+    machine that reverses it stays usable. So this dialog asks, and it answers
+    "no" itself when nobody answers.
     """
 
     def __init__(self, parent, seconds):
@@ -2369,15 +2354,12 @@ class Panel:
 
         self.sections = ttk.Notebook(main)
 
-        # The foot of the window takes its space before the pages, from the
-        # bottom upwards. pack gives out the space in the order of the calls.
-        # With the pages first, a short window got no Apply row and no status
-        # bar. Those two came later, and no space was available. The pages
-        # scroll and these two do not, so these two come first.
+        # The foot takes its space before the pages, because pack gives out
+        # space in the order of the calls and a short window then left nothing
+        # for a row that does not scroll.
         #
-        # The Apply row is below the sections and not in one section. One
-        # Apply button applies each setting in the window, in each section.
-        # See apply_settings.
+        # The Apply row is below the sections and not in one of them: one
+        # button applies each setting in the window. See apply_settings.
         self.runner = Runner(root, self._write, self._set_busy)
         self._build_apply(root)
         self.sections.pack(fill="both", expand=True)
@@ -3211,11 +3193,10 @@ class Panel:
         """How far in a setting sits, by what it hangs off.
 
         A row that needs the main switch of the tab only stays at the margin.
-        A row that also needs a row above it is indented below that row. The
-        three notification blocks then look like blocks, and not like twelve
-        equal lines. A row that depends on a *choice* is indented for the same
-        reason. The temperature marks are such rows, because they have a
-        meaning only when the slot shows the temperature.
+        A row that also needs a row above it is indented below that row, so
+        the notification blocks look like blocks and not like twelve equal
+        lines. A row that depends on a *choice* is indented for the same
+        reason.
         """
         needs = DEPENDS_ON.get(key, ())
         return (max(0, len(needs) - 1)
@@ -3347,12 +3328,10 @@ class Panel:
     def _follow(self, variable):
         """Watch a control, so the window can keep up with it.
 
-        Each setting can be the setting that another row depends on. A switch
-        and a menu are both possible. A watch on one control costs nothing, so
-        this window watches each candidate. Nobody must then keep a list in
-        step with DEPENDS_ON. This window also watches each other type: the
-        count of the unsaved settings must change with each control, and a
-        slider is one of them.
+        Any setting can be one that another row depends on, and a watch costs
+        nothing, so this watches every control. Nobody must then keep a list
+        in step with DEPENDS_ON, and the count of unsaved settings follows
+        each control as well.
         """
         variable.trace_add("write", self._settings_changed)
 
@@ -3598,12 +3577,10 @@ class Panel:
     def _relay_wrapping(self):
         """Sets the wraplengths again, after the layout of the page.
 
-        This code measures the insets against the widget above each line. At
-        the first report of the notebook width, no widget on the page has a
-        position. The first pass therefore uses the constant, and the long
-        lines become too wide. The caller schedules this function after a
-        section opens, when its geometry is correct. On a page with the
-        correct width, this function sets each label to its current value.
+        The insets are measured against the widget above each line, and at the
+        first report of the notebook width no widget has a position yet. The
+        caller schedules this after a section opens, when the geometry is
+        correct.
         """
         if not self._wrap_widths:
             return
@@ -3618,12 +3595,9 @@ class Panel:
     def _relay_buttons(self):
         """Lay each row of buttons out in as many columns as actually fit.
 
-        The columns are equal and they stretch. A row of four therefore holds
-        four names of the same width, for each text. A name that is wider than
-        its quarter is not wrapped. The row cuts it. The font of the desktop
-        gives the width of a name, and the window gives the available space.
-        Both values are available here, and neither was available at the build
-        step of the row.
+        The columns are equal and they stretch, so a name wider than its share
+        is cut. The font of the desktop gives the width of a name and the
+        window gives the space, and neither was known at the build step.
         """
         for row, buttons in self._button_rows:
             if not row.winfo_ismapped() or not buttons:
@@ -3801,9 +3775,9 @@ class Panel:
     def _tab_changed(self, _event=None):
         """Only show Apply where there is something to apply.
 
-        Two levels to ask now. A section that is one table of settings always
-        has something; the LED strip has something only on four of its seven
-        pages; and the two unbuilt sections and About never do.
+        Two levels: a section that is one table of settings always has
+        something, the LED strip only on four of its seven pages, and the
+        unbuilt sections and About never.
         """
         # The rail follows the notebook, and not the opposite. The rail
         # therefore also shows a page that the code selects, or that a
@@ -3933,12 +3907,11 @@ class Panel:
     def _swatch(self, value, ground, keep=True):
         """A square of colour for a menu entry, or None if this is not one.
 
-        Told by the value rather than by a list of which settings are colours:
-        anything the config file holds as #rrggbb is one, and a colour setting
-        added later gets its swatch without anything here being told.
+        Told by the value and not by a list: anything the file holds as
+        #rrggbb is one, so a colour setting added later gets its swatch.
 
-        `ground` is a role name or a colour. The colour behind a sample is
-        not always a colour with a role name. See _ground_under.
+        `ground` is a role name or a colour, because the colour behind a
+        sample does not always have a role name. See _ground_under.
         """
         if not _COLOUR.match(str(value)):
             return None
@@ -5577,15 +5550,12 @@ class Panel:
             self._write("The CEC toolkit could not be read: %s\n\n" % exc)
         self._cec_asked = True
         self._show_cec()
-        # The status page and the line below the title read this same answer,
-        # through _read_parts. A change here therefore makes both of them old.
+        # The status page and the line below the title read this same answer
+        # through _read_parts, so a change here makes both of them old.
         #
-        # This call is here and not in each caller. The first read runs after
-        # the window opens, and the headline comes before it, from a status of
-        # None. A toolkit with no read then reads as "installed, but it will
-        # not say how it is". Each page counts that as a problem, beside a
-        # light at the foot that reports HDMI CEC as ready. Each caller needs
-        # this call, and no caller made it. One place cannot forget it.
+        # Here and not in each caller. The first read runs after the window
+        # opens, and until then a toolkit with no read counts as "installed,
+        # but it will not say how it is". One place cannot forget the call.
         self.refresh_status()
         if then is not None:
             then()
@@ -5985,11 +5955,9 @@ class Panel:
     def _build_system(self, where, table, note):
         """The System page: the keyboard layout, the drives, and the plugin.
 
-        Both are settings of the machine and not of the bar, which is why they
-        share a section. They are not alike in one way that matters. The
-        keyboard layout is written into the home directory of the user and
-        needs no rights at all. A mount unit is in /etc and needs root, so this
-        page now has a privileged half where it had none.
+        All settings of the machine and not of the bar. The keyboard layout
+        goes in the home directory of the user and needs no rights. A mount
+        unit is in /etc and needs root, so this page has a privileged half.
         """
         outer = self._build_settings(where, table, note)
         # The keyboard layout above is the core. It writes into the home
@@ -6059,24 +6027,21 @@ class Panel:
     def _build_drives(self, parent):
         """The second drives of this machine, and what mounts them.
 
-        This writes no /etc/fstab. A SteamOS update rebuilds /etc from the new
-        image, so a line that a person adds to fstab is lost at the next
-        update. This page writes one systemd mount unit for each drive, which
-        is a file of this project and safe to carry across an update. See
+        No /etc/fstab: a SteamOS update rebuilds /etc, so a line added there
+        is lost. This writes one systemd mount unit for each drive, which is a
+        file of this project and safe to carry across an update. See
         server/steamos_utility_center/mounts.py.
         """
         box = self._section(parent, "Drives", card=True)
         self.drives_box = ttk.Frame(box, style="OnCard.TFrame")
         self.drives_box.pack(fill="x", pady=(GROUP_GAP, 0))
 
-        # The partition to add, read off the machine rather than typed. A UUID
-        # is not a value to ask a person to copy.
+        # The partition to add, read off the machine rather than typed. A
+        # UUID is not a value to ask a person to copy.
         #
-        # One row, and the button is on it. The button stood on a row of its
-        # own below, from _buttons, which lays out a row of several buttons in
-        # equal columns. One button in that grid is one button in the first of
-        # four equal columns, under two fields that are laid out by width. So
-        # the card had three lines that each began at a different place.
+        # One row, with the button on it. In a _buttons row of its own, the
+        # button took the first of four equal columns under two fields laid
+        # out by width, and the card read as three lines with three starts.
         row = ttk.Frame(box, style="OnCard.TFrame")
         row.pack(fill="x", pady=(GROUP_GAP, 0))
         ttk.Label(row, text="Add").pack(side="left", padx=(0, ROW_GAP))
@@ -6309,14 +6274,11 @@ class Panel:
         return self.runner.start(command, afterwards)
 
     def _build_app(self, where, table, note):
-        """App Settings, which is now everything about this program itself.
+        """App Settings: everything about this program itself.
 
-        This page holds the look of the panel and its update controls. The
-        update controls were on the status page before. That page then held
-        "fetch a branch and install it" beside a list of faults. Those are two
-        different questions, and a fault list is not a setting. Here the update
-        controls stand with the other settings of the panel, and not with the
-        settings of the machine.
+        The look of the panel and its update controls, which are settings of
+        the panel and not of the machine. A fault list is a different question
+        and stays on the status page.
         """
         outer = self._build_settings(where, table, note)
         self.update_box = self._build_update(outer)
@@ -6325,12 +6287,9 @@ class Panel:
     def _build_update(self, parent):
         """Fetch a branch and install it: the two halves of "get the new one".
 
-        This block is on a card, as each other group of settings on this page
-        is. It was a plain frame before, and that was correct at its old
-        position. The old status page had the colour of a card, so a plain
-        frame on it had the correct colour. On a page, that frame became a band
-        of the wrong colour at the width of the content. This window has now
-        had that fault in two forms, so the live tests check both.
+        On a card, as each other group of settings on this page is. A plain
+        frame here draws a band of the wrong colour at the width of its
+        content, and the live tests check for that.
         """
         holder = ttk.Frame(parent, style="Page.TFrame")
         holder.pack(fill="x")
@@ -6566,11 +6525,9 @@ class Panel:
     def _forget_dead_labels(self):
         """Drop wrapped labels whose widgets have gone.
 
-        This page destroys and builds its blocks again at each read. The
-        sentence of each block goes into the list of labels for the wrap step
-        of a resize. Without this function, the next resize configures a widget
-        that no longer exists, and Tk reports that as an invalid command name.
-        The list also grows for the complete time of the window.
+        This page destroys and builds its blocks again at each read, and each
+        sentence goes into the list for the wrap step of a resize. Without
+        this, the next resize configures a widget that no longer exists.
         """
         alive = []
         for label in self._wrapped:
