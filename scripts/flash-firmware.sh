@@ -86,6 +86,37 @@ if ! PIO="$(find_pio)"; then
     exit 1
 fi
 
+# pkexec starts this script in the home directory of root, and the flash runs
+# as the caller. That caller cannot return into /root.
+#
+# PlatformIO changes back to its start directory at its exit. A successful
+# flash thus ended with "PermissionError: [Errno 13] Permission denied:
+# '/root'" and an exit code that reported a full failure.
+#
+# This script thus changes to a directory that both users can reach.
+cd "$SOURCE_DIR"
+
+as_target() {
+    if [[ "$(id -u)" == "$TARGET_UID" ]]; then
+        env "PATH=$(dirname "$PIO"):$PATH" "$@"
+    else
+        runuser -u "$TARGET_USER" -- env \
+            "HOME=$TARGET_HOME" \
+            "PATH=$(dirname "$PIO"):$PATH" \
+            "$@"
+    fi
+}
+
+# Before the service stops. Which Python modules a build needs is a question
+# with no serial port and no root in it, and this file answers what it can
+# answer before it changes anything. See the environment name above.
+#
+# It cost a stopped service and a started one: PlatformIO's own virtualenv had
+# no pip, the build could not add the module that its esptool imports, and the
+# bar went out and came back for a failure that no port was needed to find.
+echo "Checking what the build needs ..."
+as_target "SUC_PREPARE_ONLY=1" bash "$SOURCE_DIR/flash-esp.sh" "$ENVIRONMENT"
+
 RESTART=0
 if systemctl is-active --quiet "$SERVICE"; then
     RESTART=1
@@ -101,23 +132,5 @@ restore() {
 }
 trap restore EXIT
 
-# pkexec starts this script in the home directory of root, and the flash runs
-# as the caller. That caller cannot return into /root.
-#
-# PlatformIO changes back to its start directory at its exit. A successful
-# flash thus ended with "PermissionError: [Errno 13] Permission denied:
-# '/root'" and an exit code that reported a full failure.
-#
-# This script thus changes to a directory that both users can reach.
-cd "$SOURCE_DIR"
-
 echo "Flashing '$ENVIRONMENT' as $TARGET_USER ($PIO)"
-if [[ "$(id -u)" == "$TARGET_UID" ]]; then
-    env "PATH=$(dirname "$PIO"):$PATH" \
-        bash "$SOURCE_DIR/flash-esp.sh" "$ENVIRONMENT"
-else
-    runuser -u "$TARGET_USER" -- env \
-        "HOME=$TARGET_HOME" \
-        "PATH=$(dirname "$PIO"):$PATH" \
-        bash "$SOURCE_DIR/flash-esp.sh" "$ENVIRONMENT"
-fi
+as_target bash "$SOURCE_DIR/flash-esp.sh" "$ENVIRONMENT"

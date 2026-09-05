@@ -49,27 +49,84 @@ fi
 # Recent espressif32 platforms ship an esptool that imports intelhex, which is
 # not always present in PlatformIO's bundled virtualenv. Without it the build
 # dies at bootloader.bin with "No module named 'intelhex'".
+#
+# That virtualenv does not always have a pip either, and then the one line
+# that installed the module printed "No module named pip" and stopped. A
+# virtualenv made with --without-pip has none, and PlatformIO needs none after
+# its own installation.
+#
+# So there are three ways here, and each one is tried in turn. The last of
+# them writes into that virtualenv with a pip from somewhere else, which works
+# because intelhex is pure Python: where it was built does not matter.
 ensure_esptool_deps() {
     local core_dir="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
     local penv_python="$core_dir/penv/bin/python"
+    local log site other
 
     [[ -x "$penv_python" ]] || return 0
     "$penv_python" -c 'import intelhex' >/dev/null 2>&1 && return 0
 
     echo "PlatformIO's esptool needs the 'intelhex' module; installing it..."
-    if ! "$penv_python" -m pip install --quiet intelhex; then
-        cat >&2 <<EOF
+    log="$(mktemp)"
 
-Could not install 'intelhex' automatically. Install it by hand:
+    # 1. The pip of that virtualenv, when it has one.
+    if "$penv_python" -m pip install --quiet intelhex >>"$log" 2>&1; then
+        rm -f "$log"
+        return 0
+    fi
+
+    # 2. Give it one. ensurepip is in the standard library and it carries the
+    #    wheel of pip with it, so this step needs no network of its own.
+    if "$penv_python" -m ensurepip --default-pip >>"$log" 2>&1 \
+            && "$penv_python" -m pip install --quiet intelhex >>"$log" 2>&1; then
+        rm -f "$log"
+        return 0
+    fi
+
+    # 3. A pip from another Python, writing into that virtualenv. purelib is
+    #    the directory of its own modules, so nothing here guesses a path.
+    site="$("$penv_python" -c \
+        'import sysconfig; print(sysconfig.get_paths()["purelib"])' \
+        2>>"$log" || true)"
+    if [[ -n "$site" ]]; then
+        for other in python3 python; do
+            command -v "$other" >/dev/null 2>&1 || continue
+            "$other" -m pip install --quiet --target "$site" intelhex \
+                >>"$log" 2>&1 || continue
+            if "$penv_python" -c 'import intelhex' >/dev/null 2>&1; then
+                rm -f "$log"
+                return 0
+            fi
+        done
+    fi
+
+    cat >&2 <<EOF
+
+Could not install 'intelhex'. These three were tried:
 
     $penv_python -m pip install intelhex
+    $penv_python -m ensurepip --default-pip
+    python3 -m pip install --target $site intelhex
 
+and each one said:
+
+$(cat "$log")
+
+The board still has the firmware it had.
 EOF
-        exit 1
-    fi
+    rm -f "$log"
+    exit 1
 }
 
 ensure_esptool_deps
+
+# The panel asks for this before it stops the service. The modules that a
+# build needs are a question with no serial port and no root in it, so a
+# machine that cannot answer it must not pay for a stopped service first.
+# See scripts/flash-firmware.sh.
+if [[ "${SUC_PREPARE_ONLY:-0}" == "1" ]]; then
+    exit 0
+fi
 
 if systemctl is-active --quiet steamos-utility-center.service 2>/dev/null; then
     echo "Stopping steamos-utility-center so the serial port is free..."

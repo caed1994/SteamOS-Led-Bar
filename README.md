@@ -119,6 +119,14 @@ Caution: The two ESP8266 builds drive different pins. If your strip is on D5
 and you flash the first build, the strip stays dark. This is the wrong pin. It
 is not a fault.
 
+**The build adds `intelhex` when it must.** The esptool of a recent espressif
+platform imports that module, and PlatformIO's own virtualenv does not always
+carry it. The script installs it in one of three ways: with the pip of that
+virtualenv, with a pip that `ensurepip` puts there, or with a pip from another
+Python that writes into it. The module is pure Python, so the last way works
+whatever built it. The script does this before it stops the service, because
+the question needs no serial port.
+
 ## Settings
 
 The settings are `NAME=value` lines in `/etc/steamos-utility-center.conf`. The

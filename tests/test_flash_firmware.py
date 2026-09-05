@@ -20,6 +20,142 @@ SCRIPT = os.path.join(HERE, "..", "scripts", "flash-firmware.sh")
 INI = os.path.join(HERE, "..", "firmware", "led-client", "platformio.ini")
 
 
+ESP_SCRIPT = os.path.join(HERE, "..", "flash-esp.sh")
+
+
+class BuildDependencyTest(unittest.TestCase):
+    """PlatformIO's own virtualenv, and the module that its esptool imports.
+
+    The one line that installed it needed a pip inside that virtualenv, and a
+    virtualenv made with --without-pip has none. It printed "No module named
+    pip" and stopped, with the service already down.
+
+    Nothing here reaches the network. The Python of that virtualenv is a shell
+    script that answers as a real one would, and it records what it was asked.
+    """
+
+    # What the fake penv Python answers. Each line is one way the script tries,
+    # in the order that it tries them.
+    PYTHON = """#!/usr/bin/env bash
+echo "$@" >> "$RECORD"
+case "$*" in
+    *"import intelhex"*)
+        [[ -e "$MARKER" ]] && exit 0
+        echo "ModuleNotFoundError: No module named 'intelhex'" >&2
+        exit 1 ;;
+    *ensurepip*)
+        [[ "$ENSUREPIP" == "1" ]] && { touch "$PIP_MARKER"; exit 0; }
+        echo "No module named ensurepip" >&2
+        exit 1 ;;
+    *"-m pip install"*)
+        [[ -e "$PIP_MARKER" ]] && { touch "$MARKER"; exit 0; }
+        echo "No module named pip" >&2
+        exit 1 ;;
+    *purelib*)
+        echo "$SITE" ;;
+    *)
+        exit 0 ;;
+esac
+"""
+
+    # A pip somewhere else, which writes into that virtualenv.
+    OTHER = """#!/usr/bin/env bash
+echo "other $@" >> "$RECORD"
+case "$*" in
+    *"--target"*intelhex*)
+        [[ "$OTHER_PIP" == "1" ]] || { echo "no pip here" >&2; exit 1; }
+        touch "$MARKER"
+        exit 0 ;;
+    *)
+        exit 1 ;;
+esac
+"""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.bin = os.path.join(self.home, "bin")
+        penv = os.path.join(self.home, "core", "penv", "bin")
+        for where in (self.bin, penv, os.path.join(self.home, "site")):
+            os.makedirs(where)
+        self.record = os.path.join(self.home, "record")
+        self.marker = os.path.join(self.home, "intelhex-is-there")
+        self.pip_marker = os.path.join(self.home, "pip-is-there")
+
+        self._write(os.path.join(penv, "python"), self.PYTHON)
+        self._write(os.path.join(self.bin, "python3"), self.OTHER)
+        # flash-esp.sh gives up before any of this without one.
+        self._write(os.path.join(self.bin, "pio"), "#!/bin/sh\nexit 0\n")
+
+    def _write(self, path, text):
+        with open(path, "w") as handle:
+            handle.write(text)
+        os.chmod(path, 0o755)
+
+    def _run(self, ensurepip="0", other_pip="0"):
+        """Runs the step that the panel asks for before it stops the service."""
+        environment = dict(os.environ)
+        environment.update(
+            PATH="%s:%s" % (self.bin, os.environ["PATH"]),
+            PLATFORMIO_CORE_DIR=os.path.join(self.home, "core"),
+            RECORD=self.record, MARKER=self.marker,
+            PIP_MARKER=self.pip_marker,
+            SITE=os.path.join(self.home, "site"),
+            ENSUREPIP=ensurepip, OTHER_PIP=other_pip,
+            SUC_PREPARE_ONLY="1")
+        return subprocess.run(["bash", ESP_SCRIPT, "esp8266_gpio14"],
+                              env=environment, capture_output=True, text=True)
+
+    def _tried(self):
+        with open(self.record) as handle:
+            return handle.read()
+
+    def test_a_virtualenv_with_no_pip_is_not_the_end_of_it(self):
+        """The failure this comes from. One way was tried, and it was the one
+        way that a virtualenv made with --without-pip cannot answer.
+        """
+        result = self._run(ensurepip="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ensurepip", self._tried())
+
+    def test_a_pip_from_somewhere_else_writes_into_it(self):
+        """The last way. intelhex is pure Python, so the interpreter that
+        installed it does not have to be the one that imports it.
+        """
+        result = self._run(other_pip="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--target", self._tried())
+
+    def test_it_tries_them_in_order_and_stops_at_the_first(self):
+        result = self._run(ensurepip="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("--target", self._tried(),
+                         "it went on after the module was there")
+
+    def test_nothing_that_works_names_each_way_it_tried(self):
+        result = self._run()
+        self.assertEqual(result.returncode, 1)
+        for named in ("-m pip install intelhex", "ensurepip", "--target"):
+            self.assertIn(named, result.stderr, named)
+        self.assertIn("No module named pip", result.stderr,
+                      "it hides what the machine said")
+
+    def test_a_module_that_is_there_costs_nothing(self):
+        open(self.marker, "w").close()
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("installing", result.stdout)
+
+    def test_the_check_alone_flashes_nothing(self):
+        """The panel runs this before it stops the service, so it must stop
+        before the part that needs the port.
+        """
+        open(self.marker, "w").close()
+        result = self._run()
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Building and flashing", result.stdout)
+
+
 class FlashScriptTest(unittest.TestCase):
     def _run(self, *args, uid=None):
         # PKEXEC_UID is how the script learns who asked, and pointing it at a
@@ -34,6 +170,17 @@ class FlashScriptTest(unittest.TestCase):
                               capture_output=True, text=True)
 
     NOBODY = 65534
+
+    def test_the_check_of_the_build_comes_before_the_service_stops(self):
+        """Which Python modules a build needs is a question with no serial
+        port and no root in it. It cost a stopped service and a started one
+        before this: the bar went out and came back for a failure that no port
+        was needed to find.
+        """
+        with open(SCRIPT) as handle:
+            body = handle.read()
+        self.assertLess(body.index("SUC_PREPARE_ONLY=1"),
+                        body.index('systemctl stop "$SERVICE"'))
 
     def test_it_wants_to_be_told_what_to_flash(self):
         result = self._run()
