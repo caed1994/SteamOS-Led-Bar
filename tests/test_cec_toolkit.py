@@ -331,6 +331,56 @@ class FixedHereTest(unittest.TestCase):
         self.assertIn('[[ -S "/run/user/$STEAMOS_CEC_UID/bus" ]]', helper)
         self.assertIn('&& session_bus_is_there; then', helper)
 
+    def test_the_standby_stops_when_the_television_says_it_is_off(self):
+        """It sent standby six times over about three seconds whatever the
+        set did, because different sets listen to different ones of the six.
+        A set that answers GIVE_DEVICE_POWER_STATUS can end that at the first
+        one: one measured television answered in 23 milliseconds.
+        """
+        helper = self._read("bin", "steamos-cec-before-sleep")
+        self.assertIn("--give-device-power-status", helper)
+        self.assertIn("television_is_off", helper)
+        # The code and not the word. cec-ctl prints "standby (0x01)", and a
+        # code does not change with the wording of a release.
+        self.assertIn('(0x01)', helper)
+        self.assertIn('(0x03)', helper)
+
+    def test_the_broadcast_goes_out_before_anything_can_stop_early(self):
+        """A television that is off is not a receiver that is off. The
+        broadcast is what an AV receiver listens to.
+        """
+        helper = self._read("bin", "steamos-cec-before-sleep")
+        broadcast = helper.index("send_native_standby 15")
+        asking = helper.index("television_is_off || said=")
+        self.assertLess(broadcast, asking)
+
+    def test_a_set_that_says_nothing_is_asked_one_time_only(self):
+        """cec-ctl waits about a second for a reply that is not coming, and
+        this is on each suspend and each shutdown. Such a set must pay that
+        one time and then get the ladder it always got.
+        """
+        helper = self._read("bin", "steamos-cec-before-sleep")
+        self.assertIn("asking=0", helper)
+        self.assertIn("POWER_STATUS_TIMEOUT", helper)
+        # And a way to stop asking at all, for a set that never answers.
+        self.assertIn('[[ "$POWER_STATUS_TIMEOUT" != "0" ]] || return 2',
+                      helper)
+        self.assertIn("POWER_STATUS_TIMEOUT",
+                      self._read("config", "steamos-cec-toolkit.conf.example"))
+
+    def test_the_question_cannot_end_the_script_by_itself(self):
+        """This file runs under `set -e`, where a command that returns
+        non-zero on a line of its own ends the script. A television that
+        answers "on" would then stop the suspend before the ladder ran.
+        """
+        helper = self._read("bin", "steamos-cec-before-sleep")
+        called = [line.strip() for line in helper.split("\n")
+                  if line.strip().startswith("television_is_off")
+                  and not line.strip().endswith("() {")]
+        self.assertTrue(called, "nothing calls it")
+        for line in called:
+            self.assertIn("||", line, line)
+
     def test_the_unit_cannot_hold_the_machine_for_a_minute_and_a_half(self):
         """The suspend and the shutdown wait for this unit, and without a
         limit of its own it gets the default of the machine. One cec-ctl that

@@ -32,6 +32,16 @@ CEC_SLEEP_TV_ACTION="${CEC_SLEEP_TV_ACTION:-standby}"
 # was on each suspend and each shutdown. Raise it in the configuration file
 # for a set that needs longer.
 TV_STANDBY_SETTLE_SECONDS="${TV_STANDBY_SETTLE_SECONDS:-0.5}"
+# How long to wait for the television to say whether it is off.
+#
+# A set that answers does it in some tens of milliseconds; one measured
+# television took 23. The limit is for the set that never answers: cec-ctl
+# waits about a second for a reply that is not coming, and this is on each
+# suspend and each shutdown. See television_is_off.
+#
+# 0 turns the question off. A television that never answers costs that half
+# second on each suspend and gains nothing, and this is the way to say so.
+POWER_STATUS_TIMEOUT="${POWER_STATUS_TIMEOUT:-0.5}"
 INPUT_INACTIVE_SUSPEND_MARKER="/run/user/$STEAMOS_CEC_UID/steamos-cec-input-inactive-suspend"
 
 case "$CEC_SLEEP_TV_ACTION" in
@@ -97,6 +107,36 @@ physical_address_payload() {
     return 1
   fi
   printf '0x%02x:0x%02x\n' "$((16#$a * 16 + 16#$b))" "$((16#$c * 16 + 16#$d))"
+}
+
+# What the television says about its own power, as an exit code:
+#
+#     0  off          1  still on        2  it said nothing
+#     3  on its way off
+#
+# This is the question the ladder below exists to answer, and the ladder had
+# no way to ask it. It sends standby six times over about three seconds
+# because different sets listen to different ones of the six, and it sends
+# all six whatever the set does, on each suspend and each shutdown.
+#
+# The hex code and not the words: cec-ctl prints "pwr-state: standby (0x01)"
+# and "in transition on to standby (0x03)", and a code does not change with
+# the wording of a release.
+#
+# The third answer is the one that matters for a set that does not do this.
+# Such a set gets asked one time and then the full ladder, so it is one
+# timeout slower and no more. A set that answers "on" is asked again after
+# each step, which costs milliseconds.
+television_is_off() {
+  local said
+  [[ "$POWER_STATUS_TIMEOUT" != "0" ]] || return 2
+  said="$(timeout "$POWER_STATUS_TIMEOUT" /usr/bin/cec-ctl -d "$CEC_DEVICE" -s \
+            --to "$TV_LOGICAL_ADDRESS" --give-device-power-status 2>/dev/null)" \
+    || return 2
+  [[ "$said" == *"pwr-state:"* ]] || return 2
+  [[ "$said" != *"(0x01)"* ]] || return 0
+  [[ "$said" != *"(0x03)"* ]] || return 3
+  return 1
 }
 
 send_inactive_source() {
@@ -171,16 +211,48 @@ if [[ -e "$CEC_DEVICE" ]]; then
     exit 0
   fi
 
+  # The set and then the bus. The broadcast is what an AV receiver listens
+  # to, so it goes out before anything below can decide that the work is
+  # done: a television that is off is not a receiver that is off.
   send_native_standby "$TV_LOGICAL_ADDRESS"
   sleep 0.25
   send_native_standby 15
 
-  for delay in 0.5 1.0; do
-    sleep "$delay"
-    send_raw_standby "$playback_logical_address" "$TV_LOGICAL_ADDRESS"
-    sleep 0.25
-    send_raw_standby "$playback_logical_address" 15
-  done
+  # Ask the set, and send no more once it says it is off. `asking` goes to 0
+  # for a set that says nothing, so such a set is asked one time and no more.
+  #
+  # `|| said=$?` and not a bare call: this file runs under `set -e`, where a
+  # command that returns non-zero on a line of its own ends the script. A
+  # television that answers "on" would then stop the suspend.
+  asking=1
+  answer=1
+  said=0
+  television_is_off || said=$?
+  [[ "$said" != "2" ]] || asking=0
+  answer="$said"
+
+  if [[ "$answer" != "0" ]]; then
+    for delay in 0.5 1.0; do
+      sleep "$delay"
+      send_raw_standby "$playback_logical_address" "$TV_LOGICAL_ADDRESS"
+      sleep 0.25
+      send_raw_standby "$playback_logical_address" 15
+      [[ "$asking" == "1" ]] || continue
+      said=0
+      television_is_off || said=$?
+      [[ "$said" != "2" ]] || { asking=0; continue; }
+      answer="$said"
+      [[ "$answer" != "0" ]] || break
+    done
+  fi
+
+  # The settle time is for a set with no way to say that it is ready. One
+  # that reports standby has said so, and a wait after that is a wait for
+  # nothing. A set on its way there is not there, and keeps the wait.
+  if [[ "$answer" == "0" ]]; then
+    echo "steamos-cec: the television reports standby"
+    exit 0
+  fi
 fi
 
 sleep "$TV_STANDBY_SETTLE_SECONDS"

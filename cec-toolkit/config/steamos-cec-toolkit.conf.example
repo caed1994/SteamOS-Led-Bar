@@ -98,6 +98,17 @@ CEC_SLEEP_TV_ACTION=standby
 # Raise it for a TV that misses the standby.
 TV_STANDBY_SETTLE_SECONDS=0.5
 
+# How long to wait for the TV to say whether it is off.
+#
+# The standby above is sent up to six times over about three seconds, because
+# different sets listen to different ones of the six. A set that answers
+# GIVE_DEVICE_POWER_STATUS ends that as soon as it reports standby: one
+# measured TV answered in 23 ms, and the suspend was 2.8 seconds shorter.
+#
+# A set that does not answer is asked one time and then gets all six as
+# before, which costs this half second. Set 0 to stop asking.
+POWER_STATUS_TIMEOUT=0.5
+
 # Optional input inactive suspend service.
 # Suspends SteamOS after this CEC source is no longer active for the delay.
 INPUT_INACTIVE_SUSPEND_DELAY_SECONDS=60

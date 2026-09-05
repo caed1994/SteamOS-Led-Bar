@@ -916,11 +916,21 @@ a feature and reboot.
 
 **Turn the television off with the machine costs some seconds of each suspend
 and each shutdown.** The machine waits for it: the unit sends standby to the
-television and the machine goes only after that. The messages take about three
-seconds, because the toolkit sends six of them with pauses between, and it does
-that because different sets listen to different ones. `TV_STANDBY_SETTLE_SECONDS`
-holds the last of those pauses, which is the time the set has to act before the
-HDMI link goes away.
+television and the machine goes only after that. The toolkit sends standby six
+times with pauses between, because different sets listen to different ones.
+`TV_STANDBY_SETTLE_SECONDS` holds the last of those pauses, which is the time
+the set has to act before the HDMI link goes away.
+
+**A television that answers ends that at the first message.** After the standby
+and the broadcast that an AV receiver listens to, the toolkit asks the set
+whether it is off. One measured television answered in 23 milliseconds and the
+suspend became 2.8 seconds shorter. A set that answers "on" gets the six
+messages as before, with the question between them, and stops at whichever one
+works.
+
+A set that answers nothing is asked one time and then gets the six, which costs
+half a second. `POWER_STATUS_TIMEOUT` bounds that wait, and `0` stops the
+question for a set that never answers it.
 
 Nothing here waits longer than it must: the unit has a limit of 15 seconds, so
 one `cec-ctl` that does not return cannot hold the machine for the minute and a
