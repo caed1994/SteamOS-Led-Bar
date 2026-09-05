@@ -116,14 +116,12 @@ class Probe:
     def lingering(self, user=None):
         """Reports whether the systemd of this user runs with no open session.
 
-        Without this setting, a change to Game Mode ends the session and stops
-        each user service. The two services of this project stop also, and
-        both must stay alive across that change.
+        Without this setting, a change to Game Mode ends the session and
+        stops each user service. Both services of this project must stay
+        alive across that change.
 
-        This function asks about one *given* user, by number. Without a user,
-        loginctl answers about a different subject and does not give Linger.
-        Then this function reported "no" on a machine that answered "yes" to
-        the same question with the user in it.
+        It asks about one *given* user, by number. With no user, loginctl
+        answers about another subject and gives no Linger at all.
         """
         who = str(os.getuid() if user is None else user)
         command = ["loginctl", "show-user", who, "--property=Linger"]
@@ -273,15 +271,12 @@ def repair_summary(checks):
 
 # -- the state of every part -----------------------------------------------
 #
-# This toolbox now installs four parts: the LED service, a CPU power unit, a
-# complete HDMI CEC toolkit, and a line in the environment.d of the user.
-# Before this layer, the page reported on one part only, and it still had the
-# name "this installation". The other parts reported on their own settings
-# pages, in their own forms, and never together.
+# This toolbox installs several parts: the LED service, a CPU power unit, the
+# HDMI CEC toolkit, and a line in the environment.d of the user. Each one
+# reported on its own settings page, in its own form, and never together.
 #
-# So this layer describes each part in the same form, and one place holds
-# them. The status page draws them, and the headline counts them. Neither of
-# the two knows the method that examines one part.
+# So this layer describes each part in one form. The status page draws them
+# and the headline counts them, and neither knows how a part is examined.
 
 
 class Part:
@@ -328,13 +323,9 @@ def led_part(checks, installed=True):
     """The LED service, from the checklist that was this page's only content.
 
     A machine without the LED module has no service, no kernel module and no
-    udev rule. None of that is a fault: it is a module that nobody asked for.
-    So the answer there is "not installed", which is ok=None, and not a list
-    of checks that failed.
-
-    Without this, a machine with the core only reported "The kernel module is
-    missing for the running kernel" at the head of every page, and offered a
-    repair for a part that it does not have. See modules.py.
+    udev rule, and none of that is a fault. The answer there is "not
+    installed", which is ok=None, and not a list of failed checks. See
+    modules.py.
     """
     if not installed:
         return Part("led", "LED bar", None,
@@ -386,16 +377,12 @@ def features_on(status):
 def adapter_gone_cost(status):
     """Returns the cost of the features that stay on with no adapter.
 
-    A user removed the adapter and connected a normal monitor. The machine
-    then needed one and a half minutes more to start, and no message gave the
-    reason. Each feature was still on, and the wake service of the toolkit
-    did not know about the removed adapter. That service waits eight seconds
-    for the device and then twelve seconds for a logical address. It repeats
-    this four times before it stops and lets the session start.
+    An adapter that is out, with the features still on, costs one and a half
+    minutes at each start and says nothing. The wake service waits eight
+    seconds for the device and twelve for a logical address, four times over.
 
     The result is "" for each condition but one: the adapter does not answer
-    *and* a feature is on. An adapter that is out, with each feature off,
-    costs nothing.
+    *and* a feature is on.
     """
     if status is None or cec_module.usable(status):
         return ""
@@ -460,19 +447,14 @@ def cec_part(status, installed, source_dir=None):
 def gpu_part(state, error="", available=None, asked=True):
     """Returns the graphics card, when a daemon controls it.
 
-    The result is "not installed" when LACT does not run, and that is the
-    condition of most machines. LACT is the tool of another project, and
-    nothing here installs it. Its absence is not a fault, and this function
-    does not count it as one.
+    "not installed" when LACT does not run, which is most machines. Nothing
+    here installs it, and its absence is not a fault.
 
-    `available` is the socket of the daemon, which is a file test. `asked`
-    tells whether the window spoke to the daemon already.
-
-    Both are here because `state is None` had three meanings and this function
-    read it as one. No daemon, a daemon that gives no answer, and a window
-    that did not ask are three different things. The page reported all three
-    as "LACT is not running." A person whose card was under LACT's control
-    read that on the status page, while the page beside it set the card.
+    `available` is a file test on the socket. `asked` says whether the window
+    spoke to the daemon yet. Both are here because `state is None` covers
+    three different things: no daemon, a daemon that gives no answer, and a
+    window that did not ask. Read as one, all three said "LACT is not
+    running" while the page beside it set the card.
     """
     if error:
         return Part("gpu", "Graphics card", False, error)
@@ -525,12 +507,9 @@ def panel_part(version, update_state=None, update_said="", behind="",
                installed=None, head=""):
     """Returns the program itself. It is always installed and on the screen.
 
-    `behind` is the sentence of install_is_behind(), and it is the one item
-    here that counts as a fault. A pull and an install are two steps, and the
-    window showed the first step only. A clone some commits in front of the
-    running copy then looked the same as a machine at the current version. So
-    a correction in the clone did not run, and each user read the log of the
-    old copy.
+    `behind` is the sentence of install_is_behind(), and the one item here
+    that counts as a fault. A pull and an install are two steps, and a clone
+    ahead of the running copy looks like a current machine.
     """
     # Show both commits. The question for this block is which code runs now.
     # A version number does not answer that question. It changes when a
@@ -570,12 +549,9 @@ SECTION_PARTS = {"strip": "led", "cec": "cec", "keyboard": "layout"}
 def summary_for(parts, section=""):
     """Returns the sentence for one page, and not always the global one.
 
-    A user reported this: the HDMI CEC page said "Everything is in order."
-    below its own title, and above a card with the text "Not installed yet".
-    Both texts were correct. The sentence counts each part, and a part that is
-    not installed is not a problem. A machine without CEC is not a broken
-    machine. But a global answer below the heading of a section reads as an
-    answer about that section.
+    A count over every part reads as an answer about the section it stands
+    under: the HDMI CEC page said "Everything is in order." above a card that
+    said "Not installed yet", and both were correct.
 
     So the part of the page gives the sentence when its condition is not good.
     A page with no part of its own gets the count across all parts.
@@ -612,15 +588,13 @@ def parts_summary(parts):
 
 # -- settings profiles -----------------------------------------------------
 #
-# A profile is the same KEY=value file as the configuration. That makes this
-# function small, because the parser, the validator and the formatter are
-# already available. A profile holds only the settings that the panel can set.
-# The lines for one machine are not in it: the serial port, the baud rate and
-# the device. So those lines cannot come from the machine of another user.
+# A profile is the same KEY=value file as the configuration, so the parser,
+# the validator and the formatter are already available. It holds the settings
+# the panel can set and not the lines that belong to one machine: the serial
+# port, the baud rate and the device.
 #
-# A profile is in the clone and not under ~/.config. The user goes to the
-# clone for this project. The clone also needs no rights: the panel writes it
-# as the user, and the configuration in /etc needs root.
+# It lives in the clone and not under ~/.config. The panel writes it as the
+# user, where the configuration in /etc needs root.
 PROFILE_DIR = "profiles"
 PROFILE_SUFFIX = ".conf"
 
@@ -743,21 +717,15 @@ def reinstall_command(source_dir, rebuild_module=True):
 #
 # Two ways in, and the difference is a password.
 #
-# The installer writes a sudoers rule for the three appliers. Each line of it
-# names one program and the one file that program reads, and there is no
-# wildcard in it. A run that matches a line needs no password at all.
+# The installer writes a sudoers rule for the appliers. Each line names one
+# program and the one file it reads, with no wildcard, so a run that matches a
+# line needs no password.
 #
-# pkexec is the other way, and it asks. It is what runs when the rule is not
-# there: an installation with --no-sudoers, one from before the rule existed,
-# or an update that took the rule away in spite of the keep-list. It is also
-# what runs for the work that the rule deliberately leaves out, which today is
-# the chown of Take ownership. That one walks a whole drive as root, and a
-# person answers for it.
+# pkexec is the other way, and it asks. It runs when the rule is not there,
+# and for the work the rule deliberately leaves out: the chown of Take
+# ownership walks a whole drive as root, and a person answers for it.
 #
-# The password thus means something again. It was twenty presses a day of
-# noise before, on settings that the same rule now permits anyway: the rule is
-# on the machine from the moment the installer runs, so a panel that keeps
-# asking makes nothing safer. See ctl.sudoers_text.
+# The password thus means something. See ctl.sudoers_text.
 
 # The reason a run failed, when the reason is rights. ctl knows the words that
 # sudo uses; this is the same question asked about a transcript.
@@ -998,14 +966,12 @@ def installed_commit():
 def install_is_behind(source_dir, installed=None, head=None):
     """Returns the sentence for a clone that is in front of the install.
 
-        The result is "" for each condition but one: both commits are known and
-        they are different. An unknown commit is not proof. A status line reads
-        this result, and a status line must not guess.
+    The result is "" for each condition but one: both commits are known and
+    they are different. An unknown commit is not proof, and a status line must
+    not guess.
 
-    Written because "pulled" and "installed" are two steps and the window
-    showed only the first. A clone three commits ahead of the running copy
-    looked exactly like an up-to-date machine, and two evenings went into
-    working out from timestamps which of the two somebody had done.
+    "Pulled" and "installed" are two steps, and the window showed the first
+    only.
     """
     installed = installed_commit() if installed is None else installed
     head = head_commit(source_dir) if head is None else head
@@ -1067,17 +1033,13 @@ def flash_firmware_command(source_dir, environment):
 def restart_watchers_command():
     """Returns the command that restarts both user units.
 
-    The two units then read the configuration again. The command needs no
-    root, and it is separate on purpose. The two are *user* units, and the
-    privileged helper cannot reach them. But the panel runs as that user.
+    Both units then read the configuration again. It needs no root, and it is
+    separate because these are *user* units that the privileged helper cannot
+    reach. The panel runs as that user.
 
-    The command restarts both units, and not the achievement watcher alone.
-    The phone bridge reads the same file, and this command did not restart it.
-    The switch in the panel therefore had no result. With the phone flashes
-    off, the bridge continued until the next boot. With the phone flashes on
-    again, the bridge stayed stopped, because it exited on the old setting.
-    The new status check then reported that condition, correctly, as a
-    problem from the panel.
+    Both, and not the achievement watcher alone. The phone bridge reads the
+    same file, and a switch in the panel that did not restart it had no
+    result until the next boot.
     """
     return ["systemctl", "--user", "restart", WATCHER, PHONE_BRIDGE]
 
@@ -1255,16 +1217,12 @@ def rainbow_choices(names):
 def desktop_choices(names):
     """Returns the menu entries for the bar in Desktop Mode.
 
-    This has the same arrangement as the two functions above. The service
-    holds the list, and only the text is here. "steam" needs the most text.
-    It means that the bar keeps the effect of the last Game Mode session.
-    The bar did that before this page existed.
+    The service holds the list, and only the text is here. "steam" needs the
+    most text: the bar keeps the effect of the last Game Mode session.
 
-    The four effects of this project use the words of the rainbow slot.
-    "rainbow" is the name of Steam, for the same reason as in the slot. Here
-    the five are separate scenes and not one slot with one effect in it. A
-    menu with "Rainbow" beside "Fire" must not make the user ask whether the
-    first entry is the second entry with another name.
+    The four effects of this project use the words of the rainbow slot, and
+    "rainbow" is Steam's own name. Here the five are separate scenes, so
+    "Rainbow" beside "Fire" must not read as one entry twice.
     """
     labels = {
         "steam": "Leave it to Steam",
@@ -1446,14 +1404,13 @@ def drive_trouble(transcript, most=2):
 def apply_mounts_command(source_dir, staged_path, owner_dir="", ask=False):
     """Returns the command that writes the drives and mounts them.
 
-    `owner_dir` is a mount point to give to the desktop user, and it is
-    optional. A drive that a person adds is a drive that root owns, so Steam
-    cannot write a library to it until somebody says otherwise. The page has
-    that as a button, and the button is this argument.
+    `owner_dir` is an optional mount point to give to the desktop user. A
+    drive that a person adds is a drive root owns, so Steam cannot write a
+    library to it until somebody says otherwise.
 
-    A call that carries it always asks for a password, because no line of the
-    sudoers rule matches a command of two arguments. That is the design and
-    not a limit to work around: the chown walks a whole drive as root.
+    A call that carries it always asks for a password: no line of the sudoers
+    rule matches a command of two arguments, and the chown walks a whole drive
+    as root.
     """
     return applier_command("drives", source_dir, "apply-mounts.sh",
                            staged_path,
@@ -1478,15 +1435,13 @@ def mount_point_for(found):
 def power_choices(offered, current="", labels=None, unset=True):
     """Returns (label, value) pairs for a CPU setting that the machine offers.
 
-    This function never uses a list in this file. The available governors and
-    preferences depend on the cpufreq driver and on its mode. See power.py. A
-    menu in this file is therefore incorrect on some machines.
+    Never from a list in this file. The available governors and preferences
+    depend on the cpufreq driver and its mode, so a menu written here is wrong
+    on some machines. See power.py.
 
-    "Leave it alone" comes first, because it is the default and because it
-    reverses the other entries. This function keeps and marks a value from the
-    configuration file that this machine does not offer. It does the same for
-    an absent sensor. Without the entry, the setting looks different for no
-    reason.
+    "Leave it alone" comes first: it is the default and it reverses the other
+    entries. A value in the file that this machine does not offer is kept and
+    marked, or the setting would look different for no reason.
     """
     labels = labels or {}
     # `unset` is False for the preference, which has no such entry. The

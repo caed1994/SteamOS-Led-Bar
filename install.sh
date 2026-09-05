@@ -9,13 +9,12 @@
 #   sudo ./install.sh --without cec   take one module back off
 #   sudo ./install.sh --modules       what the modules are, and what is here
 #
-# This installs the core: the control panel, the control command, the shared
-# code, and the keyboard layout. The LED bar, the CPU and GPU power, HDMI CEC
-# and the drives are modules, and a person asks for each one.
+# The core is the control panel, the control command, the shared code and the
+# keyboard layout. The LED bar, the CPU and GPU power, HDMI CEC and the drives
+# are modules, and a person asks for each one.
 #
-# A run with no --with and no --without keeps the modules that the machine
-# already has. The panel repairs an installation by running this script, and a
-# repair that removed the modules would be a repair that broke the machine.
+# A run with no --with and no --without keeps the modules the machine has. The
+# panel repairs an installation by running this script.
 #
 # Everything lands in /var/lib so it survives SteamOS system updates, which
 # reset the read-only rootfs.
@@ -127,19 +126,16 @@ command -v python3 >/dev/null || die "python3 not found"
 
 # --- which modules ----------------------------------------------------------
 #
-# This run installs the core, and then it makes the modules of this machine
-# equal to MODULE_WANT. There are two lists and not one:
+# This run installs the core, then makes the modules equal to MODULE_WANT.
 #
 #   MODULE_ON     what the machine has now
 #   MODULE_WANT   what it must have when this run ends
 #
-# The difference between them is the work. A module in both lists is installed
-# again, which is how an update reaches an installed module.
+# The difference is the work. A module in both is installed again, which is how
+# an update reaches one.
 #
-# MODULE_ON starts as the answer of the machine and not as an empty list. The
-# panel repairs an installation by running this script with no --with, and a
-# repair that started from an empty list would take every module off every
-# machine that has one.
+# MODULE_ON starts as the answer of the machine. Started empty, a repair from
+# the panel would take every module off every machine that has one.
 
 declare -A MODULE_ON=()
 declare -A MODULE_WANT=()
@@ -368,19 +364,16 @@ install -m 0755 "$SOURCE_DIR/server/steamos-utility-center" "$INSTALL_DIR/steamo
 install -m 0755 "$SOURCE_DIR/server/steamos-utility-centerctl" "$INSTALL_DIR/steamos-utility-centerctl"
 find "$INSTALL_DIR/steamos_utility_center" -type f -exec chmod 0644 {} +
 
-# The commit of those files, so that the panel can report a clone that moved
-# ahead of them. This is the last write of the core, so a stamp that exists is
-# a stamp for core files that all exist.
+# The commit of those files, so the panel can report a clone that moved ahead
+# of them. The last write of the core, so a stamp that exists is a stamp for
+# files that all exist.
 #
-# It uses safe.directory because this script runs as root over the clone of
-# another person, and git refuses to read a clone of another owner.
+# safe.directory because this runs as root over the clone of another person,
+# and git refuses a clone of another owner. That refusal has no value here,
+# where the panel shows the answer to the owner of the clone.
 #
-# That refusal is correct and useful in a terminal. It has no value here, where
-# the panel shows the answer to the owner of the clone.
-#
-# A clone that git refuses gives no stamp, and not a wrong stamp. The panel
-# then reports "not recorded". That is true, and it is not a report that the
-# machine is current.
+# A clone that git refuses gives no stamp and not a wrong one. The panel then
+# reports "not recorded", which is true.
 if stamp="$(git -C "$SOURCE_DIR" -c "safe.directory=$SOURCE_DIR" \
         rev-parse HEAD 2>/dev/null)" && [[ -n "$stamp" ]]; then
     printf '%s\n' "$stamp" > "$STAMP_PATH"
@@ -389,16 +382,13 @@ else
     rm -f "$STAMP_PATH"
 fi
 
-# A name that a person can type. Each file is in /var/lib, so that a SteamOS
-# update does not remove it. Nothing in /var/lib is on a PATH.
+# A name that a person can type. Each file is in /var/lib so a SteamOS update
+# does not remove it, and nothing in /var/lib is on a PATH.
 #
-# Without this link, a person can read each command in the README and can run
-# none of them. A symlink costs nothing and makes the documentation true.
+# The link is on the read-only root filesystem, so an update removes it with
+# the kernel module. One run of this script puts both back, and its absence is
+# not a failure: the full path operates either way.
 #
-# It is on the read-only root filesystem, so a SteamOS update removes it with
-# the kernel module. One run of this script puts both back.
-#
-# Its absence is not a failure: the full path operates in both cases.
 # COMMAND_LINK is in scripts/user-unit.sh, so the uninstaller removes the same
 # one this creates.
 COMMAND_STATUS="$INSTALL_DIR/steamos-utility-center"
@@ -420,17 +410,13 @@ ln -sfn "$INSTALL_DIR/steamos-utility-centerctl" "$CTL_COMMAND_LINK" 2>/dev/null
 # it takes off again. The pair is together, so a file that one adds and the
 # other forgets is a fault a reader can see.
 #
-# A removal keeps the settings of its module. /etc/steamos-utility-center.conf,
-# the power settings and the record of the drives are answers that the person
-# gave, and nothing else can find them again. A second install reads them back.
-# uninstall.sh removes them, because "uninstall" is the word that means it.
+# A removal keeps the settings of its module. They are answers the person gave,
+# and a second install reads them back. uninstall.sh removes them.
 #
-# The appliers land beside the programs they work with, and each one must have
-# a path that does not move. There are two reasons. The boot-time repair unit
-# runs the drives one from there, and a person who moved the clone would take
-# it away from that unit. And a sudoers rule names the program it permits: a
-# rule for a path inside a clone permits whatever a person puts there.
-# See server/steamos-utility-center-mounts.service and ctl.py.
+# The appliers land in $INSTALL_DIR, at a path that does not move. The
+# boot-time repair unit runs the drives one from there, and a sudoers rule
+# names the program it permits: a rule for a path inside a clone permits
+# whatever a person puts there.
 #
 # The applier is also the file that says the module is installed. See
 # server/steamos_utility_center/modules.py.
@@ -1349,14 +1335,11 @@ read_modules
 
 # Ask SteamOS to carry this project into the next image.
 #
-# A SteamOS update rebuilds /etc from the new image, and this project wrote
-# nothing that asked for its files back. Its configuration, its units and its
-# udev rule thus had the exposure that loses a hand-written line in
-# /etc/fstab. See server/steamos_utility_center/mounts.py.
+# A SteamOS update rebuilds /etc from the new image. Without this file, the
+# configuration, the units and the udev rule have the exposure that loses a
+# hand-written line in /etc/fstab. See server/steamos_utility_center/mounts.py.
 #
-# After the modules and not before them: the list names each file that this
-# project can install, and a file that a module wrote a moment ago must be in
-# the list this run writes.
+# After the modules, so a file a module wrote a moment ago is in the list.
 say "Writing $KEEP_LIST_PATH"
 install -d -m 0755 "$(dirname "$KEEP_LIST_PATH")"
 if ! keep_said="$("$INSTALL_DIR/steamos-utility-center" --write-mounts \
@@ -1369,18 +1352,15 @@ fi
 # Let the control command apply a change with no password.
 #
 # Game Mode runs no polkit agent and gives no terminal, so pkexec there has
-# nobody to ask. Without this rule every setting of this project is a setting
-# for the desktop only, and a plugin in Game Mode can read them and change
+# nobody to ask. Without this rule, Game Mode reads every setting and changes
 # none of them.
 #
-# The command writes its own rule. The paths in the rule must be the paths it
-# runs, and a copy of them in this script is a second answer to one question.
-# It reads the file with visudo before it installs it: a sudoers file that
-# does not parse takes sudo away from the machine.
+# The command writes its own rule, because the paths in it must be the paths
+# it runs. It reads the file with visudo first: a sudoers file that does not
+# parse takes sudo away from the machine.
 #
 # After the modules, because the rule names one program for each installed
-# module. A run that removed a module rewrites the rule without it, and a run
-# with no module left removes the rule. See ctl.sudoers_text.
+# module. See ctl.sudoers_text.
 #
 # --no-sudoers leaves it out, for a person who uses the panel only.
 if [[ "$SKIP_SUDOERS" -eq 1 ]]; then

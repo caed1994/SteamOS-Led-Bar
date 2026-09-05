@@ -3,16 +3,10 @@
 
 # What install.sh and uninstall.sh have to agree on.
 #
-# This is mostly the units that run in the desktop session. Both are *user*
-# systemd units. One speaks to the Steam client of the logged-in user, and the
-# other reads the session bus of that user. install.sh and uninstall.sh both
-# run as root.
-#
-# Two answers to "which user, which directory, which session" are how the two
-# scripts become different, and that failure is quiet: it leaves an enable
-# symlink in a ~/.config directory with no unit behind it.
-#
-# This file thus finds the answer one time.
+# Both run as root, and both write user units in the session of the desktop
+# user. Two answers to "which user, which directory, which session" leave an
+# enable symlink in a ~/.config directory with no unit behind it, and nothing
+# reports that. So this file answers it one time.
 #
 # Sourced, not executed.
 
@@ -87,18 +81,14 @@ MODULES_LOAD="$ROOT/etc/modules-load.d/steamos-led-bar.conf"
 
 # --- the kernel shim, on every kernel that has one --------------------------
 #
-# The installer puts the module into the updates/ directory of the running
-# kernel.
+# The installer puts the module in the updates/ directory of the running
+# kernel. A SteamOS update brings a new kernel and keeps the old modules, so
+# the copy for the previous kernel stays in its own directory and an uninstall
+# that reads `uname -r` alone leaves it.
 #
-# A SteamOS update brings a new kernel and keeps the modules of the old kernel.
-# The copy for the previous kernel thus stays in its own directory.
-#
-# That copy does nothing, because its kernel does not run. It also stayed after
-# an uninstall that read `uname -r` only.
-#
-# Both roots are walked because /lib/modules is a symlink to /usr/lib/modules
-# on Arch and a directory of its own elsewhere; the same file found twice
-# under two names is dropped by comparing what it resolves to.
+# Both roots are walked: /lib/modules is a symlink to /usr/lib/modules on Arch
+# and a directory of its own elsewhere. The same file under two names is
+# dropped by what it resolves to.
 SHIM_NAME="leds-valve-shim"
 
 shim_copies() {
@@ -165,19 +155,12 @@ WATCHER_WANTS="default.target.wants"
 # The user who started this, because each script that reads this file runs as
 # root.
 #
-# There are two variables, because there are two routes. sudo from a terminal
-# sets SUDO_USER. pkexec sets PKEXEC_UID and no SUDO_USER, and the control
-# panel starts the installer through pkexec.
+# Two variables, because there are two routes. sudo from a terminal sets
+# SUDO_USER. pkexec sets PKEXEC_UID and no SUDO_USER, and the panel starts the
+# installer through pkexec.
 #
-# A read of SUDO_USER alone is why an installation from the panel found no
-# user for the user units and skipped each of them: the watchers, the menu
-# entry, and the linger setting that keeps them alive in Game Mode.
-#
-# It reported that in one line, which moves past in the log. The panel then
-# reported the linger setting as a fault. That report was correct, and it was
-# about a step that the panel itself skipped.
-#
-# scripts/flash-firmware.sh reads both variables, and it always did.
+# With SUDO_USER alone, an install from the panel found no user and skipped
+# the watchers, the menu entry and the linger setting, in one line of log.
 invoking_user() {
     local uid="${PKEXEC_UID:-${SUDO_UID:-}}"
     if [[ -n "$uid" ]]; then
@@ -273,30 +256,17 @@ PLATFORMIO_PATH_MARK=".platformio/penv/bin"
 
 # --- the names this project installed under before it was renamed -----------
 #
-# The name was "SteamOS LED bar", and each file on a machine had a name that
-# started with steamos-led.
-#
-# The project grew past the LED bar. It now has the CPU and GPU power, HDMI
-# CEC, and the keyboard layout. Its new name is the SteamOS Utility Center, and
-# each file has a new name.
-#
-# The rename is the simple half. The difficult half is a machine with the old
-# installation. An installation under new names removes nothing under the old
-# names.
-#
-# Without this list, an update leaves the old steamos-led-serial.service
-# enabled and running beside the new unit. Two processes then hold one serial
-# port.
-#
-# The settings in /etc/steamos-led-serial.conf also stop, because nothing reads
-# that file. Each setting thus returns to its default with no message.
+# The name was "SteamOS LED bar", and each file on a machine started with
+# steamos-led. An installation under the new names removes nothing under the
+# old ones: the old service stays enabled beside the new unit, two processes
+# hold one serial port, and nothing reads /etc/steamos-led-serial.conf any
+# more.
 #
 # migrate_old_install below is the answer, and it runs before the installer
 # writes anything.
 #
-# This is data and not a list of rm lines, so that the test walks the same list
-# as the installer. Each name here is a *former* name: nothing writes these
-# names now. The scripts search for them and remove them.
+# Data and not a list of rm lines, so a test walks the same list. Each name
+# here is a *former* name: nothing writes these now.
 OLD_NAME="steamos-led"
 OLD_INSTALL_DIR="$ROOT/var/lib/steamos-led-serial"
 
@@ -312,9 +282,9 @@ OLD_USER_UNITS=("steamos-led-achievements.service:$WATCHER_UNIT"
 # What this project installed into the desktop session before and does not
 # install now.
 #
-# These are not renames: they became nothing. They thus cannot go into the list
-# above. A file with no replacement still needs a removal, or systemd runs it
-# at each login.
+# Not renames: they became nothing, so they cannot go in the list above. A
+# file with no replacement still needs a removal, or systemd runs it at each
+# login.
 #
 #   $NAME-cec.service      put the CEC adapter on the bus before the CEC
 #                          toolkit's wake service. The CEC module does that
@@ -346,18 +316,13 @@ OLD_FILES=("$ROOT/etc/udev/rules.d/99-steamos-led-serial.rules"
 
 # The one line inside a carried-over config that would otherwise be wrong.
 #
-# NOTIFY_FIFO is a setting and not a comment. It names a directory that the
-# *unit* makes, through RuntimeDirectory=.
+# NOTIFY_FIFO names a directory that the *unit* makes, through
+# RuntimeDirectory=. A new name for the unit gives a new name to that
+# directory, so a carried-over file names /run/steamos-led-serial and nothing
+# makes it. The flashes then stop with no reason in the log.
 #
-# A new name for the unit gives a new name to that directory. A configuration
-# that this moves with no change thus names /run/steamos-led-serial, and
-# nothing makes that directory now.
-#
-# The flashes then stop, and nothing in the log gives the reason.
-#
-# Only when it still holds the old default. Somebody who pointed it somewhere
-# of their own meant it, and rewriting that would be this script overruling a
-# setting rather than repairing one.
+# Only when it still holds the old default. Somebody who pointed it elsewhere
+# meant it.
 OLD_FIFO="/run/steamos-led-serial/notify"
 NEW_FIFO="/run/$NAME/notify"
 
@@ -460,18 +425,12 @@ migrate_old_install() {
 # The half of the same list for the uninstaller: remove the old installation
 # and keep nothing.
 #
-# This is a separate function and not an option on migrate_old_install. The two
-# disagree about the important part, which is the settings.
+# A separate function and not an option on migrate_old_install: a migration
+# moves the settings, and an uninstall removes them.
 #
-# A migration moves the settings. An uninstall removes this project, and a
-# configuration file with the name of a project that is not installed is
-# rubbish.
-#
-# uninstall.sh calls this. A person can run uninstall.sh with no run of the new
-# installer: they pull and they uninstall, and each name on the machine is an
-# old name.
-#
-# --purge decides the configurations here as it does for the current names.
+# A person can run uninstall.sh with no run of the new installer, so each name
+# on the machine is then an old name. --purge decides the configurations here
+# as it does for the current names.
 remove_old_install() {  # remove_old_install [purge]
     old_install_present || return 0
     echo "Removing what was left under the old steamos-led-* names."
@@ -613,15 +572,10 @@ refresh_desktop_caches() {  # refresh_desktop_caches <applications dir>
 # --- the modules ------------------------------------------------------------
 #
 # The core is the panel, the control command and the shared code. The LED bar,
-# the CPU and GPU power, HDMI CEC and the drives are modules, and a person
-# takes each one on its own.
+# the CPU and GPU power, HDMI CEC and the drives are modules.
 #
-# server/steamos_utility_center/modules.py holds the list of them and the rule
-# for "is this one installed". These scripts ask it.
-#
-# A copy of that rule here would be a second answer to one question. This file
-# exists because two copies of seven paths became different, and a fifth copy
-# of the same idea is the same fault with a new name.
+# server/steamos_utility_center/modules.py holds the list and the rule for "is
+# this one installed". These scripts ask it rather than keep a second copy.
 
 # Every module and whether this machine has it, as "name on" or "name off",
 # one per line and in the order of the pages of the panel.
@@ -738,24 +692,14 @@ remove_decky_plugin() {
 
 # --- the read-only rootfs ---------------------------------------------------
 #
-# SteamOS mounts / read-only, and both scripts write to it. The installer
-# writes the suspend hook under /usr/lib/systemd and the kernel module under
-# /usr/lib/modules. The uninstaller removes both.
+# SteamOS mounts / read-only, and both scripts write to it: the suspend hook
+# under /usr/lib/systemd and the kernel module under /usr/lib/modules.
 #
-# Under set -e, a write to a locked root filesystem gives no warning. It ends
-# the run. This function thus runs one time, at the start, before a write and
-# before a removal.
+# Under set -e a write to a locked root filesystem ends the run with no
+# warning. This thus runs one time, at the start, before any write or removal.
 #
-# It is here and not in each script, for the reason of each other value in this
-# file. The installer had this function, and the uninstaller had a later copy
-# that covered the kernel module only.
-#
-# The removal of the suspend hook, three steps earlier, thus failed on a
-# read-only /usr. That failure ended the uninstall with the service files in
-# place, and nothing reported it.
-#
-# The kernel module's own installer does the same dance; finding it already
-# unlocked, it leaves it alone.
+# The kernel module's own installer does the same. It finds the filesystem
+# already unlocked and leaves it alone.
 
 ROOTFS_RELOCK=0
 
