@@ -794,25 +794,18 @@ immediately. There is no Apply button for it. The panel keeps the selection in
 `~/.config/steamos-utility-center-panel.conf`. No other program reads that file.
 
 **The preview stage stays dark in all three.** A canvas has no alpha channel,
-so the panel draws the glow around each LED as a colour that it already mixed
-with the background. This operates against one known colour only. A strip of
-light against a pale window is also difficult to judge.
+so the glow around each LED is already mixed with the background, and that
+works against one known colour only.
 
 **Apply and Reload are below all the pages.** Apply writes each setting from
-each page. It is grey while the window and the files agree. They stand at the
-right end of the foot, beside Save profile and Load profile: the first two
-write these settings, the other two write a file of them, and a person uses
-one after the other.
+each page, and it is grey while the window and the files agree. They stand at
+the right end of the foot, beside Save profile and Load profile.
 
-Apply restarts the service only when a setting that the service reads is
-different. The **System** page's keyboard layout is in your own home directory,
-and Apply writes it with no restart.
+Apply restarts the service only when a setting the service reads is different.
+The keyboard layout is in your own home directory and needs no restart.
 
-Apply asks for **no password** on an ordinary installation. The installer
-writes a sudoers rule that permits the three programs that put a change into
-effect, each with the one file it reads, and Apply uses it. Where the rule is
-not there, Apply asks as it did before: an installation with `--no-sudoers`, or
-one from before the rule existed. See
+Apply asks for **no password** on an ordinary installation. It uses the sudoers
+rule the installer writes. With `--no-sudoers` it asks instead. See
 [Why it needs no password](#why-it-needs-no-password).
 
 Caution: After a SteamOS update, press **Rebuild and reinstall**. The update
@@ -827,16 +820,12 @@ Load does not apply. The settings go into the window, then you press Apply. The
 serial port, the baud rate and the device are not in the window, so they can
 never come from another machine.
 
-The panel runs as you and not as root. To flash the bar and to ask Steam
-questions, it needs no rights. To write the configuration, the CPU settings or
-the drives, it uses the sudoers rule and asks for nothing.
+The panel runs as you and not as root. To write the configuration, the CPU
+settings or the drives, it uses the sudoers rule and asks for nothing.
 
-Three things still ask, and each of them is deliberate. **Take ownership** is
-one `chown` over a whole drive as root, and the rule leaves it out on purpose.
-**Rebuild and reinstall** runs the installer, which does everything. The
-**self-test** opens the serial port with the service stopped. A prompt now
-means one of those three, rather than being a press of a key twenty times a
-day.
+Three things still ask. **Take ownership** is one `chown` over a whole drive as
+root, and the rule leaves it out on purpose. **Rebuild and reinstall** runs the
+installer. The **self-test** opens the serial port with the service stopped.
 
 **That second half cannot operate in Game Mode**, because Game Mode has no
 password prompt. Add the panel as a non-Steam game for the Test page, and do
@@ -911,18 +900,15 @@ this machine can behave as a console. Press the Steam button on a controller
 and the television comes on and changes to this input. Put the machine into
 suspend and the television goes off with it.
 
-**Almost none of the CEC work is this project's.** It started as the
+**Almost none of the CEC work is this project's.** It is a fork of the
 [SteamOS CEC Toolkit](https://github.com/Twsts/steamos-cec-toolkit) by Twsts,
-which is MIT-licensed. It is here under `cec-toolkit/` as a fork of that
-project. Five things in it did not operate on the machines that this project
-was built on. Those five fixes are now in that directory and not in a
-workaround outside it. `cec-toolkit/README.md` lists them, and
-`cec-toolkit/ORIGIN` records the commit of the fork.
+MIT-licensed, under `cec-toolkit/`. Five things in it did not operate on the
+machines this project was built on, and the fixes are in that directory.
+`cec-toolkit/README.md` lists them and `cec-toolkit/ORIGIN` records the commit
+of the fork.
 
-The toolkit stays a module of its own. You can install and use it with no part
-of this panel. This panel adds the installation and the switches. The panel and
-the toolkit's own Decky plugin both use the same `steamos-cec-toolkitctl`
-helper.
+The toolkit stays a module of its own and works with no part of this panel.
+This panel adds the installation and the switches.
 
 **What it needs.** It needs a CEC adapter that the kernel gives as `/dev/cec0`.
 Use a DisplayPort-to-HDMI adapter with CEC support, because the machine's own
@@ -931,16 +917,8 @@ output usually does not have CEC. It also needs `cec-ctl` from v4l-utils,
 the names of the missing parts before the installation and not after it.
 
 **An update brings the toolkit with it.** `update.sh` fetches a newer
-`cec-toolkit/` into the clone, and **Rebuild and reinstall** then installs it,
-but only on a machine that already has it. A machine that never asked for the
-toolkit does not get it from there: it writes udev rules, WirePlumber
-configuration and units of its own.
-
-This did not happen before, and nothing said so. The installer named the
-toolkit nowhere, so the copy on the machine stayed as old as it was, answered
-every question, and was reported as ready. The five fixes of this fork are in
-`cec-toolkit/bin/`, so an old copy is a machine without them. The status page
-compares the two versions now, and says which is which.
+`cec-toolkit/` into the clone, and **Rebuild and reinstall** installs it on a
+machine that has the module. The status page compares the two versions.
 
 **The installation** asks one time for your password and enables nothing. Each
 feature then has a switch that takes effect when you click it. The toolkit's
@@ -963,27 +941,19 @@ Use it to find out whether the television receives anything, before you enable
 a feature and reboot.
 
 **Turn the television off with the machine costs some seconds of each suspend
-and each shutdown.** The machine waits for it: the unit sends standby to the
-television and the machine goes only after that. The toolkit sends standby six
-times with pauses between, because different sets listen to different ones.
-`TV_STANDBY_SETTLE_SECONDS` holds the last of those pauses, which is the time
-the set has to act before the HDMI link goes away.
+and each shutdown.** The machine waits: the unit sends standby six times with
+pauses between, because different sets listen to different ones.
+`TV_STANDBY_SETTLE_SECONDS` is the last of those pauses, which is the time the
+set has to act before the HDMI link goes away.
 
-**A television that answers ends that at the first message.** After the standby
-and the broadcast that an AV receiver listens to, the toolkit asks the set
-whether it is off. One measured television answered in 23 milliseconds and the
-suspend became 2.8 seconds shorter. A set that answers "on" gets the six
-messages as before, with the question between them, and stops at whichever one
-works.
+After the first standby the toolkit asks the set whether it is off, and stops
+there when it answers. One measured television answered in 23 milliseconds and
+the suspend became 2.8 seconds shorter. A set that answers nothing costs half a
+second for the question. `POWER_STATUS_TIMEOUT` bounds that wait, and `0` stops
+it.
 
-A set that answers nothing is asked one time and then gets the six, which costs
-half a second. `POWER_STATUS_TIMEOUT` bounds that wait, and `0` stops the
-question for a set that never answers it.
-
-Nothing here waits longer than it must: the unit has a limit of 15 seconds, so
-one `cec-ctl` that does not return cannot hold the machine for the minute and a
-half a systemd default would give it. And the two calls to Steam's own CEC
-daemon are skipped when the session is gone, which it usually is at a shutdown.
+The unit has a limit of 15 seconds, so one `cec-ctl` that does not return
+cannot hold the machine.
 
 The page has three settings: the adapter, the device that carries the volume,
 and the HDMI sound card. **Discover** fills them in. It asks the CEC bus and
@@ -1012,62 +982,41 @@ GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
 That is a "no" from the television. It is not a fault here.
 
 **The controller wake finds your Bluetooth radio, whatever its name is.** The
-toolkit looks for a radio in three ways: an exact `vendor:product` list, a
-regular expression over the device name, and the Bluetooth USB class. On a
-machine that is not a Steam Deck, all three can fail. This is the measurement
-from an AM5 board:
+toolkit matches a radio by a `vendor:product` list, by a regular expression
+over the name, and by the USB class. On a board that is not a Steam Deck, all
+three can fail:
 
 ```
 0e8d:0616 MediaTek Inc. Wireless_Device
 class=ef sub=02 proto=01
 ```
 
-The list has the Intel id and not this one. The name of this Bluetooth radio
-does not contain the word Bluetooth. And `ef/02/01` is Interface Association,
-which means "my classes are in my interfaces". Each combined wifi and Bluetooth
-chip gives that class, so the **device** class check could never match one. The
-helper gave `matched:0` and no reason.
-
-The class check now looks one level lower, at the interfaces, where the answer
-is. **Which radios can wake it** on the CEC page asks the toolkit what it
-matched and gives the answer in a sentence.
+That id is not in the list, the name does not contain "Bluetooth", and
+`ef/02/01` is Interface Association, which every combined wifi and Bluetooth
+chip reports. The class check looks at the interfaces now, where the answer is.
+**Which radios can wake it** asks the toolkit what it matched.
 
 **The wake of the television does not delay the session.** The boot wake waits
-eight seconds and then makes four attempts, five seconds apart. A television
-that is new on is not ready immediately, so this is correct.
+eight seconds and then makes four attempts, five seconds apart, because a
+television that is new on is not ready at once. As a `Type=oneshot` unit that
+took the boot of one machine from 28 seconds to 55. Its unit says `Type=simple`
+now, so the same 26 seconds run beside the session.
 
-As a `Type=oneshot` unit it also meant that `default.target` waited for the
-last attempt. The measurement: the toolkit took the boot of one machine from 28
-seconds to 55 seconds, and that one service was all of it. Its unit now says
-`Type=simple`. It sends what it sent before, over the same 26 seconds, beside
-the session and not in front of it.
-
-**Something puts the adapter on the CEC bus.** Before the fork, nothing did.
-Each path that sends CEC asks the adapter for its logical address. It received
-none and then sent from an address that it did not own. A television has no
-reason to act on such a message. This is why the known repair was to disconnect
+**Something puts the adapter on the CEC bus.** Before the fork nothing did:
+each path asked the adapter for its logical address, received none, and sent
+from an address it did not own. That is why the known repair was to disconnect
 the adapter and connect it again.
 
 `steamos-cec-register` runs one time at the session start, before the other
-units. It waits for the device. It does not touch an adapter that Steam's own
-`cecd` holds. It repairs the permissions and restarts `cecd` when nothing holds
-an address. It records the position of this machine, so that a wake can also
-change the input. It claims an address itself only as the last step.
+units. It waits for the device, leaves an adapter that Steam's own `cecd`
+holds, repairs the permissions, records the position of this machine, and
+claims an address itself only as the last step.
 
-**If you remove the adapter, switch the features off.** They continue to
-operate in the only way that they can, which is to make attempts. With the
-features on and the adapter gone, each start spends more than one minute on a
-television that is not there: eight seconds for the device, twelve seconds for
-a logical address, four times.
-
-Nothing is defective and nothing says so. The panel thus says it for you, on
-the CEC page and on **Status & repair**. When the adapter returns, switch the
-features on again. This costs nothing.
-
-**To debug it**, read the scripts. The toolkit is in the repository and not
-downloaded, so you can read and change its scripts as you can the other files
-here. `cec-toolkit/ORIGIN` records the commit of the fork, which makes a later
-upstream change a three-way comparison and not a guess.
+**If you remove the adapter, switch the features off.** With the features on
+and the adapter gone, each start spends more than one minute on a television
+that is not there: eight seconds for the device and twelve for a logical
+address, four times. The panel says so on the CEC page and on **Status &
+repair**.
 
 Caution: Do not repair an installation with the release installer of the
 upstream project. It replaces the programs with the versions that have the five
@@ -1174,13 +1123,12 @@ model, a variant or the change options. It edits its own line only.
 
 A second drive for a Steam library, on the same **System** page.
 
-A line that you add to `/etc/fstab` does not survive a SteamOS update. SteamOS
-writes the new image into the other partition slot and boots into it. `/etc`
-belongs to that image, so your line is in the old slot and the new slot has the
-`fstab` of the image. `/home` and `/var` are their own partitions and stay.
+A line that you add to `/etc/fstab` does not survive a SteamOS update. The
+update writes the new image into the other partition slot, and `/etc` belongs
+to that image. `/home` and `/var` are their own partitions and stay.
 
-So this page does not write `/etc/fstab`. It writes one systemd mount unit for
-each drive, and systemd builds the same units from `fstab` anyway:
+So this page writes one systemd mount unit for each drive, which is what
+systemd builds from `fstab` anyway:
 
 ```
 /etc/systemd/system/mnt-games.mount
@@ -1200,8 +1148,7 @@ Three things carry a drive across an update:
 | `steamos-utility-center-mounts.service` | writes the units again at every boot, for an image that does not |
 
 The keep-list also covers the configuration, the units and the udev rule of
-this project. Nothing protected those before, so they had the same exposure as
-that `fstab` line.
+this project.
 
 The page reads the partitions with `lsblk`, so you pick a drive rather than
 type a UUID. The unit names the drive by UUID and not by `/dev/sda2`: the
@@ -1233,17 +1180,15 @@ holds one, and it says so in the journal:
 mnt-SN7100.mount: Mount path /mnt/SN7100 is not canonical (contains a symlink).
 ```
 
-This is the one difference between a mount unit and a line in `/etc/fstab` that
-you notice. `mount` follows a symlink, and a unit does not: a unit is named
-after its own mount point, and two names for one directory are two units for
-one mount. On SteamOS the root filesystem is read-only and several directories
-in `/` are links into `/var`, so this is not a rare case.
+`mount` follows a symlink and a unit does not: a unit is named after its mount
+point, and two names for one directory are two units for one mount. On SteamOS
+the root filesystem is read-only and several directories in `/` are links into
+`/var`, so this is not a rare case.
 
-The page thus resolves the path before it writes anything. Write `/mnt/games`
-on a machine where `/mnt` is a link, and the drive is recorded as
-`/var/mnt/games`. The page says so once, and both names reach the same
-directory. The refusal list is checked against the resolved path also, so a
-link cannot be used to reach `/usr` under another name.
+The page resolves the path before it writes. Write `/mnt/games` where `/mnt` is
+a link, and the drive is recorded as `/var/mnt/games`. The refusal list is
+checked against the resolved path too, so a link cannot reach `/usr` under
+another name.
 
 ## The command that speaks JSON
 
@@ -1323,28 +1268,23 @@ name that nobody knows in advance needs a `*` in the rule, and a rule with a
 belongs to you, and its parent belongs to root, so nobody can put a symlink in
 the place of it.
 
-The switch that wakes the television after a resume is the fourth program. It
-takes one of two words, so it gets two lines rather than a wildcard:
+The switch that wakes the television after a resume comes with the power
+module. It takes one of two words, so it gets two lines rather than a wildcard:
 
 ```
 deck ALL=(root) NOPASSWD: /var/lib/steamos-utility-center/steamos-utility-center-resume-wake on
 deck ALL=(root) NOPASSWD: /var/lib/steamos-utility-center/steamos-utility-center-resume-wake off
 ```
 
-That switch controls a unit of root, and it needed a password before. Every
-switch of that kind in the HDMI CEC toolkit has a small program behind it and a
-line that permits it, and this one had neither: it is not upstream's switch,
-and it went through the installer of the toolkit under `pkexec`. It was thus
-the one switch on that page that Game Mode could show and not move. A rule for
-that installer is not the answer, because the same script installs and removes
-the whole toolkit. A rule names a program, so the program has to be small. See
-`scripts/resume-wake.sh`.
+That switch controls a unit of root. A rule names a program, so it has a small
+program of its own rather than a rule for the toolkit's installer, which also
+removes the whole toolkit. See `scripts/resume-wake.sh`.
 
-Each of the three appliers makes two more checks before it reads the file. It
-refuses a symlink, because `install` as root would follow one and copy, for
-example, `/etc/shadow` into a file that everybody can read. And it refuses a
-file that belongs to another user. A call with no user at all is the boot-time
-repair unit, and that one is permitted.
+Each applier makes two more checks before it reads the file. It refuses a
+symlink, because `install` as root would follow one and copy, for example,
+`/etc/shadow` into a file that everybody can read. And it refuses a file that
+belongs to another user. A call with no user at all is the boot-time repair
+unit, and that one is permitted.
 
 **Take ownership is deliberately not in the rule.** That `chown` walks a whole
 drive as root. It is a rare and deliberate act, and it stays in the panel where
@@ -1382,18 +1322,16 @@ what it does:
 | a plugin older than this clone | **Update the Game Mode plugin** |
 | the files of this clone | **Install it again** |
 
-Older or current is the bytes of the files and not their time. A clone that is
-updated writes a new time on a file whose content did not change, and a button
-that offered an update for that would offer it for ever.
+Older or current is the bytes of the files and not their time: a pull writes a
+new time on a file whose content did not change.
 
-The full installer does the same, with the same script, so the two cannot put
-different files on one machine. Nothing has to be built: `decky/dist/index.js`
-is in this repository, because nobody must run npm on a Steam Machine.
+The installer uses the same script, so the two cannot put different files on
+one machine. Nothing has to be built: `decky/dist/index.js` is in this
+repository, because nobody must run npm on a Steam Machine.
 
-It needs your password one time, for both halves of the work. Decky keeps its
-plugin directory as root, and its loader is a system service that has to
-restart before it reads a new plugin. The button does that restart, so the
-plugin is in the Quick Access menu when the button is finished.
+It needs your password one time. Decky keeps its plugin directory as root, and
+its loader is a system service that must restart before it reads a new
+plugin.
 
 By hand, if you would rather:
 
@@ -1412,24 +1350,20 @@ What is on the page:
 | Television | each switch of the HDMI CEC toolkit |
 
 The page holds what a person changes from a sofa, and nothing else. A keyboard
-layout is set one time and a drive is added one time, so both are in the panel.
-There is no block that reports the health of the machine: a page that says so
-at the top of every visit says it to somebody who came to change one setting.
-What went wrong is on the page when something did.
+layout is set one time and a drive is added one time, so both stay in the
+panel.
 
-No control carries a sentence under it either. This page is a menu that opens
-over a game, in a space the width of a thumb, and a paragraph below each row is
-a page of prose there. The words in this README are where they belong. The
-words that stay on the page say what to do about something: a machine with no
-daemon, or a change to the card that waits to be kept.
+There is no health block and no sentence under a control. This is a menu that
+opens over a game, in a space the width of a thumb. The words that stay on it
+say what to do about something: a machine with no daemon, or a change to the
+card that waits to be kept.
 
-**The graphics card takes two presses.** Its sliders write nothing while they
-move: one button sends them to the card, and a second one keeps them. That is
-LACT's own safety and not an extra step of this project. The daemon puts the
-card back after a few seconds unless it is told to keep the change, and that is
-what saves a machine from a voltage offset that is too low: such a card hangs,
-and a hang that was kept comes back at every boot. Do not press Keep it before
-the picture is still there.
+**The graphics card takes two presses.** One button sends the sliders to the
+card, and a second keeps them. That is LACT's own safety: the daemon puts the
+card back after a few seconds without a confirmation, which is what saves a
+machine from a voltage offset that is too low. Such a card hangs, and a hang
+that was kept comes back at every boot. Do not press Keep it before the picture
+is still there.
 
 The card decides which sliders exist. A control with no range is a control that
 the card does not publish, so a machine with integrated graphics and no power
@@ -1437,39 +1371,30 @@ limit gets no power slider rather than one that writes nowhere.
 
 **Cooling Boost is one switch, and it takes one press.** While it is on, the
 fan of the card runs at its full speed. It does not go through the two buttons
-above: it does not send what the sliders hold, and a value that you moved and
-did not send stays where you put it. It also confirms itself, because a fan at
-full speed cannot hang a card. It is loud, and a switch that needs a second
-press to stay on is a switch that nobody trusts.
+above, so a value you moved and did not send stays where you put it. It
+confirms itself, because a fan at full speed cannot hang a card.
 
-When you turn it off, the fan goes back to what drove it before. Usually that
-is the firmware of the card, which is where most cards have it. If you set a
-fan curve in the window of LACT or in the panel, you get that curve back: the
-command writes the fan settings down before it replaces them.
+When you turn it off, the fan goes back to what drove it before: usually the
+firmware of the card, or a curve you set in LACT or in the panel. The command
+writes the fan settings down before it replaces them.
 
 The switch waits while a change to the sliders waits to be kept. Two writes to
-one document, with one of them unconfirmed, is a way to keep a voltage that
-nobody kept.
+one document, one of them unconfirmed, is a way to keep a voltage that nobody
+kept.
 
-The fan curve and the settings of the firmware are not there. Those are for a
-person with the window of LACT open and a stress test in progress, and a second
-and worse LACT is not what this is.
+The fan curve and the firmware settings are not here. They belong to the window
+of LACT.
 
-There is no brightness control. Each step of a slider is a change, each change
-restarts the service, and systemd refuses a service that starts more than five
-times in ten seconds. Two seconds of moving one slider left the bar dark. A
-control that writes at each step of a movement does not belong on a page where
-a write restarts a service.
+There is no brightness control. Each step of a slider restarts the service, and
+systemd refuses a service that starts more than five times in ten seconds.
 
-The page reads when it opens and after each change. It has no timer: one asked
-for the cheap status every five seconds, and that status carries no state for
-the switches of the CEC toolkit, so every five seconds each switch drew itself
+The page reads when it opens and after each change, and has no timer. The cheap
+status carries no state for the CEC switches, so a timer on it drew each switch
 as off.
 
 The plugin holds no rule of its own. Every value comes from
-`steamos-utility-centerctl`, and every change goes back to it, so the plugin
-and the panel are two front ends for one answer. Its backend is 115 lines and
-each method is one call.
+`steamos-utility-centerctl` and every change goes back to it, so the plugin and
+the panel are two front ends for one answer.
 
 **It runs with no root at all.** `plugin.json` carries an empty `flags`, so
 Decky starts it as you. The three programs that need rights are reached the
@@ -1479,10 +1404,9 @@ same way the panel reaches them, through the
 One thing is in the panel and not here, on purpose. **Take ownership** walks a
 whole drive as root, and Game Mode has nobody to answer for that.
 
-Every switch of the HDMI CEC toolkit can be moved from here. **Wake the
-television on resume** could not at first: it controls a unit of root and went
-through the installer of the toolkit under `pkexec`. It has a program of its
-own now, with two lines in the rule that permit it.
+Every switch of the HDMI CEC toolkit can be moved from here, including **Wake
+the television on resume**. That one controls a unit of root, so it has a
+program of its own and two lines in the rule that permit it.
 
 To build the page again after a change to it:
 

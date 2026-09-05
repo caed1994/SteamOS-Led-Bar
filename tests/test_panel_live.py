@@ -496,16 +496,13 @@ class LiveWindowTest(unittest.TestCase):
     def test_what_shows_through_the_stipple_is_the_shade_around_it(self):
         """The other half of that fault, and the half the image cannot show.
 
-        Tk draws an image on a disabled widget through a stipple of fifty per
-        cent, and that stipple is the pattern over a grey colour. The background
-        option of the style gives the colour in the holes, and the field element
-        does not. With two different colours, each second pixel below the sample
-        had the normal shade, and the field around them had the grey shade. That
-        gives a box at the position of a sample with an incorrect background.
+        Tk draws an image on a disabled widget through a fifty per cent
+        stipple, and the background option of the style gives the colour in
+        the holes. With two colours, each second pixel below the sample has
+        the normal shade and the field around it the grey one.
 
-        For that reason this test does not read the sample. A test of the image
-        passed while the screen was still incorrect. A measurement on a dark
-        theme showed that before this correction.
+        So this reads the style and not the sample: a test of the image passed
+        while the screen was still wrong.
         """
         field = self.panel._widgets["DESKTOP_COLOR"]
         field.state(["disabled"])
@@ -594,16 +591,12 @@ class LiveWindowTest(unittest.TestCase):
     def test_a_slider_that_governs_nothing_reconfigures_nothing(self):
         """Reported: dragging a slider put the CPU and the GPU up.
 
-        Each moved control asks each dependent row for its new state, and a drag
-        sends one such event for each pixel of the movement. Almost no answer
-        changes. A measurement gave eleven hundred questions and no change over
-        fifty steps. But the code applied each answer: approximately thirty widget
-        calls and five new colour samples, nine milliseconds for each step. The
-        window also painted itself at the rate of the events.
+        A drag sends one event for each pixel, and each one asked every
+        dependent row for its state: eleven hundred questions and no change
+        over fifty steps, at nine milliseconds each.
 
-        This test counts the calls and does not measure the time. A time on a
-        build machine gives no useful number. The number of widget calls is the
-        value that fell.
+        It counts widget calls and not time. A time on a build machine says
+        more about the machine than about the window.
         """
         touched = []
         for key, (_labels, controls) in self.panel._rows.items():
@@ -1657,15 +1650,12 @@ class LiveWindowTest(unittest.TestCase):
         """The bug this window keeps making, caught by arithmetic this time.
 
         Every rounded thing here is a nine-slice image, and an image keeps its
-        own corners whatever it is stretched over. So a widget wearing one has
-        to stand on a parent of exactly the colour that picture was drawn
-        against, or the corners show as a box of the wrong shade around it.
+        own corners whatever it is stretched over. A widget wearing one must
+        stand on a parent of exactly the colour that picture was drawn
+        against, or its corners show as a box of the wrong shade.
 
-        Four times now: the inner list when it was given a card, a card put
-        inside another card, the Output handle when the page changed colour
-        underneath it, and every button in the Apply row at the same moment.
-        Each was found by looking at a screenshot. dress() records the ground
-        of each picture as it makes it, so this can be found by walking.
+        Four instances so far, each found on a screenshot. dress() records the
+        ground of each picture, so this can be found by walking.
         """
         grounds = self.panel.roles["_grounds"]
         self.assertTrue(grounds, "dress recorded no grounds at all")
@@ -1708,12 +1698,10 @@ class LiveWindowTest(unittest.TestCase):
         colour that is not the colour of the parent. The second is a style with the
         colour of the page on a widget that stands on a card.
 
-        A measurement found this, and not a look at the screen. The About page,
-        both placeholder pages and the new CEC page each gave surface_container_low
-        to labels on a card with the colour surface_container_lowest. Each
-        explanation on those pages therefore had a band of a third colour behind
-        it. Three pages with one fault are one habit and not three errors, and for
-        that reason a test checks it.
+        Four pages gave surface_container_low to labels on a card with the
+        colour surface_container_lowest, so each explanation had a band of a
+        third colour behind it. One habit and not four errors, which is why a
+        test checks it.
         """
         style = ttk.Style(self.root)
 
@@ -1765,14 +1753,12 @@ class LiveWindowTest(unittest.TestCase):
         self.assertGreater(checked, 20, "hardly any label was checked")
 
     def test_no_frame_is_a_band_of_a_colour_its_parent_is_not(self):
-        """The same rule as the labels, one level up, and the gap that it left.
+        """The same rule as the labels, one level up, and the gap it left.
 
-        The Update group was a plain ttk.Frame, and such a frame has the colour of
-        a card. On the old status page that was correct, because that page was a
-        card. The group moved to App Settings, it kept the colour, and it became a
-        band of the wrong colour at the width of the content. The label test above
-        passed for that complete time, because each label in the band matched the
-        band.
+        A plain ttk.Frame has the colour of a card, so one packed onto a page
+        is a band of the wrong colour at the width of its content. The label
+        test above passes through that, because each label in the band matches
+        the band.
 
         A card is the one frame with a colour that is different from its parent.
         That contrast makes a card. Each other frame must match its parent.
@@ -1815,15 +1801,13 @@ class LiveWindowTest(unittest.TestCase):
     def test_no_card_stands_on_another_card(self):
         """Reported: dark notches inside the corners of the placeholder cards.
 
-        A card carries its own corners, and they are painted against the
-        *page*, because that is what a card normally stands on. Put one inside
-        another and those four corners are four notches of the page's colour
-        on top of the card underneath.
+        A card paints its corners against the *page*, which is what a card
+        normally stands on. One card inside another thus shows four notches of
+        the page colour on the card underneath.
 
-        Structural rather than by pixel, so it catches the next one as well:
-        the fix is a flat OnCard.TFrame for anything that stands on a card,
-        and the mistake is easy to repeat because the two look identical in
-        the source and differ only where they overlap.
+        Structural and not by pixel, so it catches the next one: the fix is a
+        flat OnCard.TFrame for anything that stands on a card, and the two
+        look identical in the source.
         """
         def cards(widget):
             found = []
@@ -2584,18 +2568,13 @@ class GpuBlockTest(unittest.TestCase):
     def _settle(self):
         """Read the card now, and take away the booking that reads it later.
 
-        The window reads the card one time, a fifth of a second after it
-        opens, and that read draws the block again from what the daemon says.
-        See Panel._first_look_gpu.
+        The window reads the card a fifth of a second after it opens, and that
+        read draws the block again from what the daemon says. See
+        Panel._first_look_gpu.
 
-        A test that set a value on the block and then let the loop run lost
-        that value to it. Whether the loop ran that long was a matter of the
-        clock, so the test passed or failed by the time of day: a test class
-        that ran before this one moved the moment, and each of these tests is
-        a different length.
-
-        This fires it here, where the test can see it, and takes the booking
-        away. The block is then the block the test drives.
+        A test that set a value and then let the loop run lost it to that
+        read, and whether the loop ran that long depended on the clock. This
+        fires it here instead.
         """
         if getattr(self.panel, "_gpu_first", None) is not None:
             self.root.after_cancel(self.panel._gpu_first)
@@ -3028,21 +3007,14 @@ class WrappingTest(unittest.TestCase):
     def test_each_page_is_laid_out_to_its_own_width(self):
         """Two notebooks, one number, and whichever spoke last won.
 
-        The sections are at the left, so the tabs of the strip have the width of
-        the rail less than a section with one page. On the machine of this report
-        that is 180 px. Both notebooks wrote the same wraplength, so each page took
-        the width of the last notebook with a size change. The same window did it
-        in both directions.
+        The tabs of the strip have the width of the rail less than a section
+        with one page, 180 px on the machine of this report. With one
+        wraplength for both, each page took the width of the last notebook to
+        change size, and the text wrapped 180 px early or 180 px past the edge
+        of its card.
 
-        With the narrow value, the explanations of the CEC page wrapped 180 px
-        before the edge of their card, and the right third of the card was empty.
-        With the wide value, the explanations of the strip went 180 px past the
-        edge of their card. A label that is wider than its space is not wrapped,
-        and the card cuts it.
-
-        This test has two halves, because the second half finds the order of the
-        release. No text must be wider than its page, and a page with more space
-        than the narrow page must use that space.
+        Two halves: no text wider than its page, and a page with more space
+        must use it.
         """
         seen, roomy = 0, 0
         for key in ("strip", "cec", "status", "strip", "cec"):
@@ -3072,18 +3044,13 @@ class WrappingTest(unittest.TestCase):
 class FoldTest(unittest.TestCase):
     """Opening a block's Details shows a paragraph. That is the whole job.
 
-    A user reported this: the Check again button below the blocks came back in
-    pieces at each open of the CPU details or the graphics details. It showed
-    one half of its label and parts of the elements behind it. It became
-    correct at the next movement of the pointer. The fault was in the draw step
-    and not in the layout: a measurement showed the same size and the same
-    position for the complete time.
+    Reported: the Check again button below the blocks came back in pieces at
+    each open, and became correct at the next movement of the pointer. The
+    fault was in the draw step and not in the layout.
 
-    The cause was a call to refresh_status() from the fold. That function reads
-    the complete machine again, and it then destroys and builds each block. The
-    button is outside the blocks, so it survives that step, and the taller page
-    moves it. It moves over an area that Tk destroyed and did not draw again,
-    and X copies the pixels of a window that moves.
+    The cause was a call to refresh_status() from the fold. It rebuilds every
+    block, the taller page moves the button over an area Tk destroyed and did
+    not paint again, and X copies the pixels of a window that moves.
     """
 
     @classmethod
@@ -3403,15 +3370,13 @@ class HeadlineTest(unittest.TestCase):
 class CardTest(unittest.TestCase):
     """A card is not one picture stretched behind it, and here is why.
 
-    ttk fills a frame with an image by a scale step, and it scales again at
-    each redraw. The cost is therefore the area of the card, and a card is the
-    largest element in this window. The four cards of the CEC page, and one of
-    them is 828x1071, cost 149 ms of one wheel step together. The page moved
-    two times each second on the machine of that report. The same page, with
-    the corners as four small pictures, moved in 3.7 ms.
+    ttk fills a frame with an image by a scale step and scales again at each
+    redraw, so the cost is the area of the card. The four cards of the CEC
+    page cost 149 ms of one wheel step together, and 3.7 ms with the corners
+    as four small pictures.
 
-    Checked structurally rather than by the clock, because a timing test on a
-    build machine says more about the build machine than about the window.
+    Checked structurally and not by the clock: a timing test on a build
+    machine says more about the machine than about the window.
     """
 
     @classmethod

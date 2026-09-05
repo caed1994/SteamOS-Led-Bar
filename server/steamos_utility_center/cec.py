@@ -412,8 +412,7 @@ def wake_radios_said(text):
     """Returns the meaning of that answer, in one sentence.
 
     Three answers, separated. "Found nothing" and "found a radio that is
-    already allowed" are not the same, and a person is asking "did it find my
-    radio?".
+    already allowed" are not the same answer to "did it find my radio?".
     """
     try:
         found = json.loads(text)
