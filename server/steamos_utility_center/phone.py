@@ -6,31 +6,17 @@
 KDE Connect carries them from the phone to the desktop. This module turns one
 of them into a line in the trigger pipe.
 
-Nothing here communicates with WhatsApp or with another app. There is no
-interface for that. This module reads the *notification*, and an app that is
-silent on the phone is thus silent here also.
+Nothing here communicates with WhatsApp or with another app. It reads the
+*notification*, so an app that is silent on the phone is silent here also.
 
-There is no D-Bus library. `gdbus` is part of glib, so it is on each machine
-with a desktop. This project does not add a package to save itself some
-parsing.
+There is no D-Bus library. `gdbus` is part of glib and is on each machine with
+a desktop. Each step below the subprocess is a pure function from a line of
+text to "what to flash", which the tests drive with recorded lines.
 
-The parsing is also the testable part. Each step below the subprocess is a pure
-function from a line of text to "what to flash", and the tests drive it with
-recorded lines and not with a phone.
-
-This module reads the notifications from one place: the signals of KDE Connect,
-which carry what the phone sent and nothing else.
-
-There was a second place, the notification bus of the desktop. It was a
-protection for a machine where KDE Connect gave no answer. It was removed after
-KDE Connect operated, because it was never the same feature.
-
-That bus carries each notification on the machine. "Your phone made a sound"
-and "a chat app on the Steam Machine made a sound" thus gave the same flash. In
-Game Mode there is no notification daemon at all, and it found nothing.
-
-A second route that flashes at the wrong events in Desktop Mode, and at nothing
-in Game Mode, is not a second route.
+The signals of KDE Connect are the one source. The notification bus of the
+desktop was a second one, and it carried each notification on the machine
+rather than each notification from the phone. Game Mode has no notification
+daemon at all.
 """
 
 from __future__ import annotations
@@ -53,12 +39,9 @@ KDECONNECT_SERVICE = "org.kde.kdeconnect"
 # What the bus says when there is a notification to read. Each other signal of
 # that service belongs to another program.
 #
-# There are two, because Android does not post a second notification for the
-# second message of a conversation. It updates the first notification.
-#
-# With "posted" alone, there was one flash for each conversation, and no flash
-# again until a person removed the notification from the machine. The next
-# message was then new again. A user reported that.
+# There are two, because Android updates the first notification of a
+# conversation rather than post a second one. With "posted" alone there was one
+# flash for each conversation and none again until somebody cleared it.
 KDECONNECT_MEMBERS = ("notificationPosted", "notificationUpdated")
 # And what it says when one goes away, which is not an arrival. It arrives for
 # each notification that a person removes on the phone. A flash for those
@@ -118,12 +101,9 @@ SETTLE_SECONDS = 2.0
 
 # What to give Qt when this module starts kdeconnectd.
 #
-# kdeconnectd is a Qt application, and it does not run without a platform
-# plugin that it can start. From a service it takes "wayland", finds no
-# compositor, and stops.
-#
-# A daemon draws nothing, and this plugin is the plugin for a program that
-# draws nothing.
+# kdeconnectd is a Qt application and needs a platform plugin it can start.
+# From a service it takes "wayland", finds no compositor, and stops. This
+# plugin is the one for a program that draws nothing.
 QT_PLATFORM = "offscreen"
 
 # How much of the digest to write. It is long enough that two different
@@ -136,21 +116,17 @@ TAG_LENGTH = 8
 # for a day must not leave a list of each notification that it sent.
 RECENT_NOTIFICATIONS = 8
 
-# A phone that connects gives KDE Connect each notification that it holds, as
-# one notificationPosted for each. A machine after a boot thus flashed one time
-# for each unread message, before a person used it. A user reported that.
+# A phone that connects gives KDE Connect each notification it holds, one
+# notificationPosted for each, so a machine after a boot flashed once for every
+# unread message.
 #
-# Nothing on a notification gives its age. These two values are thus the two
-# ways to separate that group from a conversation.
+# Nothing on a notification gives its age, so these two values are the only way
+# to separate that group from a conversation.
 #
-# The settling time is the time after the start of the machine. The phone finds
-# the machine some seconds later, and the group arrives then. It is measured
-# from the start of the bridge, which is a moment before the monitor attaches.
-#
-# It is 30 seconds, which is the balance in both directions. It must be longer
-# than the time for a phone to find a machine that started. Each second of it
-# is also a second in which a new message does not flash. The bridge restarts
-# at Apply and at the boot, so this is not only for a boot.
+# The settling time runs from the start of the bridge. It must be longer than
+# the time for a phone to find a machine that started, and each second of it is
+# a second in which a new message does not flash. The bridge restarts at Apply
+# as well as at the boot.
 BACKLOG_SETTLE = 30.0           # seconds after the bridge starts
 # The flood is the same group at a later time, when the phone joins the network
 # again. That occurs after a suspend, and after a person leaves the range of
@@ -166,11 +142,9 @@ BACKLOG_WINDOW = 4.0            # seconds they arrive within
 class Sighting(collections.namedtuple("Sighting", "app title body where")):
     """One notification, with what the bus reported about it.
 
-    `where` is the object to ask about it. The bus reports a notification by an
-    id and keeps the other values as properties of an object of its own. The app
-    is one of those values.
-
-    A record from a signal alone is thus mostly a position to ask at.
+    The bus reports a notification by an id and keeps the other values, the app
+    among them, as properties of an object. `where` is that object, so a record
+    from a signal alone is mostly a position to ask at.
     """
 
     __slots__ = ()
@@ -218,12 +192,10 @@ def wake_command():
 def _split_arguments(text):
     """Returns the top-level items of a GVariant tuple, in their own form.
 
-    This is not a GVariant parser and does not need to be one. It splits at each
-    comma that is not inside a string and not inside a bracket. That is
-    sufficient to count the arguments.
-
-    It returns each item as written, so that _as_string can separate a string
-    from a number that looks like a string.
+    Not a GVariant parser: it splits at each comma that is outside a string and
+    outside a bracket, which is enough to count the arguments. Each item stays
+    as written, so _as_string can tell a string from a number that looks like
+    one.
     """
     depth = 0
     quote = ""
@@ -293,12 +265,9 @@ def _unescape(text):
 def _arguments(line, member):
     """Returns the argument tuple of this line, if the line is that member.
 
-    gdbus writes one event on each line, as
-    "<path>: <interface>.<member> (args)". The form of the front part is
-    different between glib versions.
-
-    This function thus searches for the member. It does not read the line from
-    the left.
+    gdbus writes "<path>: <interface>.<member> (args)", and the front part is
+    different between glib versions. This searches for the member rather than
+    read the line from the left.
     """
     marker = "." + member
     at = line.find(marker + " ")
@@ -316,14 +285,12 @@ def _arguments(line, member):
 def app_from_key(key):
     """Returns the app from an Android notification key.
 
-    KDE Connect passes the key through with no change. Android writes it as
-    "user|package|id|tag|uid". An older Android writes "package:id:tag".
+    Android writes "user|package|id|tag|uid", or "package:id:tag" on an older
+    release, and KDE Connect passes it through. In both forms the package is
+    the part with full stops in it.
 
-    In both forms, the package is the part with full stops in it. That part is
-    also the part to match on: "whatsapp" is in "com.whatsapp".
-
-    It returns the full key when no part looks like a package. A rule that a
-    person can see in --print and match by hand is better than an empty value.
+    It returns the full key when no part looks like a package: a value a person
+    can see in --print and match by hand is better than an empty one.
     """
     pieces = [piece for piece in key.replace("|", ":").split(":")
               if piece and piece not in ("null", "0")]
@@ -370,11 +337,8 @@ def read_line(line):
 def member_of(line):
     """Returns the name of the signal, with no interface. "" for other lines.
 
-    This is only for a report of what this module did not use. The names are
-    different between KDE Connect versions.
-
-    A bridge that ignores the signal with the messages looks the same as a
-    phone that stopped. The dry run thus lists what it did not act on.
+    Only for the dry run, which lists what this module did not act on. A bridge
+    that ignores the signal with the messages looks like a phone that stopped.
     """
     head, separator, rest = line.partition(": ")
     if not separator or not head.startswith("/"):
@@ -485,12 +449,9 @@ def parse_rules(text):
 def match(rules, app):
     """Returns the rule for this app, or None.
 
-    It matches in both directions and ignores the case. KDE Connect names an app
-    "WhatsApp" or "com.whatsapp". The name depends on its version and on whether
-    this module could ask the object.
-
-    A rule that matched one form only is a rule that operates on the machine
-    that it was written on.
+    It matches in both directions and ignores the case. KDE Connect names an
+    app "WhatsApp" or "com.whatsapp", by its version and by whether this module
+    could ask the object.
     """
     wanted = (app or "").strip().lower()
     if not wanted:
@@ -505,11 +466,9 @@ def match(rules, app):
 def trigger_for(sighting, rules, kind=notify.KIND_PHONE, listed_only=False):
     """Returns the line to write into the pipe, or None to ignore this one.
 
-    A record with no rule goes to the pipe as the kind name and not as a colour.
-    PHONE_COLOR and PHONE_STYLE thus stay the values that the panel sets, and
-    this process needs no restart to read a change.
-
-    Only an app with a rule of its own goes to the pipe with its colour.
+    A record with no rule goes as the kind name and not as a colour, so
+    PHONE_COLOR and PHONE_STYLE stay the panel's and this process needs no
+    restart to read a change. Only an app with its own rule carries a colour.
     """
     rule = match(rules, sighting.app)
     if rule is None:
@@ -526,12 +485,8 @@ def trigger_for(sighting, rules, kind=notify.KIND_PHONE, listed_only=False):
 def fingerprint(sighting):
     """Returns a digest of a notification, for "did this one change".
 
-    It uses the app, the title and the text. Those three change when there is
-    something new.
-
-    The bridge uses it to separate two events: a notification that KDE Connect
-    reported again because the notifications beside it moved, and a notification
-    with a new message.
+    The app, the title and the text. It separates a notification that KDE
+    Connect reported again from one with a new message.
     """
     return _digest(sighting.app, sighting.title, sighting.body)
 
@@ -539,18 +494,12 @@ def fingerprint(sighting):
 def whose(sighting):
     """Returns the source of this notification, as the key of the repeat gap.
 
-    It uses the app and the title. Together they are the conversation. It does
-    not use the text, which is the message. That difference is important.
+    The app and the title, which together are the conversation. The text is
+    the message: with the text in the key, twenty messages are twenty
+    conversations. With the trigger word alone, every phone notification is
+    one conversation and two apps seconds apart give one flash.
 
-    The gap exists so that a person who writes one message each second does not
-    hold the bar. With the text as the key, each message was its own
-    conversation, and a group of twenty gave twenty flashes.
-
-    The key is also not the trigger word, which it was before. Each notification
-    from the phone is the word "phone", so each one was one conversation. A
-    WhatsApp message and a Signal message seconds apart thus gave one flash.
-
-    Between those two mistakes is the correct key: who writes.
+    The correct key is who writes.
     """
     return _digest(sighting.app, sighting.title)
 
@@ -633,12 +582,9 @@ class Bridge:
     def _look_again(self):
         """Reads the recent notifications again, because one of them changed.
 
-        The measurement on a real machine: this KDE Connect reports a changed
-        notification as "refreshed". That signal says that something changed and
-        not what changed. The notification keeps its object.
-
-        This method thus asks the objects, and the digest decides whether the
-        answer has something new.
+        KDE Connect reports a change as "refreshed", which says that something
+        changed and not what. This asks the objects, and the digest decides
+        whether the answer holds something new.
         """
         if self.details is None:
             return None
@@ -700,12 +646,9 @@ class Bridge:
     def _catching_up(self, sighting):
         """Returns whether this is the group from the phone and not a person.
 
-        The notification does not answer this. KDE Connect gives an app, a title
-        and a text, and nothing about the time at which the phone first showed
-        it.
-
-        This method thus uses the arrival time and the number of notifications
-        that arrived with it. See BACKLOG_SETTLE and BACKLOG_FLOOD.
+        KDE Connect gives no age for a notification, so this uses the arrival
+        time and the number that arrived with it. See BACKLOG_SETTLE and
+        BACKLOG_FLOOD.
         """
         now = self.clock()
         if now < self._settled_at:
@@ -750,21 +693,13 @@ class Bridge:
     def watch(self, stream, tick=None, every=None):
         """Reads the output of a monitor, and runs `tick` between the lines.
 
-        A quiet phone sends nothing for hours. A loop that wakes on a line
-        only thus never wakes. This process must also detect the exit of KDE
-        Connect.
+        A quiet phone sends nothing for hours, and this process must still
+        detect the exit of KDE Connect. The read thus stops at intervals and
+        runs `tick`.
 
-        There is a timeout for that reason: the read stops for a moment at
-        intervals, and `tick` runs.
-
-        This uses select() and not a thread. There is one thing to wait for
-        and one action to take. A thread needs a way to stop, and this loop
-        stops at its end.
-
-        `every` can be a function and not a number. This method calls it
-        before each wait. That is what lets the caller look often while
-        something is wrong, and seldom while nothing is wrong. A fixed
-        interval is either expensive or slow.
+        select() and not a thread: one thing to wait for, and a thread needs a
+        way to stop. `every` can be a function, so the caller can look often
+        while something is wrong and seldom while nothing is.
         """
         # This reads `every` at the call and not at the definition, so
         # that a test can make the interval shorter.
@@ -785,15 +720,9 @@ class Bridge:
 def obstacles(notify_on, phone_on, fifo_ready):
     """Returns what stops a notification from reaching the bar, in sentences.
 
-    It returns an empty list when nothing stops it.
-
-    The dry run flashes nothing, and it reads the bus whether or not the
-    feature is on. That is correct: a person must be able to look before the
-    decision.
-
-    Alone, that behaviour is a trap. Each line of the dry run is correct and
-    the bar stays dark, and nothing connects the two. This function is the
-    connection.
+    Empty when nothing stops it. The dry run reads the bus whether or not the
+    feature is on, so each line of it can be correct while the bar stays dark.
+    This is what connects the two.
     """
     complaints = []
     if not notify_on:
@@ -843,33 +772,24 @@ def kdeconnectd_path():
 def start_kdeconnectd(path=None):
     """Starts KDE Connect, because the bus does not start it.
 
-    The measurement on a real machine: the daemon stops with the Plasma
-    session that started it. A request to the bus after that gives nothing
-    back, because the bus has no activation file for it.
+    The daemon stops with the Plasma session that started it, and the bus has
+    no activation file for it. In Game Mode it is thus absent.
 
-    In Game Mode the daemon is thus absent, and no other program starts it.
+    The caller calls this only when nothing owns the name, and a second
+    instance loses the name and exits, so a start that was not necessary costs
+    a process that stops again.
 
-    The caller calls this method only when nothing owns the name. This method
-    is thus not a second instance against the first. The process that owns the
-    name wins and the other one exits. To start one that already runs is at
-    worst a process that stops again.
+    It starts in a session of its own, so the daemon outlives this process. A
+    daemon that stopped with the bridge would restart at each Apply, and each
+    start stops the connection to the phone.
 
-    It starts the daemon in a session of its own, so that the daemon outlives
-    the bridge. That is necessary: this process restarts, and a daemon that
-    stopped with it would start again each time. Each start stops the
-    connection to the phone.
-
-    It starts the daemon with no display, and that is important. kdeconnectd is
-    a Qt application, and Qt needs a platform plugin that it can start.
-
-    From here it took "wayland", found no compositor, and stopped before it did
-    any work:
+    It starts with no display. kdeconnectd is a Qt application, and from here
+    it takes "wayland" and finds no compositor:
 
         Failed to create wl_display (No such file or directory)
         qt.qpa.plugin: Could not load the Qt platform plugin "wayland"
 
-    The daemon draws nothing. This module needs its network and its bus, and
-    both operate with no screen.
+    This module needs its network and its bus, and both operate with no screen.
     """
     path = path or kdeconnectd_path()
     if path is None:
@@ -889,19 +809,12 @@ def start_kdeconnectd(path=None):
 def wake_kdeconnect(revive=True, settle=SETTLE_SECONDS, timeout=ASK_SECONDS):
     """Starts KDE Connect if it does not run, and reports what it knows.
 
-    The caller calls this before the monitor starts. A monitor attaches to a
-    name and does not request it. With nothing behind that name, the monitor
-    waits without a limit.
+    Before the monitor starts: a monitor attaches to a name and does not
+    request it, so with nothing behind that name it waits without a limit.
 
-    In a desktop session this finds the daemon and costs one call. In Game
-    Mode this starts it.
-
-    It returns None when the daemon gave no answer. It returns the paired
-    phones in each other case.
-
-    That is the difference between "KDE Connect does not run" and "KDE
-    Connect runs and your phone does not speak to it". Without it, the two
-    states look the same: a bar that never flashes.
+    None when the daemon gave no answer, and the paired phones in each other
+    case. That separates "KDE Connect does not run" from "it runs and your
+    phone does not speak to it".
     """
     reply = _ask(wake_command(), timeout)
     if not reply.strip() and revive and start_kdeconnectd() is not None:
@@ -936,11 +849,9 @@ def device_names(reply):
 def look_up(sighting):
     """Adds what KDE Connect keeps beside the id, if it answers.
 
-    This is never a failure. An id that this cannot ask about still flashes,
-    with the app that app_from_key found.
-
-    A notification that arrives while the phone answers is gone when this
-    asks. Nothing can win that race, and the bar flashes the general colour.
+    Never a failure: an id this cannot ask about still flashes, with the app
+    that app_from_key found. A notification that goes away during the question
+    is a race nothing can win.
     """
     reply = _ask(details_command(sighting.where))
     return read_details(reply, sighting)

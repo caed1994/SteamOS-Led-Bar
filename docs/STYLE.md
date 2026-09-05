@@ -164,6 +164,31 @@ Put it in a block and introduce it with one sentence.
 Say why, not what. The code says what it does. A comment that repeats the code
 is not useful. A comment that gives the reason is useful.
 
+## How much to write
+
+Write the shortest text that stops the next reader from making the mistake.
+
+Give the reason and stop. Do not write the history of the fault: who found it,
+how long it took, or what each earlier attempt was. A reader repairs the code
+and does not read a report of an old repair.
+
+```text
+Do not write:  A user reported this. The page said "Everything is in order"
+               below its own title, and above a card with the text "Not
+               installed yet". Both texts were correct. The sentence counts
+               each part, and a part that is not installed is not a problem.
+Write:         The line answers for the open page. A count over every part
+               reads as an answer about the section it stands under.
+```
+
+Write one reason in one place. A docstring that gives it, a comment below that
+repeats it, and a README that repeats it again are three copies to keep equal.
+
+A docstring for a function whose name says what it does is one line, or none.
+Write more only for a constraint that the code does not show.
+
+When you delete code, delete the text that documents it.
+
 ## What this does not apply to
 
 Two directories hold other persons' work:

@@ -3,42 +3,34 @@
 
 """One control surface for this project, which speaks JSON.
 
-The panel is a window, and it imports these modules and calls them. That is
-correct for a window on the desktop, and it is not enough. A plugin in Game
-Mode cannot do the same: it is a process of a different program, and its front
-end is a web page inside Steam. It needs a command that prints an answer.
-
-This is that command:
+The panel imports these modules and calls them. A plugin in Game Mode cannot:
+it is a process of another program, with a web page inside Steam for a front
+end. It needs a command that prints an answer.
 
     steamos-utility-centerctl status
     steamos-utility-centerctl get strip
     steamos-utility-centerctl set strip '{"NOTIFY": false}'
     steamos-utility-centerctl action cec-wake
 
-`set` takes a JSON object rather than one command for each setting. A new
-setting is then no work in this file at all: the config file already holds it,
-`get` already returns it, and `set` already writes it. Only the front end gains
-a row. See AREA.
+`set` takes a JSON object rather than one command for each setting, so a new
+setting is no work here at all. See AREA.
 
 Three rules give this file its shape.
 
 **One object on stdout, and nothing else.** A message for a person goes to
-stderr. A caller that parses stdout must never find a warning in the middle of
-the answer. Every command prints an object with `ok` in it, and the exit status
+stderr. Every command prints an object with `ok` in it, and the exit status
 agrees with that field.
 
-**`status` starts no process.** A front end asks for the status again and again
-while a person looks at a page, and a fork for each answer is a cost that a
-game pays. `status` therefore reads files and nothing more. `status --full`
-is the other half, with the questions that need `systemctl`, the toolkit and
-lsblk in them. A caller asks for that one time when a page opens.
+**`status` starts no process.** A front end asks for it again and again while
+a person watches a page, so it reads files and nothing more. `status --full`
+is the half that needs `systemctl`, the toolkit and lsblk, asked one time when
+a page opens.
 
-**Nothing asks for a password unless the caller permits it.** Game Mode runs no
-polkit agent and gives no terminal, so a `pkexec` there fails after a delay and
-tells a person nothing. See ledpanel.NO_AGENT_ADVICE, which says the same about
-the panel. This command uses `sudo -n`, which either works or refuses at once,
-and it names the file that makes it work. `--may-prompt` gives the old
-behaviour to a caller with a desktop around it.
+**Nothing asks for a password unless the caller permits it.** Game Mode runs
+no polkit agent and gives no terminal, so `pkexec` there fails after a delay
+and says nothing. This uses `sudo -n`, which works or refuses at once, and the
+refusal names the file that would make it work. `--may-prompt` is for a caller
+with a desktop around it.
 """
 
 from __future__ import annotations
@@ -179,16 +171,12 @@ def privileged(command, may_prompt=False, run=None):
     code, said = run(escalate(command, may_prompt))
     if code == 0:
         return said.strip()
-    # A module that is not installed has no applier. sudo answers that as a
-    # refusal about rights, and the second message below would then tell a
-    # person to reinstall for a rule that is already correct. The true answer
-    # is that this machine has no such module.
+    # A module that is not installed has no applier, and sudo reports that as
+    # a refusal about rights. The message below would then tell a person to
+    # reinstall for a rule that is already correct.
     #
-    # It matters most in Game Mode, where the plugin is the only screen and
-    # nobody can look in /var/lib to see which of the two answers it is.
-    #
-    # After the call and not before it: a failure is what makes the question
-    # worth asking, and a machine that answers has nothing to explain.
+    # After the call and not before it: a machine that answers has nothing to
+    # explain.
     owner = module_of(command[0])
     if owner and not os.path.exists(command[0]):
         raise CtlError("the %s module is not installed on this machine. "
@@ -205,10 +193,10 @@ def privileged(command, may_prompt=False, run=None):
 def stage(text, path):
     """Writes text where the applier reads it, and returns the path it used.
 
-    `path` is the fixed name that a sudoers rule permits. An installation that
-    has no such directory gets a temporary file instead: `sudo -n` then refuses
-    the argument, and the refusal names the rule that is missing. That is the
-    correct answer, and it is better than a failure to write.
+    `path` is the fixed name a sudoers rule permits. With no such directory it
+    writes a temporary file instead, and `sudo -n` then refuses the argument
+    and names the rule that is missing. That is a better answer than a failure
+    to write.
 
     Mode 0644, because the applier runs as root and reads it.
     """
@@ -369,12 +357,9 @@ def cec_offers():
 def cec_write(updates, may_prompt=False, run=None, home=None):
     """Switches a feature of the toolkit, or writes a setting of it.
 
-    Both in one call, because both are what a person changes on that page. A
-    key that names a feature is a switch, and every other key is a setting.
-
-    Neither needs root. A switch is a systemd unit of the user, and a setting
-    goes into a file of the user that has priority over the one in /etc. See
-    cec.toggle_command and cec.set_config_command.
+    A key that names a feature is a switch, and every other key is a setting.
+    Neither needs root: a switch is a unit of the user, and a setting goes in
+    a file of the user that has priority over the one in /etc.
     """
     run = _run if run is None else run
     said = []
@@ -415,22 +400,16 @@ def gpu_read(home=None):
 def gpu_offers():
     """Each control that this card publishes, with its range and its value.
 
-    The list comes from the card and not from a table in this project. A
-    control with no range is a control that the card does not have, and to
-    draw it is to offer a setting that writes nowhere. See lact.offered.
+    From the card and not from a table here. A control with no range writes
+    nowhere. See lact.offered.
 
-    The fan curve and the settings of the firmware are not here. Those are for
-    a person with the window of LACT open and a stress test in progress, and a
-    second and worse LACT is not what this is.
+    The fan curve and the firmware settings belong to the window of LACT.
+    `boost` is the one fan answer here, because a page has a switch for it. It
+    reads the card and not the file that _gpu_boost writes: somebody can set
+    the same speed in LACT, and a switch that reported a file would disagree
+    with the machine.
 
-    `boost` is the one fan answer that is here, because a page has a switch
-    for it. It is read from the card and not from the file that _gpu_boost
-    writes: a person can set the same speed in the window of LACT, and a
-    switch that reported a file rather than the machine is a switch that
-    disagrees with the machine.
-
-    It is here and not in gpu_read because this function already asks the
-    daemon. gpu_read opens files only, and `status` calls it again and again
+    Here and not in gpu_read, which opens files only because `status` calls it
     while somebody watches a page.
     """
     found = lact.state()
@@ -446,18 +425,14 @@ def gpu_offers():
 def gpu_write(updates, may_prompt=False, run=None, home=None):
     """Writes one or more controls of the card, and waits to be told to keep it.
 
-    Two rules of LACT that this has to follow.
-
-    set_gpu_config replaces the whole document rather than patching it, so
-    this starts from the document the daemon holds and changes only the keys
-    that the caller named. Anything else would turn off a fan curve that
-    somebody set in the panel.
+    Two rules of LACT to follow. set_gpu_config replaces the whole document,
+    so this starts from the document the daemon holds and changes the named
+    keys only.
 
     The daemon takes the change back after some seconds unless it is told to
-    keep it. That is not a step to skip: a voltage offset that is too low
-    hangs the card, and a hang after the change was kept is a card that hangs
-    again at every boot. So this returns the seconds, and the caller says
-    `gpu-keep` when the machine is still there to say it.
+    keep it. A voltage offset that is too low hangs the card, and a hang that
+    was kept comes back at every boot. This returns the seconds, and the
+    caller says `gpu-keep` while the machine is still there to say it.
     """
     found = lact.state()
     if not found or not found.get("gpu"):
@@ -477,14 +452,12 @@ def gpu_write(updates, may_prompt=False, run=None, home=None):
             "puts it back." % seconds)
 
 
-# The table that makes a new setting free. To add an area is four functions
-# and one line here. To add a setting inside an area is nothing.
+# The table that makes a new setting free. An area is four functions and one
+# line here. A setting inside an area is nothing.
 #
-# "keys" is the names that area accepts. It is there because a key with a
-# spelling error is otherwise a line that the file gains and the service
-# refuses at its next start: LED_COUTN=60 writes, and the machine comes back
-# from a reboot with no strip. `None` means that the program behind the area
-# decides, which is the answer for the CEC toolkit's own configuration.
+# "keys" is the names that area accepts. Without it, LED_COUTN=60 writes and
+# the machine comes back from a reboot with no strip. `None` means the program
+# behind the area decides, which is the CEC toolkit's own configuration.
 AREA = {
     "strip": {"read": strip_read, "offers": strip_offers,
               "write": strip_write, "keys": tuple(config_module.DEFAULTS)},
@@ -550,12 +523,9 @@ def _cec_action(name):
 def repair_drives(may_prompt=False, run=None, home=None):
     """Writes the mount units again and mounts what the record names.
 
-    The boot-time unit does this at every start. This is the same step for a
-    person who does not want to restart the machine to get a drive back.
-
-    It stages a copy of the record rather than naming the record itself. The
-    sudoers rule permits one file for each applier, and this way the repair
-    needs no rule of its own.
+    The same step the boot-time unit does, for a person who does not want to
+    restart. It stages a copy of the record rather than name the record, so
+    the repair needs no sudoers rule of its own.
     """
     staged = stage(mounts.text(mounts.read()), STAGED["drives"])
     try:
@@ -574,11 +544,9 @@ def restart_service(may_prompt=False, run=None, home=None):
 # One switch that puts the fan of the card at its full speed, and gives the
 # fan back when it goes off.
 #
-# It is not a setting of the card in the sense of gpu_write, and it does not
-# go through the sliders of a page. Those two send what a person moved and
-# then wait to be told to keep it. This reads the document that the daemon
-# holds, changes the fan in it, and writes it back. A person who moved a
-# slider and did not send it thus keeps what that slider holds.
+# It does not go through the sliders of a page. It reads the document the
+# daemon holds, changes the fan in it, and writes it back, so a person who
+# moved a slider and did not send it keeps what that slider holds.
 
 
 def boosting(fan):
@@ -652,9 +620,8 @@ def _gpu_boost(on):
     """Builds the action behind the switch. See the block above it.
 
     It confirms the change itself, and gpu_write does not. The countdown of
-    LACT is there for a voltage that hangs the card, because a hang that was
-    kept comes back at every boot. A fan at full speed hangs nothing. It is
-    loud, and a switch that needs a second press to stay on is a switch that
+    LACT is for a voltage that hangs the card. A fan at full speed hangs
+    nothing, and a switch that needs a second press to stay on is a switch
     nobody trusts.
     """
     def action(may_prompt=False, run=None, home=None):
@@ -735,19 +702,13 @@ def sudoers_text(user, present=None):
     """The rule that lets one user apply a change with no password.
 
     One line for each applier, and each line names the one file that applier
-    is permitted to read. There is no `*` in it. A rule with a `*` permits
-    every argument, and the argument of these programs is a file that they
-    read as root.
+    is permitted to read. There is no `*` in it: the argument of these
+    programs is a file that they read as root.
 
     An applier that is not on the machine gets no line. The appliers are the
-    modules: a machine with the LED module only has one applier, and a rule
-    that named the other two would permit programs that are not there.
+    modules, so this rule is the list of installed modules. See modules.py.
 
-    That also makes this rule the answer to "which modules are installed", and
-    it is the answer the panel reads. See modules.py.
-
-    Returns "" for a machine with no module at all. permit() then removes the
-    rule rather than writing a file of comments.
+    Returns "" for a machine with no module. permit() then removes the rule.
 
     `present` is a parameter so a test can answer for a machine it did not
     build.
@@ -800,12 +761,10 @@ def permit(user, run=None, present=None):
     """Writes that rule, and makes the directory the rule names.
 
     visudo reads the file before it is installed. A sudoers file that does not
-    parse takes sudo away from the machine, and this program must never be the
-    reason for that.
+    parse takes sudo away from the machine.
 
     A machine with no module has nothing to permit, so this removes the rule.
-    The installer runs this after every module install and every module
-    removal, so the rule follows the modules in both directions.
+    The installer runs it after every module change, in both directions.
 
     This needs root, and the installer is what runs it.
     """
