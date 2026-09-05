@@ -497,6 +497,43 @@ class PageTest(unittest.TestCase):
         self.assertNotIn("repair-drives", self.text)
 
 
+class ModuleTest(unittest.TestCase):
+    """The plugin draws the modules this machine has, and no others."""
+
+    def setUp(self):
+        self.text = read("src", "index.tsx")
+
+    def test_it_reads_the_module_list_from_the_status(self):
+        """One answer, and not a guess from the settings of an area.
+
+        An area answers whatever its files hold. The list of modules is the
+        one place that says which parts a machine has. See modules.py.
+        """
+        self.assertIn("modules?: string[];", self.text)
+        self.assertIn("held.status.modules.includes(name)", self.text)
+
+    def test_the_led_and_power_sections_are_behind_it(self):
+        for name in ('has("led")', 'has("power")'):
+            self.assertIn(name, self.text, name)
+
+    def test_an_unread_status_shows_every_section(self):
+        """This component draws before the first answer arrives.
+
+        A plugin that hid each section until then would open empty on every
+        visit, which is the fault it is meant to prevent.
+        """
+        self.assertIn("held.status?.modules === undefined", self.text)
+
+    def test_a_machine_with_no_module_is_told_where_to_get_one(self):
+        """Game Mode is the one screen where nobody can look in /var/lib."""
+        self.assertIn("held.status?.modules?.length === 0", self.text)
+        self.assertIn("No module is installed", self.text)
+
+    def test_the_built_file_carries_it(self):
+        built = read("dist", "index.js")
+        self.assertIn("No module is installed", built)
+
+
 class RestartLimitTest(unittest.TestCase):
     """The service must survive a person who changes a setting twice.
 

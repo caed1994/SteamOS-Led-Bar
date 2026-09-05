@@ -108,6 +108,26 @@ class MarkTest(unittest.TestCase):
             self.assertTrue(modules.installed(modules.CEC, home=home))
 
 
+class StatusTest(unittest.TestCase):
+    """The JSON surface reports which parts this machine has."""
+
+    def test_the_cheap_half_carries_the_modules(self):
+        """A front end asks for this again and again while a page is open.
+
+        Each answer is one file that is there or is not, so it costs no
+        process and belongs in the half that runs without one.
+        """
+        answer = ctl.status()
+        self.assertIn("modules", answer)
+        self.assertIsInstance(answer["modules"], list)
+        for name in answer["modules"]:
+            self.assertIn(name, modules.ORDER)
+
+    def test_it_is_a_list_and_not_a_map_of_four_booleans(self):
+        """A fifth module must not need a change in every front end."""
+        self.assertIsInstance(ctl.status()["modules"], list)
+
+
 class KnownTest(unittest.TestCase):
     """What the installer does with a name a person typed."""
 

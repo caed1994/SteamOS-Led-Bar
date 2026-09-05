@@ -1288,6 +1288,10 @@ because a front end asks for it again and again while a person looks at a
 page. `status --full` adds the answers that need `systemctl`, `lsblk` and the
 CEC toolkit. Ask for that one time when a page opens.
 
+`status` also gives `modules`, which is the list of [modules](#modules) that
+this machine has. An area whose module is absent still answers `get`, and a
+`set` on it reports that the module is not installed and names it.
+
 ### Why it needs no password
 
 Game Mode runs no polkit agent and gives no terminal, so a `pkexec` question
@@ -1303,6 +1307,11 @@ it.
 The rule is as small as a rule can be. There is **no wildcard in it**: each
 line names one program by its full path in `/var/lib/steamos-utility-center/`,
 and the one argument that program is permitted to take.
+
+It holds one line for each program that is on the machine, and no line for a
+program that is not. The programs are the [modules](#modules), so the rule is
+the list of installed modules. A machine with the core only gets no rule at
+all, because a core has nothing to permit.
 
 ```
 deck ALL=(root) NOPASSWD: /var/lib/steamos-utility-center/steamos-utility-center-config-apply /var/lib/steamos-utility-center/staged/strip.conf
@@ -1357,6 +1366,10 @@ also:
 `decky/` is a plugin for [Decky Loader](https://decky.xyz). It puts the
 settings that a person changes from a sofa into the Quick Access menu of Game
 Mode, where the panel cannot go.
+
+The plugin is part of the `system` [module](#modules). It draws a section for
+each module that this machine has, and none for a module that it has not. A
+machine with no module at all gets one line that says where to get one.
 
 **The panel installs it.** The **System** page has a *Game Mode* card with one
 button. It says which of four cases this machine is in, and the button says

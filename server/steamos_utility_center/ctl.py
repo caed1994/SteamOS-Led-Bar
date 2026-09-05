@@ -906,6 +906,14 @@ def status(full=False, run=None, home=None):
                   "drives": len(drives),
               },
               "sudo_rule": os.path.exists(SUDO_RULE),
+              # Which parts this machine has. A front end that offers a
+              # setting of a module that is not installed offers a setting
+              # that cannot be applied, and the Game Mode plugin is a screen
+              # where nobody can look in /var/lib to find out why.
+              #
+              # Each answer is one file that is there or is not, so this stays
+              # the half that costs no process. See modules.py.
+              "modules": list(modules.here(home=home)),
               "full": bool(full)}
     if not full:
         return answer

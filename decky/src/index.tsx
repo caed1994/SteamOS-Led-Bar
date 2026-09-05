@@ -31,6 +31,11 @@ type Answer = { ok: boolean; error?: string };
 
 type Status = Answer & {
   sudo_rule?: boolean;
+  // Which parts this machine has. The core is the panel and this command;
+  // the LED bar, the CPU and GPU power, HDMI CEC and the drives are modules,
+  // and a person takes each one from its own page in the panel. See
+  // server/steamos_utility_center/modules.py.
+  modules?: string[];
   areas?: { cec?: { installed?: boolean } };
   cec_features?: Record<string, boolean>;
 };
@@ -347,6 +352,16 @@ function Content() {
   const switches = held.status?.cec_features ?? {};
   const installed = Boolean(held.status?.areas?.cec?.installed);
 
+  // Whether this machine has one module. A section for a module that is not
+  // installed is a row of controls that can apply nothing, and Game Mode is
+  // the one screen where nobody can look in /var/lib to find out why.
+  //
+  // An unread status shows every section. This component draws before the
+  // first answer arrives, and a plugin that hid each section until then would
+  // open empty on every visit.
+  const has = (name: string) =>
+    held.status?.modules === undefined || held.status.modules.includes(name);
+
   // The switches of the toolkit, with the words that the panel uses for them.
   // The command answers with this list, so a switch that the toolkit gains
   // appears here with its own label and needs nothing written in this file.
@@ -386,6 +401,19 @@ function Content() {
         </PanelSection>
       )}
 
+      {held.status?.modules?.length === 0 && (
+        <PanelSection>
+          <PanelSectionRow>
+            <div style={{ fontSize: "0.8em", color: "#d9a441" }}>
+              No module is installed. The control panel in Desktop Mode
+              installs the LED bar, the CPU and GPU power, HDMI CEC and the
+              drives, each from its own page.
+            </div>
+          </PanelSectionRow>
+        </PanelSection>
+      )}
+
+      {has("led") && (
       <PanelSection title="LED bar">
         <PanelSectionRow>
           <Choice
@@ -414,7 +442,9 @@ function Content() {
           />
         </PanelSectionRow>
       </PanelSection>
+      )}
 
+      {has("power") && (
       <PanelSection title="CPU power">
         {Number(offered.policies ?? 0) === 0 ? (
           <PanelSectionRow>
@@ -447,7 +477,9 @@ function Content() {
           </>
         )}
       </PanelSection>
+      )}
 
+      {has("power") && (
       <PanelSection title="Graphics card">
         {!Boolean((held.gpu?.settings ?? {}).available) ? (
           <PanelSectionRow>
@@ -534,6 +566,7 @@ function Content() {
           </>
         )}
       </PanelSection>
+      )}
 
       <PanelSection title="Television">
         {!installed ? (
