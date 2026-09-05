@@ -107,17 +107,14 @@ STRIP = [
         # first effect that asked for it.
         ("RAINBOW_SHOWS", "The Rainbow entry shows", "named",
          ledpanel.rainbow_choices(config_module.RAINBOW_CHOICES), None, None),
-        # The complete bar takes one colour, and these two settings give the
-        # position on the scale. Below the first mark the bar is green.
-        # Above the second mark it is red. Yellow is between the two. So
-        # the two marks stay apart, and no pair from the sliders breaks
+        # The bar takes one colour, and these two marks give the position on
+        # the scale: green below the first, red above the second, yellow
+        # between. The sliders keep them apart, so no pair breaks
         # TEMPERATURE_SPAN.
         #
-        # The limits are narrower than the 0 to 150 of the validator. A mark
-        # at 0, or a mark at 150, gives one colour for each value that a
-        # machine produces. Such a gauge reports nothing. The step is five
-        # degrees, because a user reads a gauge quickly, and one degree
-        # makes no visible difference on it.
+        # Narrower than the 0 to 150 of the validator. A mark at either end
+        # gives one colour for every value a machine produces. The step is
+        # five degrees: one degree makes no visible difference on a gauge.
         ("TEMPERATURE_MIN", "Green up to (degrees)", "float", 20, 50, 5),
         ("TEMPERATURE_MAX", "Red from (degrees)", "float", 60, 90, 5),
         # Not a "choice": the values are paths into /sys and the machine
@@ -267,26 +264,19 @@ ADVANCED = [
     ]),
 ]
 
-# The settings of the machine. They are not settings of the LED service, and
-# they are not in the configuration file of the service. This is a page of its
-# own, for the same reason as the Desktop mode page. It is a question of its
-# own, and it changes the computer and not the bar.
+# The settings of the machine. They change the computer and not the bar, so
+# they are a page of their own and not part of the service configuration.
 #
-# Each setting here goes into the home directory of the user and needs no
-# rights. See syssettings. That is the reason the keyboard layout is the first
-# setting here: no helper script, no password, and no value that puts the
-# machine into a state that a restart cannot correct.
+# Each one goes into the home directory of the user and needs no rights. See
+# syssettings.
 #
-# The key is written here, and this table does not take it from syssettings.
-# The scene names below use the same method. The tests read this table
-# directly, and they cannot check a name that they must resolve first. The
-# tests also prove that this key is the correct one.
+# The key is written here and not taken from syssettings, and the scene names
+# below the same way: the tests read this table directly and cannot check a
+# name they must resolve first.
 #
-# The third element of a group is a line inside its card. See
-# _build_settings. This one was a paragraph below the card, and three
-# sentences under one drop-down is a page of prose about a menu. What a person
-# has to know before a change is when the change takes effect, and that is one
-# line and belongs beside the row it is about.
+# The third element of a group is a line inside its card. See _build_settings.
+# What a person must know before a change is when it takes effect, and that is
+# one line beside the row it is about.
 SYSTEM = [
     ("Keyboard", [
         ("XKB_DEFAULT_LAYOUT", "Keyboard layout", "named",
@@ -360,18 +350,13 @@ APP_KEYS = frozenset(appsettings.DEFAULTS)
 
 # -- the window's top level -------------------------------------------------
 #
-# The type of the settings, which is a different question from the page. The
-# window had one list of pages while it controlled the bar only. A keyboard
-# layout and a CPU governor are not settings of the LED strip, and one list
-# with each of them on it reports that they are.
+# Two levels, because a keyboard layout and a CPU governor are not settings of
+# the LED strip. This is the outer one: the list at the left edge, one entry
+# for each section. The pages of the LED strip are the inner level, in one
+# section.
 #
-# So there are two levels. This is the outer level: the list at the left edge,
-# with one entry for each section. The seven pages of the LED strip are the
-# inner level. They did not change, and they are now in one section.
-#
-# Each entry is (key, title, subtitle, icon). The code uses the key to name a
-# section. The entry shows the title and the subtitle. SidebarEntry draws the
-# icon, and that class holds the names.
+# Each entry is (key, title, subtitle, icon). The key names a section, and
+# SidebarEntry holds the icon names.
 SECTIONS = (
     ("strip", "LED Strip", "Configure the lighting", "strip"),
     ("power", "CPU & GPU power", "Governor, EPP and the card", "bolt"),
@@ -436,40 +421,29 @@ ABOUT_LINES = (
 # section before it does its work.
 SOON = {}
 
-# Settings with a meaning only under another setting, and their behaviour
-# without it. There are two answers, because there are two types of
-# dependency here, and they are two different questions.
+# Settings with a meaning only under another setting. Two kinds of dependency,
+# and each behaves differently.
 #
-# A row that depends on a *switch* becomes grey and keeps its position. The
-# setting belongs to the function that the switch turns on. The grey row
-# therefore says "turn that function on to use this". The user can still see
-# the row and its position, and that is the method to learn that the function
-# has this setting.
+# A row that depends on a *switch* becomes grey and keeps its position, so it
+# says "turn that function on to use this".
 #
-# A row that depends on a *choice* goes away. It does not belong to a function
-# that the user turned off. It belongs to one of the effects that one slot can
-# hold, and the settings of the other effects are not relevant. Three grey
-# temperature marks below a load gauge are three rows about an effect that is
-# not on the bar. A switch is different: the choice that brings the rows back
-# is the row directly above them, so the rows are not hidden from a user who
-# looks for them. See _hides.
+# A row that depends on a *choice* goes away. It belongs to one of the effects
+# that one slot can hold, and three grey temperature marks below a load gauge
+# are three rows about an effect that is not on the bar. The choice that
+# brings them back is the row directly above them. See _hides.
 #
-# An entry is a key, which must be on, or (key, value), which must have
-# exactly that value. The temperature settings have a meaning only when an
-# effect shows the temperature.
+# An entry is a key, which must be on, or (key, value), which must hold that
+# value.
 #
-# The value of an entry can also be more than one value, and then any one of
-# them is sufficient. A desktop scene has a colour under three of the nine
-# scenes, and DEPENDS_ON cannot give that as three separate rules. The scenes
-# are written here and are not taken from the service, because the tests read
-# this table directly. Those tests find a value that is not a scene.
+# The value can be several values, and any one of them is sufficient: a
+# desktop scene has a colour under three of the nine scenes. The scenes are
+# written here and not taken from the service, because the tests read this
+# table directly.
 #
-# The *key* of an entry can also be more than one key, and then any one of
-# them with that value is sufficient. Two settings can select the temperature
-# gauge: the rainbow slot in Game Mode, and the scene in Desktop Mode. Its
-# marks apply when one of the two selects it. One rule for each setting gives
-# two rules that must both be true, which is the opposite meaning. One rule
-# for the first setting only hides the marks that a desktop scene reads.
+# The key can be several keys, and any one of them with that value is
+# sufficient. The rainbow slot and the desktop scene can each select the
+# temperature gauge, and its marks apply when either does. Two separate rules
+# would both have to be true, which is the opposite meaning.
 TEMPERATURE_SHOWN = (("RAINBOW_SHOWS", "DESKTOP_SCENE"), "temperature")
 LOAD_SHOWN = (("RAINBOW_SHOWS", "DESKTOP_SCENE"), "load")
 SCENE_HAS_COLOUR = ("DESKTOP_SCENE", ("color", "breath", "patrol"))
@@ -483,21 +457,17 @@ SCENE_MOVES = ("DESKTOP_SCENE", ("breath", "patrol", "rainbow", "fire",
                                  "aurora"))
 # The energy preference applies only under a governor that gives the firmware
 # a range. Under `performance` the kernel fixes the value and refuses the
-# file. So the panel removes the menu, and it does not show a menu with no
-# result. This is a *choice* rule, and a choice rule hides a row.
+# file, so the panel hides the row rather than show a menu with no result.
 #
-# "Leave it to SteamOS" is also not in the list, and that is the second half
-# of the rule. Without a governor from this project, this project does not
-# control the CPU. A preference under a governor that no user selected has an
-# effect that depends on the default of SteamOS. power.epp_in_play holds both
-# halves, and the applier follows that function. The hidden row and the value
-# that the panel does not write are therefore one decision.
+# "Leave it to SteamOS" is not in the list either: without a governor from
+# this project, a preference has an effect that depends on the SteamOS
+# default. power.epp_in_play holds both halves and the applier follows it, so
+# the hidden row and the value the panel does not write are one decision.
 #
-# The list holds each governor that gives the firmware a range, because
-# DEPENDS_ON can say "is one of these" and cannot say "is not this". The list
-# holds the two governors of amd-pstate in active mode, and the classic
-# governors of a passive machine. A governor that is absent here hides a row
-# that the panel must show, and that is the safe direction of an error.
+# The list names each governor that gives the firmware a range, because
+# DEPENDS_ON can say "is one of these" and cannot say "is not this". A
+# governor missing here hides a row that the panel must show, which is the
+# safe direction of an error.
 EPP_IN_PLAY = ("CPU_GOVERNOR", ("powersave", "ondemand", "schedutil",
                                 "conservative", "userspace"))
 DEPENDS_ON = {
@@ -545,16 +515,14 @@ _IMAGES = []
 # -- how the window is dressed ---------------------------------------------
 #
 # Material Design 3, calculated from the accent colour of the desktop.
-# material.py converts that one colour into tonal ladders and roles with
-# names. This is the half that needs tkinter: it converts the roles into ttk
-# styles, and it draws the shapes that ttk cannot draw.
+# material.py converts that one colour into tonal ladders and named roles.
+# This is the half that needs tkinter: roles into ttk styles, and the shapes
+# ttk cannot draw.
 #
-# Two ideas of Material do most of the visible work. First, a raised surface
-# is a lighter *tone* and not a border or a shadow. A window can then hold
-# twelve groups of controls without twelve boxes around them. Second, hover,
-# press and disabled use one mechanism: a layer of the content colour over the
-# container. A colour for each widget is not necessary, and each control then
-# changes by the same amount.
+# Two ideas do most of the visible work. A raised surface is a lighter *tone*
+# and not a border or a shadow, so a window can hold twelve groups of controls
+# without twelve boxes. And hover, press and disabled are one mechanism: a
+# layer of the content colour over the container.
 
 # The shape scale of Material, at the sizes of this window. A radius gives the
 # size of an element: a full round end for a button, a soft corner for a
@@ -653,14 +621,12 @@ CARD_WRAP = CONTENT_MAX - CARD_INSET
 # The size of the window at the start, and its minimum size. A user cannot
 # drag it below the minimum.
 #
-# These sizes are for the monitors that users have now: 1920x1080 and
-# 2560x1440. They are not for the 1280x800 display of the machine. Game Mode
-# runs on that display, and this window is not the program on the screen
-# there.
+# For the monitors people have: 1920x1080 and 2560x1440. Not for the 1280x800
+# display of the machine, where Game Mode runs and this window does not.
 #
-# The width holds the sidebar, the inner list, a complete content column, and
-# the margins between them. At a smaller width the two lists take space from
-# the settings that they open.
+# The width holds the sidebar, the inner list, a content column and the
+# margins. Narrower, and the two lists take space from the settings they
+# open.
 START_WIDTH = 1400
 START_HEIGHT = 900
 MIN_WIDTH = 1120
@@ -781,15 +747,13 @@ TYPE_SUPPORT = -1
 
 # The window is dark whatever the desktop is, and only the *accent* follows.
 #
-# This is not a preference, and both halves of that decision are on purpose.
-# This panel controls a machine on a television in a dark room. The bar is the
-# subject of the panel, and a bar is a strip of light. A light window around a
-# preview of lit LEDs makes the preview weak.
+# Not a preference. This panel controls a machine on a television in a dark
+# room, and a light window around a preview of lit LEDs makes the preview
+# weak.
 #
-# The accent still comes from Plasma. That part of the desktop theme gives the
-# window the identity of the machine. See kdetheme. The window gives up the
-# light and dark half of the theme only. For that reason this is one name in
-# one place, and not a condition in each style.
+# The accent still comes from Plasma and gives the window the identity of the
+# machine. See kdetheme. One name in one place, and not a condition in each
+# style.
 DARK = True
 
 
@@ -1145,16 +1109,13 @@ There are two, because a radio button paints its own background.
     def scrollbars():
         """A pill in the page's margin, with nothing else to it.
 
-        The scrollbar of clam is the one widget in this window with a very old
-                look: a bevelled arrow button at the top, a sunken box for the trough,
-                and three grip lines on the thumb. This code keeps none of that. The
-                trough takes the colour of the page, so it is not visible. The layout
-                holds no arrow, because a user moves a page with the wheel or with a
-                drag, and not with two buttons of 12 pixels. The thumb is the same
-                round bar as the other elements here.
+        The scrollbar of clam keeps a bevelled arrow button, a sunken trough
+        and grip lines on the thumb. This code keeps none of that: the trough
+        takes the colour of the page, the layout holds no arrow, and the thumb
+        is the same round bar as the other elements here.
 
         Both pictures are drawn against the page, which is what the bar always
-        stands on: it is packed into a page's holder, beside the canvas.
+        stands on.
         """
         radius = SCROLL_THUMB / 2.0
         side = (SCROLL_WIDTH - SCROLL_THUMB) // 2
@@ -1238,15 +1199,13 @@ def apply_theme(root, mode=appsettings.THEME_DARK):
 
     ttk ships no theme resembling a modern desktop and cannot ask one either,
     so the scheme is worked out and painted on. clam is the base: the only
-    built-in theme that honours colour options rather than drawing fixed
-    bitmaps. Returns the roles, for the parts ttk cannot reach.
+    built-in theme that honours colour options rather than draw fixed bitmaps.
+    Returns the roles, for the parts ttk cannot reach.
 
-    The caller calls this function again at each change of the look. For that
-    reason each call works in a ttk theme of its own. An element name belongs
-    to one theme, and a second definition in that theme is not possible. A
-    second pass over the same theme raises "Duplicate element" for each
-    picture in dress(). dress() does not report a picture that it cannot
-    draw, so the window keeps its old colours and gives no message.
+    Each call works in a ttk theme of its own, because an element name belongs
+    to one theme and cannot be defined twice. A second pass over one theme
+    raises "Duplicate element" for each picture in dress(), which reports
+    nothing, so the window would keep its old colours in silence.
     """
     desktop = kdetheme.read()
     roles = material.scheme(desktop["selection"],
@@ -1536,19 +1495,17 @@ Only the thread that owns tkinter can call it. So the worker puts its
 class Popup:
     """Draws the list of a drop-down. This class draws it, and Tk does not.
 
-    A tk.Menu cannot take the look of the other controls of this window. It
-    marks the current entry with an indicator only. It cannot mark that entry
-    with a filled row, and each other list on the desktop uses a filled row.
-    Its border is also not settable.
+    A tk.Menu cannot take the look of the other controls: it marks the current
+    entry with an indicator and not with a filled row, and its border is not
+    settable.
 
-    A tk.Menu also stays too long. Tk posts it under a grab of its own and
-    gives the menu no control of the close step. It then stayed above the
-    window that took the focus next, and a menu must never do that.
+    It also stays too long. Tk posts it under a grab of its own and gives the
+    menu no control of the close step, so it stayed above the window that took
+    the focus next.
 
-    So this is a window of this file. This class draws the rows, and the
-    window closes when the focus leaves it. At that time it is a plain
-    Toplevel, and Tk reports the focus to it. The note below the constructor
-    gives the reason for the missing grab.
+    So this is a plain Toplevel of this file. It draws the rows and closes
+    when the focus leaves it. The note below the constructor gives the reason
+    for the missing grab.
     """
 
     PAD_X = 14
@@ -1643,15 +1600,12 @@ class Popup:
     def _place(self, button):
         """Puts the list below the field, with its top edge on the field.
 
-        Before, the list opened *over* the field, with the selected row on the
-        field. A menu button does that, and some desktops do it. But then the
-        list has a different position for each selected entry, and it covers
-        the control that the user pressed. Below the field, the field stays
-        visible and the list always has the same position.
+        A list that opens *over* the field, with the selected row on it, has a
+        different position for each entry and covers the control a person just
+        pressed. Below the field, the field stays visible and the position is
+        always the same.
 
-        The list opens upwards when there is not sufficient space below. That
-        is the one condition where a list that always opens downwards goes off
-        the screen, or comes back over its own field.
+        It opens upwards when there is not sufficient space below.
         """
         window = self.window
         window.update_idletasks()
@@ -1724,14 +1678,11 @@ class Dialog:
     """Shows a message in the style of this window.
 
     Tk draws its own message boxes, and beside a Material window they look
-    very old. That is important here, because this window shows a message box
-    for each event: an incorrect setting, and also a new flash of the ESP. A
-    Toplevel needs approximately the same code and takes the theme, because
-    ttk styles apply to the complete interpreter.
+    very old. A Toplevel needs approximately the same code and takes the
+    theme, because ttk styles apply to the whole interpreter.
 
-    The dialog is modal, as a question must be. It is transient to its parent
-    window, it grabs the pointer, and the caller waits for it. The caller
-    then reads the answer as a return value and not through a callback.
+    Modal, as a question must be: transient to its parent, with a grab, and
+    the caller waits and reads the answer as a return value.
     """
 
     def __init__(self, parent, title, message, confirm=None, deny="Cancel"):
@@ -1980,19 +1931,13 @@ class ProfileDialog(Dialog):
 class SidebarEntry:
     """One section in the list down the left edge.
 
-    A canvas rather than a ttk.Radiobutton, which is what the inner rail is.
-    A ttk entry has one label in one font. This entry needs two: a title, and
-    below it a smaller and weaker line that gives the subject of the section.
-    ttk cannot do that, because a widget has one -font option. A label of two
-    lines in one font removes the difference that the subtitle must show.
+    A canvas rather than the ttk.Radiobutton of the inner rail. A ttk widget
+    has one -font option, and this entry needs two: a title, and below it a
+    smaller and weaker line that gives the subject of the section.
 
-    A canvas has neither problem. Each other element that ttk cannot draw uses
-    a canvas: the preview stage and the colour samples. Each text item takes
-    its own font and its own fill, so the complete entry is four items on one
-    surface.
-
-    A canvas has no ttk states, so this class binds hover and selection
-    itself. That is three bindings, and it is the cost of the second line.
+    Each text item on a canvas takes its own font and fill, so the whole entry
+    is four items on one surface. A canvas has no ttk states, so this class
+    binds hover and selection itself.
     """
 
     def __init__(self, parent, roles, fonts, entry, on_pick,
@@ -2146,16 +2091,13 @@ class SidebarEntry:
 class FanCurve:
     """Shows the fan curve as a graph that the user can drag.
 
-    The temperature is the horizontal axis, and the fan speed is the vertical
-    axis. The user drags a point in both directions, and a point cannot pass
-    its neighbours. The curve is therefore a function of the temperature and
-    not a free shape. LACT stores it as a map with the degrees as the key, so
-    two points at one temperature are not possible.
+    Temperature across, fan speed up. A point drags in both directions and
+    cannot pass its neighbours, so the curve is a function of the temperature:
+    LACT stores it as a map with the degrees as the key.
 
-    This uses a canvas, because ttk has no graph. The other method is a column
-    of numbers with sliders. That method answers "what is the speed at 60
-    degrees" and never answers "what is the shape of this curve".
-    The shape is the reason somebody opens a fan curve.
+    A canvas, because ttk has no graph. The alternative is a column of
+    numbers, which answers "what is the speed at 60 degrees" and never "what
+    is the shape of this curve".
     """
 
     LOW, HIGH = 20, 100                 # the degrees the graph spans
@@ -2577,16 +2519,12 @@ class Panel:
     def _page(self, notebook, build):
         """Builds one page of the notebook. It scrolls in a short window.
 
-        The length of a page is the length of its settings. The height of a
-        window is the height of the screen at the most. Without this function,
-        the foot of the longest page is out of reach on a small screen. A
-        settings panel with an unreachable setting is worse than a panel with
-        a poor look.
+        A page is as long as its settings, and a window is at most as tall as
+        the screen. Without this, the foot of the longest page is out of reach
+        on a small screen.
 
-        The scrollbar is visible only when it is necessary. It comes when the
-        content is longer than the space, and it goes away when the content
-        fits. On a screen with sufficient height the panel looks the same as
-        before.
+        The scrollbar comes when the content is longer than the space and goes
+        away when it fits, so a tall screen looks the same as before.
         """
         holder = ttk.Frame(notebook, style="Page.TFrame")
         canvas = tk.Canvas(holder, highlightthickness=0, borderwidth=0,
@@ -2689,16 +2627,13 @@ class Panel:
     def _sidebar_width(self, fonts):
         """Returns the width that the rail needs for its names.
 
-        This is a measurement and not a fixed value, for the same reason as
-        the control heights. The font of the desktop gives the width of a
-        name, and this project does not. At the default of Plasma the fixed
-        268 was sufficient. A wider font, or a larger size, removed the end of
-        each subtitle in the list. Canvas text ends at the edge of the canvas.
-        It does not wrap, and it shows no mark for the cut.
+        A measurement and not a fixed value, for the same reason as the
+        control heights: the font of the desktop gives the width of a name.
+        Canvas text does not wrap and shows no mark for a cut, so a wider font
+        removed the end of each subtitle.
 
-        Never narrower than it was, so a machine with a narrow font gets the
-        rail this window was drawn around, and capped, so an enormous one
-        gets a wider rail rather than a window that is all rail.
+        Never narrower than it was, and capped, so an enormous font gives a
+        wider rail rather than a window that is all rail.
         """
         measures = dict((which, tkfont.Font(root=self.root, font=font))
                         for which, font in fonts.items())
@@ -2788,14 +2723,12 @@ class Panel:
     def _build_rail(self):
         """Fill the rail, once the notebook knows what pages it has.
 
-        Material gives a rail, and not a row of tabs, for a window with more
-        than a few destinations. Six destinations is more than that number. A
-        rail also returns the vertical space of the tab row, and a window of
-        this height needs that space.
+        Material gives a rail and not a row of tabs for six destinations, and
+        a rail returns the vertical space of the tab row.
 
-        The notebook keeps its pages and its events. Only its own tab row goes
-        out of the layout. Each function that watches for a page change
-        therefore still works, and the rail drives it.
+        The notebook keeps its pages and its events. Only its tab row goes out
+        of the layout, so each function that watches for a page change still
+        works and the rail drives it.
         """
         self._rail_choice = tk.StringVar(value=self.notebook.tabs()[0])
         for name in self.notebook.tabs():
@@ -2810,14 +2743,10 @@ class Panel:
     def _set_busy(self, busy, code=None):
         """What the window does while a command runs, and when it ends.
 
-        Each button that starts a command becomes disabled, so the user cannot
-        start a second command. The Runner also refuses a second command, but
-        it reports the refusal with one line that no user reads. After a
-        command with a bad result, the reason goes beside the status light.
-
-        There was also a moving bar below the title. It gave the same
-        information as the disabled buttons, and it moved four pixels sixty
-        times each second for the complete time of an install.
+        Each button that starts a command becomes disabled. The Runner also
+        refuses a second command, but it reports the refusal in one line that
+        nobody reads. After a command with a bad result, the reason goes
+        beside the status light.
         """
         self._busy = busy
         for button in self._busy_buttons:
@@ -2934,19 +2863,15 @@ class Panel:
     def _register_buttons(self):
         """Every button that would start a command, to grey while one runs.
 
-        This function walks the widget tree and does not read a list. A new
-        button in a list is easy to forget, and the user can then press it.
-        The fault is two pkexec prompts over each other, and no user connects
-        that fault to a list in this file. A button that only folds a block
-        stays active. Such a button starts no command, so a disabled state
-        removes a control for no reason.
+        It walks the widget tree and does not read a list. A button missing
+        from a list is a second pkexec prompt over the first, and nobody
+        connects that to a list in this file. A button that only folds a block
+        starts no command and stays active.
 
-        The caller runs this again at each redraw of the status page, because
-        that page builds its buttons again each time. A repair button that
-        this walk did not find stays active during a command, and that is the
-        fault that this function prevents. The function sets the busy state
-        again at the end, for the same reason. A second registration during a
-        command must not enable each button.
+        The caller runs this again at each redraw of the status page, which
+        builds its buttons again each time. It sets the busy state again at
+        the end, so a registration during a command does not enable every
+        button.
         """
         folds = set(getattr(self, "_fold_buttons", ()))
         self._busy_buttons = []
@@ -2990,27 +2915,21 @@ class Panel:
     def _write(self, text, tag=None):
         """Put a line where a log belongs, which is not in this window.
 
-        There is no log pane. Nine lines of command output were a fifth of the
-        window spent on something almost nobody reads, and the people who do
-        want it are better served by a terminal, where the output is
-        selectable, searchable and does not disappear with the window. So it
-        goes to stderr, which is where the terminal, the journal and anything
-        wrapping this program are already looking.
+        There is no log pane. Command output goes to stderr, where the
+        terminal, the journal and anything wrapping this program already look,
+        and where it is selectable and does not disappear with the window.
 
-        This function keeps nothing. The window held a copy before, so the
-        status bar could show the last line. The bar now shows one fixed
-        sentence. See PROBLEM_TEXT. A list that no code reads also grows for
-        the complete session.
+        It keeps nothing. A list that no code reads grows for the whole
+        session, and the status bar shows one fixed sentence now. See
+        PROBLEM_TEXT.
 
-        It cannot raise. The README tells people to start this from a
-        terminal, and a terminal closed while the window stays open leaves a
-        broken pipe: writing to it throws, and an exception here would come
-        out of the middle of an install.
+        It cannot raise. A terminal closed while the window stays open leaves
+        a broken pipe, and an exception here would come out of the middle of
+        an install.
 
-        This function accepts `tag` and does not use it. `tag` belongs to the
-        contract of the Runner, which marks its own first and last line with
-        one. This signature keeps the Runner usable by each other caller that
-        gives a simple writer.
+        `tag` belongs to the contract of the Runner, which marks its own first
+        and last line with one. This signature keeps the Runner usable by each
+        other caller that gives a simple writer.
         """
         try:
             print(text, end="", file=sys.stderr)
@@ -3020,14 +2939,13 @@ class Panel:
     def _say_problem(self, failed):
         """Show or clear the warning beside the status lights.
 
-        One line, in the error colour, beside the lights for the bar and for
-        the television. Each element in this window that reports a condition,
-        and does not set one, is in that place.
+        One line, in the error colour, beside the lights for the bar and the
+        television, where each element that reports a condition stands.
 
-        It says the same thing every time. What it used to say was the failing
-        command's own last line, which had to be cut to fit the room left over
-        beside the indicators, and a complaint cut off at the end has had the
-        useful half removed. This points at where the whole of it is instead.
+        It says the same thing every time. The failing command's own last line
+        had to be cut to the room beside the indicators, and a complaint cut
+        at the end loses the useful half. This points at where the whole of it
+        is.
         """
         if not failed:
             self.problem.pack_forget()
@@ -3039,13 +2957,12 @@ class Panel:
     def _ground(self, parent):
         """The style a plain frame needs to stand on this parent seamlessly.
 
-        Each frame in this window is a surface of its own, which is a card, or
-        a part of its parent. A frame of the second type needs the name of its
-        parent surface. This is a function and not a style at each call,
-        because the builders below work on a card *and* on a page. A builder
-        with the wrong style drew a band of the wrong colour at the width of
-        its content. One test found three such bands at the same time. This
-        function prevents a fourth one.
+        A frame is either a surface of its own, which is a card, or a part of
+        its parent, and the second kind needs the name of its parent surface.
+
+        A function and not a fixed style, because the builders below work on a
+        card *and* on a page. With the wrong style a builder draws a band of
+        the wrong colour at the width of its content.
         """
         try:
             named = str(parent.cget("style"))
@@ -3059,21 +2976,19 @@ class Panel:
     def _card(self, parent, **kw):
         """Builds a raised surface with round corners. It groups the settings.
 
-        The corners are four small pictures. place() puts them on the frame.
-        They are not one picture behind the complete frame, and each other
-        round element here uses one picture. ttk fills a frame with an image by
-        a scale step, and it scales again at each redraw. The cost is therefore
-        the area of the card, and a card is the largest element in the window.
+        The corners are four small pictures that place() puts on the frame,
+        and not one picture behind the whole frame as each other round element
+        here uses. ttk fills a frame with an image by a scale step and scales
+        again at each redraw, so the cost is the area of the card.
 
-        The four cards of the CEC page, and one of them is a thousand pixels
-        tall, cost approximately 150 ms of one wheel step together. That is the
-        cause of the slow movement. This code draws the four corners at the size
-        of the display, and the same page then moved in 3.6 ms.
+        The four cards of the CEC page cost approximately 150 ms of one wheel
+        step together. With four corner pictures the same page moves in
+        3.6 ms.
 
-        Made before the caller fills the card, so the content is stacked above
-        them: where a card's padding is narrower than the radius the content
+        Made before the caller fills the card, so the content stacks above
+        them. Where the padding is narrower than the radius, the content
         covers the inner part of a corner square, which is card-coloured
-        anyway. The other way round it would cover the content.
+        anyway.
         """
         card = ttk.Frame(parent, style="Card.TFrame", **kw)
         for photo, where in self._card_corners():
@@ -3148,21 +3063,16 @@ class Panel:
     def _build_settings(self, parent, groups, note=None):
         """One tab: a heading per group, a row per setting.
 
-        There is one grid for the complete tab, and not one grid for each
-        group. Each heading is a row across that grid. A grid for each group
-        takes the width of its label column from its own longest label. The
-        controls of one group then start at a different position from the next
-        group. That gives two irregular columns on a page that must be a list.
+        One grid for the whole tab, with each heading a row across it. A grid
+        for each group takes its label column from its own longest label, so
+        the controls of one group start at a different position from the next.
 
         `note` is a line below the rows, for a page where the rows cannot give
-        the time of the change. It is below and not above, because it explains
-        the rows above it.
+        the time of the change.
 
         A group can carry such a line itself, as a third element beside its
         title and its rows. That one stands inside the card, under the rows it
-        is about. A page note stands under every card of the page, and a line
-        that belongs to one group of several thus reads as a line about all of
-        them.
+        is about. A page note stands under every card of the page.
         """
         outer = ttk.Frame(parent, style="Page.TFrame")
         grids = []
@@ -3282,13 +3192,11 @@ class Panel:
     def _exclusive(self, key, other):
         """Whether these two rows can never be on the page at the same time.
 
-        This is not the same question as "do they use different rules". The
-        colour of the desktop scene and its brightness use two different
-        lists of scenes. Three scenes are in both lists, and there the two
-        rows are on the page together. They are one block. The temperature
-        marks and the colours of the load gauge use answers of the same
-        choice, and those answers have no scene in common. They are two
-        blocks.
+        Not the same question as "do they use different rules". The colour of
+        the desktop scene and its brightness use two lists with three scenes
+        in common, so those rows appear together and are one block. The
+        temperature marks and the load colours share no answer, so they are
+        two.
         """
         needs, theirs = DEPENDS_ON.get(key, ()), DEPENDS_ON.get(other, ())
         for switch in {switch for need in needs if isinstance(need, tuple)
@@ -3451,16 +3359,11 @@ class Panel:
     def _settings_changed(self, *_args):
         """A control moved. Book the catching-up rather than doing it here.
 
-        A drag of a slider sends one motion event for each pixel of the
-        movement, and each event comes here. A measurement gave nine
-        milliseconds for one pass over each dependent row and each unsaved
-        setting. That is approximately ninety per cent of one core during a
-        drag. The window also painted itself again at the rate of the events,
-        and that put the load gauge of the desktop to a high value.
+        A drag sends one motion event for each pixel, and one pass over every
+        dependent row and unsaved setting costs nine milliseconds.
 
-        Booked for the next idle moment instead. Tk runs idle work before it
-        redraws, so the window still catches up before anything is seen; it
-        just does it once per redraw rather than once per pixel.
+        Tk runs idle work before it redraws, so a booked pass still catches up
+        before anything is seen, once per redraw and not once per pixel.
         """
         if self._catching_up is None:
             self._catching_up = self.root.after_idle(self._catch_up)
@@ -3542,16 +3445,14 @@ class Panel:
     def _satisfied(self, need):
         """Whether one DEPENDS_ON entry is met.
 
-        There are three forms: the setting is on, the setting has this value,
-        or the setting has one of these values. The third form is necessary
-        because a menu of nine entries can have three entries with the same
-        meaning for the row below. Three separate rules must all be true, and
-        that is the wrong result.
+        Three forms: the setting is on, it has this value, or it has one of
+        these values. The third is necessary because three entries of one menu
+        can mean the same for the row below, and three separate rules would
+        all have to be true.
 
-        A rule that watches more than one menu is met when one of them gives
-        the value. The reason is the same in the other direction: the
-        temperature marks apply when the slot of Game Mode shows the gauge, and
-        also when the scene of the desktop shows it.
+        A rule over more than one setting is met when one of them gives the
+        value: the temperature marks apply when either the slot of Game Mode
+        or the scene of the desktop shows the gauge.
         """
         wanted = None
         if isinstance(need, tuple):
@@ -3605,15 +3506,12 @@ class Panel:
             grid.rowconfigure(row, minsize=minsize if on else 0)
             return
         # Nothing to do when the row already looks like that, which is almost
-        # every time: one moved control asks this of every row that hangs off
-        # anything, and hardly any of them hang off the one that moved. Over
-        # a slider drag, measured: eleven hundred of these in fifty steps, and
-        # not one of them a change.
+        # every time: eleven hundred of these in fifty steps of a drag, and
+        # not one a change.
         #
-        # Read back off the widget rather than remembered here. _set_busy
-        # wakes every button in the window without coming through this, so an
-        # answer kept on the side would be stale exactly when it matters -
-        # which is the Apply that left a greyed colour ungreyed.
+        # Read back off the widget and not remembered here. _set_busy wakes
+        # every button without coming through this, so an answer kept on the
+        # side is stale exactly when it matters.
         if controls and ("disabled" not in controls[0].state()) == bool(on):
             return
         for label in labels:
@@ -3658,49 +3556,37 @@ class Panel:
     def _rewrap(self, event):
         """Follows the width of the page, after a change of that width.
 
-        This binding is on the notebook and not on the window, for two
-        reasons. First, the page is narrower than the window by the width of
-        the rail. A wrap at the width of the window makes the text wider than
-        the page, and the page then cuts it at the right edge.
+        On the notebook and not on the window, for two reasons. The page is
+        narrower than the window by the width of the rail, and text wrapped at
+        the width of the window is cut at the edge of the page.
 
-        Second, a read of the notebook width during the Configure event of the
-        *window* gives the width before the change of size. A measurement
-        showed that the wrap stayed one size change behind. A smaller window
-        then cut the text until the next change of size. The Configure event of
-        the notebook carries its new width.
+        And a read of the notebook width during the Configure of the *window*
+        gives the width before the change, so the wrap stayed one size change
+        behind.
 
-        A toplevel is in the bindtags of each widget below it. The same binding
-        on the window therefore ran for the Configure event of each child, with
-        the width of that child. A measurement showed one such call with 14 px
-        from a scrollbar. That call wrapped each text into a narrow column,
-        changed the layout, and started the handler again.
-
-        The window then changed between two sizes until the user stopped it. A
-        widget is not in the bindtags of its children, so this binding cannot
-        see the size of another widget. The guard below records that.
+        A toplevel is in the bindtags of each widget below it, so the same
+        binding on the window ran for each child with the width of that child.
+        One such call carried 14 px from a scrollbar, wrapped every text into
+        a narrow column, and started the handler again. The guard below
+        records which widget sent the event.
 
         Setting wraplength can also bring a Configure straight back, which is
         what comparing the width first ends.
         """
         # Both notebooks. A section with one page of its own also holds
-        # explanations, as a page of the strip does. Without that section here,
-        # its text went onto one line. A toplevel reads that as a request for
-        # width, and the window then opened at two and a half thousand pixels.
+        # explanations. Without that section here its text went onto one line,
+        # and the window opened at two and a half thousand pixels.
         if event.widget not in (self.notebook, self.sections):
             return
         # Less the scrollbar, whether this page has one or not.
         #
         # A page that scrolls gives fourteen pixels of its side to the bar,
-        # and the width of the notebook does not hold that value. Text on a
-        # scrolling page was therefore that much wider than its space. A label
-        # that is wider than its space is not wrapped. The page cuts it. The
-        # fault looked like exactly one pixel, because a wrap fails only when
-        # a word crosses the edge. The error was fourteen pixels each time,
-        # and this page was the first page long enough to show it.
+        # and the width of the notebook does not hold that value. A label
+        # wider than its space is not wrapped: the page cuts it.
         #
-        # This code reserves the space on each page and not only on a page
-        # with a bar. The height of the window decides whether a page has a
-        # bar. Without this, the wrap changes with the height of the window.
+        # Reserved on each page and not only on a page with a bar. The height
+        # of the window decides whether a page has one, and the wrap must not
+        # change with the height of the window.
         width = max(320, min(event.width, CONTENT_MAX)
                     - CARD_INSET - SCROLLBAR_ROOM)
         if width == self._wrap_widths.get(str(event.widget)):
@@ -3770,18 +3656,11 @@ class Panel:
     def _page_width(self, label):
         """How wide the page this label stands on is.
 
-        There are two notebooks, and they have different widths. The sections
-        are at the left, so the tabs of the strip have the width of the rail
-        less than a section with one page. A measurement gave 631 against 812.
-        One value for both is incorrect for one of the two, and the last
-        Configure event decided which one. Both orders occur, and the same
-        window laid out the same page in both ways.
-
-        With the narrow value, the explanations of the CEC page wrapped 180 px
-        before the edge of their card, and the right third of the card was
-        empty. With the wide value, the explanations of the strip went 180 px
-        past the edge of their card. A label that is wider than its space is
-        not wrapped. The card cuts it.
+        Two notebooks with different widths: the tabs of the strip have the
+        width of the rail less than a section with one page, 631 against 812.
+        One value for both wraps one of them 180 px early or 180 px past the
+        edge of its card, and a label wider than its space is not wrapped. The
+        card cuts it.
 
         Asked per label rather than remembered per page, because a label knows
         where it is and nothing has to be told when it moves.
@@ -3826,16 +3705,13 @@ class Panel:
     def _build_apply(self, parent):
         """Apply and Reload, once, below the tabs that have settings.
 
-        Each settings tab held them before, with a line that said that Apply
-        also writes the other tab. One row below all the tabs gives that
-        information by its position. But it must stand below the correct tabs
-        only. On Status & repair it stood below the firmware box, and it read
-        as "apply the firmware".
+        One row below all the tabs says by its position that Apply writes
+        each of them. It must stand below the correct tabs only: on Status &
+        repair it read as "apply the firmware".
 
-        The buttons go away on the tabs that have none; the row they stand in
-        stays and keeps its height. Taking the row itself out of the layout
-        moved everything below it by that height on every tab change, which
-        is a whole window shifting under the pointer.
+        The buttons go away on a tab with no settings, and the row keeps its
+        height. Taking the row out of the layout moved everything below it on
+        every tab change.
         """
         self.apply_row = ttk.Frame(parent, style="Page.TFrame")
         self.apply_row.pack(side="bottom", fill="x",
@@ -3858,20 +3734,17 @@ class Panel:
                                  style="Page.Bad.TLabel")
         # Four buttons at the right end, and none at the left one.
         #
-        # The first two act on the settings in this window and the last two on
-        # a file of them, and the two pairs stood at the two edges of the row
-        # for that reason. That put the width of the window between two
-        # buttons that a person uses one after the other, and the gap between
-        # the pairs says the same thing at a tenth of the distance.
+        # The first two act on the settings in this window and the last two
+        # on a file of them. At the two edges of the row, that put the width
+        # of the window between two buttons a person uses one after the other.
+        # The gap between the pairs says the same at a tenth of the distance.
         #
-        # Profiles sit here rather than on a page of their own: this is already
-        # the row for "what to do with these settings", and a profile is those
-        # settings by another name.
+        # Profiles are here and not on a page of their own: this is already
+        # the row for "what to do with these settings".
         #
         # The list is in the order a person reads them, and _show_apply packs
-        # it backwards: pack puts each widget to the left of the last one. The
-        # order here is thus the order on the screen, and other code that
-        # names the first of them names Apply. See _refresh_unsaved.
+        # it backwards, because pack puts each widget to the left of the last.
+        # Other code that names the first of them names Apply.
         self._apply_buttons = [
             # The text is no longer "Apply and restart service". The settings
             # of the System page restart no service. They belong to the
@@ -3948,15 +3821,13 @@ class Panel:
         """Tell the open page's scroller that its content changed height.
 
         The inner frame of a page is a canvas window item, so it has the size
-        that the scroller gave it. A new widget in it does not make it larger,
-        and the scroller calculates again only after a change of its size. No
-        code closes that loop. An open fold that makes a page taller therefore
-        leaves its new content in the old height. A measurement showed this: a
-        fan curve asked for 200 pixels, got 120, and lost its lower half.
+        the scroller gave it. A new widget does not make it larger, and the
+        scroller recalculates only after a change of its size. Nothing closes
+        that loop: a fan curve asked for 200 pixels, got 120, and lost its
+        lower half.
 
-        Not the same as _fit_window, which resizes the *window*: on a window
-        already at the height the screen allows, that changes nothing and no
-        Configure ever arrives.
+        Not _fit_window, which resizes the *window*. On a window already at
+        the height the screen allows, that changes nothing.
         """
         canvas = self._scrollers.get(str(self._open_page()))
         if canvas is None:
@@ -4010,21 +3881,16 @@ class Panel:
     def _field(self, parent, key, variable, choices, current, width=None):
         """A drop-down of (label, value) pairs, showing labels.
 
-        This is a field of this file and not a combobox, for two reasons.
+        A field of this file and not a combobox, for two reasons. A combobox
+        opens a Tk listbox, which holds text only, so a list of colours cannot
+        show the colours. And Tk posts that listbox under a grab it does not
+        release, so it stays above the next window. See Popup.
 
-        First, a combobox opens a Tk listbox, and a listbox holds text only. A
-        list of colours therefore cannot show the colours. A user selected
-        "Hot Pink" from a column of words, and that was the one control in a
-        window about light with no view of the colours.
+        It returns the field and does not place it: the settings grid and the
+        rows on Status & repair use different layouts.
 
-        Second, Tk posts that listbox under a grab and does not release it. The
-        listbox then stayed above the next window. See Popup for both.
-
-        This function returns the field and does not place it. The settings
-        grid and the rows on Status & repair use different layouts, and the
-        position is not the work of this function. `key` is the name of the
-        field among the drop-downs. A setting uses its own name, and each
-        other field uses a word in lower case. The two cannot be equal,
+        `key` names the field among the drop-downs. A setting uses its own
+        name, and each other field a word in lower case, which cannot collide
         because a configuration name is in upper case.
         """
         self._menus[key] = list(choices)
@@ -4087,20 +3953,16 @@ class Panel:
 
     # -- swatches on widgets that change shade under them ------------------
     #
-    # A colour sample has no alpha channel. It holds its background in its
-    # round corners and in the space beside it. Forty-four of the one hundred
-    # and ninety six pixels of a sample are a mix of the colour and the
-    # background. A sample with the wrong background therefore shows a box
-    # behind the colour. In the light theme the two shades are almost equal
-    # and nothing is visible. In the dark theme it is a dark rectangle, and a
-    # user reported it.
+    # A colour sample has no alpha channel, so it holds its background in its
+    # round corners and beside it: forty-four of its one hundred and ninety
+    # six pixels are a mix of the two. With the wrong background it shows a
+    # box behind the colour, which is invisible in the light theme and a dark
+    # rectangle in the dark one.
     #
-    # The correct shade is not one fixed value. A field takes a grey fill when
-    # it is disabled, and a button mixes its own fill below the pointer. So
-    # this code asks for the background again at each state change. The two
-    # tables below hold the same states as the pictures in apply_theme. The
-    # fill of a field changes for the disabled state only. The fill of a normal
-    # button also changes for hover and for press.
+    # The correct shade is not one value. A field takes a grey fill when it is
+    # disabled, and a button mixes its own fill below the pointer, so this
+    # asks again at each state change. The two tables below hold the same
+    # states as the pictures in apply_theme.
     FIELD_STATES = ()
     BUTTON_STATES = (("pressed", material.STATE_PRESSED),
                      ("active", material.STATE_HOVER))
@@ -4269,14 +4131,13 @@ class Panel:
     def _collect_power(self):
         """The CPU settings out of the widgets, checked against the machine.
 
-        This checks against the machine and not against a list. It also checks
-        here and not in the helper alone. The window must refuse a value that
-        this hardware does not offer, and it must show the reason.
+        Against the machine and not against a list, and here and not in the
+        helper alone: the window must refuse a value this hardware does not
+        offer, and show the reason.
         """
-        # This starts from the values in the file. A row without hardware on
-        # this machine then keeps its stored value. The energy preference on
-        # a driver with no such setting is one such row. Without this, each
-        # Apply removes that row from the configuration.
+        # It starts from the values in the file, so a row with no hardware on
+        # this machine keeps its stored value. Without this, each Apply
+        # removes that row from the configuration.
         values = dict(self.power)
         values.update({key: self._value_for(key, self.vars[key][0].get())
                        for key in POWER_KEYS if key in self.vars})
@@ -4847,13 +4708,14 @@ class Panel:
     def _build_power(self, where, table, note):
         """The CPU settings, and the graphics card underneath them.
 
-        Two halves that do not share an Apply, deliberately. The CPU half is
-        this project's own configuration file and goes through the window's
-        Apply with everything else; the GPU half is somebody else's daemon,
-        applies at once, and has to be confirmed within seconds or it puts
-        itself back. Putting them behind one button would mean either the CPU
-        settings inheriting a countdown they have no need of, or the GPU ones
-        losing the countdown that keeps a bad voltage survivable.
+        Two halves that do not share an Apply. The CPU half is this project's
+        configuration file and goes through the window's Apply. The GPU half
+        is somebody else's daemon: it applies at once and must be confirmed
+        within seconds.
+
+        One button would give the CPU settings a countdown they do not need,
+        or take from the GPU ones the countdown that keeps a bad voltage
+        survivable.
         """
         outer = self._build_settings(where, table, note)
         self._gpu = None                # the last read, or None for no daemon
@@ -5045,15 +4907,12 @@ class Panel:
     def _build_gpu_firmware(self, holder):
         """The card's own fan settings, on the cards that have them.
 
-        These are outside the "control the fan" switch above, on purpose.
-        They are in the firmware and not in the control loop of LACT. So they
-        apply while the card drives its own fan. Most users keep that state,
-        and these settings are for those users.
+        Outside the "control the fan" switch above, because they are in the
+        firmware and not in the control loop of LACT. They apply while the
+        card drives its own fan, which is the state most people keep.
 
-        This block draws only the settings that the card reports. LACT reads
-        each of them from sysfs and reports each one with a file. A card
-        before RDNA3 therefore reports none and gets none. This block is then
-        absent and not empty.
+        It draws the settings the card reports. A card before RDNA3 reports
+        none, and this block is then absent and not empty.
         """
         offered = lact.firmware((self._gpu or {}).get("stats") or {})
         if not offered:
@@ -5351,21 +5210,15 @@ class Panel:
     def _build_cec(self, parent):
         """Talking to the television, if the toolkit for it is installed.
 
-        There are two pages in one frame, and the machine decides which page
-        the user sees. This window has no mode for it. The first page is an
-        offer to install, and the second page holds the switches.
+        Two pages in one frame, and the machine decides which one a person
+        sees: an offer to install, or the switches. Both are built now and one
+        is packed, because somebody can install the toolkit while the window
+        is open. See _show_cec.
 
-        This code builds both pages now and packs one of them. See _show_cec. A
-        user can install the toolkit while the window is open. A page with the
-        state of the build step therefore needs a rebuild of the window.
-
-        Nothing here waits for Apply. The installer of the toolkit leaves a
-        sudoers rule for the helpers of its own switches. Each switch on this
-        page is therefore a normal command that runs at the click. See
-        server/steamos_utility_center/cec.py. The settings pages have an Apply
-        button, because a write to /etc needs a password and a restart of the
-        service. Here the machine asks for nothing, and an Apply button adds a
-        step with no purpose.
+        Nothing here waits for Apply. The toolkit's installer leaves a sudoers
+        rule for its own helpers, so each switch is an ordinary command that
+        runs at the click. The settings pages wait because a write to /etc
+        needs a password and a restart of the service.
         """
         outer = ttk.Frame(parent, style="Page.TFrame")
         self._cec = None                    # the last status read, or None
@@ -5854,12 +5707,10 @@ class Panel:
         """Asks which radios the toolkit found, and which of them can wake.
 
         A machine with "Let a controller wake the machine" on, and no wake,
-        gives the user no place to look. The toolkit turns wakeup on for each
-        radio that it matches, and it reports that list nowhere. This function
-        asks for the list and puts the answer on the page as a sentence. This
-        window has no log pane, so the JSON of the helper goes to stderr with
-        the output of each other command, and a user of the window does not
-        see it.
+        gives a person no place to look: the toolkit reports the list of
+        matched radios nowhere. This asks for it and puts the answer on the
+        page as a sentence, because the JSON of the helper goes to stderr and
+        this window has no log pane.
         """
         self.runner.start(
             ledpanel.wake_radios_command(),
@@ -5888,16 +5739,12 @@ class Panel:
     def _build_status(self, parent):
         """Builds one block for the condition of each part of the toolbox.
 
-        This page held the LED checklist only, below the heading "this
-        installation". At that time the toolbox installed four parts. The
-        other three parts reported on their own settings pages, in their own
-        forms, and never together. A machine with a removed CEC adapter then
-        showed "everything is in order" here.
-
         Each block has the same shape: a light, a sentence, the detail behind
-        it, and the one button that repairs *that* part. The repair buttons
-        stay here and do not move to their own pages. The user finds a fault
-        here, and a walk to another section is the walk that this page saves.
+        it, and the one button that repairs *that* part.
+
+        The repair buttons stay here and do not move to their own pages. A
+        person finds a fault here, and a walk to another section is the walk
+        this page saves.
         """
         outer = ttk.Frame(parent, style="Page.TFrame")
         # Which blocks are unfolded, by part key. Kept out here because
@@ -6036,20 +5883,13 @@ class Panel:
     def _fold_part(self, key):
         """Show or hide one block's detail. Nothing else.
 
-        Before, this function called refresh_status(). That function reads the
-        complete machine again: systemctl, the LACT socket, and a KDE Connect
-        probe with a two-second timeout. It then destroys and builds each block
-        on the page. All that work shows a paragraph that this code already
-        made before the draw step of the button.
+        Not refresh_status(), which reads the whole machine again and rebuilds
+        every block to show a paragraph that already exists.
 
-        It also left an artefact on the screen. The Check again button is
-        outside the blocks, so it survives the rebuild. The taller page then
-        moves it, over an area that Tk destroyed and did not draw again. X
-        copies the pixels of a window that moves, and it does not paint them
-        again. So the button arrived with those pixels: one half of its label,
-        and parts of the elements below it. The button came back at the next
-        movement of the pointer, and that says "drawn incorrectly" and not
-        "laid out incorrectly".
+        That rebuild also left an artefact. The Check again button survives
+        it, and the taller page moves it over an area Tk destroyed and did not
+        paint again. X copies the pixels of a window that moves, so the button
+        arrived carrying half its own label.
         """
         self._open_parts.symmetric_difference_update({key})
         holder = self._part_details.get(key)
@@ -6087,11 +5927,9 @@ class Panel:
     def _refit(self):
         """Set the height outright; asking nicely does not work.
 
-        Tk makes a toplevel larger for its content. But the size from the
-        window manager stays. The documentation says that a clear of the
-        geometry cancels a size from the *user*. A measurement here showed no
-        change, because this size came from the window manager. This function
-        does not change the width, because the user sets the width.
+        Tk makes a toplevel larger for its content, but a size from the
+        window manager stays. A clear of the geometry cancels a size from the
+        *user* only. It does not change the width, which the user sets.
         """
         # Cleared at the start of the run. The scheduled call now runs, and a
         # cancel after this point cancels a later call.
@@ -6173,12 +6011,11 @@ class Panel:
         """The Game Mode plugin, and one button that installs it.
 
         The panel is a window on the desktop, and Game Mode has no desktop.
-        The plugin is the other half of this project for that reason, and it
-        is on this page because a person who cannot find it does not know
-        that it exists.
+        The plugin is the other half of this project, and it is on this page
+        because a person who cannot find it does not know it exists.
 
-        This is a card of state and one button, and both come from the same
-        four words. See ledpanel.decky_state.
+        A card of state and one button, both from the same four words. See
+        ledpanel.decky_state.
         """
         box = self._section(parent, "Game Mode", card=True)
         self.decky_said = ttk.Label(box, style="Muted.TLabel", justify="left")
@@ -6256,17 +6093,13 @@ class Panel:
         self._drive_button.pack(side="left", padx=(GROUP_GAP, 0))
         self._drive_choice.trace_add("write", lambda *_a: self._drive_picked())
 
-        # What the last apply said. It is empty until there is something to
-        # say, and it holds the reason a drive did not mount: a person had to
-        # start this panel from a terminal to read that, and the reason was in
-        # the output all the time. See ledpanel.drive_trouble.
+        # What the last apply said, empty until there is something to say. It
+        # holds the reason a drive did not mount, which was in the output all
+        # the time and needed a terminal to read. See ledpanel.drive_trouble.
         #
-        # This label was built and never placed, which is the second time a
-        # label on this card was. tests/test_panel_live.py measures both now.
-        #
-        # It carries its own space above it and it has none of its own when it
-        # is empty, so an empty one does not put a band of nothing at the foot
-        # of the card. See _tell_drives.
+        # It carries its own space above it and none when it is empty, so an
+        # empty one puts no band of nothing at the foot of the card. See
+        # _tell_drives.
         self.drives_said = ttk.Label(box, style="Muted.TLabel", justify="left")
         self.drives_said.pack(anchor="w")
         self._wrapped.append(self.drives_said)
@@ -6458,11 +6291,9 @@ class Panel:
     def _run_privileged(self, command, asking, done):
         """Runs work that needs root, and asks for a password only if it must.
 
-        The installer writes a sudoers rule for the three appliers, so the
-        usual run needs no password. `asking` is the same work through pkexec.
-        It runs once, and only when the first run failed because nothing
-        permits it: an installation with --no-sudoers, one from before the
-        rule existed, or an update that took the rule away.
+        The installer writes a sudoers rule for the appliers, so the usual
+        run needs no password. `asking` is the same work through pkexec, run
+        once and only when the first run failed because nothing permits it.
 
         `asking` is None where the first command already asks. Take ownership
         is that case: it carries a second argument, and no line of the rule
@@ -6703,26 +6534,19 @@ class Panel:
     def _say_headline(self):
         """One line below the title, for the page that is open now.
 
-        It counts each part. Before, it counted the LED checklist only. The
-        problem count of the LED bar then stood over the HDMI CEC page, and a
-        machine with a removed adapter read "everything is in order".
-
-        The line reports the open page when that page has something to report.
-        See ledpanel.summary_for. A part that is only absent gets neither a
-        good nor a bad colour. "Not installed." in green is a contradiction.
-        In red it reports a fault on a machine that does not want the
-        function.
+        It counts each part and reports the open page when that page has
+        something to report. See ledpanel.summary_for. A part that is only
+        absent gets neither a good nor a bad colour: "Not installed." in green
+        is a contradiction, and in red it reports a fault on a machine that
+        does not want the function.
 
         It reads the parts of the last status read and does not read them
-        again. A change of the page must not run the checks: they call
-        systemctl, lsmod and LACT, and a person who walks down the sidebar
-        would wait for all of them at each step.
+        again. The checks call systemctl, lsmod and LACT, and a person who
+        walks down the sidebar would wait for all of them at each step.
 
-        This is a function of its own because refresh_status held it, and
-        refresh_status runs at the start and at Check again. The line thus
-        named the page that was open at the last read. A machine with no LED
-        module read "LED bar: Not installed" over the CPU page and over the
-        System page.
+        A function of its own, because refresh_status held it and runs at the
+        start and at Check again. The line then named the page that was open
+        at the last read.
         """
         parts = getattr(self, "_parts", None)
         if not parts:
