@@ -8,22 +8,16 @@ The other pages of this window write one file,
 file. The settings here are different. They belong to the machine, they are
 in the home directory of the user, and no service of this project reads them.
 
-This module is separate from `steamos_utility_center.config` on purpose. That
-file belongs to the service, the service validates it, and a change to it
-restarts the service. A keyboard layout in that file gives two problems: the
-service refuses to start on a value it does not know, and the change causes a
-restart with no purpose.
+It is separate from `steamos_utility_center.config`, which belongs to the
+service. A keyboard layout in that file would make the service refuse to start
+on a value it does not know, and each change would restart it for nothing.
 
-These settings are the simple half of a utility panel, because none of them
-needs root. The panel runs as the user, and each step here does the same. It
-uses no pkexec, no polkit, and no helper script. A step that needs root
-belongs in `scripts/`, as the step that applies the configuration of the
-service does.
+None of these needs root. The panel runs as the user and so does each step
+here: no pkexec, no polkit, no helper script.
 
-This module does not use tkinter. A machine with no display must be able to
-test the values of the settings. It is in this package and not beside the
-panel for the same reason: `steamos-utility-centerctl` reads and writes the
-keyboard layout also, and a program of the server must not import the window.
+It uses no tkinter, so a machine with no display can test the values. It is in
+this package because `steamos-utility-centerctl` reads and writes the keyboard
+layout as well, and a program of the server must not import the window.
 """
 
 from __future__ import annotations
@@ -90,22 +84,17 @@ XKB_RULES = ("/usr/share/X11/xkb/rules/evdev.lst",
 
 # Which of them to actually put in the menu, and why it is not all of them.
 #
-# The rules file lists ninety-nine layouts, and the drop-down of the panel
-# does not scroll. It takes the size of its entries, and the screen then
-# limits it. A measurement on a 1280x800 display, the display of a Steam
-# Machine, gave 926 pixels for twenty-eight entries. The last four entries
-# were below the edge of the screen, and a click could not reach them. A menu
-# that cannot show its last entry is worse than a short menu.
+# The rules file lists ninety-nine layouts, and the drop-down does not scroll.
+# On a 1280x800 display, twenty-eight entries took 926 pixels and the last
+# four were below the edge of the screen.
 #
-# So the list holds nineteen layouts. That is approximately two thirds of that
-# screen, and it leaves space for a desktop with a larger font. The list
-# holds more European layouts. That is a guess about the users who install an
-# LED strip on a Steam Machine, and not a fact.
+# So the list holds nineteen, which is approximately two thirds of that screen
+# and leaves space for a larger font. It holds more European layouts, which is
+# a guess about the people who install an LED strip.
 #
-# The guess is safe because the list is not a limit. This module keeps a
-# layout that a user wrote into the file manually. The panel adds it to the
-# menu as its own entry. A colour that the palette does not hold gets the same
-# treatment. See Panel._label_for.
+# The guess is safe because the list is not a limit: a layout written into the
+# file by hand is kept, and the panel adds it to the menu. See
+# Panel._label_for.
 COMMON = ("de", "at", "ch", "us", "gb", "fr", "es", "it", "nl", "be",
           "se", "no", "dk", "fi", "pl", "cz", "hu", "pt", "tr")
 
@@ -270,14 +259,13 @@ def validate(values):
 def write(values, home=None):
     """Put these settings into the user's files. Returns what changed.
 
-    This function writes only the lines of this project. A user puts other
-        variables into a file in environment.d. This file has a very low number
-        for that reason: more than one program can use it. A rewrite of the
-        complete file removes the setting of another program.
+    It writes the lines of this project only. More than one program can put
+    variables in environment.d, and a rewrite of the whole file removes
+    theirs.
 
-    Setting one back to "leave it to the system" removes its line rather than
-    writing an empty one: an empty XKB_DEFAULT_LAYOUT is a layout that is
-    empty, which is not the same as never having said anything.
+    "Leave it to the system" removes the line rather than write an empty one.
+    An empty XKB_DEFAULT_LAYOUT is an empty layout, which is not the same as
+    saying nothing.
     """
     validate(values)
     changed = []

@@ -409,17 +409,14 @@ class EspLink:
     def send_standby(self, colour, period_ms, shape=STANDBY_BREATH):
         """Hand the strip to the ESP to draw on its own until we return.
 
-        The one thing the firmware animates on the host's behalf, because
-        during a suspend there is no host: the service is frozen and nothing
-        can be rendered. So the colour, the period and the shape are sent once
-        and the ESP keeps going alone. A firmware too old to know this message
-        ignores it and the strip simply goes dark, as it did before.
+        The one thing the firmware animates on its own, because a suspend
+        freezes the service and there is no host to render. The colour, the
+        period and the shape go once and the ESP continues alone. Older
+        firmware ignores the message and the strip goes dark, as before.
 
-        The shape is a sixth byte, and the firmware that came before it reads
-        five and returns. Such a board thus breathes whatever this asks for,
-        which is the old behaviour and not a failure. `standby_shapes` reports
-        whether the board on the other end reads the byte, so a caller can say
-        so rather than draw the wrong thing in silence.
+        The shape is a sixth byte, which firmware from before it does not
+        read. Such a board breathes whatever this asks for. `standby_shapes`
+        reports whether the board reads the byte, so a caller can say so.
         """
         payload = (bytes(colour) + int(period_ms).to_bytes(2, "little")
                    + bytes([int(shape) & 0xFF]))

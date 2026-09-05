@@ -8,12 +8,11 @@ into it. /etc belongs to that image, so a line that a person adds to
 /etc/fstab is in the old slot only. The new slot has the fstab of the image,
 and the line is gone. /home and /var are their own partitions and stay.
 
-So this project does not write /etc/fstab. It writes one systemd mount unit
-for each drive. systemd builds the same units from fstab, so this is the same
-mechanism one level down. The difference is important: fstab also holds the
-entries for /, /boot, /home and /var, and a copy of it that survives an update
-writes those entries over the entries of the new image. A mount unit is a file
-of this project alone, and it is safe to keep.
+So this project writes one systemd mount unit for each drive and does not
+write /etc/fstab. systemd builds the same units from fstab, so this is the
+same mechanism one level down. fstab also holds the entries for /, /boot,
+/home and /var, and a copy of it that survives an update writes those over the
+entries of the new image. A mount unit is this project's file alone.
 
 Three things carry a drive across an update:
 
@@ -117,27 +116,21 @@ class MountError(ValueError):
 def canonical(where):
     """Returns the mount point with each symlink in it resolved.
 
-    systemd refuses a mount unit whose `Where=` holds a symlink. It says so:
+    systemd refuses a mount unit whose `Where=` holds a symlink:
 
         mnt-SN7100.mount: Mount path /mnt/SN7100 is not canonical
         (contains a symlink).
 
-    The unit then fails with `Result: resources`, the drive stays unmounted,
-    and the chown of Take ownership refuses because there is nothing there.
+    The unit then fails with `Result: resources` and the drive stays
+    unmounted. `mount` follows a symlink and systemd does not, because a unit
+    is named after its mount point and two names for one directory would be
+    two units for one mount.
 
-    This is the one difference between a mount unit and a line in /etc/fstab
-    that a person notices. `mount` follows a symlink and mounts the drive.
-    systemd does not, because a unit is named after its own mount point: two
-    names for one directory are two units for one mount, and systemd cannot
-    tell that they are the same.
+    On SteamOS the root filesystem is read-only, so several directories in /
+    are links into /var and this is not a rare case.
 
-    On SteamOS this is not a rare case. The root filesystem is read-only, so
-    several directories in / are links into /var. A person who writes
-    /mnt/games gets a unit that never mounts.
-
-    A mount point that does not exist yet is resolved to the same degree: the
-    part of it that exists is resolved, and the rest is added. That is correct
-    here, because systemd makes the last directory itself.
+    A mount point that does not exist yet is resolved as far as it exists.
+    systemd makes the last directory itself.
     """
     where = str(where or "").rstrip("/") or "/"
     return os.path.realpath(where)
@@ -147,14 +140,12 @@ def escape(where):
     """Returns the unit name of a mount point, as systemd escapes it.
 
     systemd names a mount unit after its own mount point: /mnt/games becomes
-    mnt-games.mount. A unit with another name is a unit that systemd does not
-    connect to the directory, and it never mounts anything.
+    mnt-games.mount. Another name never mounts anything.
 
     The rules are those of systemd-escape --path. The leading slash goes, each
-    remaining slash becomes a hyphen, and a character that is not a letter, a
-    digit, a colon or an underscore becomes \\x plus two hexadecimal digits.
-    A hyphen in the path is such a character, or a directory called a-b and the
-    path a/b would give one unit name.
+    remaining slash becomes a hyphen, and every other character that is not a
+    letter, a digit, a colon or an underscore becomes \\x plus two hexadecimal digits.
+    A hyphen is one of those, or a/b and a-b would give one name.
     """
     path = "/" + where.strip("/")
     if path == "/":
@@ -342,13 +333,11 @@ def _run(command):
 def partitions(run=_run):
     """Returns the partitions of this machine, as the page offers them.
 
-    Read from lsblk and not from a list, for the reason that the sensor menu
-    and the governor menu are read from the machine: the drives of a machine
-    are the answer of that machine.
+    From lsblk and not from a list, as the sensor and governor menus are read
+    from the machine.
 
-    A partition with no UUID carries no filesystem that this can mount, and it
-    is left out. The partition that holds / is left out for the same reason:
-    SteamOS mounts it, and a second unit on it is the refusal above.
+    A partition with no UUID carries no filesystem this can mount. The
+    partition that holds / is left out too: SteamOS mounts it.
     """
     said = run(["lsblk", "--json", "--bytes", "--paths",
                 "--output", "NAME,UUID,FSTYPE,SIZE,LABEL,MOUNTPOINT"])
@@ -416,15 +405,12 @@ def partition_said(found):
 def keep_list_text(entries, extra=()):
     """Returns the file that asks SteamOS to keep this project across a update.
 
-    A SteamOS update rebuilds /etc from the new image. The paths in
-    /etc/atomic-update.conf.d/*.conf are the paths that holo-sync-var carries
-    into the new slot. The CEC toolkit writes such a file, and this project
-    wrote none: its own configuration, its two units and its udev rule had no
-    protection at all.
+    A SteamOS update rebuilds /etc from the new image, and the paths in
+    /etc/atomic-update.conf.d/*.conf are what holo-sync-var carries into the
+    new slot.
 
     /etc/fstab is not here and must never be. It also holds the entries for /,
-    /boot, /home and /var. A copy of it that survives an update writes the
-    entries of the old image over the entries of the new one.
+    /boot, /home and /var, and a copy of it writes those over the new image.
     """
     lines = [
         "# Keep the files of the SteamOS Utility Center across a SteamOS "
@@ -527,13 +513,11 @@ PROJECT_FILES = (
 def write_units(entries, root="", keep=True):
     """Writes the mount unit of each drive, and returns what it wrote.
 
-    It writes and removes files, and it runs no systemctl. The caller does
-    that, because a test must be able to call this without a systemd. See
-    scripts/apply-mounts.sh.
+    Files only, and no systemctl: the caller does that, so a test can run this
+    with no systemd. See scripts/apply-mounts.sh.
 
-    A unit that this project wrote, for a drive that nobody wants any more, is
-    removed here. A mount unit of another program is left alone. See
-    stale_units.
+    A unit this project wrote for a drive nobody wants is removed here. A unit
+    of another program is left alone. See stale_units.
     """
     for entry in entries:
         validate(entry)

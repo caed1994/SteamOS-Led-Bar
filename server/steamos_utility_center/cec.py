@@ -3,40 +3,26 @@
 
 """Talking to the television over HDMI, through the CEC toolkit.
 
-Almost none of the CEC work is ours. It is the SteamOS CEC Toolkit, a fork of
-another person's project. It is a module of its own under cec-toolkit/.
-cec-toolkit/ORIGIN records where it came from. cec-toolkit/README.md gives the
-changes and their reasons.
+Almost none of the CEC work is ours. It is the SteamOS CEC Toolkit, under
+cec-toolkit/. Its ORIGIN records where it came from, and its README.md gives
+the changes and their reasons.
 
-This module is the connection between that toolkit and this panel, and it is
-deliberately thin. The toolkit has `steamos-cec-toolkitctl`, which reports each
-of its own values as one JSON document and switches one feature at a time.
-
-Nothing in this module reads a device, runs systemctl or edits a configuration
-file. It builds the commands and reads the answers. The toolkit stays the one
-program that knows how CEC operates.
+This module is the thin connection between that toolkit and this panel. It
+builds the commands and reads the answers of `steamos-cec-toolkitctl`. It
+reads no device, runs no systemctl and edits no configuration file, so the
+toolkit stays the one program that knows how CEC operates. It is also testable
+on a machine with no television, no adapter and no toolkit.
 
 Two results are important.
 
 **To install it needs root. To use it does not.** The toolkit's installer
-writes a sudoers file. That file gives the desktop user NOPASSWD on the helpers
-that its own switches need.
+writes a sudoers file for the helpers its own switches need. Each switch on
+the page is thus an ordinary command that runs as the user, with no password
+and no Apply button. The LED pages wait for Apply because they write /etc.
 
-After that one install with root, each switch on the page is an ordinary
-command that runs as the user. There is no password, no polkit and no Apply
-button. The CEC page thus saves at each click, where the LED pages wait for
-Apply. The machine does not ask, so a request from this panel would be a
-ceremony that the system does not need.
-
-**Each answer comes from the machine.** The feature list here is a list of
-names and words. Whether a feature is on, installable, or possible at all comes
-from `toolkitctl status` at the moment of the question. A page from this module
-thus cannot report a state that the toolkit does not report.
-
-Nothing in this module runs a command. It builds the commands and returns them
-to the panel's Runner. This module is thus testable on a machine with no
-television, no CEC adapter and no toolkit, which is each machine that it was
-written on.
+**Each answer comes from the machine.** The list here is names and words.
+Whether a feature is on, installable or possible comes from `toolkitctl
+status` at the moment of the question.
 """
 
 from __future__ import annotations
@@ -75,18 +61,12 @@ RESUME_WAKE_REPORT = "resume_wake_enabled"
 
 # The eight features that this page can switch, in the order of the display.
 #
-# The order is the order in which a person sets them up. It is not the order of
-# the toolkit's own names.
+# The order is the order a person sets them up in: the television follows the
+# machine, then the machine follows the television, then the volume, then the
+# three that repair particular hardware and are switched on after a fault.
 #
-# First are the two that make the television follow the machine. Then the two
-# that make the machine follow the television. Then the volume. Then the three
-# that are repairs for particular hardware.
-#
-# The last three are last because a person must switch them on only after a
-# fault.
-#
-# The name is the toolkit's own name. It goes directly to set-service, so this
-# project cannot rename it.
+# The name is the toolkit's own. It goes to set-service, so this project
+# cannot rename it.
 FEATURES = (
     ("steam-button", USER_SERVICE,
      "Steam button wakes the television",
@@ -141,21 +121,16 @@ NEEDS = (
 # The configuration values that belong on a page, as
 # (key, label, explanation, choices).
 #
-# The file has approximately forty values. These are the values whose wrong
-# content stops CEC completely. The other values tune particular televisions
-# and controllers, and they belong in the file with their comments.
+# The file has approximately forty values. These are the ones whose wrong
+# content stops CEC completely. The others tune particular televisions and
+# controllers and belong in the file with their comments.
 #
-# `choices` is a list of (label, value) pairs for a setting with a fixed set of
-# answers. It is empty for a setting that a person types.
+# `choices` is (label, value) pairs, and empty for a setting a person types.
+# Its first pair is what the toolkit does with the setting absent, so a
+# drop-down opens on the behaviour a person gets anyway.
 #
-# The first pair is what the toolkit does when the setting is not in the file.
-# A drop-down list thus opens on the behaviour that a person gets anyway, and
-# not on an empty entry.
-#
-# The last two values belong to a switch on the same page and not to the
-# adapter, and their text says so. A feature whose behaviour depends on a value
-# in a file is a feature with half of itself off the page. That is what sent a
-# person to the configuration file with a text editor.
+# The last two belong to a switch on the same page and say so. A feature whose
+# behaviour depends on a value in a file has half of itself off the page.
 SHOWN = (
     ("CEC_DEVICE", "CEC adapter",
      "The adapter's device node, usually /dev/cec0.", ()),
@@ -225,13 +200,7 @@ def out_of_date(status, repo):
     """Reports whether the installed toolkit is older than this clone.
 
     False where either version is unreadable. A question that cannot be
-    answered is not an answer of "yes": an old toolkit is worth reporting, and
-    a report on a machine that has nothing to compare is noise.
-
-    This exists because nothing compared the two. `update.sh` brought a newer
-    cec-toolkit/ into the clone, the installer did not touch the toolkit at
-    all, and the copy on the machine stayed as old as it was with nothing to
-    say so.
+    answered is not an answer of "yes".
     """
     running = running_version(status)
     theirs = clone_version(repo)
@@ -245,13 +214,12 @@ def status_command(home=None):
 def read_status(text):
     """Returns what `toolkitctl status` printed, as a dictionary.
 
-    This function is separate from the run of the command, so that each
-    caller can be tested against a recorded answer.
+    Separate from the run of the command, so a caller can be tested against a
+    recorded answer.
 
-    The toolkit prints one JSON document and nothing else. Text that this
-    cannot parse thus means that the program did not run: python is missing,
-    or the installation is incomplete. That is worth the exception. An empty
-    status reads as "nothing is on", which is a different answer.
+    The toolkit prints one JSON document and nothing else, so text this cannot
+    parse means the program did not run. That is worth the exception: an empty
+    status would read as "nothing is on".
     """
     try:
         found = json.loads(text)
@@ -305,14 +273,12 @@ def resume_wake_enabled(answer):
 
 # The program that switches the wake after a resume, and where it is.
 #
-# That switch is a unit of root, so it needs a program with root behind it.
-# Every switch of this kind in the toolkit has one, and a line in a sudoers
-# file that permits it. This switch is not upstream's, so it had neither: it
-# went through scripts/install-cec.sh under pkexec, which asks for a password
-# and thus works on a desktop and nowhere else.
+# That switch is a unit of root, so it needs a program with root behind it and
+# a sudoers line that permits it. Every switch of this kind in the toolkit has
+# both. This one is not upstream's, so it went through pkexec and worked on a
+# desktop and nowhere else.
 #
-# It has its own program now, and this project's own sudoers rule permits it
-# with the two words it takes. See scripts/resume-wake.sh and ctl.sudoers_text.
+# See scripts/resume-wake.sh and ctl.sudoers_text.
 RESUME_WAKE_HELPER = ("/var/lib/steamos-utility-center/"
                       "steamos-utility-center-resume-wake")
 
@@ -365,16 +331,12 @@ def configured_device(settings):
 # The one action here that is not a toolkit subcommand, because the question
 # is not about the toolkit.
 #
-# Volume over CEC is the System Audio Control feature, and it is written for
-# an amplifier.
+# Volume over CEC is the System Audio Control feature, written for an
+# amplifier. A television that does not implement it accepts the volume
+# command, does nothing, and answers nothing, so the switch looks defective
+# while the log says the message went out.
 #
-# A television that does not implement it does not say so. It accepts the
-# volume command, does nothing, and answers nothing. The switch thus looks
-# defective while each line in the log says that the message went out. To
-# establish this took one evening.
-#
-# Asked directly, the same television answers immediately. On the set this was
-# found on:
+# Asked directly, the same television answers at once:
 #
 #   GIVE_SYSTEM_AUDIO_MODE_STATUS (0x7d)
 #       Received from TV (0): FEATURE_ABORT reason: refused (0x04)
@@ -432,15 +394,12 @@ def action_command(key, home=None, settings=None):
 # -- which radios can wake this machine --------------------------------------
 #
 # The one value on the CEC page that comes from a helper and not from
-# `toolkitctl status`. The status does not carry it. The status says whether
-# the usb-wake service is enabled, and not which radios it found.
+# `toolkitctl status`, which says whether the usb-wake service is enabled and
+# not which radios it found.
 #
-# "The switch is on and nothing wakes the machine" is the state of a person who
-# asks this question. The helper's own `status` lists what it matched and
-# whether each radio can wake the machine. That is the answer.
-#
-# No password is necessary. The toolkit's installer writes a sudoers rule for
-# this program, as it does for each switch on the page.
+# The question comes from "the switch is on and nothing wakes the machine".
+# The helper's own `status` lists what it matched. The toolkit's installer
+# permits it, as it does each switch on the page.
 USB_WAKE_HELPER = "/var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-control"
 
 
@@ -452,11 +411,9 @@ def wake_radios_command():
 def wake_radios_said(text):
     """Returns the meaning of that answer, in one sentence.
 
-    There are three answers, and this function separates them deliberately.
-    It did not do so before. To find nothing and to find a radio that is
-    already allowed printed the same line. A machine where this does not
-    operate thus read as a machine with nothing left to do. That is not an
-    answer to the question "did it find my radio?".
+    Three answers, separated. "Found nothing" and "found a radio that is
+    already allowed" are not the same, and a person is asking "did it find my
+    radio?".
     """
     try:
         found = json.loads(text)
@@ -515,13 +472,9 @@ def device(status):
 def usable(status):
     """Returns whether CEC can operate now: the adapter is there and writable.
 
-    It must be readable *and* writable, because CEC is a conversation. An
-    adapter that this user can read and cannot write is the form that a
-    permissions fault takes after a suspend or a SteamOS update.
-
-    The toolkit installs a helper and a udev rule to repair that fault. A
-    False answer here is thus a repairable state, and it is worth a
-    difference from a machine with no adapter.
+    Readable *and* writable, because CEC is a conversation. Read-only is the
+    form a permissions fault takes after a suspend or a SteamOS update, and
+    the toolkit has a helper and a udev rule that repair it.
     """
     found = device(status)
     return bool(found.get("exists") and found.get("readable")

@@ -233,15 +233,12 @@ def comet_levels(progress, led_count, duration):
 def sparkle_levels(progress, led_count, duration):
     """Returns the brightness for the sparkle: points that light and fade.
 
-    This is the one shape with no order. Each other shape says "here is an
-    event, watch it". This one only glitters. It thus suits the notifications
-    that a person is glad to receive, and not the ones that need an action.
+    The one shape with no order: each LED runs its own clock at its own rate.
+    It suits a notification a person is glad to receive and not one that needs
+    an action.
 
-    Each LED runs its own clock at its own rate. Nothing moves together and
-    nothing is in line.
-
-    It fades at the end and does not stop. Without the fade, the last point
-    stops in the middle of its life and reads as a fault.
+    It fades at the end. Without that, the last point stops in the middle of
+    its life and reads as a fault.
     """
     if led_count < 1:
         return []
@@ -335,17 +332,12 @@ FIXED_KINDS = {KIND_WARNING: STYLE_ALTERNATE}
 
 # A trigger can also give what makes it different, after an "@".
 #
-# Nothing about the flash changes. It is only the key of the repeat gap. Two
-# different messages are thus two flashes, and two copies of one message are
-# one flash.
+# Nothing about the flash changes. It is the key of the repeat gap only, so
+# two different messages are two flashes and two copies of one are one.
 #
-# This is necessary because the important triggers are not different by
-# themselves. Each notification from the phone is the word "phone", or one
-# colour if the app has a rule.
-#
-# Without this key, the second message of a conversation was a repeat of the
-# first. A WhatsApp message and a Signal message in the same seconds also
-# collided.
+# The important triggers are not different by themselves: every notification
+# from the phone is the word "phone". Without this key, the second message of
+# a conversation was a repeat of the first.
 TAG_SEPARATOR = "@"
 
 
@@ -474,17 +466,13 @@ class NotificationOverlay:
         # that moves against each other effect is the same fault that the
         # temperature gauge had.
         self.reverse = reverse
-        # It also applies the brightness limit, for a reason that is not
-        # appearance. People set that limit because the strip uses the USB line
-        # of the ESP, and a flash is the maximum load: the full bar is lit at
-        # one time. To ignore the limit thus reduces the voltage on the strips
-        # that the setting protects.
+        # It also applies the brightness limit, which is not a matter of
+        # appearance: the strip runs off the USB line of the ESP, and a flash
+        # lights the full bar at one time.
         #
-        # It applies one of the three settings only. MIN_BRIGHTNESS is a
-        # minimum under what Steam asked for, and a flash asks for nothing. A
-        # flash must also reach zero at both ends, or two flashes in sequence
-        # join together. GAMMA changes how the colours of Steam appear, and a
-        # flash is not a state of Steam.
+        # One of the three settings only. MIN_BRIGHTNESS is a floor under what
+        # Steam asked for, and a flash must reach zero at both ends or two in
+        # sequence join together. GAMMA belongs to the colours of Steam.
         self.brightness = max(0, min(int(max_brightness), 255)) / 255.0
         self.style = style if style in STYLES else STYLE_BLOOM
         self.repeat_gap = max(0.0, float(repeat_gap))

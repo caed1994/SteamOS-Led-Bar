@@ -14,27 +14,21 @@ same way:
     amd-pstate / intel_cpufreq, passive the classic governors, usually no EPP
     acpi-cpufreq and older              the classic governors, no EPP at all
 
-No part of this module is written for one manufacturer. Each line except one
-uses the generic cpufreq files. This module thus operates on Intel as it
-operates on the AMD part in a Steam Machine. The rule below is also the same,
-because intel_pstate fixes the preference under `performance` as amd-pstate
-does.
+No part of this module is written for one manufacturer. Each line except
+driver_mode uses the generic cpufreq files, and driver_mode reads a file that
+only AMD publishes.
 
-The exception is driver_mode. It reads a file that only AMD publishes, and it
-is reported beside driver() and not in place of it.
+It keeps no list of its own. It reads each available value from sysfs at the
+moment of the question, so a machine with neither setting gets a page that
+says so.
 
-This module thus has no list of its own. It reads each available value from
-sysfs at the moment of the question. A machine with neither setting gets a page
-that says so, and not a menu that writes to files that are not there.
+One interaction is important. Under the `performance` governor the firmware is
+at its highest preference and the EPP file refuses each other value. See
+epp_applies.
 
-One interaction is important. Under the `performance` governor, the firmware is
-at its highest preference and the EPP file refuses each other value. This is
-the kernel's rule. See epp_applies.
-
-Nothing in this module writes. To apply a setting needs root, and that work is
-in steamos-utility-center-power. This module is the read half. `text()` is the
-one function that looks like an exception and is not: it builds the text of the
-file for a caller that stages it, and it opens no file itself.
+Nothing here writes. To apply a setting needs root, and that is in
+steamos-utility-center-power. `text()` builds the text of the file for a
+caller that stages it, and opens no file itself.
 """
 
 from __future__ import annotations
@@ -68,15 +62,11 @@ PINNED_GOVERNOR = "performance"
 # machine does not answer.
 #
 # While the fixing governor is set, the kernel reduces
-# energy_performance_available_preferences to that one value. A read then gives
-# the values that are available *now* and not the values that the hardware has.
-# To change away from that governor in the same session would thus be a
-# selection from a list of one.
+# energy_performance_available_preferences to that one value. A change away
+# from that governor in the same session would then select from a list of one.
 #
-# These five values are the values of amd-pstate and of intel_pstate. Together
-# they cover each machine that has the file, so one list serves both. This list
-# is used only while the reported list is not correct. Everywhere else, this
-# module asks the machine.
+# These five are the values of amd-pstate and of intel_pstate together. This
+# list is used only while the reported one is wrong.
 PINNED_FALLBACK = ("default", "performance", "balance_performance",
                    "balance_power", "power")
 
@@ -178,14 +168,13 @@ def driver(root=""):
 def driver_mode(root=""):
     """Returns the amd_pstate mode, or "" on a machine without amd_pstate.
 
-    AMD alone publishes its mode under this name. On Intel the same difference
-    is in the name of the driver: intel_pstate is the active driver, and
-    intel_cpufreq is the same driver in passive mode. This function is thus
-    reported beside driver() and not in place of it.
+    AMD alone publishes its mode under this name. On Intel the difference is
+    in the name of the driver: intel_pstate is active, intel_cpufreq is the
+    same driver in passive mode. So this is reported beside driver() and not
+    in place of it.
 
-    The mode is worth a report and not only an action. Active mode and passive
-    mode give different governors, and only one of them has an EPP each time. A
-    page with the wrong set looks defective to a person who read the wiki.
+    Worth a report: the two modes give different governors, and only one of
+    them has an EPP.
     """
     return _read(root + PSTATE_STATUS)
 
@@ -205,17 +194,12 @@ def governors(root=""):
 def epp_values(root=""):
     """Returns the values that the preference accepts under a governor.
 
-    This is not the current content of the file. While the fixing governor
-    runs, the kernel reduces this list to that one value. A read then answers
-    "what can I select at this moment".
+    Not the current content of the file. While the fixing governor runs, the
+    kernel reduces that list to one value, and a read of it answers "what can
+    I select now".
 
-    The question here is always different: "what can I select after I apply the
-    governor that I am about to apply".
-
-    This was a defect that a user reported with a screenshot. With the
-    performance governor already applied, a selection of powersave and a
-    preference in the same session was refused, because the check read a list
-    of one value.
+    The question here is "what can I select after I apply the governor I am
+    about to apply".
     """
     reported = _offered(EPP_AVAILABLE, root)
     if not reported:
@@ -228,16 +212,12 @@ def epp_values(root=""):
 def epp_in_play(values, root=""):
     """Returns whether the preference is a setting, for these values.
 
-    Three conditions make it not a setting. Each of the three means the same
-    thing to each caller: do not offer it, do not validate it, do not write it.
+    Three conditions make it not a setting, and each means the same to every
+    caller: do not offer it, do not validate it, do not write it.
 
-    The first condition is a machine with no governor of ours. This project
-    then does not manage the CPU and must not set one half of it. The effect of
-    a preference under a governor that nobody selected depends on the SteamOS
-    default.
-
-    The second condition is the fixing governor, under which the kernel refuses
-    the file. The third condition is a driver that has no such file.
+    A machine with no governor of ours, because this project must not set one
+    half of the CPU. The fixing governor, under which the kernel refuses the
+    file. A driver that has no such file.
     """
     if values.get("CPU_GOVERNOR", UNSET) == UNSET:
         return False

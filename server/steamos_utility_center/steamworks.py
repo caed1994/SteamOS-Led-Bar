@@ -6,11 +6,10 @@
 This needs no API key and no network. The Steam client already knows the
 achievement state, and `libsteam_api.so` is the local interface to it.
 
-The difficulty is that Steamworks is a *game-side* API. A program must start it
-as one specific app, and the API cannot report which game runs. This module
-thus finds the app ID of the running game first.
+Steamworks is a *game-side* API: a program starts it as one specific app, and
+it cannot report which game runs. This module thus finds the app ID first.
 
-It uses the flat C API only. ctypes is thus sufficient, and it marshals no
+It uses the flat C API only, so ctypes is sufficient and it marshals no
 callback structures.
 """
 
@@ -77,23 +76,16 @@ CHAT_ENTRY_TYPING = 2
 
 # PersonaStateChange_t: k_iSteamFriendsCallbacks (300) + 4.
 #
-# It has the same shape as a chat message: a SteamID and an int. The number is
-# thus the only way to separate the two.
+# It has the same shape as a chat message, a SteamID and an int, so the number
+# is the only way to separate the two.
 #
-# The int is a bit field of EPersonaChange. One bit means "came online", and
-# that bit is the one worth a flash. The other bits are avatars, nicknames,
-# rich presence and approximately twelve more, and each of them arrives
-# often.
+# The int is a bit field of EPersonaChange. k_EPersonaChangeComeOnline is a
+# change from offline to online and nothing else. The other bits are avatars,
+# nicknames, rich presence and a dozen more, and each arrives often.
 #
-# k_EPersonaChangeComeOnline means a change from offline to online, and nothing
-# else.
-#
-# It is not k_EPersonaChangeStatus (0x0002), which is a change from away or
-# busy back to online. It is not k_EPersonaChangeGamePlayed (0x0010), which is
-# a friend that starts a game.
-#
-# A person who logs in and starts a game sets both bits in one callback, and
-# that correctly counts one time.
+# Not k_EPersonaChangeStatus (0x0002), which is away or busy back to online.
+# Not k_EPersonaChangeGamePlayed (0x0010), which is a friend that starts a
+# game. A person who does both sets both bits in one callback.
 PERSONA_STATE_CHANGE = 304
 PERSONA_STATE_CHANGE_BYTES = 12
 PERSONA_CHANGE_CAME_ONLINE = 0x0004
@@ -858,14 +850,11 @@ class FriendListener:
     def poll(self, now=None):
         """Returns the events after the last call: (messages, came online).
 
-        It returns both in one pass. The first caller reads the callbacks and
-        removes them, so two readers each get half of them.
+        Both in one pass: the first caller removes the callbacks, so two
+        readers would each get half of them.
 
         A message is a (steam id, message id) pair. Only a *received* message
         makes that callback, so the bar does not flash while a person types.
-
-        A friend at the keyboard does make the callback, and this function thus
-        reads the entry type.
         """
         now = time.monotonic() if now is None else now
         messages, online = [], []

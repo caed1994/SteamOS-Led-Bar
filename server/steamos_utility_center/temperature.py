@@ -71,9 +71,8 @@ def read_celsius(path):
 #   crit      - the critical point of the manufacturer
 #   max       - the point at which the part expects a throttle
 #
-# These limits are worth a read, because "hot" is not one number. An APU at
-# 95 C operates as its design intends. An NVMe drive at 95 C is far above its
-# own limit. The part knows its own numbers. This project does not.
+# Worth a read, because "hot" is not one number. An APU at 95 C operates as
+# its design intends, and an NVMe drive at 95 C is far above its own limit.
 LIMIT_FILES = ("emergency", "crit", "max")
 
 # The kernel sets these, and this project does not. Each one is the driver's
@@ -240,15 +239,9 @@ class TemperatureSource:
 
 # -- the watch for a sensor that stays too hot -----------------------------
 #
-# This is a different question from the question of the gauge, and it is thus a
-# separate class.
-#
-# The gauge shows one sensor that a person selected. It uses a strong average,
-# so that the first LED does not move.
-#
-# This class reads each sensor with no average. It measures the time that a
-# sensor stays high. One reader for both would give one of the two the data
-# for the other.
+# A different question from the gauge, so a separate class. The gauge shows
+# one sensor with a strong average, so the first LED does not move. This reads
+# each sensor with no average and measures how long one stays high.
 
 # The distance below the critical point of the part at which this warns. It
 # gives a person time to see the warning before the hardware acts.

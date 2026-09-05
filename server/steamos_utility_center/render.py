@@ -224,20 +224,14 @@ def _temperature(snapshot, elapsed, options):
 
 # -- the load gauge --------------------------------------------------------
 #
-# This gauge uses length and not colour, and that is correct here. The load
-# has a real zero and a real maximum, so the length of the bar *is* the
-# reading. The temperature has neither, and that gauge thus uses colour.
+# This gauge uses length and not colour. The load has a real zero and a real
+# maximum, so the length of the bar *is* the reading. The temperature has
+# neither and uses colour instead.
 #
-# The colour says which chip. Both colours are settings: LOAD_CPU_COLOR and
-# LOAD_GPU_COLOR.
-#
-# The defaults are amber and blue. They are almost the maximum distance apart
-# on this strip. That distance is what stops the gauge from reading as one
-# irregular bar.
-#
-# This is important when a person changes them, and the panel says so below the
-# rows. The gauge is readable when a person sees the two halves as two. Two
-# colours near each other still operate as a gauge, but not as *two* bars.
+# The colour says which chip, from LOAD_CPU_COLOR and LOAD_GPU_COLOR. The
+# defaults are amber and blue, which are almost the maximum distance apart.
+# Two colours near each other read as one irregular bar and not as two, and
+# the panel says so below the rows.
 LOAD_CPU_COLOUR = (255.0, 110.0, 0.0)
 LOAD_GPU_COLOUR = (26.0, 159.0, 255.0)
 
@@ -278,20 +272,14 @@ def load_levels(fraction, length):
 def _load(snapshot, elapsed, options):
     """Draws two bars from the centre, one chip in each direction.
 
-    The bars start at the centre and not at one end, because the two readings
-    are equal. One bar for each, and they meet at the centre.
+    From the centre and not from one end: the two readings are equal, and two
+    bars end to end put one of them at the far side of the strip.
 
-    Two bars end to end put one of them at the far side of the strip, and that
-    is the last place that a person looks.
+    LOAD_SWAP moves the reading and its colour together, or the colours would
+    no longer say which chip is which.
 
-    LOAD_SWAP selects which chip is on which side. The reading and the colour
-    move together. A swap thus puts the CPU bar *and* its colour on the right.
-    A swap of one of the two makes a gauge whose colours no longer say which
-    chip is which.
-
-    This function always has a reading. A gauge with nothing to read is not
-    this effect, and _substitute gives the slot back to the rainbow before
-    this function runs.
+    This function always has a reading. _substitute gives the slot back to the
+    rainbow before it runs.
     """
     cpu, gpu = options.reading()
     # A machine whose driver publishes no GPU counter shows the CPU on both
@@ -371,16 +359,12 @@ def _fire(snapshot, elapsed, options):
 
 # -- aurora ----------------------------------------------------------------
 
-# The hue range of the real northern lights: from green through cyan to
-# violet. It never uses the warm half of the circle.
+# The hue range of the real northern lights: green through cyan to violet, and
+# never the warm half of the circle. That limit is the effect. A rainbow
+# already exists.
 #
-# That limit is the effect. A rainbow already exists, and it is the effect that
-# people switch off.
-#
-# The two waves below give a sum from -2 to 2. The hue thus stays within
-# AURORA_SPREAD of AURORA_HUE. 0.33 is pure green and 0.71 is violet-blue. That
-# range is what stops the effect from reaching the yellows and becoming a slow
-# rainbow.
+# The two waves below sum from -2 to 2, so the hue stays within AURORA_SPREAD
+# of AURORA_HUE. 0.33 is pure green and 0.71 is violet-blue.
 AURORA_HUE = 0.52
 AURORA_SPREAD = 0.19
 
@@ -440,26 +424,18 @@ TAKES_BRIGHTNESS = "brightness"
 TAKES_SPEED = "speed"
 TAKES_BOTH = frozenset((TAKES_BRIGHTNESS, TAKES_SPEED))
 
-# The load gauge uses neither value. It fills each half of the bar to give the
-# load of that chip. The minimum brightness of the innermost LED is what says
-# "idle" and not "off". To make that dim changes the reading and not the
-# appearance.
+# The load gauge uses neither. The minimum brightness of the innermost LED is
+# what says "idle" and not "off", so a dim gauge changes the reading. Its
+# movement uses the clock and not the delay field, for the same reason.
 #
-# Its movement uses the clock and not the delay field, for the same reason. A
-# gauge at half speed shows the load of the past.
-#
-# MAX_BRIGHTNESS still applies to it. That setting limits the current of the
-# strip, which is not a matter of taste.
+# MAX_BRIGHTNESS still applies. That setting limits the current of the strip.
 TAKES_NOTHING = frozenset()
 
 # The temperature gauge uses the brightness and not the speed. It is the full
-# bar in one colour, and it is redrawn when the sensor changes. There is no
-# cycle for a multiplier to scale, and is_animated thus calls it static.
-#
-# A dim temperature gauge is a dim bar of the same colour. The colour is the
-# full reading, so this gauge does not change its meaning. The load gauge does.
-#
-# With no sensor, this gauge gives the slot to the rainbow, which does move.
+# bar in one colour, so there is no cycle for a multiplier to scale and
+# is_animated calls it static. The colour is the whole reading, so a dim gauge
+# does not change its meaning. With no sensor it gives the slot to the
+# rainbow.
 # That is an error path with a log line, and not a speed setting.
 TAKES_LIGHT = frozenset((TAKES_BRIGHTNESS,))
 
@@ -481,12 +457,11 @@ RAINBOW_CHOICES = (SHOWS_RAINBOW,) + tuple(_SUBSTITUTES)
 def rainbow_takes(rainbow_shows):
     """Returns which settings of the bar reach the effect in the slot.
 
-    Each program that describes a setting to a person asks this. A report that
-    names a brightness that the effect ignores is why a person moves a control
-    and sees no change.
+    Each program that describes a setting to a person asks this, so that a
+    control which changes nothing is not offered as one that does.
 
-    Steam's own rainbow takes both settings, and that is also the answer for a
-    name that this function does not know.
+    Steam's own rainbow takes both, which is also the answer for a name this
+    function does not know.
     """
     return _SUBSTITUTES.get(rainbow_shows, (None, None, TAKES_BOTH))[2]
 
@@ -574,13 +549,10 @@ class Renderer:
     def reading(self, fresh=False):
         """Returns the load of this frame. It reads it one time for each frame.
 
-        fractions() moves the value at each call. Two calls in one frame thus
-        move the bar at twice the correct rate.
-
-        The frame takes the reading. Each caller that needs the result reads
-        the same answer. Two callers need it: the code that decides whether
-        there is a gauge to draw, and the code that decides which settings of
-        the bar reach it.
+        fractions() moves the value at each call, so two calls in one frame
+        move the bar at twice the rate. Two callers need the answer: the one
+        that decides whether there is a gauge, and the one that decides which
+        settings reach it.
         """
         if fresh:
             self._reading = (None if self.load is None
@@ -590,33 +562,24 @@ class Renderer:
     def shown_by(self, shows):
         """Returns the effect that a `shows` argument asks for.
 
-        With no argument, it returns the setting.
+        With no argument, the setting. Each entry point takes `shows`, so the
+        effect is not a property of the renderer.
 
-        Each entry point takes `shows`, so that one caller can name the effect
-        of one frame. The effect is thus not a property of the renderer.
-
-        Game Mode never gives the argument. It draws the effect in the rainbow
-        slot, and that is the purpose of the slot.
-
-        Desktop Mode gives the argument. There is no slot on the desktop. The
-        desktop selects its scene and passes it down for each frame.
+        Game Mode gives no argument and uses the rainbow slot. The desktop has
+        no slot: it selects a scene and passes it down for each frame.
         """
         return self.rainbow_shows if shows is None else shows
 
     def _substitute(self, snapshot, shows=None):
         """Returns the renderer that replaces the rainbow here, or None.
 
-        None also covers a value whose hardware is absent, and a load gauge
-        with nothing to read. The second case occurs in the first frames after
-        a start, and on a machine with no counters.
+        None also covers absent hardware and a load gauge with nothing to
+        read, which happens in the first frames after a start. Steam's own
+        rainbow says "not this effect" better than a dark strip does.
 
-        A bar from no reading is a reading of nothing. Steam's own rainbow says
-        "not this effect" better than a dark strip does.
-
-        The decision is here and not in the gauge, so that each other part
-        agrees about what is on the bar. A rainbow in place of the load takes
-        the brightness and the speed as a rainbow does, and it cannot do that
-        if this function hides the change.
+        The decision is here and not in the gauge, so each other part agrees
+        about what is on the bar: a rainbow in that slot must take the
+        brightness and the speed as a rainbow does.
         """
         if snapshot.effect != shim.EFFECT_RAINBOW:
             return None
@@ -631,15 +594,12 @@ class Renderer:
     def is_animated(self, snapshot, shows=None):
         """Returns whether this scene changes from frame to frame.
 
-        The temperature gauge does not change. It is redrawn when the sensor
-        changes, and that is much slower than a frame. At the full frame rate
-        it thus sends the same bytes sixty times each second. With nothing to
-        read it gives the slot to the rainbow, which does animate.
+        The temperature gauge does not: it is redrawn when the sensor changes,
+        which is much slower than a frame.
 
-        The load gauge is the opposite. Its value moves towards each new
-        reading and does not step onto it. It thus has a new frame to draw each
-        time. At the idle rate, that movement becomes four steps each second,
-        and the movement exists to prevent exactly that.
+        The load gauge does. Its value moves towards each new reading rather
+        than step onto it, and at the idle rate that movement becomes four
+        steps each second.
         """
         effect = self._substitute(snapshot, shows)
         if effect is _temperature:

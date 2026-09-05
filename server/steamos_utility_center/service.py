@@ -36,24 +36,19 @@ DEVICE_RETRY_DELAY = 5.0
 # the reason is lost in the log.
 CONFIG_REFUSED_EXIT = 2
 
-# What the strip shows while the machine is in suspend. It is fixed, and that
-# is deliberate. It is not a notification and not an effect. It is the
-# appearance of "the machine is off and alive", and it must look the same on
-# each machine.
+# What the strip shows while the machine is in suspend. It is the appearance
+# of "the machine is off and alive".
 #
-# It is here and not in the firmware. The ESP must draw it, because during a
-# suspend there is no host to render anything. But a change to its appearance
-# must not need a new flash of each board.
+# The ESP draws it, because a suspend has no host to render anything. The
+# values are here so that a change to the appearance needs no new flash.
 #
-# It is deliberately dim: a dark room at night, and not a night light. With the
-# 5% minimum of the breath, this covers approximately 2 to 30 of 255.
+# Dim: a dark room at night, and not a night light. With the 5% minimum of the
+# breath this covers approximately 2 to 30 of 255. Not lower, because a WS2812
+# has large steps at the low end and white there takes a colour.
 #
-# It is not lower. A WS2812 has large steps at the low end, and white there
-# takes a colour.
-#
-# These two are the values of a machine that set neither STANDBY_COLOR nor
-# STANDBY_BRIGHTNESS. White at 30 of 255 is (30, 30, 30), so a machine that
-# upgrades from a build with no such settings sees no change at all.
+# These are the values of a machine that set neither STANDBY_COLOR nor
+# STANDBY_BRIGHTNESS, so an upgrade from a build with no such settings sees no
+# change.
 STANDBY_COLOR = (30, 30, 30)
 STANDBY_PERIOD_MS = 6000            # one slow breath, calmer than the waiting one
 
@@ -105,24 +100,16 @@ class _Stopped(Exception):
 def anything_shows(config, shows):
     """Returns whether either mode puts `shows` on the bar on this machine.
 
-    Two settings can ask for the same effect, and they are independent.
-    RAINBOW_SHOWS selects the effect in the rainbow slot of Steam in Game Mode.
-    DESKTOP_SCENE names an effect directly on the desktop, where there is no
-    menu to share.
+    Two settings can ask for the same effect and they are independent.
+    RAINBOW_SHOWS selects the effect in Steam's rainbow slot. DESKTOP_SCENE
+    names an effect directly on the desktop.
 
-    A gauge is thus necessary here if *either* setting asks for it. The sources
-    below are what a gauge reads.
+    A gauge is thus necessary if *either* asks for it. Without this, a load
+    gauge selected on the desktop alone had no counters to read, and
+    render._substitute gave the slot back to the rainbow it replaced.
 
-    A user reported the defect. With DESKTOP_SCENE=load and RAINBOW_SHOWS at
-    the rainbow, nothing built the counters. The load gauge thus had nothing to
-    read, and render._substitute gave the slot back to the rainbow of Steam.
-
-    A selection of the load gauge on the desktop thus showed a rainbow, which
-    is the one effect that it replaced. The temperature gauge had the same
-    defect, from the same two lines.
-
-    Only the two effects that read hardware need this question. Fire and the
-    aurora are arithmetic, and they draw wherever a setting names them.
+    Only the two effects that read hardware need the question. Fire and the
+    aurora are arithmetic.
     """
     return (config["RAINBOW_SHOWS"] == shows
             or desktop.scene_shows(config["DESKTOP_SCENE"]) == shows)
@@ -232,21 +219,12 @@ def build_scene(config):
 def warn_scene_split(config):
     """Reports one time when a configuration file had a different meaning.
 
-    The rainbow scene of Desktop Mode was the same slot as the slot of Game
-    Mode. DESKTOP_SCENE=rainbow with RAINBOW_SHOWS=fire thus put fire on the
-    desktop.
+    The rainbow scene of the desktop was Steam's slot, so DESKTOP_SCENE=rainbow
+    with RAINBOW_SHOWS=fire put fire on the desktop. The desktop has a fire
+    scene of its own now, and that pair means the rainbow.
 
-    The desktop now has a fire scene of its own. That pair of settings thus
-    means the rainbow, which is what it says. It is not what the bar did
-    before.
-
-    This function does not migrate the file. Both readings of that file are
-    correct, and only the person who wrote it knows which one they meant. A
-    setting that changes itself is worse than a setting that reports its
-    meaning.
-
-    It writes a line to the log and does not refuse the file, for the same
-    reason: nothing here is defective.
+    It writes a line and does not migrate the file. Both readings are correct,
+    and only the person who wrote it knows which one they meant.
     """
     if (config["DESKTOP_SCENE"] != desktop.SCENE_RAINBOW
             or config["RAINBOW_SHOWS"] == render.SHOWS_RAINBOW):
@@ -536,16 +514,13 @@ class Runner:
         last_key = None
         # The earliest time of the next frame.
         #
-        # FPS is a limit, and it was only a timeout. The loop wakes at each write
-        # to the device, so the frame rate was the write rate of Steam and not the
-        # rate in the configuration.
+        # The loop wakes at each write to the device, so without this the frame
+        # rate is the write rate of Steam. During a download Steam writes the
+        # progress bar four hundred times each second, down a link that carries
+        # approximately sixty.
         #
-        # The measurement on a Steam Machine: during a download, Steam writes the
-        # progress bar four hundred times each second. This service rendered each
-        # write and sent it down a link that carries approximately sixty.
-        #
-        # This service still reads the state at each write. The limit applies to
-        # the render and to the send only.
+        # The state is still read at each write. The limit is on the render and
+        # the send.
         due = 0.0
         # Whether this holds a frame. That is the one case in which the wait
         # below must be shorter.
@@ -653,16 +628,12 @@ class Runner:
             payload = self.overlay.frame(now)
             if (payload is None and showing is snapshot
                     and snapshot.seq <= UNTOUCHED_SEQ):
-                # There is nothing to show, and black is not better than the
-                # breath that the ESP runs.
+                # Nothing to show, and black is not better than the breath the
+                # ESP runs. A flash still reaches the bar through the branch
+                # above and returns here afterwards.
                 #
-                # A flash still reaches the bar: it is the branch above. It
-                # returns to this branch, and this branch asks for the breath
-                # again.
-                #
-                # A scene is something to show. It thus appears on a machine
-                # with no Game Mode session after the boot, and it does not
-                # wait for a session that can never start.
+                # A scene is something to show, so it appears on a machine
+                # with no Game Mode session after the boot.
                 self._hold_for_steam()
                 continue
             if payload is None:
@@ -698,21 +669,13 @@ def _interrupt_on_sigterm():
 def run_desktop(config):
     """Reports the desktop scene and the owner of the bar. A desktop command.
 
-    That is not a limit to remove. It is the shape of the question. Game Mode
-    has no terminal, so a person can run this on one side of the question only.
-    What it reads live is thus always the desktop half.
+    Game Mode has no terminal, so what this reads live is always the desktop
+    half. The other half is what the service recorded in the log at its start
+    and at each change.
 
-    The other half is what the service *recorded* while nobody could watch. The
-    service writes the mode to the log at its start and at each change. The
-    journal is thus where a person reads a Game Mode session afterwards.
-
-    This function reads the journal. It does not print a journalctl line for a
-    person to type. The answer to "did this machine ever recognise Game Mode"
-    must not be two steps away.
-
-    The important failure is a scene that stays on the bar through a game and
-    ignores each write of Steam, with nothing on the screen to give the reason.
-    This function makes that failure visible.
+    It reads the journal itself rather than print a journalctl line to type.
+    The failure it makes visible is a scene that stays on the bar through a
+    game and ignores each write of Steam.
     """
     scene = build_scene(config)
     print("DESKTOP_SCENE=%s" % config["DESKTOP_SCENE"])
@@ -1421,17 +1384,13 @@ MONITOR_MISSING_EXIT = 4
 def run_watch_phone(config, print_only=False):
     """Flash the bar on your phone's notifications, by way of KDE Connect.
 
-    Runs as your normal user next to the desktop, not as the sandboxed
-    service: the notifications are on the session bus, which only the session
-    can read. Like the achievement watcher, all it ever does to this project
-    is write trigger words into the pipe.
+    Runs as your normal user next to the desktop and not as the sandboxed
+    service: the notifications are on the session bus. Like the achievement
+    watcher, it writes trigger words into the pipe and nothing else.
 
-    Run `print_only` first. It reports each notification that it sees and the
-    flash that it would make, and it flashes nothing.
-
-    A person thus finds two answers by a look, and not by a guess in a rule.
-    The first is whether KDE Connect answers on this machine. The second is the
-    names of the apps on it.
+    Run `print_only` first. It reports each notification it sees and the flash
+    it would make, so a person can read whether KDE Connect answers and what
+    the apps are named.
     """
     _interrupt_on_sigterm()
 
@@ -1654,18 +1613,12 @@ def dump_line(snapshot, written, seen):
     """Returns one state change, with the time from the previous one.
 
     The interval is between the marks of the module and not between the
-    moments at which this loop saw them. The module marks each write, and this
-    loop can be a moment behind one.
+    moments this loop saw them, so the column answers "how often does Steam
+    write".
 
-    The column thus answers "how often does Steam write". A download raises
-    that question, and nothing in this project can answer it from outside.
-
-    It also reports when the answer omits a write. The shim gives the current
-    state and not a queue, so this loop reads two writes inside one wait as
-    one write.
-
-    The counter reports that. An interval that covers a write that nobody saw
-    is not the interval that a person wants.
+    The shim gives the current state and not a queue, so two writes inside one
+    wait read as one. The counter reports that, because an interval that
+    covers a write nobody saw is not the interval a person wants.
     """
     gap = ("" if written is None
            else "+%.2fs" % ((snapshot.monotonic_ns - written) / 1e9))
